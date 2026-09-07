@@ -95,6 +95,17 @@ export class SerializedFile {
     }
 
     this.byPathId = new Map(this.objects.map((o) => [o.pathId, o]));
+    this.resS = null;              // renseigne par UnityEnv si le .resS existe
+  }
+
+  /**
+   * Octets d'un flux de ressources voisin (.resS), ou vivent les gros blocs :
+   * 10 des 142 clips audio du build sont dans sharedassets1.assets.resS.
+   */
+  resource(offset, size) {
+    const res = this.resS;
+    if (!res || offset < 0 || offset + size > res.length) return null;
+    return res.subarray(offset, offset + size);
   }
 
   /** Octets bruts d'un objet. */

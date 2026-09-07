@@ -31,10 +31,13 @@ export class ExtractContext {
    * @param {TypeUniverse} universe
    * @param {string} sceneFile  fichier de scene principal
    */
-  constructor(env, universe, sceneFile = "level0") {
+  constructor(env, universe, sceneFile = "level0", engineTypes = null) {
     this.env = env;
     this.universe = universe;
     this.sceneFile = sceneFile;
+    // Structures des classes moteur (unity41-types.json), injectees plutot
+    // qu'importees : le Worker les recupere par fetch, les tests par le disque.
+    this.engineTypes = (engineTypes && engineTypes.classes) || {};
     this.trees = new Map();
     this.worldCache = new Map();
 
@@ -78,6 +81,18 @@ export class ExtractContext {
   tree(cls) {
     if (!this.trees.has(cls)) this.trees.set(cls, monoBehaviourTree(this.universe, cls));
     return this.trees.get(cls);
+  }
+
+  /** Lit un objet moteur avec sa structure Unity. */
+  readEngine(obj) {
+    if (!obj) return null;
+    const nodes = this.engineTypes[obj.type];
+    if (!nodes) return this.env.read(obj);
+    try {
+      return readTypeTree(obj.file.reader(obj), nodes, obj.file).value;
+    } catch {
+      return null;
+    }
   }
 
   /** Nom de la classe C# d'un MonoBehaviour. */

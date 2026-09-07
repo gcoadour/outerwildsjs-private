@@ -9,6 +9,23 @@ export const BUILD = process.env.OW_BUILD
 
 export const DATA_FILES = ["mainData", "level0", "resources.assets",
                            "sharedassets0.assets", "sharedassets1.assets"];
+// level0 pointe vers "library/unity default resources" : sans ce fichier, les
+// renvois vers les shaders et polices integres d'Unity restent non resolus.
+export const EXTRA_FILES = ["Resources/unity default resources"];
+export const RESOURCE_FILES = ["sharedassets1.assets.resS"];
+
+/** Charge un monde Unity complet depuis le build local. */
+export async function loadEnv() {
+  const { UnityEnv } = await import("../web/src/pipeline/unity/env.js");
+  const env = new UnityEnv();
+  for (const r of RESOURCE_FILES) {
+    if (existsSync(join(BUILD, r))) env.addResource(r, load(r));
+  }
+  for (const n of [...DATA_FILES, ...EXTRA_FILES]) {
+    if (existsSync(join(BUILD, n))) env.add(n, load(n));
+  }
+  return env;
+}
 
 export function haveBuild() { return existsSync(join(BUILD, "level0")); }
 export function load(name) { return new Uint8Array(readFileSync(join(BUILD, name))); }
