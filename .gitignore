@@ -1,0 +1,34 @@
+# --- Contenu du jeu : NE JAMAIS COMMITER ---
+# Les binaires, assets et sources decompilees d'Outer Wilds sont
+# la propriete de Mobius Digital / Alex Beachum. Ce depot ne contient
+# que l'outillage permettant de les reproduire localement.
+# le symlink 'work' aussi bien que le repertoire
+work
+work/
+downloads/
+game/
+decompiled/
+extracted/
+*.zip
+*.assets
+*.resS
+*.dll
+
+# --- Sorties du pipeline ---
+# data/ contient des donnees extraites du jeu (valeurs de champs, assets,
+# graphe de scene). Rien de tout cela n'est versionne : le pipeline le
+# regenere localement en quelques minutes.
+data/
+
+# --- Divers ---
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+
+# Babylon.js recupere par web/fetch-deps.sh
+web/vendor/
+
+# --- Tests locaux ---
+# tests/ lit un build extrait pointe par OW_BUILD ; rien n'en est versionne.
+tests/fixtures/

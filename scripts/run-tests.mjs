@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+// Lance les tests. Ils lisent un build extrait, pointe par OW_BUILD ; sans lui
+// ils s'annoncent ignores plutot que d'echouer, pour que l'integration continue
+// reste verte sans jamais avoir a heberger le jeu.
+
+import { readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+
+const BUILD = process.env.OW_BUILD;
+if (!BUILD || !existsSync(join(BUILD, "level0"))) {
+  console.log("OW_BUILD ne pointe pas sur un build extrait : tests ignores.");
+  console.log("Pour les lancer : OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs");
+  process.exit(0);
+}
+
+const tests = readdirSync("tests").filter((f) => /^\d+-.*\.mjs$/.test(f)).sort();
+let failed = 0;
+for (const t of tests) {
+  const r = spawnSync(process.execPath, ["--max-old-space-size=6000", join("tests", t)],
+                      { stdio: "inherit" });
+  if (r.status !== 0) failed++;
+}
+console.log(`\n${tests.length - failed}/${tests.length} fichiers de test passes.`);
+process.exit(failed ? 1 : 0);
