@@ -39,7 +39,7 @@ scene.activeCamera = cam;
 engine.runRenderLoop(() => scene.render());
 addEventListener("resize", () => engine.resize());
 
-BABYLON.SceneLoader.ImportMeshAsync("", "../data/gltf/", file, scene).then((r) => {
+BABYLON.SceneLoader.ImportMeshAsync("", "data/gltf/", file, scene).then((r) => {
   const meshes = r.meshes.filter((m) => m.getTotalVertices() > 0);
   if (!meshes.length) { st.textContent = "Aucune geometrie dans " + file; return; }
   meshes.forEach((m) => m.computeWorldMatrix(true));

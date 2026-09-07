@@ -92,7 +92,7 @@ export function signalStrength(dPixels, hotspot, falloff) {
 
 export async function loadAudioMap() {
   try {
-    const res = await fetch("../data/audio/sources.json", { cache: "no-store" });
+    const res = await fetch("data/audio/sources.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
     return (await res.json()).sources || [];
   } catch (e) {
@@ -217,7 +217,7 @@ export class AudioField {
       spatialDistanceModel: "linear",
       spatialMaxDistance: s.range || 60,
     };
-    this.B.CreateSoundAsync(s.name || `src${i}`, `../data/audio/${s.file}`, opts)
+    this.B.CreateSoundAsync(s.name || `src${i}`, `data/audio/${s.file}`, opts)
       .then((snd) => {
         this.pending.delete(i);
         if (snd && snd.spatial) {

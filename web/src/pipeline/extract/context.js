@@ -58,14 +58,16 @@ export class ExtractContext {
     }
 
     // --- noms d'assets, pour rendre les PPtr lisibles ---
+    //
+    // Indexe par path_id seul. Ces identifiants se repetent d'un fichier a
+    // l'autre, donc la table est ambigue : elle ne sert qu'a l'affichage, ou un
+    // homonyme est sans consequence. Tout ce qui doit designer un objet
+    // precisement passe par assetName(objet), qui ne peut pas se tromper.
     this.assetNames = new Map();
     for (const type of ["Texture2D", "Mesh", "Material", "AudioClip"]) {
       for (const o of env.objects({ type })) {
-        // Seul le nom est lu ici : la chaine est en tete de tous ces objets.
-        try {
-          const r = o.file.reader(o);
-          this.assetNames.set(o.pathId, r.string());
-        } catch { /* asset sans nom lisible : sans consequence */ }
+        const n = this.assetName(o);
+        if (n !== null && !this.assetNames.has(o.pathId)) this.assetNames.set(o.pathId, n);
       }
     }
 
@@ -81,6 +83,18 @@ export class ExtractContext {
   tree(cls) {
     if (!this.trees.has(cls)) this.trees.set(cls, monoBehaviourTree(this.universe, cls));
     return this.trees.get(cls);
+  }
+
+  /**
+   * Nom d'un asset, sans le decoder entierement : la chaine est en tete de
+   * Texture2D, Mesh, Material, AudioClip, Shader et Font.
+   */
+  assetName(obj) {
+    try {
+      return obj.file.reader(obj).string();
+    } catch {
+      return null;
+    }
   }
 
   /** Lit un objet moteur avec sa structure Unity. */

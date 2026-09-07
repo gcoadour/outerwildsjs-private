@@ -1,0 +1,49 @@
+# Publie web/ comme racine du site GitHub Pages.
+#
+# Rien du jeu n'est publie : le site ne contient que le code du moteur et du
+# pipeline. Les donnees viennent du fichier que la personne fournit sur la page,
+# et sont reconstruites dans son navigateur.
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verifier qu'aucun contenu du jeu n'est publie
+        run: node scripts/check-no-assets.mjs
+
+      - name: Recuperer Babylon.js
+        # Vendorise a la publication pour que la page ne depende d'aucun CDN a
+        # l'execution. Le repli CDN reste code en dur cote client.
+        run: web/fetch-deps.sh
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -58,8 +58,10 @@ export class TextureExporter {
     img = resizeRGBA(img, this.maxSide);
 
     const safe = (tex.m_Name || `${this.prefix}_${ptr.pathId}`).replace(/[^\w.\- ]/g, "_").trim();
-    const file = `${safe || this.prefix}_${ptr.pathId}.png`;
-    this.emitImage(file, img);
+    const wanted = `${safe || this.prefix}_${ptr.pathId}.png`;
+    // L'hote peut changer l'extension a l'ecriture (JPEG pour une texture
+    // opaque) : c'est le nom qu'il rend qui fait foi.
+    const file = this.emitImage(wanted, img) || wanted;
     const entry = { file, size: [img.width, img.height] };
     this.cache.set(ptr.pathId, entry);
     this.count++;

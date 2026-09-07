@@ -3,11 +3,86 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Outer Wilds alpha — prototype Babylon.js</title>
+<title>Outer Wilds alpha — moteur navigateur</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- Ecran d'accueil. Rien du jeu n'est servi par cette page : tout part du
+     fichier que la personne fournit, et tout reste dans son navigateur. -->
+<div id="gate">
+  <div class="gate-card">
+    <h1>Outer Wilds — alpha ouverte</h1>
+    <p class="lede">
+      Cette page rejoue l'alpha ouverte de 2013 dans le navigateur. Elle ne
+      contient aucune donnee du jeu : ni modele, ni texture, ni son, ni code.
+      Fournissez votre copie du build Linux, et tout est reconstruit ici, sur
+      votre machine.
+    </p>
+
+    <section id="gate-step-drop">
+      <div id="gate-drop" tabindex="0" role="button">
+        <strong>Deposez <code>OuterWilds_Alpha_1_2_Linux.zip</code></strong>
+        <span>ou cliquez pour le choisir — 290 Mo</span>
+      </div>
+      <input type="file" id="gate-file" accept=".zip,application/zip" hidden>
+
+      <details class="options">
+        <summary>Options d'extraction</summary>
+        <label>
+          <input type="checkbox" id="opt-geometry" checked>
+          Geometrie des corps celestes (glTF) — plus long, environ 40 Mo
+        </label>
+        <label>
+          Taille maximale des textures
+          <select id="opt-texture">
+            <option value="256">256 px — leger</option>
+            <option value="512" selected>512 px</option>
+            <option value="1024">1024 px — fidele</option>
+          </select>
+        </label>
+      </details>
+
+      <details class="options">
+        <summary>Ou trouver ce fichier, et pourquoi il n'est pas ici</summary>
+        <p>
+          L'alpha a ete distribuee publiquement en 2013 sur le site du projet,
+          puis archivee. Elle reste l'oeuvre d'Alex Beachum et de Mobius
+          Digital : ce depot ne la redistribue pas et cette page ne l'heberge
+          pas. Le fichier attendu porte l'empreinte SHA-256
+          <code>5c7defad…80f05a</code> et pese 289 268 118 octets.
+        </p>
+      </details>
+
+      <p class="privacy">
+        Le fichier n'est pas televerse. Il est lu dans cet onglet, decompresse
+        dans un Web Worker, et ce qui en sort reste dans le stockage prive de
+        votre navigateur. Aucune requete reseau n'est faite avec son contenu.
+      </p>
+    </section>
+
+    <section id="gate-step-work" hidden>
+      <h2 id="gate-phase">Preparation</h2>
+      <progress id="gate-bar" max="1"></progress>
+      <p id="gate-detail" class="muted"></p>
+      <p class="muted small">
+        La premiere extraction prend quelques minutes. Elle est conservee :
+        les visites suivantes demarrent directement.
+      </p>
+    </section>
+
+    <section id="gate-step-done" hidden>
+      <h2>Pret</h2>
+      <div id="gate-summary"></div>
+      <button id="gate-play" class="primary">Entrer dans le systeme</button>
+      <button id="gate-reset" class="ghost">Effacer les donnees extraites</button>
+    </section>
+
+    <p id="gate-error" class="error" hidden></p>
+  </div>
+</div>
+
 <canvas id="view"></canvas>
 <canvas id="map" hidden></canvas>
 <canvas id="minimap" width="336" height="336" hidden></canvas>
@@ -22,31 +97,14 @@
     <b>E</b> interagir/parler · <b>1-9</b>/<b>↑↓⏎</b> répondre · <b>M</b> carte · <b>T</b> télescope · <b>F</b> sonde · <b>G</b> affichage · <b>L</b> lampe · <b>N</b> ordinateur de bord · <b>clic</b> capturer la souris
   </div>
 </div>
-<script>
-// Babylon est charge depuis vendor/ (voir web/fetch-deps.sh). Le CDN ne sert
-// que de repli : il n'est pas toujours joignable selon le reseau.
-function loadScript(src) {
-  return new Promise((ok, ko) => {
-    const s = document.createElement("script");
-    s.src = src; s.onload = ok; s.onerror = () => ko(new Error(src));
-    document.head.appendChild(s);
-  });
-}
-loadScript("vendor/babylon.js")
-  .catch(() => loadScript("https://cdn.babylonjs.com/babylon.js"))
-  // le chargeur glTF est optionnel : sans lui le prototype tourne avec les
-  // spheres de substitution
-  .then(() => loadScript("vendor/babylonjs.loaders.min.js")
-    .catch(() => loadScript("https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"))
-    .catch(() => console.warn("chargeur glTF indisponible")))
-  // Havok est optionnel : sans lui la collision reste analytique
-  .then(() => loadScript("vendor/HavokPhysics_umd.js")
-    .catch(() => console.warn("Havok indisponible")))
-  .then(() => import("./src/main.js"))
-  .catch((e) => {
-    document.getElementById("status").textContent =
-      "Babylon.js introuvable. Lancer web/fetch-deps.sh (" + e.message + ")";
-  });
+
+<script type="module">
+import { initGate } from "./src/gate.js";
+initGate().catch((e) => {
+  const box = document.getElementById("gate-error");
+  box.hidden = false;
+  box.textContent = e.message;
+});
 </script>
 </body>
 </html>

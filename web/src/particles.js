@@ -14,7 +14,7 @@ const MAX_CAPACITY = 600;  // plafond par systeme
 
 export async function loadParticleMap() {
   try {
-    const res = await fetch("../data/particles/systems.json", { cache: "no-store" });
+    const res = await fetch("data/particles/systems.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
     return (await res.json()).systems || [];
   } catch (e) {
@@ -45,7 +45,7 @@ export class ParticleField {
     if (!this.textures.has(file)) {
       try {
         this.textures.set(file,
-          new this.B.Texture(`../data/particles/${file}`, this.scene));
+          new this.B.Texture(`data/particles/${file}`, this.scene));
       } catch (e) {
         this.textures.set(file, null);
       }

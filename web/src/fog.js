@@ -264,7 +264,7 @@ export function fogLights(gameplay) {
 
 /** Icones des lumieres, projetees a l'ecran. */
 export class FogLightIcons {
-  constructor(BABYLON, scene, root, lights, dir = "../data/interface/") {
+  constructor(BABYLON, scene, root, lights, dir = "data/interface/") {
     this.B = BABYLON;
     this.scene = scene;
     this.dir = dir;

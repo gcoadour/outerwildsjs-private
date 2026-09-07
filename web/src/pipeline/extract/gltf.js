@@ -210,9 +210,11 @@ export function exportSubtree(ctx, rootGid, label, {
     if (normal && isDXT5nm(img)) img = unswizzleNormal(img);
 
     const safe = (tex.m_Name || `tex_${ptr.pathId}`).replace(/[^\w.\- ]/g, "_").trim();
-    const file = `${safe || "tex"}_${ptr.pathId}${normal ? "_n" : ""}.png`;
-    emitImage(`${textureDir}/${file}`, img);
-    g.images.push({ uri: `${textureDir}/${file}` });
+    const wanted = `${textureDir}/${safe || "tex"}_${ptr.pathId}${normal ? "_n" : ""}.png`;
+    // Le nom rendu par l'hote fait foi : une texture opaque part en JPEG, et le
+    // glTF doit renvoyer vers le fichier reellement ecrit.
+    const uri = emitImage(wanted, img) || wanted;
+    g.images.push({ uri });
     g.textures.push({ source: g.images.length - 1, sampler: 0 });
     g.textureByPid.set(key, g.textures.length - 1);
     return g.textures.length - 1;

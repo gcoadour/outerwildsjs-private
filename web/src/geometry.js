@@ -58,7 +58,7 @@ export const BODY_FILES = [
 
 /** Charge un fichier glTF et l'enveloppe dans un conteneur. */
 async function loadFile(BABYLON, scene, file) {
-  const res = await BABYLON.SceneLoader.ImportMeshAsync("", "../data/gltf/", file, scene);
+  const res = await BABYLON.SceneLoader.ImportMeshAsync("", "data/gltf/", file, scene);
   const container = new BABYLON.TransformNode("geo_" + file, scene);
   container.rotation.y = Math.PI;
   for (const m of res.meshes) {

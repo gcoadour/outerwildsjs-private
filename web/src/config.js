@@ -21,7 +21,7 @@ const FALLBACK = {
 
 export async function loadSolarSystem() {
   try {
-    const res = await fetch("../data/solar_system.json", { cache: "no-store" });
+    const res = await fetch("data/solar_system.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     // on ne garde que les corps porteurs d'un champ de gravite
@@ -40,7 +40,7 @@ export async function loadSolarSystem() {
  */
 export async function loadGameplay() {
   try {
-    const res = await fetch("../data/gameplay.json", { cache: "no-store" });
+    const res = await fetch("data/gameplay.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
     return await res.json();
   } catch (e) {

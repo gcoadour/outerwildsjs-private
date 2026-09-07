@@ -17,7 +17,7 @@
 //                 une HUDCamera dediee ; leur etendue a l'ecran depend de cette
 //                 camera, que ce portage ne reproduit pas.
 
-const DIR = "../data/interface/";
+const DIR = "data/interface/";
 
 export async function loadInterface() {
   try {

@@ -1,0 +1,24 @@
+name: Verifications
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Aucun contenu du jeu au depot
+        run: node scripts/check-no-assets.mjs
+
+      - name: Les modules du pipeline se chargent
+        run: node scripts/check-modules.mjs
+
+      - name: Tests
+        # Sans build local, les tests s'annoncent ignores plutot que d'echouer.
+        run: node scripts/run-tests.mjs

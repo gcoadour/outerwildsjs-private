@@ -130,7 +130,7 @@ export class Settings {
  * racine, aux dimensions (0,36 ; 0,81) de l'ecran, en gris a 50 %.
  */
 export class SettingsUI {
-  constructor(root, settings, dir = "../data/interface/") {
+  constructor(root, settings, dir = "data/interface/") {
     this.s = settings;
     this.dir = dir;
     this.el = document.createElement("div");

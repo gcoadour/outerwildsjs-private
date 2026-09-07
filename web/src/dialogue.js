@@ -14,7 +14,7 @@ const STORAGE_KEY = "outerwildsjs.knowledge";
 
 export async function loadDialogue() {
   try {
-    const res = await fetch("../data/dialogue/dialogue.json", { cache: "no-store" });
+    const res = await fetch("data/dialogue/dialogue.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
     return await res.json();
   } catch (e) {
