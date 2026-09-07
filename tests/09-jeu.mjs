@@ -20,6 +20,7 @@ import { Ship } from "../web/src/ship.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
+import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity } from "../web/src/sectors.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
@@ -306,6 +307,30 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   ev.see("sun_body.gltf", false);
   ev.update(1000, evict);
   check("un fichier protege ne part jamais", freed.length, 1);
+}
+
+// --- champ de debris du trou blanc --------------------------------------
+{
+  const field = new DebrisField(750, 2);
+  check("rayon de debris", field.radius, DEBRIS_RADIUS);
+  field.swallow("Shard_01"); field.swallow("Shard_02");
+  check("deux morceaux en file", field.pending, 2);
+  check("rien ne ressort avant le delai", field.update(1.9).length, 0);
+  check("un morceau ressort", field.update(0.2).length, 1);
+  check("... un seul a la fois", field.grown, 1);
+  field.update(2);
+  check("puis le suivant", field.grown, 2);
+  check("file vide", field.pending, 0);
+
+  const p = field.items[0].position;
+  check("dans la sphere de debris",
+        Math.hypot(p[0], p[1], p[2]) <= 750 + 1e-9, true);
+  check("placement reproductible",
+        JSON.stringify(new DebrisField(750, 2).place("Shard_01")),
+        JSON.stringify(p));
+  check("deux morceaux ne se superposent pas",
+        JSON.stringify(field.items[0].position) !==
+        JSON.stringify(field.items[1].position), true);
 }
 
 // --- eclairage ambiant par secteur --------------------------------------

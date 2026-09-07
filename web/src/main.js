@@ -40,7 +40,7 @@ import { PlayerDeathHandler, FlashbackOverlay } from "./death.js";
 import { MeshLOD, Evictor } from "./lod.js";
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
 import { QuantumMoon, quantumHosts, bodyOccluder } from "./quantum.js";
-import { BlackHole } from "./blackhole.js";
+import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
@@ -442,6 +442,43 @@ async function boot() {
                     (whiteVol.fields || {})._radius || 50) : null;
   window.__blackhole = blackHole;
 
+  // Champ de debris du trou blanc : ce que le trou noir avale ressort la-bas,
+  // un morceau apres l'autre, dans une sphere de 750 unites.
+  const debris = whiteVol
+    ? new DebrisField((whiteVol.fields || {})._debrisRadius || 750) : null;
+  const debrisMeshes = [];
+  let debrisBase = null;
+  window.__debris = debris;
+
+  function syncDebris(dt, framePos) {
+    if (!debris) return;
+    const fresh = debris.update(dt);
+    if (fresh.length && !debrisBase) {
+      debrisBase = BABYLON.MeshBuilder.CreateSphere("debris",
+        { diameter: 24, segments: 6 }, scene);
+      const m = new BABYLON.StandardMaterial("debrisMat", scene);
+      m.diffuseColor = new BABYLON.Color3(0.32, 0.28, 0.30);
+      m.specularColor = new BABYLON.Color3(0, 0, 0);
+      debrisBase.material = m;
+      debrisBase.isPickable = false;
+      debrisBase.setEnabled(false);
+      MeshLOD.pin(debrisBase);
+    }
+    for (const item of fresh) {
+      // une instance par morceau : 122 au plus, et un seul appel de rendu
+      const inst = debrisBase.createInstance(`debris_${item.seed}`);
+      inst.isPickable = false;
+      debrisMeshes.push({ inst, item });
+    }
+    if (!debrisMeshes.length) return;
+    const base = whiteVol.position;
+    for (const { inst, item } of debrisMeshes) {
+      inst.position.set(base[0] - framePos[0] + item.position[0],
+                        base[1] - framePos[1] + item.position[1],
+                        base[2] - framePos[2] + item.position[2]);
+    }
+  }
+
   // --- croute de Brittle Hollow : les fragments tombent pour de bon ---
   const crust = bhBody
     ? new Crust(crustCarriers(gameplay),
@@ -726,6 +763,17 @@ async function boot() {
       const newPos = currentPosition(orbits, fb);
       const shift = sub3(anchorPos, newPos);
       player.pos.x += shift[0]; player.pos.y += shift[1]; player.pos.z += shift[2];
+      // Tout ce qui vit dans le repere courant doit suivre, pas seulement le
+      // joueur. Le vaisseau restait en arriere au changement de corps dominant :
+      // on volait vers une planete et il se retrouvait a des milliers d'unites,
+      // le temps que le pilote automatique le ramene. Les sondes en vol ont le
+      // meme probleme, en plus court.
+      if (ship) {
+        ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
+      }
+      for (const p of probes.probes) {
+        p.pos[0] += shift[0]; p.pos[1] += shift[1]; p.pos[2] += shift[2];
+      }
       anchorBody = fb;
       reframe(anchorBody);
       origin.offset.x = fb.position0[0];
@@ -933,6 +981,8 @@ async function boot() {
       const chasing = fish.filter((f) => f.state !== "repos").length;
       if (chasing) bits.push(`anglerfish : ${chasing} en alerte`);
       if (blackHole && blackHole.transits) bits.push(`trou noir : ${blackHole.transits} transit(s)`);
+      if (debris && (debris.grown || debris.pending)) bits.push(
+        `debris : ${debris.grown} ressorti(s), ${debris.pending} en file`);
       if (quantum) bits.push(
         `lune quantique : ${quantum.hostName}` +
         (quantum.observed ? " (observee)" : ` (${quantum.collapses} sauts)`));
@@ -983,8 +1033,17 @@ async function boot() {
     }
 
     // --- Dark Bramble : les predateurs suivent le bruit ---
+    //
+    // Les predateurs sont poses en coordonnees MONDE, comme tout ce qui vient
+    // de gameplay.json ; le joueur, lui, vit dans le repere du corps ancre. On
+    // leur passe donc sa position monde. Sans cette conversion, la distance
+    // etait fausse du decalage du repere — plusieurs milliers d'unites — et
+    // aucun predateur ne se reveillait jamais.
     const noisy = !!(input.forward || input.right || input.up || player.grounded === false);
-    for (const f of fish) f.update(dt, player.pos, noisy);
+    const playerWorld = { x: player.pos.x + anchorPos[0],
+                          y: player.pos.y + anchorPos[1],
+                          z: player.pos.z + anchorPos[2] };
+    for (const f of fish) f.update(dt, playerWorld, noisy);
     thorns.update(loop.fraction);
 
     // --- trou noir : capture puis ejection au trou blanc ---
@@ -1029,13 +1088,18 @@ async function boot() {
               pos: [local.x, local.y, local.z],
               vel: [0, 0, 0],   // _escapeFromParentSpeed vaut 0 dans le build
               apply: (p) => f.node.position.set(p[0], p[1], p[2]),
-              remove: () => f.node.setEnabled(false),
+              remove: () => {
+                f.node.setEnabled(false);
+                // avale par le trou noir : il prend la file du trou blanc
+                if (debris) debris.swallow(f.node.name);
+              },
             };
           });
         }
       }
       blackHole.fragmentsDetached = crust.detached;
     }
+    syncDebris(dt, anchorPos);
 
     // --- outils du joueur ---
     camera.fov = telescope.update(dt);
