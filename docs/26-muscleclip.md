@@ -145,12 +145,27 @@ sont les variantes préfixées `~`), les os bougent d'une image à l'autre, aucu
 erreur console. L'enfant au télescope tient la pose « LookingThroughTelescope »,
 bras levés vers l'instrument.
 
+## Le même décodeur dans le navigateur
+
+Le module ci-dessus est en Python, donc hors d'atteinte d'un onglet : les corps
+sortaient en pose de repos dans le pipeline navigateur, seuls les squelettes
+étant portés. `web/src/pipeline/unity/muscle.js` le porte, règle pour règle, et
+`web/src/pipeline/extract/gltf.js` en fait des canaux glTF.
+
+Deux classes moteur ont dû rejoindre `unity41-types.json` : `Avatar` (90), pour
+la table `m_TOS` sans laquelle aucun os n'est nommé, et `AnimatorController`
+(91), pour la liste des clips et l'état par défaut. Le portage a aussi montré
+que le champ de couches lu par le Python, `m_LayerArray`, n'existe pas en 4.1 —
+il s'y appelle `m_HumanLayerArray` — et qu'un flux dense, qui ne range pas de
+tangentes, faisait lever une `IndexError` au décodeur Python dès qu'on lui en
+demandait. Aucun clip du build n'est dans ce cas ; c'est un flux fabriqué qui
+l'a montré. Voir [`31-navigateur.md`](31-navigateur.md).
+
+Les deux décodeurs ont été comparés sur les mêmes flux fabriqués, et rendent les
+mêmes valeurs et les mêmes tangentes.
+
 ## Ce qui manque encore
 
-- **Les tangentes.** Les coefficients `[0]`, `[1]`, `[2]` décrivent la cubique du
-  segment ; le décodeur ne garde que la valeur et interpole linéairement.
-  Passer en `CUBICSPLINE` demanderait de convertir les tangentes d'Unity vers
-  la convention glTF, et se voit surtout sur les mouvements lents.
 - **Les machines à états.** Seul l'état par défaut est joué ; transitions,
   conditions et arbres de mélange restent hors d'atteinte.
 - **`m_ValueArrayDelta`** (bornes par courbe) et `m_IndexArray` ne servent pas.
