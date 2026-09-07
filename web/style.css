@@ -1,0 +1,169 @@
+/* --- Polices du jeu (voir tools/14_interface.py) ----------------------------
+   Elles etaient extraites depuis le debut sans etre utilisees : toute
+   l'interface etait rendue dans une police systeme. OWUtilities les repartit
+   par role — Gill Sans MT pour les dialogues et les invites, digital-7 pour
+   tout ce qui s'affiche dans le casque, Gill Sans MT Bold pour les noms de
+   personnages, Gill Sans MT Menu pour les reglages. */
+@font-face { font-family: "OW Dialogue"; src: url("../data/interface/Gill Sans MT.ttf"); font-display: swap; }
+@font-face { font-family: "OW Helmet"; src: url("../data/interface/digital-7.ttf"); font-display: swap; }
+@font-face { font-family: "OW Name"; src: url("../data/interface/Gill Sans MT Bold.ttf"); font-display: swap; }
+@font-face { font-family: "OW Menu"; src: url("../data/interface/Gill Sans MT Menu.ttf"); font-display: swap; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; background: #05060a; overflow: hidden; }
+#view { width: 100vw; height: 100vh; display: block; outline: none; }
+#hud {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  padding: 12px 16px;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #cfd6e4;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .65));
+  pointer-events: none;
+}
+#status { color: #ffd9a0; }
+#hud2 { margin-top: 3px; color: #9fd6c4; }
+#map {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 5;
+  display: block; cursor: crosshair;
+}
+/* Proportions reprises de DialogueGUI (voir web/src/dialogueui.js) */
+#dialogue {
+  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
+  z-index: 6; pointer-events: none;
+}
+.dlg-box {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px 20px; box-sizing: border-box;
+  background: rgba(8, 12, 20, .9);
+  border: 1px solid rgba(255, 217, 160, .35);
+  border-left: 3px solid #ffd9a0;
+  font-family: "OW Dialogue", ui-monospace, Menlo, monospace; color: #e8eef8;
+}
+.dlg-name {
+  /* GetPromptGUIStyleCharacterName : Gill Sans MT Bold */
+  font-family: "OW Name", "OW Dialogue", monospace;
+  color: #ffd9a0; letter-spacing: .04em;
+  border-bottom: 1px solid rgba(255, 217, 160, .2); padding-bottom: 6px;
+}
+.dlg-text { white-space: pre-wrap; line-height: 1.55; }
+.dlg-options { display: flex; flex-direction: column; gap: 2px; }
+.dlg-option { color: #9fb3cc; padding: 2px 6px; }
+.dlg-sel { color: #fff; background: rgba(255, 217, 160, .16); }
+.dlg-next { align-self: flex-end; color: #7f8a9e; }
+#help { margin-top: 4px; color: #7f8a9e; }
+#help b { color: #aab6cc; font-weight: 600; }
+
+/* --- Interface de jeu (voir web/src/hud.js et tools/14_interface.py) --------
+   Le panneau de ressources reprend la geometrie relative du casque : les trois
+   elements sont places dans un espace local ou x et y vont de -1 a 1. Sa taille
+   et son coin a l'ecran, eux, sont un choix de ce portage. */
+#ui {
+  /* au-dessus de la carte : le jeu dessine bien les invites de carte par-dessus */
+  position: fixed; inset: 0; z-index: 7; pointer-events: none;
+  font: 30px/1.2 "OW Dialogue", ui-monospace, Menlo, monospace;
+}
+.ow-res {
+  /* a droite : les invites du jeu occupent deja le bas a gauche */
+  position: absolute; right: 28px; bottom: 96px;
+  width: 300px; height: 170px;
+}
+.ow-res > * { position: absolute; }
+.ow-health { object-fit: contain; object-position: bottom; opacity: .95; }
+.ow-bar { overflow: visible; }
+/* le degrade s'etire avec la jauge, comme le quad 3D du jeu */
+.ow-bar-fill {
+  position: absolute; left: 6%; bottom: 0; width: 88%; height: 100%;
+  object-fit: fill;
+}
+.ow-bar-frame {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill;
+}
+.ow-vignette {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: fill; transition: opacity .12s linear;
+}
+/* « low fuel / low health / low oxygen », a droite du centre de l'ecran :
+   PlayerResourceGUI.OnGUI les pose a x = largeur/2 + 50, en corps 20, rouge */
+.ow-warn {
+  position: absolute; left: 50%; top: 50%; margin-left: 50px;
+  transform: translateY(-50%);
+  /* GetHelmetGUIStyle(20, rouge) : c'est la police du casque, pas celle des
+     dialogues */
+  font-family: "OW Helmet", ui-monospace, monospace;
+  font-size: 20px; line-height: 25px; color: #f00; white-space: pre;
+}
+.ow-prompts { position: absolute; display: flex; flex-direction: column; }
+/* PromptManager.Update : centre de l'ecran + 50 px vers le bas, aligne au centre */
+.ow-prompts-center {
+  left: 50%; top: 50%; margin-top: 50px; transform: translateX(-50%);
+  align-items: center;
+}
+/* bas : (largeur/2, hauteur - 100), aligne au centre */
+.ow-prompts-bottom {
+  left: 50%; bottom: 100px; transform: translateX(-50%); align-items: center;
+}
+/* gauche : (50, hauteur - 100), aligne a gauche, empile vers le haut */
+.ow-prompts-left {
+  left: 50px; bottom: 100px; align-items: flex-start;
+  flex-direction: column-reverse;
+}
+/* ScreenPrompt.DrawPrompt : fond 1,1 x 1,2 fois le texte, centre dessus */
+.ow-prompt {
+  color: #E6D8B8; padding: 0 5%; margin-bottom: 5px;
+  background: url("../data/interface/TutorialTextBG.png") center / 100% 100% no-repeat;
+  line-height: 1.2; white-space: nowrap;
+}
+/* Icone d'une FogLight : centree sur la position projetee, remontee de 30 px */
+.ow-foglight {
+  position: absolute; transform: translate(-50%, -50%);
+  image-rendering: auto; pointer-events: none;
+}
+/* AutopilotGUI : centre, corps 24, a 200 px du haut plus sa propre hauteur */
+.ow-autopilot {
+  position: absolute; left: 50%; top: 224px; transform: translateX(-50%);
+  /* GetHelmetGUIStyle(24) */
+  font-family: "OW Helmet", ui-monospace, monospace;
+  font-size: 24px; line-height: 1.2; text-align: center; white-space: nowrap;
+}
+/* Minimap : un globe vu depuis la direction du joueur */
+#minimap {
+  position: fixed; right: 28px; top: 24px; z-index: 7;
+  width: 168px; height: 168px; pointer-events: none;
+}
+/* Icone de manette d'une invite, posee avant le texte comme dans le jeu */
+.ow-prompt-btn {
+  height: 1em; width: auto; vertical-align: -0.12em;
+  image-rendering: auto;
+}
+/* SettingsMenu : une colonne d'options, aux trois couleurs de Menu */
+/* SettingsMenu : la racine est en coordonnees d'ecran (0,5 ; 0,8) et chaque
+   option porte son propre decalage en pixels, de -70 a -370 par pas de 50. */
+.ow-settings {
+  position: absolute; left: 50%; top: 20%;
+  font-family: "OW Menu", "OW Dialogue", monospace; text-align: center;
+}
+.ow-settings-bg {
+  position: absolute; left: 50%; transform: translate(-50%, -50%);
+  opacity: .5;                     /* m_Color de la GUITexture : gris a 50 % */
+}
+.ow-setting {
+  position: absolute; left: 0; transform: translate(-50%, -50%);
+  white-space: nowrap; line-height: 1.2;
+}
+.ow-settings-title { font-size: 42px; }
+
+/* Ordinateur de bord : deux zones de texte, comme les deux TextMesh du terminal */
+#computer {
+  position: fixed; left: 50%; top: 22%; transform: translateX(-50%);
+  z-index: 7; pointer-events: none; width: min(620px, 74vw);
+  padding: 22px 28px; box-sizing: border-box;
+  background: rgba(4, 12, 10, .93);
+  border: 1px solid rgba(120, 230, 190, .3);
+  font-family: "OW Dialogue", ui-monospace, monospace; color: #9fe8c8;
+}
+.ow-computer-name {
+  font-size: 26px; letter-spacing: .06em; text-align: center;
+  padding-bottom: 10px; margin-bottom: 12px;
+  border-bottom: 1px solid rgba(120, 230, 190, .22);
+}
+.ow-computer-desc { font-size: 17px; line-height: 1.6; white-space: pre-wrap; }

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outer Wilds alpha — prototype Babylon.js</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view"></canvas>
+<canvas id="map" hidden></canvas>
+<canvas id="minimap" width="336" height="336" hidden></canvas>
+<div id="ui"></div>
+<div id="computer" hidden></div>
+<div id="hud">
+  <div id="status">Chargement…</div>
+  <div id="hud2"></div>
+  <div id="dialogue" hidden></div>
+  <div id="help">
+    <b>ZQSD/WASD</b> se déplacer · <b>Espace</b> monter · <b>Maj</b> accélérer ·
+    <b>E</b> interagir/parler · <b>1-9</b>/<b>↑↓⏎</b> répondre · <b>M</b> carte · <b>T</b> télescope · <b>F</b> sonde · <b>G</b> affichage · <b>L</b> lampe · <b>N</b> ordinateur de bord · <b>clic</b> capturer la souris
+  </div>
+</div>
+<script>
+// Babylon est charge depuis vendor/ (voir web/fetch-deps.sh). Le CDN ne sert
+// que de repli : il n'est pas toujours joignable selon le reseau.
+function loadScript(src) {
+  return new Promise((ok, ko) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = () => ko(new Error(src));
+    document.head.appendChild(s);
+  });
+}
+loadScript("vendor/babylon.js")
+  .catch(() => loadScript("https://cdn.babylonjs.com/babylon.js"))
+  // le chargeur glTF est optionnel : sans lui le prototype tourne avec les
+  // spheres de substitution
+  .then(() => loadScript("vendor/babylonjs.loaders.min.js")
+    .catch(() => loadScript("https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"))
+    .catch(() => console.warn("chargeur glTF indisponible")))
+  // Havok est optionnel : sans lui la collision reste analytique
+  .then(() => loadScript("vendor/HavokPhysics_umd.js")
+    .catch(() => console.warn("Havok indisponible")))
+  .then(() => import("./src/main.js"))
+  .catch((e) => {
+    document.getElementById("status").textContent =
+      "Babylon.js introuvable. Lancer web/fetch-deps.sh (" + e.message + ")";
+  });
+</script>
+</body>
+</html>

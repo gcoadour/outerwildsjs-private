@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visualiseur glTF — Outer Wilds alpha</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; background: #080a10; overflow: hidden; }
+  canvas { width: 100vw; height: 100vh; display: block; outline: none; }
+  #s { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 12px;
+       font: 12px/1.5 ui-monospace, Menlo, monospace; color: #ffd9a0;
+       background: linear-gradient(transparent, #000c); white-space: pre; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="s">Chargement…</div>
+<script src="vendor/babylon.js"></script>
+<script src="vendor/babylonjs.loaders.min.js"></script>
+<script>
+// Visualise un glTF produit par tools/08_export_gltf.py.
+//   web/gltf-viewer.html?f=timberhearth.gltf
+const file = new URLSearchParams(location.search).get("f") || "timberhearth.gltf";
+const st = document.getElementById("s");
+const engine = new BABYLON.Engine(document.getElementById("c"), true);
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = new BABYLON.Color4(0.03, 0.04, 0.07, 1);
+new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0, 1, 0), scene).intensity = 0.55;
+const dl = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-1, -2, -1), scene);
+dl.intensity = 1.5;
+
+// La camera doit exister AVANT la boucle de rendu : si scene.render() leve
+// "No camera defined", Babylon arrete la boucle et le canvas reste noir.
+const cam = new BABYLON.ArcRotateCamera("cam", 1.1, 1.1, 10, BABYLON.Vector3.Zero(), scene);
+cam.attachControl(document.getElementById("c"), true);
+cam.wheelDeltaPercentage = 0.02;
+scene.activeCamera = cam;
+engine.runRenderLoop(() => scene.render());
+addEventListener("resize", () => engine.resize());
+
+BABYLON.SceneLoader.ImportMeshAsync("", "../data/gltf/", file, scene).then((r) => {
+  const meshes = r.meshes.filter((m) => m.getTotalVertices() > 0);
+  if (!meshes.length) { st.textContent = "Aucune geometrie dans " + file; return; }
+  meshes.forEach((m) => m.computeWorldMatrix(true));
+
+  // Cadrage sur le barycentre des centres de maillages : plus robuste qu'une
+  // boite englobante globale, qui engloberait aussi le pivot d'orbite a
+  // l'origine et centrerait la vue sur du vide.
+  const cs = meshes.map((m) => m.getBoundingInfo().boundingBox.centerWorld);
+  const center = cs.reduce((a, c) => a.add(c), BABYLON.Vector3.Zero()).scale(1 / cs.length);
+  const ds = cs.map((c) => BABYLON.Vector3.Distance(c, center)).sort((a, b) => a - b);
+  const extent = ds[ds.length - 1] || 100;
+
+  cam.setTarget(center);
+  cam.radius = extent * 3;
+  cam.lowerRadiusLimit = extent * 0.02;
+  cam.upperRadiusLimit = extent * 40;
+  cam.minZ = Math.max(extent * 0.001, 0.05);
+  cam.maxZ = extent * 200;
+
+  const verts = meshes.reduce((s, m) => s + m.getTotalVertices(), 0);
+  st.textContent = `${file} — ${meshes.length} maillages, ${verts.toLocaleString("fr")} sommets\n`
+    + `centre ${center.x.toFixed(0)},${center.y.toFixed(0)},${center.z.toFixed(0)} — etendue ${extent.toFixed(0)} u`
+    + `   ·   molette : zoom, glisser : orbite`;
+  window.__gltfok = true;
+}).catch((e) => {
+  st.textContent = "Erreur de chargement de " + file + " : " + e.message
+    + "\nGenerer d'abord : python3 tools/08_export_gltf.py --root TimberHearth_Pivot";
+});
+</script>
+</body>
+</html>
