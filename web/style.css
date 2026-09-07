@@ -172,6 +172,11 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
    Il occupe la page tant que l'extraction n'a pas eu lieu ; le canvas du
    moteur vit dessous et n'est revele qu'une fois les donnees pretes. */
 
+/* La regle d'identite l'emporterait sur le display:none que le navigateur
+   applique a [hidden] : sans cette ligne, l'ecran d'accueil ne disparait
+   jamais et recouvre le moteur qui tourne dessous. */
+#gate[hidden] { display: none; }
+
 #gate {
   position: fixed;
   inset: 0;

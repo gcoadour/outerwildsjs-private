@@ -175,6 +175,12 @@ export async function initGate() {
     return;
   }
 
+  // Sans persistance demandee, le navigateur peut evincer les 200 Mo extraits
+  // au premier manque de place, et tout serait a refaire.
+  if (navigator.storage.persist) {
+    try { await navigator.storage.persist(); } catch { /* refus : sans gravite */ }
+  }
+
   const input = $("gate-file");
   const drop = $("gate-drop");
   input.addEventListener("change", () => handleFile(input.files[0]));
