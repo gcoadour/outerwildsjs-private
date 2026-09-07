@@ -42,7 +42,7 @@ OuterWilds_Alpha_1_2_Data/
 └── Mono/                                    — runtime Mono
 ```
 
-Total : **28 286 objets sérialisés**.
+Total : **28 206 objets sérialisés**.
 
 Le jeu tient donc en une seule scène (`level0`) : pas de découpage en niveaux,
 ce qui est cohérent avec un système solaire continu et sans écran de chargement.
