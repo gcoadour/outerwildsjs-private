@@ -1,7 +1,8 @@
 // Banc d'essai du pipeline, execute sous Node sur un build extrait localement.
 // Le build n'est jamais versionne : ce script ne tourne que si OW_BUILD pointe
 // sur un dossier *_Data existant.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, openSync, readSync, closeSync,
+         statSync as nodeStatSync } from "node:fs";
 import { join } from "node:path";
 
 export const BUILD = process.env.OW_BUILD
@@ -19,16 +20,39 @@ export async function loadEnv() {
   const { UnityEnv } = await import("../web/src/pipeline/unity/env.js");
   const env = new UnityEnv();
   for (const r of RESOURCE_FILES) {
-    if (existsSync(join(BUILD, r))) env.addResource(r, load(r));
+    if (existsSync(join(BUILD, r))) env.addResource(r, new FdSource(join(BUILD, r)));
   }
   for (const n of [...DATA_FILES, ...EXTRA_FILES]) {
-    if (existsSync(join(BUILD, n))) env.add(n, load(n));
+    if (existsSync(join(BUILD, n))) env.add(n, new FdSource(join(BUILD, n)));
   }
   return env;
 }
 
 export function haveBuild() { return existsSync(join(BUILD, "level0")); }
 export function load(name) { return new Uint8Array(readFileSync(join(BUILD, name))); }
+
+/**
+ * Source d'octets adossee au disque, equivalent Node du
+ * FileSystemSyncAccessHandle utilise dans le Worker. Les tests passent par elle
+ * pour eprouver le chemin paresseux, celui qui tourne reellement dans le
+ * navigateur, plutot qu'un chargement integral que le navigateur ne fera jamais.
+ */
+export class FdSource {
+  constructor(path) {
+    this.fd = openSync(path, "r");
+    this.size = nodeStatSync(path).size;
+  }
+  get length() { return this.size; }
+  read(offset, length) {
+    const n = Math.max(0, Math.min(length, this.size - offset));
+    const out = new Uint8Array(n);
+    if (n) readSync(this.fd, out, 0, n, offset);
+    return out;
+  }
+  close() { closeSync(this.fd); }
+}
+
+
 
 let failures = 0, checks = 0;
 export function check(label, actual, expected) {

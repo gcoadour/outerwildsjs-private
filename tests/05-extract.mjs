@@ -8,7 +8,7 @@ import { extractScene } from "../web/src/pipeline/extract/scene.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
-import { BUILD, DATA_FILES, haveBuild, load, check, report } from "./run.mjs";
+import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
 
@@ -17,8 +17,7 @@ const ASSEMBLIES = ["Assembly-CSharp", "Assembly-CSharp-firstpass",
                     "DecalSystem.Runtime", "UnityEngine", "mscorlib"];
 const u = new TypeUniverse();
 for (const a of ASSEMBLIES) u.add(a, new Uint8Array(readFileSync(join(BUILD, "Managed", `${a}.dll`))));
-const env = new UnityEnv();
-for (const n of DATA_FILES) env.add(n, load(n));
+const env = await loadEnv();
 
 console.time("indexation");
 const ctx = new ExtractContext(env, u, "level0");

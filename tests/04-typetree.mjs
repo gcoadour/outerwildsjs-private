@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { UnityEnv } from "../web/src/pipeline/unity/env.js";
 import { readTypeTree } from "../web/src/pipeline/unity/typetree.js";
 import { TypeUniverse, monoBehaviourTree } from "../web/src/pipeline/dotnet/typetree.js";
-import { BUILD, DATA_FILES, haveBuild, load, check, report } from "./run.mjs";
+import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
 
@@ -18,8 +18,7 @@ for (const a of ASSEMBLIES) {
   u.add(a, new Uint8Array(readFileSync(join(BUILD, "Managed", `${a}.dll`))));
 }
 
-const env = new UnityEnv();
-for (const n of DATA_FILES) env.add(n, load(n));
+const env = await loadEnv();
 
 const trees = new Map();
 function treeFor(cls) {
@@ -61,20 +60,28 @@ check("MonoBehaviour de level0 lus au bit pres", exact, 1390);
 console.log(`     soit ${(100 * exact / total).toFixed(1)} % (pipeline Python : 98,1 %)`);
 
 // Meme controle sur les cinq fichiers : rien ne doit deborder nulle part.
-let allTotal = 0, allExact = 0, allOther = 0;
+// GUISkin est un objet natif d'Unity, present dans ses ressources integrees.
+// Comme GUIStyle, sa forme serialisee ne se deduit pas de ses champs C#. Rien
+// dans le pipeline ne le lit, et ce n'est pas du contenu du jeu.
+const NATIVE = new Set(["GUISkin"]);
+
+let allTotal = 0, allExact = 0, allNoScript = 0;
 for (const o of env.objects({ type: "MonoBehaviour" })) {
-  allTotal++;
   const cls = env.scriptName(o);
+  if (cls && NATIVE.has(cls)) continue;
+  allTotal++;
   const nodes = cls && treeFor(cls);
-  if (!nodes) { allOther++; continue; }
+  // Quelques MonoBehaviour n'ont pas de script : un dans resources.assets, un
+  // dans les ressources integrees d'Unity. Sans classe, pas d'arbre possible.
+  if (!nodes) { allNoScript++; continue; }
   try {
     const r = o.file.reader(o);
     readTypeTree(r, nodes, o.file);
-    if (r.pos === o.byteSize) allExact++; else allOther++;
-  } catch { allOther++; }
+    if (r.pos === o.byteSize) allExact++;
+  } catch { /* compte comme non exact */ }
 }
-// L'unique MonoBehaviour sans script (resources.assets) n'a pas d'arbre.
-check("MonoBehaviour du build entier lus au bit pres", allExact, allTotal - 1);
+check("MonoBehaviour du build entier lus au bit pres", allExact, allTotal - allNoScript);
+console.log(`     (${allNoScript} sans script, donc sans arbre possible)`);
 
 // Controle de valeur : la gravite de Timber Hearth doit etre celle du jeu.
 let gw = null;

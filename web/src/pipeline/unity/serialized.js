@@ -8,6 +8,7 @@
 
 import { BinaryReader } from "./binary.js";
 import { CLASS_NAMES } from "./classids.js";
+import { toSource } from "./source.js";
 
 /** Un noeud de type tree, au meme format que celui produit par le generateur. */
 function readTypeTreeNodeOld(r, nodes, level) {
@@ -28,11 +29,22 @@ function readTypeTreeNodeOld(r, nodes, level) {
 export class SerializedFile {
   /**
    * @param {string} name  nom du fichier (level0, sharedassets1.assets, ...)
-   * @param {Uint8Array} u8  contenu complet
+   * @param {Uint8Array|{length:number, read:Function}} input  octets ou source
    */
-  constructor(name, u8) {
+  constructor(name, input) {
     this.name = name;
-    this.u8 = u8;
+    this.source = toSource(input);
+
+    // Seuls l'entete et les metadonnees sont lus ici ; les octets des objets
+    // restent dans la source. Sur sharedassets1.assets cela fait 48 Ko au lieu
+    // de 410 Mo.
+    const head = this.source.read(0, Math.min(64, this.source.length));
+    const probe = new BinaryReader(head, 0, false);
+    const metadataSize = probe.u32();
+    const fileSize = probe.u32();
+    probe.u32();
+    const dataOffset = probe.u32();
+    const u8 = this.source.read(0, Math.max(dataOffset, metadataSize + 64));
 
     // L'entete est gros-boutiste, quelle que soit la plateforme.
     const h = new BinaryReader(u8, 0, false);
@@ -44,9 +56,9 @@ export class SerializedFile {
     if (this.version < 9) {
       throw new Error(`format serialise ${this.version} non gere (attendu >= 9)`);
     }
-    if (this.fileSize !== u8.length) {
+    if (this.fileSize !== this.source.length) {
       // Tronque ou concatene : mieux vaut le dire tout de suite que lire du vide.
-      throw new Error(`taille incoherente: entete ${this.fileSize}, fichier ${u8.length}`);
+      throw new Error(`${name}: taille incoherente, entete ${this.fileSize}, fichier ${this.source.length}`);
     }
 
     const endianness = h.u8v();   // 0 = petit-boutiste
@@ -105,12 +117,12 @@ export class SerializedFile {
   resource(offset, size) {
     const res = this.resS;
     if (!res || offset < 0 || offset + size > res.length) return null;
-    return res.subarray(offset, offset + size);
+    return res.read(offset, size);
   }
 
-  /** Octets bruts d'un objet. */
+  /** Octets bruts d'un objet, lus a la demande. */
   data(obj) {
-    return this.u8.subarray(obj.byteStart, obj.byteStart + obj.byteSize);
+    return this.source.read(obj.byteStart, obj.byteSize);
   }
 
   /** Lecteur positionne sur un objet. */

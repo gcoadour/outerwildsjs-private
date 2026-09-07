@@ -6,6 +6,7 @@
 
 import { SerializedFile } from "./serialized.js";
 import { READERS, readMonoBehaviourHeader } from "./classes.js";
+import { toSource } from "./source.js";
 
 /** Nom de fichier nu, quel que soit le separateur employe dans l'entete. */
 function basename(p) {
@@ -20,8 +21,8 @@ export class UnityEnv {
   }
 
   /** Ajoute un fichier serialise au monde. */
-  add(name, u8) {
-    const f = new SerializedFile(name, u8);
+  add(name, input) {
+    const f = new SerializedFile(name, input);
     f.resS = this.resources.get(`${basename(name)}.ress`) || null;
     this.files.set(basename(name), f);
     return f;
@@ -31,10 +32,11 @@ export class UnityEnv {
    * Ajoute un flux de ressources (.resS). A appeler avant add() du fichier
    * correspondant, ou dans n'importe quel ordre : le rattachement est refait.
    */
-  addResource(name, u8) {
-    this.resources.set(basename(name), u8);
+  addResource(name, input) {
+    const src = toSource(input);
+    this.resources.set(basename(name), src);
     for (const [n, f] of this.files) {
-      if (`${n}.ress` === basename(name)) f.resS = u8;
+      if (`${n}.ress` === basename(name)) f.resS = src;
     }
   }
 

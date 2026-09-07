@@ -1,12 +1,11 @@
 // Verifie la resolution des PPtr entre fichiers : c'est elle qui donne le nom
 // du script C# attache a chaque MonoBehaviour.
 import { UnityEnv } from "../web/src/pipeline/unity/env.js";
-import { BUILD, DATA_FILES, haveBuild, load, check, report } from "./run.mjs";
+import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
 
-const env = new UnityEnv();
-for (const n of DATA_FILES) env.add(n, load(n));
+const env = await loadEnv();
 
 let named = 0, total = 0;
 const classes = new Map();
