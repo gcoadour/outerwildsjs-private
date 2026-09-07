@@ -266,7 +266,7 @@ async function run(blob, options) {
   if (options.geometry !== false) {
     phase("geometrie", "Export glTF des corps celestes…");
     const roots = findRoots(ctx);
-    let i = 0;
+    let i = 0, animations = 0, channels = 0;
     for (const root of roots) {
       const label = root.name.toLowerCase();
       step(`${root.name} (${++i}/${roots.length})`, i / roots.length);
@@ -277,8 +277,12 @@ async function run(blob, options) {
       await writeFile(`data/gltf/${label}.gltf`, JSON.stringify(res.gltf));
       await writeFile(`data/gltf/${label}.bin`, res.bin);
       await drainImages("data/gltf");
+      animations += res.stats.animations;
+      channels += res.stats.channels;
     }
     summary["corps en glTF"] = roots.length;
+    summary.animations = animations;
+    summary["canaux d'animation"] = channels;
   }
 
   for (const s of sources) s.close();

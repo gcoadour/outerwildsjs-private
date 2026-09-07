@@ -42,7 +42,7 @@ ouvert en `file://` n'en est pas une.
 | `data/components/level0.json` | 1 390 MonoBehaviour avec la **valeur** de leurs champs |
 | `data/solar_system.json` | 17 corps : positions, rayons, gravité, constantes de vol |
 | `data/gameplay.json` | vaisseau, ressources, 39 interactifs, 34 lisibles, 16 spawns |
-| `data/gltf/*.gltf` | 9 corps en glTF 2.0, hiérarchie, matériaux, squelettes |
+| `data/gltf/*.gltf` | 9 corps en glTF 2.0, hiérarchie, matériaux, squelettes, animations |
 | `data/audio/` | 36 clips et 97 sources placées avec leur piste de mixage |
 | `data/particles/` | 135 systèmes de particules et leurs textures |
 | `data/shaders/` | 121 sources ShaderLab et leur classement |
@@ -97,10 +97,13 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | MonoBehaviour de `level0` | **1 390 / 1 390** (pipeline Python : 1 364) |
 | Textures décodées | 399, dont DXT1/DXT5/ARGB32/RGB24 identiques à UnityPy au pixel près |
 | Maillages décodés | 1 569, 929 529 sommets, concordants avec UnityPy |
+| Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
 
-Sans build local, les tests s'annoncent ignorés plutôt que d'échouer : rien
-n'oblige jamais l'intégration continue à héberger le jeu.
+Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips
+d'animation s'éprouve sur un flux fabriqué, et l'export glTF sur un monde de
+trois objets. Le reste s'annonce ignoré plutôt que d'échouer — rien n'oblige
+jamais l'intégration continue à héberger le jeu.
 
 ## Le pipeline Python
 

@@ -268,7 +268,9 @@ def decode_clip(clip, tos, tangents=False):
         aligned = all(len(c) == len(times) and
                       all(abs(c[i][0] - times[i]) < 1e-6 for i in range(len(times)))
                       for c in comps)
-        finite = all(math.isfinite(k[2]) and math.isfinite(k[3])
+        # Une cle sans tangentes vient du flux dense ou constant, qui n'en range
+        # pas : la courbe part alors en lineaire, comme une tangente infinie.
+        finite = all(len(k) > 3 and math.isfinite(k[2]) and math.isfinite(k[3])
                      for c in comps for k in c)
         if aligned and finite:
             out.setdefault(name, {})[path] = {

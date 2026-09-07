@@ -11,6 +11,7 @@
 
 import { decodeMesh } from "../unity/mesh.js";
 import { decodeTexture2D, resizeRGBA } from "../unity/texture.js";
+import { avatarTOS, decodeClip } from "../unity/muscle.js";
 import { texturePtr } from "./materials.js";
 
 const ARRAY_BUFFER = 34962, ELEMENT_ARRAY_BUFFER = 34963;
@@ -35,6 +36,7 @@ class GltfBuilder {
     this.textures = [];
     this.materials = [];
     this.skins = [];
+    this.animations = [];
     this.textureByPid = new Map();
     this.materialByPid = new Map();
   }
@@ -90,6 +92,27 @@ class GltfBuilder {
     const view = this._view(mats);
     this.accessors.push({ bufferView: view, componentType: FLOAT,
                           count: mats.length / 16, type: "MAT4" });
+    return this.accessors.length - 1;
+  }
+
+  /** Temps d'echantillonnage d'une animation : glTF exige leurs bornes. */
+  addTimes(times) {
+    const flat = Float32Array.from(times);
+    let min = Infinity, max = -Infinity;
+    for (const t of flat) { if (t < min) min = t; if (t > max) max = t; }
+    const view = this._view(flat);
+    this.accessors.push({ bufferView: view, componentType: FLOAT, count: flat.length,
+                          type: "SCALAR", min: [min], max: [max] });
+    return this.accessors.length - 1;
+  }
+
+  /** Valeurs d'une animation : VEC3 pour position et echelle, VEC4 pour rotation. */
+  addValues(values, dim) {
+    const flat = new Float32Array(values.length * dim);
+    values.forEach((v, i) => { for (let c = 0; c < dim; c++) flat[i * dim + c] = v[c]; });
+    const view = this._view(flat);
+    this.accessors.push({ bufferView: view, componentType: FLOAT, count: values.length,
+                          type: dim === 4 ? "VEC4" : "VEC3" });
     return this.accessors.length - 1;
   }
 
@@ -155,13 +178,72 @@ function unswizzleNormal(img) {
   return { width, height, rgba: out, format: "normal" };
 }
 
+// --- animations -------------------------------------------------------------
+//
+// La conversion de repere est la meme que pour les noeuds, mais les valeurs
+// arrivent sous deux formes : structures {x, y, z[, w]} pour les clips legacy,
+// tableaux nus pour les clips Mecanim decodes par unity/muscle.js.
+
+const vec3 = (v) => (Array.isArray(v) ? [v[0], v[1], -v[2]] : [v.x, v.y, -v.z]);
+const quat = (q) => (Array.isArray(q) ? [-q[0], -q[1], q[2], q[3]] : [-q.x, -q.y, q.z, q.w]);
+const scale3 = (v) => (Array.isArray(v) ? [v[0], v[1], v[2]] : [v.x, v.y, v.z]);
+
+const CURVE_KINDS = [
+  ["m_PositionCurves", "translation", vec3, 3],
+  ["m_RotationCurves", "rotation", quat, 4],
+  ["m_ScaleCurves", "scale", scale3, 3],
+];
+
+/**
+ * Index, dans m_AnimationClips, du clip joue par defaut par un controleur.
+ *
+ * La machine a etats d'Unity 4 vit dans m_Controller.m_StateMachineArray.
+ * m_DefaultState y designe un etat, et l'ordre des etats suit celui de
+ * m_AnimationClips (verifie sur les huit controleurs du build : les hachages
+ * m_ClipID se succedent dans le meme ordre). Sans cela, les villageois qui
+ * observent les etoiles joueraient l'inactivite par defaut.
+ *
+ * Le tableau des couches s'appelle m_HumanLayerArray en 4.1 et m_LayerArray
+ * plus tard ; les deux noms sont lus, et un index hors bornes retombe sur la
+ * premiere machine plutot que de renoncer.
+ */
+export function controllerDefaultClip(ctrl) {
+  const ctl = ctrl && ctrl.m_Controller;
+  const machines = (ctl && ctl.m_StateMachineArray) || [];
+  if (!machines.length) return null;
+  const layers = (ctl.m_HumanLayerArray || ctl.m_LayerArray || []);
+  const first = layers.length ? (layers[0] && layers[0].data) || layers[0] : null;
+  let which = first ? Number(first.m_StateMachineIndex || 0) : 0;
+  if (!(which >= 0 && which < machines.length)) which = 0;
+  const sm = (machines[which] && machines[which].data) || machines[which];
+  const idx = sm && sm.m_DefaultState;
+  return idx === undefined || idx === null ? null : Number(idx);
+}
+
+/**
+ * (temps, valeur, pente d'entree, pente de sortie) d'une AnimationCurve.
+ *
+ * Les clips legacy rangent directement les deux tangentes de Hermite, la ou
+ * Mecanim range le cubique du segment. Elles sont dans la meme unite que celles
+ * de glTF -- une derivee par unite de temps -- et se transportent telles quelles.
+ */
+function curveKeys(c) {
+  const keys = (c && c.curve && c.curve.m_Curve) || [];
+  return keys
+    .map((k) => [k.time, k.value, k.inSlope, k.outSlope])
+    .sort((a, b) => a[0] - b[0]);
+}
+
 export function exportSubtree(ctx, rootGid, label, {
   emitImage, maxTexture = 1024, maxMeshes = 4000, textureDir = "textures",
 } = {}) {
   const env = ctx.env;
   const sceneFile = env.get(ctx.sceneFile);
   const g = new GltfBuilder();
-  const stats = { nodes: 0, meshes: 0, skipped: 0, skins: 0, incompleteSkins: 0 };
+  const stats = { nodes: 0, meshes: 0, skipped: 0, skins: 0, incompleteSkins: 0,
+                  animations: 0, channels: 0, cubic: 0, linear: 0,
+                  mecanimClips: 0, emptyMecanimClips: 0, unresolvedBones: 0,
+                  unresolvedPaths: 0, compressedClips: 0 };
 
   // --- index par GameObject : maillage, materiau, squelette ---
   const meshOf = new Map(), matOf = new Map(), skinOf = new Map();
@@ -178,6 +260,51 @@ export function exportSubtree(ctx, rootGid, label, {
       if (type === "SkinnedMeshRenderer") {
         skinOf.set(gid, v);
         if (v.m_Mesh) meshOf.set(gid, v.m_Mesh);
+      }
+    }
+  }
+
+  // --- clips par GameObject ---
+  //
+  // Un objet porte souvent plusieurs clips alors qu'un seul demarre : on marque
+  // celui qui joue par defaut ; les autres sortent quand meme, mais prefixes,
+  // pour que le moteur ne les superpose pas sur les memes os.
+  const animOf = new Map();
+  for (const type of ["Animation", "Animator"]) {
+    for (const o of env.objects({ type, file: ctx.sceneFile })) {
+      const d = ctx.readEngine(o);
+      if (!d || !d.m_GameObject) continue;
+      const refs = [];
+      // composant Animation : m_Animation designe le clip par defaut ; a
+      // defaut, on retient le premier de m_Animations
+      const listed = (d.m_Animations || []).filter((v) => v && v.pathId);
+      let main = d.m_Animation && d.m_Animation.pathId ? d.m_Animation.pathId : 0;
+      if (!main && listed.length) main = listed[0].pathId;
+      for (const v of listed) {
+        refs.push({ ptr: v, from: o.file, isDefault: v.pathId === main });
+      }
+      if (main && !refs.some((r) => r.ptr.pathId === main)) {
+        refs.push({ ptr: d.m_Animation, from: o.file, isDefault: true });
+      }
+      // composant Animator : les clips sont listes par son controleur, dont
+      // l'etat par defaut designe celui qui demarre
+      if (d.m_Controller && d.m_Controller.pathId) {
+        const cobj = env.deref(d.m_Controller, o.file);
+        const ctrl = cobj && ctx.readEngine(cobj);
+        const clips = ((ctrl && ctrl.m_AnimationClips) || []).filter((v) => v && v.pathId);
+        const def = ctrl ? controllerDefaultClip(ctrl) : null;
+        clips.forEach((v, i) => refs.push({ ptr: v, from: cobj.file,
+                                            isDefault: def === null || i === def }));
+      }
+      // Un composant Animation reference son clip par defaut ET le liste dans
+      // m_Animations : sans ce dedoublonnage, le clip sort deux fois.
+      const gid = d.m_GameObject.pathId;
+      if (!animOf.has(gid)) animOf.set(gid, new Map());
+      const seen = animOf.get(gid);
+      for (const r of refs) {
+        const prev = seen.get(r.ptr.pathId);
+        if (prev) prev.isDefault = prev.isDefault || r.isDefault;
+        else seen.set(r.ptr.pathId, { ...r });
       }
     }
   }
@@ -343,6 +470,7 @@ export function exportSubtree(ctx, rootGid, label, {
   // --- noeuds ---
   const nodeIndex = new Map();
   const skinnedNodes = [];
+  const animatedRoots = [];   // [transform, GameObject] portant des clips
 
   const emitNode = (tid, depth = 0) => {
     const gid = gidOfTransform.get(tid);
@@ -363,6 +491,7 @@ export function exportSubtree(ctx, rootGid, label, {
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);
       }
     }
+    if (animOf.has(gid)) animatedRoots.push([tid, gid]);
     const kids = (childrenOf.get(tid) || [])
       .map((c) => emitNode(c, depth + 1)).filter((k) => k !== null);
     if (kids.length) node.children = kids;
@@ -415,6 +544,130 @@ export function exportSubtree(ctx, rootGid, label, {
     stats.skins++;
   }
 
+  // --- animations ---
+  //
+  // Une courbe legacy est reperee par un CHEMIN de hierarchie relatif a l'objet
+  // anime (« Bras/AvantBras/Main ») : il se resout en descendant par les noms,
+  // puis se traduit en index de noeud glTF.
+  const resolvePath = (rootTid, path) => {
+    let cur = rootTid;
+    for (const part of (path || "").split("/").filter(Boolean)) {
+      let next = null;
+      for (const c of childrenOf.get(cur) || []) {
+        if (ctx.name(gidOfTransform.get(c)) === part) { next = c; break; }
+      }
+      if (next === null) return null;
+      cur = next;
+    }
+    const idx = nodeIndex.get(cur);
+    return idx === undefined ? null : idx;
+  };
+
+  // Un clip Mecanim ne designe pas ses cibles par un chemin mais par le CRC32
+  // du nom de l'os : on indexe donc les noms du sous-arbre anime.
+  const nameCache = new Map();
+  const namesIn = (rootTid) => {
+    if (nameCache.has(rootTid)) return nameCache.get(rootTid);
+    const found = new Map();
+    const stack = [rootTid];
+    while (stack.length) {
+      const cur = stack.pop();
+      const idx = nodeIndex.get(cur);
+      const nm = ctx.name(gidOfTransform.get(cur));
+      if (idx !== undefined && nm !== null && !found.has(nm)) found.set(nm, idx);
+      stack.push(...(childrenOf.get(cur) || []));
+    }
+    nameCache.set(rootTid, found);
+    return found;
+  };
+
+  const addSampler = (samplers, channels, times, values, dim, cubic, node, path) => {
+    samplers.push({ input: g.addTimes(times), output: g.addValues(values, dim),
+                    interpolation: cubic ? "CUBICSPLINE" : "LINEAR" });
+    channels.push({ sampler: samplers.length - 1, target: { node, path } });
+    stats[cubic ? "cubic" : "linear"]++;
+  };
+
+  /** Canaux d'un clip Mecanim decode par unity/muscle.js. */
+  const mecanimChannels = (clip, rootTid, channels, samplers) => {
+    const bones = decodeClip(clip, avatarTOS(ctx), { tangents: true });
+    if (!bones.size) { stats.emptyMecanimClips++; return; }
+    stats.mecanimClips++;
+    const names = namesIn(rootTid);
+    for (const [bone, attrs] of bones) {
+      const node = names.get(bone);
+      if (node === undefined) { stats.unresolvedBones++; continue; }
+      for (const [path, attr] of Object.entries(attrs)) {
+        const rot = path === "rotation";
+        const conv = rot ? quat : (path === "scale" ? scale3 : vec3);
+        const dim = rot ? 4 : 3;
+        const cubic = !Array.isArray(attr);
+        const keys = cubic ? attr.keys : attr;
+        let values;
+        if (cubic) {
+          // glTF CUBICSPLINE : trois elements par cle, dans l'ordre tangente
+          // d'entree, valeur, tangente de sortie. Les tangentes d'Unity comme
+          // celles de glTF sont des derivees par unite de TEMPS : elles se
+          // transportent telles quelles, sans mise a l'echelle par le pas.
+          values = [];
+          keys.forEach(([, v], i) => {
+            values.push(conv(attr.in[i]), conv(v), conv(attr.out[i]));
+          });
+        } else {
+          values = keys.map(([, v]) => conv(v));
+        }
+        addSampler(samplers, channels, keys.map(([t]) => t), values, dim, cubic, node, path);
+      }
+    }
+  };
+
+  for (const [rootTid, gid] of animatedRoots) {
+    for (const ref of (animOf.get(gid) || new Map()).values()) {
+      const clipObj = env.deref(ref.ptr, ref.from);
+      const clip = clipObj && ctx.readEngine(clipObj);
+      if (!clip) continue;
+      if (clip.m_Compressed) { stats.compressedClips++; continue; }
+      const channels = [], samplers = [];
+      // Deux familles coexistent. m_AnimationType == 1 designe les clips
+      // « legacy », dont les courbes sont lisibles telles quelles.
+      // m_AnimationType == 2 designe Mecanim : ces trois listes sont vides et
+      // tout vit dans m_MuscleClip, que unity/muscle.js sait decoder.
+      const curveCount = CURVE_KINDS.reduce((s, [k]) => s + ((clip[k] || []).length), 0);
+      if (curveCount === 0) mecanimChannels(clip, rootTid, channels, samplers);
+
+      // la boucle suivante ne fait rien sur un clip Mecanim : ses trois listes
+      // de courbes sont vides
+      for (const [field, path, conv, dim] of CURVE_KINDS) {
+        for (const c of clip[field] || []) {
+          const node = resolvePath(rootTid, c.path);
+          if (node === null) { stats.unresolvedPaths++; continue; }
+          const keys = curveKeys(c);
+          if (keys.length < 2) continue;
+          // cubique si les deux tangentes sont la et finies, sinon lineaire :
+          // mieux vaut une interpolation assumee qu'une tangente inventee
+          const hasSlopes = keys.every((k) => k[2] !== undefined && k[2] !== null
+                                           && k[3] !== undefined && k[3] !== null);
+          const tang = hasSlopes ? keys.map((k) => [conv(k[2]), conv(k[3])]) : null;
+          const cubic = !!tang && tang.every(([a, b]) => [...a, ...b].every(Number.isFinite));
+          const values = cubic
+            ? keys.flatMap((k, i) => [tang[i][0], conv(k[1]), tang[i][1]])
+            : keys.map((k) => conv(k[1]));
+          addSampler(samplers, channels, keys.map((k) => k[0]), values, dim, cubic, node, path);
+        }
+      }
+
+      if (channels.length) {
+        // « Objet|Clip » pour le clip par defaut, prefixe « ~ » pour les autres :
+        // le moteur ne demarre que les premiers, sans quoi deux clips se
+        // disputeraient les memes os (voir web/src/geometry.js).
+        const nm = `${ctx.name(gid) || "node"}|${clip.m_Name || "clip"}`;
+        g.animations.push({ name: ref.isDefault ? nm : `~${nm}`, samplers, channels });
+        stats.animations++;
+        stats.channels += channels.length;
+      }
+    }
+  }
+
   const bin = g.buffer();
   const gltf = {
     asset: { version: "2.0", generator: `outerwildsjs (navigateur) — ${label}` },
@@ -429,6 +682,7 @@ export function exportSubtree(ctx, rootGid, label, {
   };
   if (g.materials.length) { gltf.materials = g.materials; gltf.textures = g.textures; gltf.images = g.images; }
   if (g.skins.length) gltf.skins = g.skins;
+  if (g.animations.length) gltf.animations = g.animations;
 
   return { gltf, bin, stats };
 }
