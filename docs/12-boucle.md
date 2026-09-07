@@ -57,18 +57,28 @@ Le rayon d'onde affiché (300 000 u) est un artefact de l'accélération extrêm
 à 3 000×, l'onde avance énormément entre deux images. À vitesse normale elle
 progresse continûment et atteint les planètes extérieures en 15 secondes.
 
+## Ce qui a été porté depuis
+
+Les cinq manques de cette page sont comblés — voir
+[`32-mort.md`](32-mort.md) :
+
+- **La mémoire entre boucles** (voir [`23-connaissance.md`](23-connaissance.md)) :
+  les connaissances, l'exploration et le compteur survivent à la supernova comme
+  au rechargement.
+- **La séquence de flashback** : les quatre constantes donnent 22 images et
+  8,21 s, et la boucle ne repart qu'au bout.
+- **Le spectacle de la supernova** : les quatre comportements nommés par le
+  build — progression de surface, contraction, explosion, onde — rendus d'une
+  seule courbe, avec couronne et coque d'onde de choc.
+- **Les autres causes de mort** : impact, dévoré, incinération s'ajoutent à
+  l'asphyxie et à la supernova, toutes derrière un seul `PlayerDeathHandler`.
+- **`GetPreventSupernova()`** : le compte à rebours continue, l'étoile
+  n'explose pas.
+
 ## Ce qui manque
 
-- **La mémoire entre boucles**, qui est tout l'intérêt du jeu. Seul le compteur
-  survit. La persistance des connaissances suppose le système de dialogue et
-  `PlayerData`, non portés.
-- **La séquence de flashback.** `Flashback` porte ses constantes (délai de 2 s,
-  durée d'image initiale 0,6 s décroissant par 0,9 jusqu'à 0,06 s, fondu au
-  blanc de 0,8 s) mais l'effet n'est pas implémenté.
-- **Le spectacle de la supernova.** L'étoile enfle et rougit, mais les
-  comportements dédiés (`SunExplosionBehavior`, `ShrinkSunBehavior`,
-  `SunSurfaceProgressionBehavior`, `SunCoronaProgressBehavior`) ne sont pas
-  portés, et la vérification n'a validé que la machine à états, pas le rendu.
-- **Les autres causes de mort.** Seules l'asphyxie et la supernova tuent.
-  `DeathType` en énumère davantage, et `PlayerDeathHandler` n'est pas porté.
-- **`GetPreventSupernova()`**, qui permet de suspendre la fin des temps.
+- **Les images du flashback**, absentes du build : ce portage en donne le
+  rythme, pas le contenu.
+- **Le son par cause de mort** et la caméra de la séquence.
+- **Le rendu de l'explosion** reste une couronne additive et une coque en fil de
+  fer : les shaders de la supernova ne sont pas portés.

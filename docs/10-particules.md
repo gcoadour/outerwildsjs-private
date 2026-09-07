@@ -90,14 +90,23 @@ cases de 28 pixels sur ses 81 images.
 
 ## Ce qui reste approximatif
 
-- **Les courbes de vitesse sont aplaties** à leur scalaire ; seules la couleur
-  et la taille sont transportées comme courbes.
+- ~~**Les courbes de vitesse sont aplaties**~~ — **portées comme bornes**. Une
+  `MinMaxCurve` se lit de la même façon dans ses quatre modes : le minimum est
+  le plus petit sommet de `minCurve`, le maximum le plus grand de `maxCurve`, et
+  `scalar` multiplie les deux. Durée de vie, vitesse initiale et taille initiale
+  sortent donc en enveloppe `[min, max]` quand elle n'est pas plate, et le
+  moteur tire entre les deux — une gerbe dont toutes les étincelles ont
+  exactement la même taille se voit tout de suite.
 - **Le nombre de passages d'une planche de sprites** (`cycles`) ne se traduit
   qu'approximativement : Babylon exprime une cadence, Unity un nombre de
   passages sur la durée de vie. Le cas `cycles = 1` est exact.
 - **Les six modules jamais utilisés** ne sont pas portés, délibérément.
-- **`gravityModifier` n'est pas appliqué.** Il faudrait le brancher sur le champ
-  dominant, comme pour le joueur.
+- ~~**`gravityModifier` n'est pas appliqué.**~~ — **branché sur le champ
+  dominant**. Unity le multiplie par `Physics.gravity`, un vecteur global
+  constant ; ce jeu n'en a pas, puisque la verticale change d'un corps à
+  l'autre. C'est donc le champ dominant qui joue ce rôle, ce qui est la
+  traduction exacte du modèle : une étincelle retombe vers la planète sous
+  laquelle elle est née, pas vers un bas absolu.
 - **L'équilibrage visuel n'est pas vérifié.** Les tailles vont jusqu'à 140
   unités ; savoir si le rendu est fidèle demande un œil humain, au même titre
   que l'équilibrage des volumes audio.

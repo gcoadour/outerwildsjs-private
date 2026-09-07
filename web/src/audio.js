@@ -311,13 +311,30 @@ export class AudioField {
     return true;
   }
 
-  /** Indices des sources dont le nom correspond, pour relier un emetteur. */
+  /**
+   * Indices des sources d'un emetteur.
+   *
+   * L'extracteur pose `transmitter` sur la source quand elle partage son
+   * GameObject avec un AudioTransmitter : c'est ce lien-la qui fait foi, le nom
+   * ne servant qu'a designer lequel.
+   */
   indicesNamed(name) {
     const out = [];
     for (let i = 0; i < this.sources.length; i++) {
-      if (this.sources[i].name === name) out.push(i);
+      const s = this.sources[i];
+      if (s.name === name && (s.transmitter || s.track === "Signal")) out.push(i);
     }
     return out;
+  }
+
+  /**
+   * Applique la coupure correspondant a une force de signal, en prenant le
+   * `_lowPassCutoff` de l'emetteur lui-meme quand l'extracteur l'a releve.
+   */
+  lowPassFor(i, strength) {
+    const s = this.sources[i];
+    const muffled = (s && s.transmitter && s.transmitter.lowpass) || TRANSMITTER_LOWPASS;
+    return this.setLowPass(i, transmitterCutoff(strength, muffled));
   }
 
   _despawn(i) {

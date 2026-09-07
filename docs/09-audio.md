@@ -105,9 +105,26 @@ de 0,75 à 0 en deux secondes pendant que la piste des signaux reste à 1.
 
 ## Ce qui reste
 
-- **La coupure passe-bas** des émetteurs (`_lowPassCutoff = 1 000 Hz`) n'est pas
-  appliquée : le graphe WebAudio de Babylon n'est pas exposé assez proprement
-  pour y insérer un filtre biquad sans dépendre de sa version.
+- ~~**La coupure passe-bas** des émetteurs~~ — **portée**. Babylon ne publie pas
+  de filtre, mais son graphe est fait de vrais nœuds WebAudio : le dernier de la
+  chaîne d'une source est un `GainNode` relié au bus de sortie, et on s'intercale
+  entre les deux. La manœuvre est défensive de bout en bout — le filtre n'est
+  branché sur la destination qu'**avant** de couper l'arête existante, et le
+  moindre accroc annule tout. Une version de Babylon qui changerait sa structure
+  interne ferait perdre le filtre, jamais le son.
+
+  Ce qui vient du build : le filtre et sa valeur de 1 000 Hz. Ce qui n'en vient
+  pas : la façon dont il s'ouvre. Le rapprochement avec `panLevel`, qui suit
+  `1 − force`, dit que le signal se dégage à mesure qu'on le cadre ; la
+  progression retenue est **géométrique**, parce qu'une octave se parcourt en
+  multipliant — 1 000 Hz sans viser, 4 472 Hz à mi-course, la bande entière une
+  fois le signal centré.
+
+  Vérifié dans un vrai navigateur, sur un WAV fabriqué : le nœud inséré est bien
+  un `lowpass`, il passe de 1 000 à 20 000 Hz selon la force du signal, et il est
+  détaché avec la source. Le `_lowPassCutoff` de chaque émetteur est lu depuis la
+  source elle-même — l'extracteur le pose déjà sur elle — et non pris comme une
+  constante.
 - **15 Mo de WAV non compressés** : voir `docs/27-poids.md`.
 - **L'équilibrage des volumes** demande une écoute humaine.
 

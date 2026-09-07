@@ -30,8 +30,7 @@ import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
 import { Ship, shipSpawn } from "./ship.js";
-import { loadAudioMap, AudioField, AudioMixer, signalStrength,
-         transmitterCutoff } from "./audio.js";
+import { loadAudioMap, AudioField, AudioMixer, signalStrength } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
 import { TimeLoop } from "./timeloop.js";
@@ -738,7 +737,10 @@ async function boot() {
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
 
-    const input = {
+    // Un mort ne pilote plus : PlayerDeathHandler coupe les commandes le temps
+    // de la sequence. Sans cela on continuait a marcher pendant son propre
+    // flashback.
+    const input = death.dead ? { forward: 0, right: 0, up: false, boost: false } : {
       forward: (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0),
       right: (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0),
       up: keys.Space,
@@ -1156,10 +1158,7 @@ async function boot() {
         // 1 000 Hz, et se degage a mesure qu'on le vise. C'est le dernier
         // morceau des emetteurs qui manquait — la boucle tourne meme lunette
         // baissee, sans quoi le filtre ne serait jamais pose.
-        if (t.sources && t.sources.length) {
-          const hz = transmitterCutoff(s);
-          for (const i of t.sources) audio.setLowPass(i, hz);
-        }
+        for (const i of t.sources || []) audio.lowPassFor(i, s);
       }
     }
 

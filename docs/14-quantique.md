@@ -43,15 +43,33 @@ auteurs, pas un effet de bord.
 Après le saut, la distance à l'observateur passe de 800 à 17 601 unités — la
 mesure la plus parlante du fait que la lune a bien changé de système.
 
+## L'occlusion, et l'inclinaison
+
+Deux manques de cette page sont comblés.
+
+**Le test de visibilité tient compte des occlusions.** Il ne suffit plus de
+garder la lune dans son champ de vision : si un corps se trouve entre l'œil et
+elle, elle n'est pas observée, et rien n'empêche le saut. Le test est
+analytique — distance du centre du corps au segment œil-lune — plutôt qu'un
+lancer de rayon dans la scène : il coûte trois produits scalaires, et il ne
+dépend pas de la géométrie chargée, si bien qu'une planète pas encore
+téléchargée masque quand même.
+
+La garde des 150 unités tient malgré tout : collé contre la lune, mur ou pas,
+on la verrouille.
+
+**Les orbites sont inclinées.** `orbitTilt` cherche d'abord une valeur dans les
+champs du composant — un angle, un axe. Les quatre `QuantumOrbit` de l'alpha
+n'en portent aucun : c'est pourquoi la première version tournait à plat. À
+défaut, l'inclinaison est tirée du **nom de l'hôte**, donc stable d'une partie à
+l'autre, et bornée à 25 degrés. C'est un choix de ce portage, pas une mesure —
+mais quatre orbites dans le même plan, cela se voit.
+
 ## Ce qui manque
 
-- **Pas de brouillard quantique.** `QuantumFogBoundary` (rayons 100 et 110,
-  zone de fondu 30) n'est pas porté : on voit la lune de loin sans le voile qui
-  la masque dans le jeu.
-- **Le test de visibilité est angulaire**, fondé sur le champ de vision. Le jeu
-  utilise un test de sphère avec profondeur (`_checkDepth = 100`), qui tient
-  compte des occlusions : une lune cachée derrière une planète compte comme non
-  observée. Ici elle compterait comme vue.
-- **L'orbite est plane.** La lune tourne dans le plan horizontal de son hôte,
-  sans inclinaison.
+- **Le brouillard quantique est porté depuis** (voir
+  [`29-brouillards.md`](29-brouillards.md)) : coque opaque de 100 à 110 unités,
+  fondue sur 30, dont la sortie force l'effondrement.
+- **`_checkDepth = 100` n'est pas utilisé comme tel** : le test d'occlusion est
+  binaire, là où le jeu lance une sphère de 150 sur une profondeur de 100.
 - `AlignQuantumMoon`, qui oriente la lune vers le joueur, n'est pas porté.

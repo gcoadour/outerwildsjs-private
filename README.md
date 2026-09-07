@@ -99,11 +99,13 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | Maillages décodés | 1 569, 929 529 sommets, concordants avec UnityPy |
 | Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
+| Logique de jeu, sans le build | 107 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules |
 
 Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips
-d'animation s'éprouve sur un flux fabriqué, et l'export glTF sur un monde de
-trois objets. Le reste s'annonce ignoré plutôt que d'échouer — rien n'oblige
-jamais l'intégration continue à héberger le jeu.
+d'animation s'éprouve sur un flux fabriqué, l'export glTF sur un monde de
+trois objets, et toute la logique de jeu — mourir, exploser, s'abîmer, alléger
+la scène — sur des états construits à la main. Le reste s'annonce ignoré plutôt
+que d'échouer : rien n'oblige jamais l'intégration continue à héberger le jeu.
 
 ## Le pipeline Python
 

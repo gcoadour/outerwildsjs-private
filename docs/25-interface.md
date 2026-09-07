@@ -59,8 +59,12 @@ est exact.
 ## Ce qui manque
 
 - **Pas de `_probePrefab`** : la sonde est une sphère, pas le modèle du jeu.
-- **Pas de retour de la sonde** ni de caméra embarquée, qui sont l'intérêt de
-  l'outil dans le jeu final.
+- ~~**Pas de caméra embarquée**~~ — **portée**. La sonde est un appareil photo
+  qu'on jette : sa caméra occupe un coin de l'écran tant qu'elle vole, cadrée
+  par un encadré HTML calé sur les mêmes fractions que le viewport de Babylon.
+  Sa bille est posée sur un calque que cette caméra ne regarde pas — elle est à
+  30 centimètres de l'objectif et remplirait l'image.
+- **Pas de retour de la sonde** : elle part et ne revient pas.
 - **Le curseur n'est pas pilotable à la manette**, la sensibilité de 0,5 du
   build s'appliquant à un axe analogique.
 - **Les panneaux de musée** utilisent la mise en forme élargie, mais rien ne
