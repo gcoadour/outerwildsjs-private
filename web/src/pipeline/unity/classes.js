@@ -84,10 +84,43 @@ export function readComponentHeader(r, file) {
   return { m_GameObject: readPPtr(r, file) };
 }
 
+/**
+ * AudioClip Unity 4. Sa forme ne tient pas dans un type tree : les octets du son
+ * sont tantot dans l'objet, tantot dans le fichier .resS voisin, ou m_AudioData
+ * ne porte alors que la taille suivie du decalage.
+ *
+ * m_Stream ne permet pas de trancher — les 142 clips du build l'ont non nul,
+ * alors que 132 portent leurs octets en ligne. On tranche donc sur ce qui reste
+ * a lire : si la taille annoncee depasse l'objet, les octets sont dehors. Les
+ * clips se suivent dans le .resS, le decalage de l'un valant la fin du precedent.
+ */
+export function readAudioClip(r, file) {
+  const name = r.string();
+  const format = r.i32();
+  const type = r.i32();
+  const is3D = r.bool();
+  const useHardware = r.bool();
+  r.align(4);
+  const stream = r.i32();
+  const size = r.i32();
+  let offset = 0;
+  let inline = null;
+  if (size <= r.remaining) {
+    inline = r.bytes(size);
+    r.align(4);
+  } else {
+    offset = r.remaining >= 4 ? r.i32() : 0;
+  }
+  return { m_Name: name, m_Format: format, m_Type: type, m_3D: is3D,
+           m_UseHardware: useHardware, m_Stream: stream,
+           size, offset, data: inline };
+}
+
 export const READERS = {
   GameObject: readGameObject,
   Transform: readTransform,
   MonoScript: readMonoScript,
   TextAsset: readTextAsset,
   MonoBehaviour: readMonoBehaviourHeader,
+  AudioClip: readAudioClip,
 };

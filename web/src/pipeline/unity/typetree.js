@@ -8,7 +8,10 @@ const ALIGN = 0x4000;
 
 const PRIM = {
   bool: (r) => r.bool(),
-  char: (r) => r.u16(),
+  // `char` d'un type tree Unity fait UN octet : c'est le type des donnees de
+  // chaine et du m_FontData d'une Font. Le lire sur 16 bits fait deborder la
+  // lecture des 7 polices du build.
+  char: (r) => r.u8v(),
   SInt8: (r) => r.i8(),
   UInt8: (r) => r.u8v(),
   SInt16: (r) => r.i16(),
@@ -53,6 +56,15 @@ function readNode(r, node, file) {
     const fileId = r.i32();
     const pathId = file && file.version >= 14 ? r.i64() : r.i32();
     value = pathId === 0 ? null : { fileId, pathId };
+  } else if (type === "TypelessData") {
+    // Donnees opaques (image d'une Texture2D, tampons d'un Mesh) : une taille
+    // puis les octets bruts, sans noeud Array intermediaire. Sans ce cas, le
+    // noeud est lu comme une structure et la lecture s'arrete au premier octet.
+    const n = r.i32();
+    if (n < 0 || r.pos + n > r.length) {
+      throw new RangeError(`TypelessData de ${n} octets a ${r.pos}/${r.length}`);
+    }
+    value = r.bytes(n);          // vue, sans copie : ces blocs pesent lourd
   } else if (node.children.length && node.children[0].m_Type === "Array") {
     value = readArray(r, node.children[0], file);
   } else if (type === "Array") {
@@ -73,7 +85,7 @@ function readArray(r, arrayNode, file) {
   if (n < 0 || n > 50_000_000) throw new RangeError(`taille de tableau invalide: ${n}`);
   // Un tableau d'octets se lit d'un bloc : c'est le cas courant et le plus lourd.
   let out;
-  if (dataNode && (dataNode.m_Type === "UInt8" || dataNode.m_Type === "SInt8")
+  if (dataNode && ["UInt8", "SInt8", "char"].includes(dataNode.m_Type)
       && !dataNode.children.length) {
     out = r.bytes(n).slice();
   } else {
