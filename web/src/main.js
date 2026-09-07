@@ -460,12 +460,14 @@ async function boot() {
       m.specularColor = new BABYLON.Color3(0, 0, 0);
       debrisBase.material = m;
       debrisBase.isPickable = false;
-      debrisBase.setEnabled(false);
       MeshLOD.pin(debrisBase);
     }
     for (const item of fresh) {
-      // une instance par morceau : 122 au plus, et un seul appel de rendu
-      const inst = debrisBase.createInstance(`debris_${item.seed}`);
+      // Le maillage de base EST le premier morceau, les suivants en sont des
+      // instances : un seul appel de rendu pour les 122, et pas de maillage
+      // source eteint dont les instances dependraient.
+      const inst = debrisMeshes.length
+        ? debrisBase.createInstance(`debris_${item.seed}`) : debrisBase;
       inst.isPickable = false;
       debrisMeshes.push({ inst, item });
     }
