@@ -17,6 +17,10 @@ export class TimeLoop {
     this.duration = minutes * 60;
     this.timeScale = 1;          // accelere la boucle pour les verifications
     this.loopCount = 0;
+    // TimeLoop.GetPreventSupernova : le jeu sait suspendre la fin des temps.
+    // Le compte a rebours continue, mais l'etoile n'explose pas — c'est ce qui
+    // permet une scene qui doit se jouer jusqu'au bout.
+    this.preventSupernova = false;
     this.reset();
   }
 
@@ -51,7 +55,7 @@ export class TimeLoop {
     if (this.dead) return null;
     this.elapsed += dt * this.timeScale;
 
-    if (!this.supernova && this.elapsed >= this.duration) {
+    if (!this.supernova && this.elapsed >= this.duration && !this.preventSupernova) {
       this.supernovaAt = this.elapsed;
     }
     if (this.supernova && sunDistance != null &&

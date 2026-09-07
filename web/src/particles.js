@@ -53,7 +53,13 @@ export class ParticleField {
     return this.textures.get(file);
   }
 
-  update(listener, toFrame) {
+  /**
+   * @param field champ de gravite dominant a la position de l'auditeur, ou
+   *              null. Les systemes a portee sont sur le meme corps que le
+   *              joueur : son champ est le leur, a la precision qui compte pour
+   *              une etincelle qui vit une seconde.
+   */
+  update(listener, toFrame, field = null) {
     // classe par distance : on garde les plus proches dans le budget
     const cand = [];
     for (let i = 0; i < this.systems.length; i++) {
@@ -74,7 +80,24 @@ export class ParticleField {
       } else {
         this.spawn(c.i, c.s, c.p);
       }
+      this.applyGravity(c.i, c.s, field);
     }
+  }
+
+  /**
+   * `gravityModifier` d'InitialModule : la part de la gravite ambiante que
+   * subissent les particules. Unity la multiplie par `Physics.gravity`, un
+   * vecteur global constant ; ce jeu n'en a pas — la verticale change d'un
+   * corps a l'autre. C'est donc le CHAMP DOMINANT qui joue ce role, ce qui est
+   * la traduction exacte du modele : une etincelle retombe vers la planete
+   * sous laquelle elle est nee, pas vers un bas absolu.
+   */
+  applyGravity(i, s, field) {
+    const ps = this.live.get(i);
+    if (!ps || !s.gravityModifier) return;
+    if (!field) { ps.gravity = this.B.Vector3.Zero(); return; }
+    const g = field.magnitude * s.gravityModifier;
+    ps.gravity = new this.B.Vector3(field.dir.x * g, field.dir.y * g, field.dir.z * g);
   }
 
   spawn(i, s, p) {
@@ -109,7 +132,16 @@ export class ParticleField {
           ? B.ParticleSystem.BLENDMODE_MULTIPLY
           : B.ParticleSystem.BLENDMODE_ADD;
 
-      ps.minSize = ps.maxSize = Math.max(0.01, s.size || 1);
+      // Bornes plutot que valeur unique quand la courbe en donne deux : une
+      // gerbe dont toutes les etincelles ont exactement la meme taille et la
+      // meme duree de vie se voit tout de suite.
+      const range = (r, fallback, floor) => {
+        const lo = r ? Math.max(floor, r[0]) : Math.max(floor, fallback);
+        const hi = r ? Math.max(lo, r[1]) : lo;
+        return [lo, hi];
+      };
+      const [smin, smax] = range(s.sizeRange, s.size || 1, 0.01);
+      ps.minSize = smin; ps.maxSize = smax;
       // SizeModule : la taille au fil de la vie, presente sur 80 systemes.
       // Les valeurs sont des FACTEURS de la taille initiale, d'ou le gradient
       // de facteur plutot qu'une taille absolue.
@@ -140,9 +172,11 @@ export class ParticleField {
         ps.spriteCellChangeSpeed = (cycles || 1) <= 1 ? 0 : cycles;
         ps.spriteCellLoop = true;
       }
-      ps.minLifeTime = ps.maxLifeTime = Math.max(0.05, s.lifetime || 1);
+      const [lmin, lmax] = range(s.lifetimeRange, s.lifetime || 1, 0.05);
+      ps.minLifeTime = lmin; ps.maxLifeTime = lmax;
       ps.emitRate = Math.max(0.1, s.rate || 10);
-      ps.minEmitPower = ps.maxEmitPower = s.startSpeed || 0;
+      const [vmin, vmax] = range(s.speedRange, s.startSpeed || 0, 0);
+      ps.minEmitPower = vmin; ps.maxEmitPower = vmax;
       ps.updateSpeed = 0.016 * (s.speedScale || 1);
 
       const sh = s.shape || { type: "sphere", radius: 1 };

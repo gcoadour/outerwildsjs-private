@@ -24,6 +24,11 @@ export const FISH = {
   escapeDistance: 300,
   habitatRadius: 1200,
   noiseRadius: 200,
+  // Distance a laquelle le predateur attrape. Le build ne la donne PAS : il
+  // decrit la detection et la poursuite, pas la prise, qui passe par un volume
+  // de collision sur la bouche. 25 unites est l'ordre de grandeur du maillage
+  // d'AnglerFish ; c'est un choix de ce portage, comme le dit docs/16-bramble.md.
+  catchRadius: 25,
 };
 
 const dist = (a, b) => Math.hypot(a[0] - b.x, a[1] - b.y, a[2] - b.z);
@@ -35,6 +40,7 @@ export class Anglerfish {
     this.position = home.slice();
     this.state = "repos";     // repos | inspecte | poursuit
     this.speed = 0;
+    this.caught = false;      // le joueur est dans la bouche
   }
 
   /**
@@ -74,6 +80,11 @@ export class Anglerfish {
         this.position[i] += (v[i] / L) * this.speed * dt;
       }
     }
+    // La prise : un predateur qui atteint sa proie la mange. C'est la seule
+    // consequence qui manquait — jusqu'ici on pouvait se faire poursuivre sans
+    // rien risquer.
+    this.caught = this.state !== "repos" &&
+                  dist(this.position, player) < this.cfg.catchRadius;
     return this.state;
   }
 }
