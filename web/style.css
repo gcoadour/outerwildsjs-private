@@ -12,6 +12,9 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; background: #05060a; overflow: hidden; }
 #view { width: 100vw; height: 100vh; display: block; outline: none; }
+/* 100vh compte la barre d'adresse des navigateurs mobiles, 100dvh non : sans
+   cette seconde regle, le bas de l'image passe sous la barre. */
+@supports (height: 100dvh) { #view { height: 100dvh; } }
 #hud {
   position: fixed; left: 0; right: 0; bottom: 0;
   padding: 12px 16px;
@@ -25,7 +28,11 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 #map {
   position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 5;
   display: block; cursor: crosshair;
+  /* la carte prend elle-meme glisser et pincer : le navigateur ne doit pas
+     les detourner en defilement ou en zoom de page */
+  touch-action: none;
 }
+@supports (height: 100dvh) { #map { height: 100dvh; } }
 /* Proportions reprises de DialogueGUI (voir web/src/dialogueui.js) */
 #dialogue {
   position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
@@ -47,11 +54,20 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 }
 .dlg-text { white-space: pre-wrap; line-height: 1.55; }
 .dlg-options { display: flex; flex-direction: column; gap: 2px; }
-.dlg-option { color: #9fb3cc; padding: 2px 6px; }
+.dlg-option {
+  color: #9fb3cc; padding: 2px 6px;
+  /* #dialogue laisse passer les clics ; les options, elles, les prennent */
+  pointer-events: auto; cursor: pointer;
+}
 .dlg-sel { color: #fff; background: rgba(255, 217, 160, .16); }
-.dlg-next { align-self: flex-end; color: #7f8a9e; }
+.dlg-next {
+  align-self: flex-end; color: #7f8a9e;
+  pointer-events: auto; cursor: pointer;
+}
 #help { margin-top: 4px; color: #7f8a9e; }
 #help b { color: #aab6cc; font-weight: 600; }
+#help-touch { display: none; margin-top: 4px; color: #7f8a9e; }
+#help-touch b { color: #aab6cc; font-weight: 600; }
 
 /* --- Interface de jeu (voir web/src/hud.js et tools/14_interface.py) --------
    Le panneau de ressources reprend la geometrie relative du casque : les trois
@@ -149,6 +165,7 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 .ow-setting {
   position: absolute; left: 0; transform: translate(-50%, -50%);
   white-space: nowrap; line-height: 1.2;
+  pointer-events: auto; cursor: pointer;
 }
 .ow-settings-title { font-size: 42px; }
 
@@ -270,3 +287,203 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 /* Le HUD du moteur reste cache tant que l'ecran d'accueil est la. */
 body:not(.playing) #hud,
 body:not(.playing) #ui { display: none; }
+
+/* --- Commandes tactiles et jeu en paysage (voir web/src/touch.js) -----------
+   Rien ici ne vient du build : le jeu de 2013 ne connait ni ecran tactile ni
+   telephone. Cette partie est un choix de portage, et elle est ecrite pour ne
+   rien changer a l'affichage clavier-souris — tout est conditionne soit par
+   `body.touch`, que web/src/touch.js pose quand les commandes s'installent,
+   soit par une requete de media que seul un ecran tactile satisfait.
+
+   Trois plans se superposent, et l'ordre compte :
+
+     #touch    z-index 4, SOUS la carte (5), les dialogues (6) et l'interface
+               (7) : ses zones de pilotage ne volent donc jamais un appui
+               destine a une option de dialogue ou a une ligne de reglages.
+     #touchui  z-index 8, AU-DESSUS de tout : les boutons restent atteignables
+               quand la carte plein ecran est ouverte. Le conteneur laisse
+               passer les appuis, seuls les boutons les prennent.
+     #rotate   z-index 200, quand l'appareil est tenu en portrait. */
+
+#touch, #touchui {
+  position: fixed; inset: 0;
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
+#touch { z-index: 4; }
+#touchui { z-index: 8; pointer-events: none; }
+#touch[hidden], #touchui[hidden] { display: none; }
+
+/* Zones de pilotage : la gauche pour le manche, la droite pour le regard.
+   Elles sont invisibles — un pouce se pose ou il veut. */
+.tc-zone { position: absolute; top: 0; bottom: 0; }
+.tc-zone-move { left: 0; width: 45%; }
+.tc-zone-look { right: 0; width: 55%; }
+/* menu ou carte ouverte : le pilotage se suspend, sinon le pouce qui vise une
+   option ferait aussi tourner la tete du joueur derriere */
+#touch.tc-idle .tc-zone { pointer-events: none; }
+
+/* Manche flottant : il apparait la ou le pouce se pose. */
+.tc-stick {
+  position: absolute; width: 108px; height: 108px; margin: -54px 0 0 -54px;
+  border: 1px solid rgba(207, 224, 244, .25);
+  background: rgba(10, 16, 26, .28);
+  border-radius: 50%; pointer-events: none;
+}
+.tc-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 46px; height: 46px; margin: 0; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(207, 224, 244, .3);
+  border: 1px solid rgba(207, 224, 244, .5);
+}
+
+/* Boutons. Les couleurs sont celles du HUD : ambre pour l'action, ardoise
+   pour le reste. La cible fait au moins 44 px, ce qu'un doigt demande. */
+.tc-group { position: absolute; display: flex; gap: 8px; }
+.tc-group[hidden] { display: none; }
+.tc-btn {
+  pointer-events: auto;
+  display: grid; place-items: center;
+  min-width: 46px; height: 46px; padding: 0 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(207, 224, 244, .28);
+  background: rgba(8, 12, 20, .5);
+  color: #cfd6e4;
+  font: 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+.tc-btn.tc-on {
+  background: rgba(255, 217, 160, .28);
+  border-color: rgba(255, 217, 160, .7);
+  color: #fff;
+}
+/* Cluster d'action, en bas a droite : le pouce droit y tombe naturellement. */
+.tc-actions {
+  right: calc(12px + env(safe-area-inset-right));
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  /* l'ordre du DOM est monter, accelerer, action : « E » se retrouve donc au
+     coin, la ou le pouce droit tombe sans effort */
+  align-items: center;
+}
+.tc-act {
+  min-width: 66px; height: 66px;
+  font-size: 22px; color: #ffd9a0;
+  border-color: rgba(255, 217, 160, .5);
+  background: rgba(30, 22, 10, .5);
+}
+.tc-up, .tc-boost { min-width: 52px; height: 52px; font-size: 18px; }
+/* Bascules, en haut au centre : elles ne servent qu'entre deux manoeuvres. */
+.tc-toggles {
+  left: 50%; transform: translateX(-50%);
+  top: calc(6px + env(safe-area-inset-top));
+  gap: 6px;
+}
+.tc-tog {
+  min-width: 44px; height: 34px; border-radius: 17px;
+  font-size: 10px; letter-spacing: .02em;
+}
+/* Croix de menu et touches de carte : une rangee, en bas au centre. */
+.tc-menu, .tc-mapkeys {
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(12px + env(safe-area-inset-bottom));
+}
+.tc-key { min-width: 48px; height: 44px; font-size: 16px; }
+.tc-mapkeys .tc-key { min-width: 64px; font-size: 11px; }
+.tc-m-ok { color: #9fe8c8; border-color: rgba(120, 230, 190, .45); }
+.tc-m-back { color: #f0c6c6; border-color: rgba(200, 120, 120, .45); }
+
+/* --- L'interface du jeu, adaptee au paysage d'un telephone -----------------
+   Un telephone tenu en paysage donne environ 800 x 370 pixels CSS : trois fois
+   moins de hauteur que l'ecran de reference du HUD. Les elements gardent leurs
+   proportions internes — la geometrie du casque ne change pas — mais leur
+   taille et leur coin changent, et ils se rangent pour laisser les pouces
+   libres : jauges en haut a gauche, minicarte en haut a droite, bascules en
+   haut au centre, action en bas a droite, manche en bas a gauche. */
+body.touch { overscroll-behavior: none; }
+body.touch #help { display: none; }
+body.touch #help-touch { display: block; }
+
+body.touch #hud {
+  padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
+  padding-left: calc(8px + env(safe-area-inset-left));
+  font-size: 10px; line-height: 1.35;
+  /* le bandeau s'arrete avant le cluster d'action */
+  right: 40%;
+}
+body.touch #status, body.touch #hud2, body.touch #help-touch {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+body.touch #ui { font-size: 16px; }
+body.touch .ow-res {
+  right: auto; bottom: auto;
+  left: calc(8px + env(safe-area-inset-left)); top: 8px;
+  width: 148px; height: 84px;
+}
+body.touch #minimap {
+  right: calc(8px + env(safe-area-inset-right)); top: 46px;
+  width: 92px; height: 92px;
+}
+body.touch .ow-warn { font-size: 13px; line-height: 16px; margin-left: 24px; }
+body.touch .ow-autopilot { top: 30%; font-size: 15px; }
+body.touch .ow-prompts-center { margin-top: 26px; }
+body.touch .ow-prompts-bottom { bottom: 74px; }
+body.touch .ow-prompts-left {
+  left: calc(10px + env(safe-area-inset-left)); bottom: 40px;
+}
+body.touch #dialogue { bottom: 66px; }
+body.touch #computer {
+  top: 12%; width: min(560px, 68vw); padding: 12px 16px;
+}
+body.touch .ow-computer-name { font-size: 18px; padding-bottom: 6px; margin-bottom: 8px; }
+body.touch .ow-computer-desc { font-size: 13px; line-height: 1.45; }
+
+/* Menu ou carte ouverte : les boutons de pilotage se rangent, et les lignes
+   d'etat laissent la place a la croix. Le dialogue, lui, vit dans le meme
+   bandeau et doit rester visible : on ne cache que les lignes de texte. */
+#touchui.tc-modal .tc-actions, #touchui.tc-modal .tc-toggles { display: none; }
+body.tc-modal #status, body.tc-modal #hud2, body.tc-modal #help-touch { display: none; }
+
+/* Mode « masque » de GUIMode : il rend l'ecran entier au jeu, bandeau d'etat
+   compris. Le reste de l'interface est deja cache par le moteur. */
+body.gui-hidden #status, body.gui-hidden #hud2,
+body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
+
+/* --- Portrait : la page le dit et attend -----------------------------------
+   Le HUD du jeu suppose un ecran plus large que haut ; en portrait, les trois
+   quarts s'y chevauchent. Plutot que de dessiner une seconde interface, on
+   demande de tourner l'appareil. Le moteur, lui, continue de tourner. */
+#rotate { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  body.playing #rotate {
+    position: fixed; inset: 0; z-index: 200;
+    display: grid; place-items: center;
+    padding: 32px; text-align: center;
+    background: rgba(5, 6, 10, .96); color: #d8e0ea;
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  #rotate span {
+    display: block; margin-top: 8px; color: #8b9cb0; font-size: 14px;
+  }
+}
+
+/* --- Ecran d'accueil sur petit ecran --------------------------------------- */
+.touch-only { display: none; }
+@media (pointer: coarse) {
+  .touch-only { display: block; }
+  .mobile-note {
+    margin: 18px 0 0; padding: 12px 14px;
+    border-left: 2px solid #6f5a35; color: #c2b391; font-size: 13px;
+  }
+}
+@media (max-width: 560px), (max-height: 480px) {
+  #gate { padding: 12px; }
+  .gate-card { padding: 18px 16px 16px; border-radius: 10px; }
+  .gate-card h1 { font-size: 20px; }
+  .gate-card .lede { margin-bottom: 16px; font-size: 14px; }
+  #gate-drop { padding: 22px 14px; }
+  .gate-card button { width: 100%; margin: 0 0 8px; padding: 12px 16px; }
+}

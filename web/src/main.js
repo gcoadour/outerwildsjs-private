@@ -47,6 +47,7 @@ import { Telescope, ProbeLauncher } from "./tools.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
+import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -296,7 +297,9 @@ async function boot() {
   // Reglages : leur sauvegarde est distincte de celle de la partie, comme
   // SettingsSave l'est de PlayerData dans le jeu.
   const settings = new Settings(iface || {});
-  const settingsUI = uiRoot ? new SettingsUI(uiRoot, settings) : null;
+  const settingsUI = uiRoot
+    ? new SettingsUI(uiRoot, settings, "data/interface/",
+                     { onPick: () => applySettings() }) : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   const flashlight = new Flashlight(BABYLON, scene);
@@ -468,7 +471,12 @@ async function boot() {
   const telescope = new Telescope();
   const probes = new ProbeLauncher();
   window.__tools = { telescope, probes };
-  const dlgUI = new DialogueUI(document.getElementById("dialogue"));
+  // Les options de dialogue sont touchables : au clavier on les choisit au
+  // chiffre ou au curseur, au doigt on les vise directement.
+  const dlgUI = new DialogueUI(document.getElementById("dialogue"), {
+    onChoose: (i) => { optionPressed = i + 1; },
+    onNext: () => { interactPressed = true; },
+  });
 
   // Rendu des sondes : une petite sphere emissive par sonde en vol, reutilisee
   // d'une sonde a l'autre plutot que recreee.
@@ -516,87 +524,104 @@ async function boot() {
   addEventListener("keydown", (e) => { keys[e.code] = true; });
   addEventListener("keyup", (e) => { keys[e.code] = false; });
   let interactPressed = false, optionPressed = 0, probeFired = false;
-  addEventListener("keydown", (e) => {
-    if (e.code === "KeyE") interactPressed = true;
-    const m = /^Digit([1-9])$/.exec(e.code);
+
+  /**
+   * Une commande, designee par son code clavier.
+   *
+   * Les boutons tactiles passent par ici avec le meme code que la touche
+   * correspondante : il n'y a donc qu'un seul jeu de commandes, et rien en
+   * aval ne sait d'ou vient l'ordre.
+   */
+  function command(code) {
+    if (code === "KeyE") interactPressed = true;
+    const m = /^Digit([1-9])$/.exec(code);
     if (m) optionPressed = parseInt(m[1], 10);
-    if (e.code === "KeyM") solarMap.toggle();
-    if (e.code === "KeyC" && solarMap.open) solarMap.recenter();
+    if (code === "KeyM") solarMap.toggle();
+    if (code === "KeyC" && solarMap.open) solarMap.recenter();
     // La lampe : le jeu la met sur la croix directionnelle, ici sur L.
-    if (e.code === "KeyL") flashlight.toggle();
+    if (code === "KeyL") flashlight.toggle();
     // L'ordinateur de bord ne se consulte qu'a l'interieur du vaisseau ; ce
     // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
-    if (e.code === "KeyN" && ship && ship.boarded) {
+    if (code === "KeyN" && ship && ship.boarded) {
       computer.open = !computer.open;
     }
     if (computer.open) {
-      if (e.code === "ArrowLeft") computer.move(-1);
-      if (e.code === "ArrowRight") computer.move(1);
-      if (e.code === "Enter" || e.code === "Space") computer.select();
-      if (e.code === "Backspace" || e.code === "Escape") computer.cancel();
+      if (code === "ArrowLeft") computer.move(-1);
+      if (code === "ArrowRight") computer.move(1);
+      if (code === "Enter" || code === "Space") computer.select();
+      if (code === "Backspace" || code === "Escape") computer.cancel();
     }
-    if (e.code === "KeyT") telescope.toggle();
-    if (e.code === "KeyF") probeFired = true;
+    if (code === "KeyT") telescope.toggle();
+    if (code === "KeyF") probeFired = true;
     // GUIMode fait tourner ses quatre modes sur une touche de debogage
-    if (e.code === "KeyG") console.log("mode d'affichage :", guiMode.cycle());
+    if (code === "KeyG") console.log("mode d'affichage :", guiMode.cycle());
     // Le menu des reglages, comme dans le jeu, met le temps en pause
-    if (e.code === "Escape" && settingsUI) {
+    if (code === "Escape" && settingsUI) {
       settings.open = !settings.open;
       settingsUI.render();
     }
     if (settings.open && settingsUI) {
-      if (e.code === "ArrowUp") settings.move(-1);
-      if (e.code === "ArrowDown") settings.move(1);
-      if (e.code === "ArrowLeft") settings.toggle(-1);
-      if (e.code === "ArrowRight") settings.toggle(1);
-      if (e.code === "Enter" || e.code === "Space") settings.toggle(0);
+      if (code === "ArrowUp") settings.move(-1);
+      if (code === "ArrowDown") settings.move(1);
+      if (code === "ArrowLeft") settings.toggle(-1);
+      if (code === "ArrowRight") settings.toggle(1);
+      if (code === "Enter" || code === "Space") settings.toggle(0);
       applySettings();
       settingsUI.render();
     }
     if (dialogue.active) {
       const n = (dialogue.view && dialogue.view.options.length) || 0;
-      if (e.code === "ArrowUp") dlgUI.moveCursor(-1, n);
-      if (e.code === "ArrowDown") dlgUI.moveCursor(1, n);
-      if (e.code === "Enter" && n) optionPressed = dlgUI.cursor + 1;
+      if (code === "ArrowUp") dlgUI.moveCursor(-1, n);
+      if (code === "ArrowDown") dlgUI.moveCursor(1, n);
+      if (code === "Enter" && n) optionPressed = dlgUI.cursor + 1;
     }
-  });
-  // la carte capte la molette et le clic quand elle est ouverte
-  // Deplacement du point vise : le jeu applique axe x distance de zoom x dt,
-  // ce qui donne une vitesse constante A L'ECRAN. Glisser a la souris revient
-  // au meme en convertissant les pixels parcourus en fraction d'ecran.
-  let panFrom = null;
-  solarMap.canvas.addEventListener("mousedown", (e) => { panFrom = [e.clientX, e.clientY, false]; });
-  addEventListener("mouseup", () => { panFrom = null; });
-  solarMap.canvas.addEventListener("mousemove", (e) => {
-    if (!panFrom) return;
-    const dx = e.clientX - panFrom[0], dy = e.clientY - panFrom[1];
-    if (Math.abs(dx) + Math.abs(dy) > 3) panFrom[2] = true;   // c'est un glisser
-    const w = solarMap.canvas.width || 1;
-    solarMap.pan(-dx / w * 2, -dy / w * 2, 1);
-    panFrom[0] = e.clientX; panFrom[1] = e.clientY;
-  });
+  }
+  addEventListener("keydown", (e) => command(e.code));
 
+  /**
+   * Deplacement du regard, en pixels.
+   *
+   * `Axis` : brut x facteur d'inversion x sensibilite / 5. La sensibilite 5
+   * laisse donc la valeur d'origine inchangee. Le gain sert au doigt, qui
+   * parcourt moins de pixels qu'une souris.
+   */
+  function look(dx, dy, gain = 1) {
+    const f = settings.lookFactor();
+    yaw += dx * 0.0022 * gain * Math.abs(f);
+    pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * 0.0022 * gain * f));
+  }
+
+  // --- commandes tactiles ---
+  //
+  // Elles ne s'installent que sur un ecran tactile, et ne remplacent rien :
+  // le clavier continue de repondre, ce qui laisse les deux utilisables sur
+  // une machine qui a les deux.
+  const touch = new TouchControls(
+    document.getElementById("touch"), document.getElementById("touchui"),
+    { onKey: command, onLook: (dx, dy) => look(dx, dy, 1) });
+  if (touchAvailable()) touch.enable();
+  window.__touch = touch;   // sonde de verification
+  // La carte capte glisser, pincer, taper et la molette quand elle est
+  // ouverte. Les trois premiers sont des evenements de POINTEUR : le meme code
+  // sert la souris et le doigt (voir web/src/touch.js).
+  bindMapGestures(solarMap.canvas, solarMap,
+                  (b) => { if (autopilot) autopilot.engage(b); });
   solarMap.canvas.addEventListener("wheel", (e) => {
     e.preventDefault(); solarMap.setZoom(solarMap.zoom * (e.deltaY > 0 ? 1.15 : 0.87));
   }, { passive: false });
-  solarMap.canvas.addEventListener("click", (e) => {
-    if (panFrom && panFrom[2]) return;   // fin d'un glisser, pas une selection
-    const r = solarMap.canvas.getBoundingClientRect();
-    const b = solarMap.pick(e.clientX - r.left, e.clientY - r.top);
-    if (b) { solarMap.selected = b; if (autopilot) autopilot.engage(b); }
-  });
+
   canvas.addEventListener("click", () => {
-    canvas.requestPointerLock();
-    // le navigateur bloque l'audio tant qu'aucun geste utilisateur n'a eu lieu
-    if (!audio.unlocked) audio.unlock();
+    // Le verrouillage de souris n'a pas de sens au doigt, et le demander
+    // ferait echouer la promesse a chaque tape.
+    if (!touch.enabled) canvas.requestPointerLock();
   });
+  // le navigateur bloque l'audio tant qu'aucun geste utilisateur n'a eu lieu ;
+  // au doigt, ce geste n'atteint jamais le canvas, qui est sous la couche
+  // tactile — on l'ecoute donc au niveau de la fenetre
+  addEventListener("pointerdown", () => { if (!audio.unlocked) audio.unlock(); });
   addEventListener("mousemove", (e) => {
     if (document.pointerLockElement !== canvas) return;
-    // Axis : brut x facteur d'inversion x sensibilite / 5. La sensibilite 5
-    // laisse donc la valeur d'origine inchangee.
-    const f = settings.lookFactor();
-    yaw += e.movementX * 0.0022 * Math.abs(f);
-    pitch = Math.max(-1.5, Math.min(1.5, pitch + e.movementY * 0.0022 * f));
+    look(e.movementX, e.movementY);
   });
 
   // --- boucle ---
@@ -618,11 +643,15 @@ async function boot() {
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
 
+    // Clavier et doigt s'additionnent : le manche virtuel est analogique, la
+    // touche vaut 1, et la somme est bornee comme un axe l'est.
+    const ax = touch.axes;
+    const axis = (v) => Math.max(-1, Math.min(1, v));
     const input = {
-      forward: (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0),
-      right: (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0),
-      up: keys.Space,
-      boost: keys.ShiftLeft || keys.ShiftRight,
+      forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward),
+      right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right),
+      up: keys.Space || ax.up,
+      boost: keys.ShiftLeft || keys.ShiftRight || ax.boost,
     };
     // 1. avance des orbites, puis re-expression dans le repere du corps ancre
     advance(orbits, dt);
@@ -1007,6 +1036,15 @@ async function boot() {
         computerEl.appendChild(ds);
       }
     }
+
+    // Etat de l'interface tactile : un menu ouvert sort la croix et suspend le
+    // pilotage, la carte laisse ses gestes au canvas.
+    touch.setContext({ menu: settings.open || computer.open, map: solarMap.open });
+    // Le mode « masque » de GUIMode ne cache pas que les invites : il rend
+    // l'ecran entier au jeu, bandeau d'etat compris. Le dialogue vit dans le
+    // meme bandeau et n'est pas concerne : c'est une conversation en cours,
+    // pas un affichage de mise au point.
+    document.body.classList.toggle("gui-hidden", guiMode.hidden);
 
     // --- brouillards ---
     // anchorPos, pas origin.offset : le decalage du floating origin est fige sur

@@ -44,6 +44,8 @@ portage.
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
+| commandes tactiles | manche analogique, regard, 18 boutons, carte au pincement |
+| jeu en paysage | HUD, dialogue et réglages bornés pour un écran de 800 × 370 |
 | vérification | `tools/15_verify.py`, 30 invariants dans un vrai navigateur |
 
 ## Ce qui manque, par ordre de coût
@@ -216,6 +218,13 @@ options, dont cinq portent sur quelque chose que ce portage possède, et trois
 sont persistées dans une sauvegarde distincte de celle de la partie. Les icônes
 de manette des invites sont reprises, et la minicarte lit le drapeau
 `_useMinimap` du secteur plutôt qu'une heuristique de distance.
+
+**Le jeu se joue au doigt**, en paysage (voir [`32-mobile.md`](32-mobile.md)) :
+manche flottant, regard glissé, tape brève pour `E`, croix de menu, carte au
+pincement, et un HUD borné pour un écran trois fois moins haut que celui de
+2013. Rien de cela ne vient du build, qui ne connaît que le clavier et la
+manette — la couche tactile produit donc exactement les mêmes entrées que le
+clavier, et rien en aval ne sait qu'un doigt existe.
 
 Les **marqueurs de carte** suivent maintenant `MapMarker` — crochets dessinés,
 deux couleurs, distances d'affichage —, la disposition du menu est celle de la
