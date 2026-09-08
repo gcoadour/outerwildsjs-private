@@ -96,10 +96,78 @@ export class PlayerData {
 }
 
 /**
- * Choix d'un arbre de dialogue selon les connaissances, comme le font les
- * controleurs du jeu. Les noms d'arbres viennent des TextAsset.
+ * Controleurs de conversation poses dans la scene.
+ *
+ * `CoachConvoController`, `CuratorConvoController`, `SecondLoopConvoTrigger` :
+ * chacun porte, EN REFERENCE DIRECTE, les arbres qu'il echange selon les
+ * drapeaux. L'extracteur resout ces references (`entry.trees`, nom de champ ->
+ * identifiant du TextAsset) ; il n'y a donc plus a deviner l'arbre par son nom.
  */
-export function selectTree(data, convo, trees) {
+export function convoControllers(gameplay = {}) {
+  const out = [];
+  for (const [cls, list] of Object.entries(gameplay.placed || {})) {
+    if (!/convocontroller|convotrigger/i.test(cls)) continue;
+    for (const e of list) {
+      if (!e.trees || !Object.keys(e.trees).length) continue;
+      out.push({ name: e.name, kind: cls, position: e.position, trees: e.trees });
+    }
+  }
+  return out;
+}
+
+/**
+ * Regles d'echange d'arbre, dans l'ordre ou le jeu les teste.
+ *
+ * Le motif designe le CHAMP du controleur, pas le nom de l'arbre : c'est la
+ * difference entre lire la reference et chercher un titre qui lui ressemble.
+ */
+const TREE_RULES = [
+  { when: (d) => !d.hasCompletedTraining, field: /before|training|untrained/i,
+    who: /coach/i },
+  { when: (d) => d.knowsLaunchCodes, field: /withcodes|hascodes|after/i, who: /coach/i },
+  { when: () => true, field: /withoutcodes|nocodes|before/i, who: /coach/i },
+  { when: (d) => d.knowsLaunchCodes, field: /goodluck|after|post|launch/i,
+    who: /curator/i },
+  { when: () => true, field: /preflight|before|initial/i, who: /curator/i },
+  { when: (d) => d.loopCount >= 2, field: /farewell|second|loop/i, who: /./ },
+];
+
+/** Arbre porte par le controleur d'une conversation, ou null. */
+export function treeFromController(data, convo, controllers = []) {
+  if (!controllers.length) return null;
+  const who = convo.character || convo.name || "";
+  let ctrl = controllers.find((c) => c.name && c.name === convo.name);
+  if (!ctrl && convo.position) {
+    // meme personnage, autre GameObject : on prend le controleur pose sur lui
+    let bestD = 12;
+    for (const c of controllers) {
+      if (!c.position) continue;
+      const d = Math.hypot(c.position[0] - convo.position[0],
+                           c.position[1] - convo.position[1],
+                           c.position[2] - convo.position[2]);
+      if (d < bestD) { bestD = d; ctrl = c; }
+    }
+  }
+  if (!ctrl) return null;
+  for (const rule of TREE_RULES) {
+    if (!rule.who.test(who) && !rule.who.test(ctrl.kind)) continue;
+    if (!rule.when(data)) continue;
+    const hit = Object.entries(ctrl.trees).find(([k]) => rule.field.test(k));
+    if (hit) return String(hit[1]);
+  }
+  return null;
+}
+
+/**
+ * Choix d'un arbre de dialogue selon les connaissances, comme le font les
+ * controleurs du jeu.
+ *
+ * La reference directe prime ; la recherche par nom d'arbre ne reste que
+ * comme repli, pour un build ou le controleur ne porterait pas ses arbres.
+ */
+export function selectTree(data, convo, trees, controllers = []) {
+  const direct = treeFromController(data, convo, controllers);
+  if (direct && trees[direct]) return direct;
   const named = (frag) => {
     for (const [id, t] of Object.entries(trees)) {
       if (t.name && t.name.toLowerCase().includes(frag)) return id;

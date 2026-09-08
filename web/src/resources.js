@@ -3,6 +3,45 @@
 //   oxygene 400 s, carburant 15, recharge 0,75/s, sante 100, combinaison 100,
 //   degats d'impact entre 20 et 40 u/s.
 
+/**
+ * Zones qui rechargent l'oxygene, hors du vaisseau.
+ *
+ * `main.js` passait `inSupply: ship.boarded` : SEUL LE VAISSEAU rechargeait, et
+ * personne n'avait cherche ce que la scene proposait. La question se tranche
+ * ici : on ramasse tout composant dont le nom parle d'oxygene, avec le volume
+ * mesure sur son collider. Si le build n'en pose aucun, la liste est vide et le
+ * comportement reste celui d'avant — mais on saura alors que c'est un manque de
+ * l'alpha et non du portage, ce qui n'etait pas etabli.
+ *
+ * Les arbres de Timber Hearth en sont le cas attendu : dans le jeu final, on se
+ * recharge a leur pied.
+ */
+export function oxygenZones(gameplay = {}) {
+  const out = [];
+  for (const [cls, list] of Object.entries(gameplay.placed || {})) {
+    if (!/oxygen/i.test(cls)) continue;
+    for (const e of list) {
+      const f = e.fields || {};
+      const radius = (e.volume && e.volume.radius) ||
+        Object.entries(f).find(([k, v]) =>
+          typeof v === "number" && v > 0 && /radius/i.test(k))?.[1] || 0;
+      if (!radius) continue;
+      out.push({ name: e.name, kind: cls, position: e.position, radius });
+    }
+  }
+  return out;
+}
+
+/** Le joueur est-il dans une zone d'oxygene ? (position monde) */
+export function inOxygenZone(zones, world) {
+  for (const z of zones) {
+    const d = Math.hypot(world[0] - z.position[0], world[1] - z.position[1],
+                         world[2] - z.position[2]);
+    if (d <= z.radius) return z;
+  }
+  return null;
+}
+
 export class Resources {
   constructor(c = {}) {
     this.maxOxygen = c._maxOxygen ?? 400;

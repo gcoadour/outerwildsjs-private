@@ -31,6 +31,7 @@ export class Ship {
     // null hors de tout secteur. Le vaisseau garde sa pleine puissance sur la
     // premiere jumelle, ou la limite vaut 200 contre 20 partout ailleurs.
     this.thrustLimit = null;
+    this.fluid = null;
   }
 
   get integrity() { return this.damage.integrity; }
@@ -57,8 +58,8 @@ export class Ship {
     return Math.hypot(this.pos.x - p.x, this.pos.y - p.y, this.pos.z - p.z);
   }
 
-  update(dt, bodies, input, basis) {
-    const f = dominantField(bodies, this.pos);
+  update(dt, bodies, input, basis, world = null) {
+    const f = dominantField(bodies, this.pos, world);
     if (f) {
       this.vel.x += f.dir.x * f.magnitude * dt;
       this.vel.y += f.dir.y * f.magnitude * dt;
@@ -116,6 +117,16 @@ export class Ship {
       this.landed = true;
       break;
     }
+
+    // Fluides : ce qui vaut pour le joueur vaut pour le vaisseau. Poser un
+    // vaisseau sur Giant's Deep sans que rien ne freine n'avait pas de sens.
+    this.fluid = (world && world.fluids && world.fluids.count)
+      ? world.fluids.apply(
+          [this.pos.x + (world.framePos ? world.framePos[0] : 0),
+           this.pos.y + (world.framePos ? world.framePos[1] : 0),
+           this.pos.z + (world.framePos ? world.framePos[2] : 0)],
+          this.vel, dt, f)
+      : null;
     return f;
   }
 

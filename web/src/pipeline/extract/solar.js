@@ -6,8 +6,10 @@ import { round } from "./context.js";
 
 // Classes portant l'information physique d'un corps.
 const BODY_CLASSES = ["GravityWell", "PlanetoidSector", "SphereOceanFluidVolume",
+                      "SimpleFluidVolume",
                       "FogVolume", "WhiteHoleVolume", "QuantumOrbit", "RotateTransform",
                       "OWRigidbody", "AlignWithTargetBody", "InitialMotion"];
+const FLUID_CLASSES = ["SphereOceanFluidVolume", "SimpleFluidVolume"];
 const CONSTANT_CLASSES = ["ThrusterModel", "PlayerCharacterController"];
 
 export function extractSolarSystem(ctx) {
@@ -97,6 +99,34 @@ export function extractSolarSystem(ctx) {
     });
   }
 
+  // Volumes de fluide. Ils etaient lus — SphereOceanFluidVolume figure dans
+  // BODY_CLASSES depuis toujours — puis jetes, parce que la boucle ci-dessus
+  // n'ecrit un corps que s'il porte un GravityWell ou un PlanetoidSector.
+  // Giant's Deep n'avait donc pas d'ocean. Ils sortent maintenant a part : ce
+  // n'est pas un corps, c'est un milieu.
+  const fluids = [];
+  for (const [gid, cs] of comps) {
+    for (const cls of FLUID_CLASSES) {
+      const f = cs[cls];
+      if (!f) continue;
+      let radius = null;
+      for (const [k, v] of Object.entries(f)) {
+        if (typeof v === "number" && v > 0 && /radius/i.test(k)) { radius = v; break; }
+      }
+      const vol = radius === null ? ctx.volumeOf(gid) : null;
+      if (radius === null && vol) radius = vol.radius;
+      if (!radius) continue;
+      const drag = Object.entries(f).find(([k, v]) =>
+        typeof v === "number" && /drag/i.test(k));
+      fluids.push({
+        name: ctx.name(gid), kind: cls,
+        position: ctx.world(gid)[0].map((v) => round(v, 3)),
+        radius: round(radius, 3),
+        drag: drag ? drag[1] : null,
+      });
+    }
+  }
+
   const dist = (p) => Math.hypot(p[0] || 0, p[1] || 0, p[2] || 0);
   bodies.sort((a, b) => dist(a.position) - dist(b.position));
 
@@ -107,5 +137,5 @@ export function extractSolarSystem(ctx) {
   }
 
   return { unity: ctx.env.get(ctx.sceneFile).unityVersion,
-           source: ctx.sceneFile, bodies, constants };
+           source: ctx.sceneFile, bodies, fluids, constants };
 }

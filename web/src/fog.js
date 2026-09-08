@@ -19,8 +19,14 @@
 //
 // Le second decroit vers le centre : on entre dans une poche degagee.
 
-// RenderSettings de la scene : gris moyen, exponentiel au carre (m_FogMode 3)
+// RenderSettings de la scene : gris moyen, exponentiel au carre (m_FogMode 3).
+//
+// Ces deux valeurs etaient recopiees ici a la main. Elles sont maintenant LUES
+// (data/lighting.json, voir pipeline/extract/lighting.js) et ne servent plus
+// que de repli — une valeur juste et une valeur recopiee se ressemblent
+// jusqu'au jour ou l'une des deux change.
 export const FOG_COLOR = [0.5, 0.5, 0.5];
+export const FOG_MODE = "exp2";
 export const MAX_DENSITY = 0.5;        // FogDetector._maxDensity
 export const FOG_FAR_CLIP = 2400;      // PlayerCameraController.LateUpdate
 export const FAR_CLIP_TRIGGER = 0.01;  // ... au-dela de cette densite
@@ -62,11 +68,25 @@ export function densityAt(v, x, y, z) {
  * declencheurs de collision, on teste donc la distance au rayon exterieur.
  */
 export class FogField {
-  constructor(volumes) {
+  /** @param settings `settings` de data/lighting.json, ou null pour le repli */
+  constructor(volumes, settings = null) {
     this.volumes = volumes;
     this.density = 0;
     this.inBramble = false;
     this.flash = null;
+    this.color = (settings && settings.fogColor) || FOG_COLOR;
+    this.mode = (settings && settings.fogMode) || FOG_MODE;
+    // Une zone d'epave suspend la mise a jour du brouillard : `DerelictCloaker`
+    // et les evenements EnterDerelictZone / ExitDerelictZone. La densite garde
+    // alors la valeur qu'elle avait en entrant.
+    this.suspended = false;
+  }
+
+  /** Entree/sortie d'une zone d'epave : le brouillard cesse d'etre recalcule. */
+  setSuspended(on) {
+    if (this.suspended === !!on) return false;
+    this.suspended = !!on;
+    return true;
   }
 
   /** Eclair de brouillard : montee cubique puis descente cubique. */
@@ -79,6 +99,7 @@ export class FogField {
    * @param framePos position monde de l'origine du repere courant
    */
   update(pos, framePos, now) {
+    if (this.suspended) return this.density;
     const o = framePos || [0, 0, 0];
     let net = 0;
     let bramble = false;
@@ -110,9 +131,11 @@ export class FogField {
   /** Applique le brouillard a la scene et resserre le plan lointain. */
   apply(BABYLON, scene, camera) {
     if (this.density > 0) {
-      scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+      scene.fogMode = this.mode === "linear" ? BABYLON.Scene.FOGMODE_LINEAR
+        : this.mode === "exp" ? BABYLON.Scene.FOGMODE_EXP
+        : BABYLON.Scene.FOGMODE_EXP2;
       scene.fogDensity = this.density;
-      scene.fogColor = new BABYLON.Color3(...FOG_COLOR);
+      scene.fogColor = new BABYLON.Color3(...this.color);
     } else {
       scene.fogMode = BABYLON.Scene.FOGMODE_NONE;
     }

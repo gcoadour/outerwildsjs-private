@@ -134,6 +134,12 @@ async function handleFile(file) {
   try {
     const options = { geometry: $("opt-geometry").checked,
                       maxTexture: Number($("opt-texture").value) || 512 };
+    // Le Service Worker garde les petits fichiers en memoire : une nouvelle
+    // extraction les rend faux. Il n'a pas de moyen de le savoir seul.
+    try {
+      const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+      if (sw) sw.postMessage({ type: "purge" });
+    } catch (e) { /* pas de Service Worker : rien a vider */ }
     const result = await runPipeline(file, options);
     showSummary(result.summary, result.seconds);
     $("gate-step-work").hidden = true;
