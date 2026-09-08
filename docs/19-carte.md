@@ -82,5 +82,7 @@ d'empiler les marqueurs sur le point visé.
   masquer, un nom absent coûtant plus qu'un nom déplacé.
 
 - **Pas de sonde** (`Probe`), ce système n'étant pas porté.
-- **`_maxDisplayDistance`** n'est pas appliqué : tous les corps restent
-  visibles quelle que soit la distance.
+- ~~**`_maxDisplayDistance`** n'est pas appliqué~~ — **appliqué** : une lune
+  disparaît de la carte au-delà de 5 000 unités, une planète de 50 000, et le
+  Soleil reste toujours visible. La carte se vide donc à mesure qu'on s'éloigne,
+  comme dans le jeu.

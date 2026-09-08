@@ -23,7 +23,10 @@ est un réglage délibéré : c'est le seul endroit où le vaisseau garde sa ple
 puissance.
 
 La scène contient aussi une hiérarchie de LOD (`LODGroup`, `LODLayer`,
-`ChildColliderLOD` ×21, `CreateLODGroup` ×5, `LODBiasManager`), non portée.
+`ChildColliderLOD` ×21, `CreateLODGroup` ×5, `LODBiasManager`). Les seuils que
+`CreateLODGroup` porte sont désormais lus et appliqués ; la classe moteur
+`LODGroup` attend une régénération de `unity41-types.json`
+([`35-monde.md`](35-monde.md), fin).
 
 ## Le principe retenu
 
@@ -89,8 +92,11 @@ pointent vers des nœuds de ce lot.
 
 ## Ce qui manque
 
-- **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
-  en enchaîne plusieurs sur des maillages simplifiés. Simplifier un maillage à
-  la volée coûterait plus que ce qu'il rapporte ici.
-- **Les 21 `ChildColliderLOD`** ne sont pas portés : les colliders sont posés
-  d'un bloc sur le corps ancré.
+- **Le LOD ne fait que deux niveaux**, présent ou absent. La correction de fond
+  vaut d'être notée : un `LODGroup` **ne simplifie rien à la volée**, il désigne
+  des maillages déjà simplifiés, présents dans le build — il n'y a donc rien à
+  générer, seulement à exporter les niveaux. Le seuil, lui, est lu dès que
+  `CreateLODGroup` en donne un, et il s'exprime dans l'unité que ce module
+  calcule déjà.
+- **Les 21 `ChildColliderLOD`** sont extraits (`colliderLODNames`), mais les
+  colliders sont toujours posés d'un bloc sur le corps ancré.

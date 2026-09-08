@@ -2,8 +2,9 @@
 
 Cette page fait l'inventaire de l'**état** du portage.
 [`34-actions.md`](34-actions.md) reprend la comparaison sous forme d'**actions
-ordonnées**, et y ajoute les écarts trouvés en confrontant les extracteurs au
-moteur — des données du build déjà extraites que personne ne lit.
+ordonnées**, et [`35-monde.md`](35-monde.md) raconte ce qu'a donné leur mise en
+œuvre : l'essentiel de ce qui manquait était **déjà extrait, et personne ne le
+lisait**.
 
 Inventaire fondé sur les composants et assets réellement présents dans le
 build, pas sur une impression. Ce document dit honnêtement où en est le
@@ -58,6 +59,15 @@ portage.
 | caméra de sonde | vue embarquée dans un coin de l'écran |
 | commandes tactiles | manche analogique, regard, 18 boutons, carte au pincement |
 | jeu en paysage | HUD, dialogue et réglages bornés pour un écran de 800 × 370 |
+| rotation propre et jour/nuit | appliquée au repère ancré, le sol ne bouge pas |
+| lumières placées | extraites, instanciées à la volée dans un budget de 8 |
+| portées audio | `MinDistance` / `MaxDistance` / `rolloffMode` du build |
+| champs directionnels | 34 volumes, prioritaires sur le champ radial |
+| fluides | volumes émis, traînée et poussée appliquées |
+| zones d'oxygène et chaleur | ramassées par motif, avec le volume de leur collider |
+| manette | Gamepad API, mêmes axes et mêmes codes que le clavier |
+| caméras déportées | les deux consoles réutilisent la vue de la sonde |
+| `mainData` | inventorié : scène de démarrage et managers |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -89,10 +99,10 @@ dans l'alpha.
 
 Tout est vérifié au chiffre, rien ne l'est au rendu.
 
-- **L'équilibrage des volumes audio** — les portées sont aujourd'hui choisies
-  par piste. Ce n'est plus une fatalité : le champ existe en 4.1 sous le nom
-  `MinDistance`, sans préfixe, et le pipeline navigateur le lit dans le type
-  tree. À corriger avant de juger à l'oreille, voir [`34-actions.md`](34-actions.md) A2.
+- **L'équilibrage des volumes audio** — les portées sont désormais celles du
+  build (`MinDistance`, `MaxDistance`, `rolloffMode`, voir
+  [`35-monde.md`](35-monde.md) §2). L'oreille juge donc enfin des valeurs du
+  jeu, mais elle n'a pas encore jugé.
 - **L'équilibrage visuel des particules** — les tailles vont jusqu'à 140 unités.
 - **Le rendu général** : atmosphères, surface stellaire, brouillards et
   explosion sont des implémentations originales visant un résultat comparable,
@@ -104,42 +114,40 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 - **La distorsion** reste une approximation délibérée : capturer le fond
   demanderait un second rendu complet de la scène — doubler les 6,1 ms — pour
   **deux matériaux dans tout le jeu**.
-- **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
-  en enchaîne plusieurs sur des maillages simplifiés — qui sont dans le build,
-  et donc à exporter plutôt qu'à générer ([`34-actions.md`](34-actions.md) A8).
-- **Les 21 `ChildColliderLOD`** : les colliders sont posés d'un bloc sur le
-  corps ancré.
-- **15 Mo de WAV non compressés** et **11,1 Mo de Babylon** sur les 66 du
-  démarrage (voir [`27-poids.md`](27-poids.md)).
-- **Le son comme signal** pour les prédateurs : le bruit est déduit des
-  commandes du joueur, pas des sources sonores réelles.
-- **`_checkDepth = 100`** de la lune quantique : le test d'occlusion est
-  binaire, là où le jeu lance une sphère sur une profondeur.
-- **`AlignQuantumMoon`**, **`CorruptionAnimator`**, **`_vanishEffectPrefab`**.
-- **Les pièces du vaisseau n'ont pas de géométrie propre** : une pièce morte se
-  lit dans son état, elle ne se voit pas sur la coque.
-- **La manette n'est pas lue**, alors que le build en décrit une entière
-  (`XboxInput`) — les commandes tactiles ajoutées passent par les mêmes codes
-  clavier que le reste (voir [`33-mobile.md`](33-mobile.md)), et le portrait n'a
-  pas d'interface propre.
+- **Les niveaux de détail du build** ne sont lus qu'à moitié. `lod.js` applique
+  les seuils que porte `CreateLODGroup`, mais la classe moteur `LODGroup` (205)
+  n'est pas encore dans `unity41-types.json` : `tools/16_unity_types.py` la
+  demande, il faut relancer l'outil pour l'obtenir. Sans elle, rien n'est émis
+  et le seuil unique de 0,0022 reste la règle.
+- **Les 21 `ChildColliderLOD`** sont extraits, mais les colliders sont toujours
+  posés d'un bloc sur le corps ancré — 441 sur Timber Hearth.
+- **11,1 Mo de Babylon** sur les 66 du démarrage
+  ([`27-poids.md`](27-poids.md)) : les réduire demande une étape de
+  construction, que le dépôt n'a pas. C'est un choix de projet, pas une
+  optimisation à faire en passant.
+- **Les 15 Mo de WAV** sont réencodés en Opus à l'extraction (WebCodecs, repli
+  WAV) — le gain réel n'a pas encore été mesuré sur un build.
+- **`_vanishEffectPrefab`**, et **les pièces du vaisseau sans géométrie
+  propre** : une pièce morte se lit dans son état, elle ne se voit pas sur la
+  coque.
+- **Le portrait n'a pas d'interface propre.** La manette, elle, est lue
+  ([`35-monde.md`](35-monde.md) §7).
 
-### 4. Ce que la comparaison extracteurs / moteur a fait apparaître
+### 4. Ce que la comparaison extracteurs / moteur avait fait apparaître
 
-Des données du build **déjà extraites, et que rien ne lit** — ou des composants
-que les extracteurs ne regardent pas. Le détail et la marche à suivre sont dans
-[`34-actions.md`](34-actions.md) ; en résumé :
+Des données du build **déjà extraites, et que rien ne lisait**. Les neuf écarts
+relevés par [`34-actions.md`](34-actions.md) sont maintenant branchés — rotation
+propre, portées audio, lumières, `RenderSettings`, `_checkDepth`, champs
+directionnels, fluides, `mainData`, zones d'oxygène — et
+[`35-monde.md`](35-monde.md) dit comment.
 
-| écart | où |
-|---|---|
-| **rotation propre des corps** : `spin` et `spinSpeed` extraits, jamais appliqués — pas de cycle jour/nuit | A1 |
-| **portées audio** inventées par piste, et rayon en pixels d'un émetteur pris pour des unités de monde | A2 |
-| **aucune lumière du build** n'est extraite : une directionnelle et une hémisphérique pour tout le système | A3 |
-| `RenderSettings` recopiés à la main au lieu d'être lus | A4 |
-| `CHECK_RADIUS` et `CHECK_DEPTH` exportés et inutilisés | A5 |
-| **34 `DirectionalForceField`** ignorés, contre 10 `GravityWell` portés | A6 |
-| **fluides** : `SphereOceanFluidVolume` listé par l'extracteur mais jamais émis — Giant's Deep n'a pas d'océan | A7 |
-| **`mainData`** chargé par le worker mais jamais extrait : 989 objets hors périmètre | A9 |
-| **zones d'oxygène** : seul le vaisseau recharge, sans qu'on ait cherché ce que la scène propose | A11 |
+Ce qu'il faut en retenir vaut pour la suite : **avant de conclure qu'une chose
+manque au build, vérifier qu'on la lit**. Six des neuf écarts étaient des
+lecteurs absents, pas des données absentes.
+
+Reste à mesurer sur un vrai build ce que ces extracteurs sortent — la session
+qui les a écrits ne l'avait pas. `tests/05-extract.mjs` et `tools/15_verify.py`
+relèvent les comptes ; les chiffres entreront ici quand ils seront tombés.
 
 ## Où lire le détail
 
@@ -155,6 +163,7 @@ que les extracteurs ne regardent pas. Le détail et la marche à suivre sont dan
 | mort par prédateur | [`16-bramble.md`](16-bramble.md) |
 | caméra embarquée de la sonde | [`25-interface.md`](25-interface.md) |
 | commandes tactiles et jeu en paysage | [`33-mobile.md`](33-mobile.md) |
+| rotation, lumières, fluides, champs, manette | [`35-monde.md`](35-monde.md) |
 
 ## Estimation honnête
 
@@ -163,6 +172,13 @@ depuis longtemps, et c'est lui qui conditionnait tout le reste. Ce qui manquait
 ensuite était du **volume** de logique de jeu ; il a été porté système par
 système.
 
+Puis une seconde nature de manque est apparue, moins attendue : **ce qui était
+extrait et que rien ne lisait**. Elle est comblée
+([`35-monde.md`](35-monde.md)), et il n'y avait presque rien à écrire — seulement
+à ouvrir des fichiers qu'on écrivait déjà.
+
 Ce qui reste tient en une phrase : **le contenu que l'alpha n'a pas, et le
 jugement qu'une machine ne rend pas**. Le premier ne se comble pas ; le second
-demande quelqu'un qui joue, regarde et écoute.
+demande quelqu'un qui joue, regarde et écoute. S'y ajoute, pour un temps, une
+troisième chose : **des comptes à relever sur un vrai build**, que les
+extracteurs neufs sortiront à la première extraction.

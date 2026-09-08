@@ -24,6 +24,11 @@ Ouvrir la page, déposer `OuterWilds_Alpha_1_2_Linux.zip` (289 268 118 octets,
 SHA-256 `5c7defad…80f05a`). L'extraction complète prend environ **70 secondes**
 et n'est faite qu'une fois : elle est conservée d'une visite à l'autre.
 
+Une manette est lue si elle est branchée : elle produit exactement les mêmes
+axes et les mêmes commandes que le clavier, et l'invite à l'écran porte déjà
+l'icône du bouton que le jeu attend
+([`docs/35-monde.md`](docs/35-monde.md) §7).
+
 Sur téléphone ou tablette, la page se joue **en paysage**, avec la disposition
 d'un FPS mobile : deux manches — le gauche déplace, le droit regarde, glissé
 pour viser et tenu pour tourner — des gâchettes le long du bord haut, un losange
@@ -55,6 +60,8 @@ ouvert en `file://` n'en est pas une.
 | `data/shaders/` | 121 sources ShaderLab et leur classement |
 | `data/dialogue/` | 26 arbres de dialogue, 72 branches, 14 conversations |
 | `data/interface/` | 46 invites à l'écran, 4 polices, jauges et icônes |
+| `data/lighting.json` | lumières placées de la scène et `RenderSettings` |
+| `data/scene/maindata.json` | scène de démarrage et managers, en inventaire |
 
 ## Comment ça marche
 
@@ -106,7 +113,7 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | Maillages décodés | 1 569, 929 529 sommets, concordants avec UnityPy |
 | Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
-| Logique de jeu, sans le build | 125 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, géométrie des manches tactiles |
+| Logique de jeu, sans le build | 270 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg |
 
 Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips
 d'animation s'éprouve sur un flux fabriqué, l'export glTF sur un monde de

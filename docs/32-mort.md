@@ -103,6 +103,10 @@ pas.
 - **Les images du flashback**, qui ne sont pas dans le build.
 - **Le rendu de l'explosion** reste une couronne additive et une coque en fil de
   fer. Les shaders de la supernova ne sont pas portés.
-- **`PlayerDeathHandler` du jeu** fait plus que ce qui est ici : il joue un son
-  par cause et pilote la caméra pendant la séquence. Les commandes, elles, sont
-  bien coupées — un mort ne marche plus pendant son propre flashback.
+- ~~**`PlayerDeathHandler` du jeu** fait plus que ce qui est ici~~ — le son
+  par cause et le mouvement de caméra sont **portés**
+  ([`35-monde.md`](35-monde.md) §8) : la source demandée est celle dont le nom
+  parle de la cause, la piste `Death` à défaut, et la caméra bascule puis se
+  relève au fondu. La table qui relie une cause à un son, elle, vit dans
+  l'assembly et non dans les assets : le rapprochement par le nom est un choix
+  de ce portage.

@@ -70,6 +70,9 @@ mais quatre orbites dans le même plan, cela se voit.
 - **Le brouillard quantique est porté depuis** (voir
   [`29-brouillards.md`](29-brouillards.md)) : coque opaque de 100 à 110 unités,
   fondue sur 30, dont la sortie force l'effondrement.
-- **`_checkDepth = 100` n'est pas utilisé comme tel** : le test d'occlusion est
-  binaire, là où le jeu lance une sphère de 150 sur une profondeur de 100.
-- `AlignQuantumMoon`, qui oriente la lune vers le joueur, n'est pas porté.
+- ~~**`_checkDepth = 100` n'est pas utilisé comme tel**~~ — **porté** : la
+  sphère de 150 grossit l'obstacle, et il faut y rester sur 100 pour qu'il
+  compte. Raser le limbe d'une planète ne masque donc plus la lune ; passer
+  franchement derrière, si ([`35-monde.md`](35-monde.md) §8).
+- ~~`AlignQuantumMoon`~~ — **porté** : la lune fait face à l'observateur. Sans
+  lui, elle changeait de planète *et* d'aspect à chaque saut.

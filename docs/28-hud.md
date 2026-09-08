@@ -271,7 +271,8 @@ plus visible de cette passe, et il ne coûte que quatre `@font-face`.
 - Les **icônes de manette** (`XboxInput.GetButtonTexture`) ne sont pas
   reprises : le catalogue conserve le bouton de chaque invite, mais le portage
   se joue au clavier et n'affiche que le texte.
-- Le **secteur majeur** n'est pas modélisé : la minicarte s'allume à proximité
-  d'un corps plutôt que sur le drapeau `GetUseMinimap` d'un secteur.
+- Le **secteur majeur** n'est pas modélisé comme tel, mais la minicarte suit
+  bien le drapeau `GetUseMinimap` du secteur courant quand il y en a un ; la
+  proximité d'un corps ne sert plus que de repli hors de tout secteur.
 - Les **traces de la minicarte** sont des points, là où le jeu emploie deux
   systèmes de particules.

@@ -62,9 +62,10 @@ Croissance des ronces : 0, 5 puis 10 sur 10 aux quarts de boucle.
   manque du portage mais de l'alpha elle-même.
 - **Le brouillard**, `FogCloak` et `FogLight` sont portés depuis (voir
   [`29-brouillards.md`](29-brouillards.md)).
-- **Le son comme signal**, faute de lien entre le système audio et le
-  `NoiseSensor` : le bruit est ici déduit des commandes du joueur, pas des
-  sources sonores réelles.
+- ~~**Le son comme signal**~~ — **porté** : `AudioField.emitters()` publie les
+  sources qui jouent vraiment, et le `NoiseSensor` va vers la plus forte qu'il
+  entend. On peut donc se trahir en laissant tourner une source, ou s'en servir
+  de leurre ([`35-monde.md`](35-monde.md) §8).
 - ~~**La mort par prédateur**~~ — **portée** : un prédateur qui atteint sa proie
   la mange (voir [`32-mort.md`](32-mort.md)). Le rayon de prise, 25 unités,
   n'est pas dans le build — il décrit la détection et la poursuite, pas la
@@ -75,5 +76,6 @@ Croissance des ronces : 0, 5 puis 10 sur 10 aux quarts de boucle.
   La distance était donc fausse du décalage entre les deux — plusieurs milliers
   d'unités — et aucun prédateur ne pouvait se réveiller. Le portage convertit
   maintenant la position du joueur avant de la leur passer.
-- `CorruptionAnimator`, qui pilote un seuil de découpe de matériau sur la
-  fraction de boucle.
+- ~~`CorruptionAnimator`~~ — **porté** : le seuil de découpe suit la fraction de
+  boucle, sur les matériaux auxquels le répartiteur de shaders a déjà posé une
+  découpe alpha.

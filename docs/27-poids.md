@@ -139,18 +139,22 @@ la supernova se déclenche — et le démarrage tombe de **79,3 à 66,1 Mo**.
 
 ## Ce qui reste
 
-- **15 Mo de WAV non compressés** (15 fichiers, 48 kHz 16 bits) : ce sont les
-  échantillons qu'Unity stockait déjà décodés. Les réencoder demanderait un
-  encodeur Vorbis, absent de la chaîne d'outils ; les rééchantillonner à
-  24 kHz les diviserait par deux, au prix d'une perte que je ne peux pas juger
-  à l'oreille ici.
-- **Les textures partagées se retéléchargent.** 27 URL sont demandées jusqu'à
-  cinq fois, faute d'en-têtes de cache sur le serveur de développement
-  (`python3 -m http.server` n'en envoie aucun). Un hébergement réel les
-  mettrait en cache ; la mesure ci-dessus est donc le pire cas.
-- **Aucun LOD par maillage.** Un corps est chargé entier ou pas du tout ; le
-  jeu, lui, a des `LODGroup` par objet.
+- ~~**15 Mo de WAV non compressés**~~ — la chaîne d'outils Python n'a pas
+  d'encodeur Vorbis, mais **le navigateur en a un**. `AudioEncoder` (WebCodecs)
+  encode en Opus dans le worker, au moment de l'extraction, une fois pour
+  toutes, avec repli sur le WAV là où l'API manque
+  ([`35-monde.md`](35-monde.md) §9). C'est le pipeline navigateur qui rend cette
+  piste possible ; le gain réel reste à mesurer sur un build.
+- ~~**Les textures partagées se retéléchargent.**~~ 27 URL demandées jusqu'à
+  cinq fois : le Service Worker sert `data/…` et annonce désormais
+  `Cache-Control: public, max-age=86400, immutable`, avec un cache mémoire pour
+  les petits fichiers. Ces fichiers sont immuables — ils viennent d'être
+  reconstruits et rien ne les modifie — et la page prévient le worker quand une
+  nouvelle extraction commence.
+- **Le LOD par maillage** existe depuis ([`17-secteurs.md`](17-secteurs.md)) et
+  lit les seuils du build quand il en donne ; les niveaux simplifiés du jeu ne
+  sont pas encore exportés.
 - **Babylon pèse 11,1 Mo** des 60, soit près d'un cinquième. Une compilation sur
   mesure ne garderait que les modules utilisés.
-- **La géométrie n'est jamais déchargée.** Traverser tout le système finit par
-  tout charger ; il n'y a pas d'éviction.
+- **L'éviction** existe depuis : un corps quitté depuis 45 secondes est libéré
+  ([`17-secteurs.md`](17-secteurs.md)).

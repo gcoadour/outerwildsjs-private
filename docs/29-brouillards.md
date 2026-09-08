@@ -47,7 +47,10 @@ poche dégagée. C'est l'inverse du premier, et c'est délibéré.
 `FogDetector` plafonne la somme à **0,5**, et bascule le moteur en
 `FogMode.ExponentialSquared`. La couleur ne vient pas du code mais des
 `RenderSettings` de la scène : un gris moyen `(0,5, 0,5, 0,5)`, avec
-`m_FogMode = 3` qui confirme l'exponentiel au carré.
+`m_FogMode = 3` qui confirme l'exponentiel au carré. Ces deux valeurs étaient
+**recopiées à la main** dans `fog.js` ; elles sont désormais **lues**
+(`data/lighting.json`, voir [`35-monde.md`](35-monde.md) §3) et ne servent plus
+ici que de repli.
 
 Et `PlayerCameraController.LateUpdate` resserre le plan lointain à **2400**
 quand la densité atteint 0,01 — vérifié dans le portage : la caméra passe de
@@ -151,7 +154,9 @@ fois, plutôt que de lancer six rayons par image dans une scène de plusieurs
 centaines de maillages. Le fondu, lui, reste continu.
 
 ## Ce qui reste
-- **`DerelictCloaker`** (2) et les événements `EnterDerelictZone` /
-  `ExitDerelictZone`, qui suspendent la mise à jour du brouillard.
+- ~~**`DerelictCloaker`** (2) et les événements `EnterDerelictZone` /
+  `ExitDerelictZone`~~ — **portés** : entrer dans une zone d'épave suspend la
+  mise à jour du brouillard, dont la densité garde alors la valeur qu'elle avait
+  en entrant.
 - La coque quantique est une sphère unie ; le jeu utilise un matériau à
   `_TintColor` dont la texture n'est pas reprise.
