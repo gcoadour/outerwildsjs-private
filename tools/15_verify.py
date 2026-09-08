@@ -359,17 +359,35 @@ def run(url, heavy):
             new PointerEvent('pointerdown', {pointerId: 4, bubbles: true}));
           t.onKey = onKey; t.onLook = onLook;
 
-          // un menu ouvert suspend le pilotage
+          // un menu ouvert remplace la manette par la croix et les deux
+          // boutons de reponse, et suspend le pilotage
+          const vus_a_l_ecran = () =>
+            [...document.querySelectorAll('#touchui .tc-btn')]
+              .filter(b => b.offsetParent).map(b => b.getAttribute('aria-label'));
           t.setContext({menu: true, map: false});
           const suspendu = document.getElementById('touch')
             .classList.contains('tc-idle');
+          const enMenu = vus_a_l_ecran();
           t.setContext({menu: false, map: false});
+          const enVol = vus_a_l_ecran();
+
+          // CE QUI COMPTE VRAIMENT : le pouce touche l'ecran, pas un element
+          // choisi a la main. Un plan pose au-dessus des zones de pilotage les
+          // rendrait muettes sans qu'aucun evenement envoye a la zone elle-meme
+          // ne s'en apercoive — c'est exactement ce qui est arrive avec la
+          // carte fermee, restee etendue sur tout l'ecran.
+          const sous = (x, y) => { const el = document.elementFromPoint(x, y);
+                                   return el ? String(el.className || el.id) : 'rien'; };
+          const pouceGauche = sous(innerWidth * 0.15, innerHeight * 0.72);
+          const pouceDroit = sous(innerWidth * 0.62, innerHeight * 0.72);
+
           const manches = document.querySelectorAll('#touch .tc-stick').length;
           const empreintes = document.querySelectorAll('#touch .tc-home').length;
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
           return {avant, course, relache, apresCourse, glisse, vitesse, arret,
-                  vus, suspendu, manches, empreintes, boutons};
+                  vus, suspendu, manches, empreintes, boutons, enVol, enMenu,
+                  pouceGauche, pouceDroit};
         }""")
         rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
         rep.eq("a fond devant : le cran de course prend", tactile["course"], True)
@@ -385,7 +403,20 @@ def run(url, heavy):
         rep.eq("tape et bouton d'action donnent la touche du jeu",
                tactile["vus"], ["KeyE", "KeyE"])
         rep.eq("un menu ouvert suspend le pilotage", tactile["suspendu"], True)
-        rep.eq("boutons tactiles a l'ecran", tactile["boutons"], 18)
+        # Rien au-dessus des zones de pilotage : le defaut qui rendait les deux
+        # manches muets ne se voyait qu'ici.
+        rep.eq("le pouce gauche atteint sa zone",
+               "tc-zone-move" in tactile["pouceGauche"], True)
+        rep.eq("le pouce droit atteint sa zone",
+               "tc-zone-look" in tactile["pouceDroit"], True)
+        rep.eq("la manette en vol", tactile["enVol"],
+               ["Telescope", "Sonde", "Carte du systeme", "Ordinateur de bord",
+                "Affichage", "Menu", "Monter", "Accelerer", "Lampe",
+                "Interagir, parler"])
+        rep.eq("un menu la remplace par la croix et les deux reponses",
+               tactile["enMenu"],
+               ["Haut", "Gauche", "Droite", "Bas", "Valider", "Retour"])
+        rep.eq("boutons tactiles en tout", tactile["boutons"], 18)
 
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------

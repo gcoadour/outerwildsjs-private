@@ -138,7 +138,30 @@ export async function goLandscape(el = document.documentElement) {
   } catch (e) { /* non expose, ou refus : sans gravite */ }
 }
 
-// Boutons d'action, dans l'ordre ou ils apparaissent.
+// --- disposition, en grammaire de manette ---------------------------------
+//
+// Le modele est l'overlay des FPS mobiles : deux manches sous les pouces, les
+// bascules en gachettes le long du bord haut, un losange d'action a droite. La
+// grammaire est celle d'une manette parce que c'est celle que tout le monde
+// reconnait — mais rien n'est invente pour autant : chaque bouton porte un code
+// clavier, et c'est tout ce qu'il envoie.
+//
+// Deux etiquettes par bouton : le repere de manette (L1, A, ...) dit OU il est,
+// le nom dit ce qu'il FAIT. Personne n'a de plan de touches en tete pour un jeu
+// de 2013 ; le nom est donc le gros, le repere le petit.
+
+// Gachettes, le long du bord haut : ce qui s'utilise entre deux manoeuvres.
+// Les deux premieres sont a gauche, les deux autres a droite.
+const SHOULDERS = [
+  { tag: "L1", code: "KeyT", label: "lunette", title: "Telescope" },
+  { tag: "L2", code: "KeyF", label: "sonde", title: "Sonde" },
+  { tag: "R1", code: "KeyM", label: "carte", title: "Carte du systeme" },
+  { tag: "R2", code: "KeyN", label: "bord", title: "Ordinateur de bord" },
+];
+
+// Losange d'action, aux places d'une manette : Y en haut, X a gauche, B a
+// droite, A en bas. C'est A qui tombe sous le pouce sans effort, donc A porte
+// l'action principale du jeu.
 //
 // `hold` : maintenu, comme Espace — il remplit un axe directement, et son
 // `code` n'est la que pour dire quelle touche il double.
@@ -146,37 +169,47 @@ export async function goLandscape(el = document.documentElement) {
 // tenir « accelerer » et viser. Le cran de course du manche gauche l'allume
 // aussi, le temps qu'il dure.
 // Les autres envoient leur code une fois, comme une frappe.
-const ACTIONS = [
-  { key: "up", code: "Space", label: "▲", title: "Monter", hold: true, cls: "tc-up" },
-  { key: "boost", code: "ShiftLeft", label: "»", title: "Accelerer", toggle: true, cls: "tc-boost" },
-  { key: "interact", code: "KeyE", label: "E", title: "Interagir, parler", cls: "tc-act" },
+const FACE = [
+  { slot: "y", key: "up", code: "Space", label: "▲", tag: "monter",
+    title: "Monter", hold: true },
+  { slot: "x", key: "boost", code: "ShiftLeft", label: "»", tag: "vite",
+    title: "Accelerer", toggle: true, cls: "tc-boost" },
+  { slot: "b", code: "KeyL", label: "☀", tag: "lampe", title: "Lampe" },
+  { slot: "a", code: "KeyE", label: "E", tag: "agir", title: "Interagir, parler",
+    cls: "tc-act" },
 ];
 
-// Bascules, en haut : les memes que les touches du clavier.
-const TOGGLES = [
-  { code: "KeyM", label: "carte" },
-  { code: "KeyT", label: "lunette" },
-  { code: "KeyF", label: "sonde" },
-  { code: "KeyL", label: "lampe" },
-  { code: "KeyN", label: "bord" },
-  { code: "KeyG", label: "vue" },
-  { code: "Escape", label: "menu" },
+// Boutons du milieu, ceux qu'une manette met entre ses deux manches : ce qui ne
+// sert qu'entre deux vols.
+const CENTER = [
+  { code: "KeyG", label: "vue", title: "Affichage" },
+  { code: "Escape", label: "menu", title: "Menu" },
 ];
 
-// Croix de menu : ce que le clavier fait avec ses fleches. Elle ne sort que
-// quand un menu est ouvert — reglages, ordinateur de bord, carte.
-const MENU = [
-  { code: "ArrowUp", label: "▲", cls: "tc-m-up" },
-  { code: "ArrowDown", label: "▼", cls: "tc-m-down" },
-  { code: "ArrowLeft", label: "◀", cls: "tc-m-left" },
-  { code: "ArrowRight", label: "▶", cls: "tc-m-right" },
-  { code: "Enter", label: "✓", cls: "tc-m-ok" },
-  { code: "Escape", label: "✕", cls: "tc-m-back" },
+// Croix directionnelle : ce que le clavier fait avec ses fleches. Elle ne sort
+// que dans un menu — reglages, ordinateur de bord — et elle sort A GAUCHE, la
+// ou le pouce qui tenait le manche se trouve deja.
+const DPAD = [
+  { slot: "up", code: "ArrowUp", label: "▲", title: "Haut" },
+  { slot: "left", code: "ArrowLeft", label: "◀", title: "Gauche" },
+  { slot: "right", code: "ArrowRight", label: "▶", title: "Droite" },
+  { slot: "down", code: "ArrowDown", label: "▼", title: "Bas" },
+];
+
+// Valider et revenir prennent les places de A et B : le pouce droit les trouve
+// la ou il vient de laisser « agir » et « lampe ».
+const CONFIRM = [
+  { slot: "a", code: "Enter", label: "✓", tag: "valider", title: "Valider",
+    cls: "tc-m-ok" },
+  { slot: "b", code: "Escape", label: "✕", tag: "retour", title: "Retour",
+    cls: "tc-m-back" },
 ];
 
 const MAP_KEYS = [
-  { code: "KeyC", label: "centrer", cls: "tc-m-ok" },
-  { code: "KeyM", label: "fermer", cls: "tc-m-back" },
+  { slot: "a", code: "KeyC", label: "◎", tag: "centrer", title: "Centrer",
+    cls: "tc-m-ok" },
+  { slot: "b", code: "KeyM", label: "✕", tag: "fermer", title: "Fermer",
+    cls: "tc-m-back" },
 ];
 
 /**
@@ -317,6 +350,8 @@ export class TouchControls {
     this.uiRoot.classList.remove("tc-modal");
     document.body.classList.remove("tc-modal");
     this.buttons = [];
+    this.flight = [];
+    this.dpad = null;
     this.moveZone = null;
     this.lookZone = null;
     this.moveStick = null;
@@ -486,24 +521,41 @@ export class TouchControls {
   buildButtons() {
     const group = (cls) => {
       const d = document.createElement("div");
-      d.className = "tc-group " + cls;
+      d.className = cls;
       this.uiRoot.appendChild(d);
       return d;
     };
-    const actions = group("tc-actions");
-    const toggles = group("tc-toggles");
-    this.menuGroup = group("tc-menu");
-    this.mapGroup = group("tc-mapkeys");
+    // Vol : gachettes, milieu, losange d'action.
+    this.flight = [
+      group("tc-group tc-shoulders tc-sh-left"),
+      group("tc-group tc-shoulders tc-sh-right"),
+      group("tc-group tc-center"),
+      group("tc-pad tc-face"),
+    ];
+    // Menu et carte : croix a gauche, valider/revenir aux places de A et B.
+    this.dpad = group("tc-pad tc-dpad");
+    this.menuGroup = group("tc-pad tc-face tc-confirm");
+    this.mapGroup = group("tc-pad tc-face tc-confirm");
+    this.dpad.hidden = true;
     this.menuGroup.hidden = true;
     this.mapGroup.hidden = true;
 
-    for (const a of ACTIONS) {
-      const b = this.button(actions, a);
-      if (a.key === "boost") this.boostBtn = b;
+    const [shL, shR, center, face] = this.flight;
+    SHOULDERS.forEach((sp, i) => {
+      this.button(i < 2 ? shL : shR, { ...sp, cls: "tc-shoulder" });
+    });
+    for (const c of CENTER) this.button(center, { ...c, cls: "tc-pill" });
+    for (const f of FACE) {
+      const b = this.button(face, { ...f, cls: `tc-f-${f.slot} ${f.cls || ""}` });
+      if (f.key === "boost") this.boostBtn = b;
     }
-    for (const t of TOGGLES) this.button(toggles, { ...t, cls: "tc-tog" });
-    for (const m of MENU) this.button(this.menuGroup, { ...m, cls: "tc-key " + m.cls });
-    for (const m of MAP_KEYS) this.button(this.mapGroup, { ...m, cls: "tc-key " + m.cls });
+    for (const d of DPAD) this.button(this.dpad, { ...d, cls: `tc-d-${d.slot} tc-key` });
+    for (const m of CONFIRM) {
+      this.button(this.menuGroup, { ...m, cls: `tc-f-${m.slot} tc-key ${m.cls}` });
+    }
+    for (const m of MAP_KEYS) {
+      this.button(this.mapGroup, { ...m, cls: `tc-f-${m.slot} tc-key ${m.cls}` });
+    }
     this.uiRoot.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
@@ -522,7 +574,17 @@ export class TouchControls {
     const b = document.createElement("button");
     b.className = "tc-btn " + (spec.cls || "");
     b.type = "button";
-    b.textContent = spec.label;
+    const put = (cls, text) => {
+      const sp = document.createElement("span");
+      sp.className = cls;
+      sp.textContent = text;
+      b.appendChild(sp);
+    };
+    put("tc-lab", spec.label);
+    // Le repere de manette est le petit : c'est le nom de l'action qu'on lit.
+    // Les gachettes le mettent au-dessus, le losange en dessous, ce que le CSS
+    // fait tourner sans que l'ordre du DOM change.
+    if (spec.tag) put("tc-tag", spec.tag);
     if (spec.title) b.title = spec.title;
     b.setAttribute("aria-label", spec.title || spec.label);
     parent.appendChild(b);
@@ -552,14 +614,19 @@ export class TouchControls {
   }
 
   /**
-   * Etat de l'interface : un menu ouvert sort la croix et suspend le pilotage,
-   * la carte sort ses deux touches et laisse le canvas prendre les gestes.
+   * Etat de l'interface, et la disposition qui va avec.
+   *
+   * En vol, la manette entiere. Dans un menu, elle est remplacee — pas
+   * recouverte — par la croix et les deux boutons de reponse : les commandes de
+   * vol n'y servent a rien, et le pouce n'a plus a chercher lequel repond.
    */
   setContext(ctx) {
     if (!this.enabled) return;
     const menu = !!ctx.menu, map = !!ctx.map;
     if (menu === this.context.menu && map === this.context.map) return;
     this.context = { menu, map };
+    for (const g of this.flight) g.hidden = menu || map;
+    this.dpad.hidden = !menu;
     this.menuGroup.hidden = !menu;
     this.mapGroup.hidden = !map;
     // Zones coupees dans un menu : sinon le pouce qui vise une option fait
