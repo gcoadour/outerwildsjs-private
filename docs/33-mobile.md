@@ -36,11 +36,15 @@ boutons de l'écran et les touches partagent le même chemin.
 | manche droit, glissé | souris capturée | même formule, gain 1,7 |
 | manche droit, tenu | souris capturée | rotation **continue**, 900 px/s à fond |
 | tape brève à droite | `E` | parler, interagir, faire défiler un dialogue |
-| `▲` maintenu | `Espace` | monter |
-| `»` | `Maj` | **latché** : un pouce ne peut pas tenir et viser à la fois |
-| `E` | `E` | l'action principale, au coin, là où le pouce tombe |
-| carte, lunette, sonde, lampe, bord, vue, menu | `M`, `T`, `F`, `L`, `N`, `G`, `Échap` | |
-| croix `▲▼◀▶ ✓ ✕` | flèches, `Entrée`, `Échap` | ne sort que dans un menu |
+| losange `▲` (place de Y) | `Espace` | monter, maintenu |
+| losange `»` (place de X) | `Maj` | **latché** ; le cran de course l'allume aussi |
+| losange `E` (place de A) | `E` | l'action principale, là où le pouce tombe |
+| losange `☀` (place de B) | `L` | lampe |
+| gâchettes `L1` `L2` `R1` `R2` | `T`, `F`, `M`, `N` | lunette, sonde, carte, ordinateur de bord |
+| pastilles du milieu | `G`, `Échap` | affichage, menu |
+| croix `▲▼◀▶`, à gauche | flèches | ne sort que dans un menu |
+| `✓` `✕`, aux places de A et B | `Entrée`, `Échap` | ne sortent que dans un menu |
+| `◎` `✕`, aux places de A et B | `C`, `M` | carte ouverte : centrer, fermer |
 | glisser sur la carte | glisser à la souris | même conversion pixels → fraction d'écran |
 | pincer sur la carte | molette | zoom borné aux valeurs du jeu |
 | taper une option de dialogue | `1`-`9` | le curseur suit le doigt |
@@ -84,6 +88,31 @@ déclenche partout ; lui demander de viser un bouton à chaque réplique de
 dialogue serait pénible. Une tape est un pointeur posé et relevé sans avoir
 glissé de plus de 14 pixels, en moins de 300 ms — au-delà, c'est un regard.
 
+## La grammaire d'une manette
+
+Les boutons n'étaient qu'une rangée de sept noms en haut et trois pastilles en
+bas : rien ne disait lequel servait à quoi, ni où chercher. Ils suivent
+désormais la disposition d'une manette, parce que c'est la seule que tout le
+monde reconnaît sans l'apprendre — celle des overlays de FPS mobiles :
+
+- **gâchettes** le long du bord haut, deux à gauche, deux à droite ; les coins
+  sont pris par les jauges et la minicarte ;
+- **losange d'action** en bas à droite, aux places de Y, X, B et A. C'est A qui
+  tombe sous le pouce sans effort, donc A porte `E` — l'action principale ;
+- **pastilles du milieu**, celles qu'une manette met entre ses deux manches,
+  pour ce qui ne sert qu'entre deux vols ;
+- **croix directionnelle** en bas à gauche, là où le pouce tenait le manche.
+
+Chaque bouton porte **deux étiquettes** : le nom de l'action, en gros, et le
+repère de manette (`L1`, `A`, …), en petit. Personne n'a de plan de touches en
+tête pour un jeu de 2013 ; le repère dit *où* est le bouton, le nom dit ce
+qu'il *fait*.
+
+Un menu ne recouvre pas la manette : il la **remplace**. Les dix commandes de
+vol disparaissent, la croix et les deux boutons de réponse prennent leur place —
+`✓` et `✕` exactement là où le pouce venait de laisser « agir » et « lampe ».
+Rien à chercher, rien qui réponde à côté.
+
 ## Les trois plans, et pourquoi l'ordre compte
 
 ```
@@ -101,6 +130,20 @@ de dialogue ou à une ligne de réglages ne leur est jamais volé. Les boutons s
 enfermerait le joueur dedans, faute de pouvoir viser « fermer ». Leur conteneur
 laisse passer les appuis ; seuls les boutons eux-mêmes les prennent.
 
+Être en dessous a un prix, et il a été payé : **les deux manches sont restés
+muets**. `#map` est un canvas plein écran, en z-index 5, masqué par l'attribut
+`hidden` quand la carte est fermée — sauf que sa règle d'identité fixe
+`display: block`, laquelle l'emporte sur le `display: none` que le navigateur
+applique à `[hidden]`. La carte fermée restait donc étendue au-dessus des zones
+de pilotage et avalait tous leurs appuis ; seuls les boutons, plus haut,
+répondaient. Le même piège était déjà annoté sur `#gate`, où il avait été vu.
+
+Ce qu'il faut en retenir tient à la manière de vérifier : envoyer un événement
+de pointeur *à la zone elle-même* ne prouve rien, puisque cela court-circuite le
+test de recouvrement. Le contrôle qui l'aurait vu est celui qui part du **point
+de l'écran** — `elementFromPoint` là où le pouce se pose — et il est désormais
+dans `tools/15_verify.py`.
+
 Un menu ouvert (réglages, ordinateur de bord) ou la carte **suspendent le
 pilotage** et rangent les boutons de vol : sinon le pouce qui vise une option
 fait aussi tourner la tête du joueur derrière, et la croix se poserait sur le
@@ -116,13 +159,13 @@ changent, et ils se rangent pour laisser les pouces libres :
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ jauges      carte lunette sonde lampe bord vue menu   ⊙   │  minicarte
-│                                                           │
-│                    invite centrale             ◌          │
-│  invites            ◌                           ▲  »  E   │
-│  bandeau d'état ─────────────────────────────────────────│
+│ jauges   L1 L2  vue menu  R1 R2                       ⊙   │  minicarte
+│                                                     ▲     │
+│                    invite centrale                        │
+│  invites        ◌            ◌                  »     ☀   │
+│  bandeau d'état ───────────────────────────────────  E ──│
 └──────────────────────────────────────────────────────────┘
-   manche gauche : déplacement          manche droit : regard
+   manche gauche : déplacement    manche droit : regard, puis le losange
 ```
 
 Trois bornes s'ajoutent ailleurs, pour la même raison :
@@ -173,9 +216,13 @@ lui envoie des événements de pointeur, et contrôle qu'elle produit bien les
 entrées attendues : axe saturé à 1 manche à fond, course au cran, axe nul manche
 relâché, glissement à droite à son gain direct, **rotation continue à 900 px/s
 manche droit tenu** et plus rien une fois relâché, `KeyE` sur la tape comme sur
-le bouton d'action, pilotage suspendu dans un menu, deux manches, deux
-empreintes et 18 boutons à l'écran. Puis elle est retirée, et la page rendue
-telle qu'elle était.
+le bouton d'action, pilotage suspendu dans un menu, dix commandes de vol
+remplacées par six en menu, deux manches, deux empreintes et 18 boutons en tout.
+Puis elle est retirée, et la page rendue telle qu'elle était.
+
+Et surtout, depuis que le défaut ci-dessus a coûté deux manches silencieux :
+**ce que le doigt touche vraiment**, `elementFromPoint` aux deux endroits où les
+pouces se posent, qui doit être la zone de pilotage et rien d'autre.
 
 L'ouverture forcée `?touch=1` installe la disposition tactile sur un poste de
 bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
@@ -184,6 +231,9 @@ bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
 ## Ce qui reste
 
 - **Le portrait** n'a pas d'interface propre, seulement un bandeau.
+- **La croix ne sort que dans un menu.** En vol elle ne servirait à rien, mais
+  dans un dialogue les options se visent au doigt plutôt qu'avec elle — ce qui
+  marche, sans être le même geste que dans un menu.
 - **Rien n'est réglable depuis l'écran** : ni la taille des boutons, ni leur
   côté (le gaucher n'a pas d'option), ni la sensibilité tactile en propre — elle
   passe par le réglage de regard du jeu, ce qui est cohérent mais pas séparé. Le

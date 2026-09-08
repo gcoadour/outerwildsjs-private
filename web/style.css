@@ -25,6 +25,13 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 }
 #status { color: #ffd9a0; }
 #hud2 { margin-top: 3px; color: #9fd6c4; }
+/* Meme piege que pour #gate, et il coutait cher : la regle d'identite ci-dessous
+   l'emporte sur le `display: none` que le navigateur applique a [hidden]. La
+   carte fermee restait donc etendue sur tout l'ecran, en z-index 5, au-dessus
+   des zones de pilotage (4) : elle avalait tous les appuis destines aux
+   manches, qui ne repondaient jamais, et le clic de capture de souris avec. */
+#map[hidden] { display: none; }
+
 #map {
   position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 5;
   display: block; cursor: crosshair;
@@ -347,18 +354,22 @@ body:not(.playing) #ui { display: none; }
    un de chaque cote. Elle s'efface des que le pouce se pose — a partir de la,
    c'est le manche lui-meme qui montre ou il est. */
 .tc-home {
-  position: absolute; width: 96px; height: 96px; margin: -48px 0 0 -48px;
-  border: 1px dashed rgba(207, 224, 244, .16);
+  position: absolute; width: 108px; height: 108px; margin: -54px 0 0 -54px;
+  border: 1px solid rgba(207, 224, 244, .16);
+  background: rgba(10, 16, 26, .18);
   border-radius: 50%; pointer-events: none;
   transition: opacity .18s ease;
 }
+/* Le meme bouton que celui du manche, en plus pale : l'empreinte montre l'objet
+   qu'on va prendre, pas un repere abstrait. */
 .tc-home::after {
   content: ""; position: absolute; left: 50%; top: 50%;
-  width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
-  background: rgba(207, 224, 244, .22);
+  width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
+  background: rgba(207, 224, 244, .12);
+  border: 1px solid rgba(207, 224, 244, .22);
 }
-.tc-zone-move .tc-home { left: 22%; bottom: 26%; }
-.tc-zone-look .tc-home { left: 42%; bottom: 34%; }
+.tc-zone-move .tc-home { left: 24%; bottom: 12%; }
+.tc-zone-look .tc-home { left: 40%; bottom: 12%; }
 .tc-zone.tc-live .tc-home, #touch.tc-idle .tc-home { opacity: 0; }
 
 /* Manches flottants : ils apparaissent la ou le pouce se pose. Les deux ont la
@@ -384,13 +395,20 @@ body:not(.playing) #ui { display: none; }
   border-color: rgba(255, 217, 160, .5);
 }
 
-/* Boutons. Les couleurs sont celles du HUD : ambre pour l'action, ardoise
-   pour le reste. La cible fait au moins 44 px, ce qu'un doigt demande. */
+/* Boutons, en grammaire de manette : gachettes le long du bord haut, losange
+   d'action a droite, croix a gauche quand un menu est ouvert. Les couleurs sont
+   celles du HUD : ambre pour l'action, ardoise pour le reste. La cible fait au
+   moins 44 px, ce qu'un doigt demande.
+
+   Chaque bouton porte deux etiquettes : le nom de l'action, qui est le gros, et
+   le repere de manette, qui est le petit. L'ordre du DOM est nom puis repere ;
+   les gachettes le retournent pour mettre « L1 » au-dessus. */
 .tc-group { position: absolute; display: flex; gap: 8px; }
-.tc-group[hidden] { display: none; }
+.tc-group[hidden], .tc-pad[hidden] { display: none; }
 .tc-btn {
   pointer-events: auto;
-  display: grid; place-items: center;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 1px;
   min-width: 46px; height: 46px; padding: 0 6px;
   border-radius: 50%;
   border: 1px solid rgba(207, 224, 244, .28);
@@ -400,45 +418,73 @@ body:not(.playing) #ui { display: none; }
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
 }
+.tc-tag {
+  font-size: 8px; letter-spacing: .02em; text-transform: uppercase;
+  opacity: .6; white-space: nowrap;
+}
 .tc-btn.tc-on {
   background: rgba(255, 217, 160, .28);
   border-color: rgba(255, 217, 160, .7);
   color: #fff;
 }
-/* Cluster d'action, en bas a droite : le pouce droit y tombe naturellement. */
-.tc-actions {
-  right: calc(12px + env(safe-area-inset-right));
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  /* l'ordre du DOM est monter, accelerer, action : « E » se retrouve donc au
-     coin, la ou le pouce droit tombe sans effort */
-  align-items: center;
+.tc-btn.tc-on .tc-tag { opacity: .85; }
+
+/* Gachettes : deux a gauche du centre, deux a droite, le long du bord haut —
+   les coins sont pris par les jauges et la minicarte. Le repere passe
+   au-dessus du nom. */
+.tc-shoulders { top: calc(6px + env(safe-area-inset-top)); gap: 6px; }
+.tc-sh-left { right: 50%; margin-right: 64px; }
+.tc-sh-right { left: 50%; margin-left: 64px; }
+.tc-shoulder {
+  flex-direction: column-reverse;
+  min-width: 72px; height: 38px; border-radius: 10px;
+  font-size: 11px; letter-spacing: .02em;
 }
+/* Boutons du milieu, ceux qu'une manette met entre ses manches. */
+.tc-center {
+  left: 50%; transform: translateX(-50%);
+  top: calc(9px + env(safe-area-inset-top)); gap: 6px;
+}
+.tc-pill { min-width: 54px; height: 32px; border-radius: 16px; font-size: 10px; }
+
+/* Losange et croix : une grille de trois cases sur trois, dont seules les
+   quatre du milieu des bords sont remplies — c'est ce qui donne la forme. */
+.tc-pad { position: absolute; display: grid; gap: 4px; }
+.tc-f-y { grid-area: 1 / 2; }
+.tc-f-x { grid-area: 2 / 1; }
+.tc-f-b { grid-area: 2 / 3; }
+.tc-f-a { grid-area: 3 / 2; }
+.tc-d-up { grid-area: 1 / 2; }
+.tc-d-left { grid-area: 2 / 1; }
+.tc-d-right { grid-area: 2 / 3; }
+.tc-d-down { grid-area: 3 / 2; }
+
+/* Losange d'action, en bas a droite : A tombe sous le pouce, donc A porte
+   l'action principale du jeu. */
+.tc-face {
+  right: calc(20px + env(safe-area-inset-right));
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  place-items: center;
+}
+.tc-face .tc-btn { min-width: 54px; height: 54px; padding: 0 2px; font-size: 17px; }
 .tc-act {
-  min-width: 66px; height: 66px;
+  min-width: 62px; height: 62px;
   font-size: 22px; color: #ffd9a0;
   border-color: rgba(255, 217, 160, .5);
   background: rgba(30, 22, 10, .5);
 }
-.tc-up, .tc-boost { min-width: 52px; height: 52px; font-size: 18px; }
-/* Bascules, en haut au centre : elles ne servent qu'entre deux manoeuvres. */
-.tc-toggles {
-  left: 50%; transform: translateX(-50%);
-  top: calc(6px + env(safe-area-inset-top));
-  gap: 6px;
+.tc-act .tc-tag { color: #ffd9a0; }
+
+/* Croix directionnelle, en bas a gauche : la ou le pouce tenait le manche. */
+.tc-dpad {
+  left: calc(16px + env(safe-area-inset-left));
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  gap: 2px;
 }
-.tc-tog {
-  min-width: 44px; height: 34px; border-radius: 17px;
-  font-size: 10px; letter-spacing: .02em;
-}
-/* Croix de menu et touches de carte : une rangee, en bas au centre. */
-.tc-menu, .tc-mapkeys {
-  left: 50%; transform: translateX(-50%);
-  bottom: calc(12px + env(safe-area-inset-bottom));
-}
-.tc-key { min-width: 48px; height: 44px; font-size: 16px; }
-.tc-mapkeys .tc-key { min-width: 64px; font-size: 11px; }
+.tc-key { min-width: 48px; height: 46px; border-radius: 10px; font-size: 16px; }
 .tc-m-ok { color: #9fe8c8; border-color: rgba(120, 230, 190, .45); }
 .tc-m-back { color: #f0c6c6; border-color: rgba(200, 120, 120, .45); }
+.tc-face .tc-key { border-radius: 50%; }
 
 /* --- L'interface du jeu, adaptee au paysage d'un telephone -----------------
    Un telephone tenu en paysage donne environ 800 x 370 pixels CSS : trois fois
@@ -486,10 +532,10 @@ body.touch #computer {
 body.touch .ow-computer-name { font-size: 18px; padding-bottom: 6px; margin-bottom: 8px; }
 body.touch .ow-computer-desc { font-size: 13px; line-height: 1.45; }
 
-/* Menu ou carte ouverte : les boutons de pilotage se rangent, et les lignes
-   d'etat laissent la place a la croix. Le dialogue, lui, vit dans le meme
-   bandeau et doit rester visible : on ne cache que les lignes de texte. */
-#touchui.tc-modal .tc-actions, #touchui.tc-modal .tc-toggles { display: none; }
+/* Menu ou carte ouverte : les commandes de vol sont rangees par la couche
+   elle-meme (voir setContext), et les lignes d'etat laissent la place a la
+   croix. Le dialogue, lui, vit dans le meme bandeau et doit rester visible :
+   on ne cache que les lignes de texte. */
 body.tc-modal #status, body.tc-modal #hud2, body.tc-modal #help-touch { display: none; }
 
 /* Mode « masque » de GUIMode : il rend l'ecran entier au jeu, bandeau d'etat
