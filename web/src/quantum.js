@@ -67,6 +67,84 @@ export function segmentHitsSphere(a, b, center, radius) {
   return Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2]) < radius;
 }
 
+/**
+ * Longueur du segment qui passe A L'INTERIEUR d'une sphere.
+ *
+ * C'est ce que `_checkDepth` demande et que le test binaire ne donnait pas : le
+ * jeu ne se contente pas de savoir qu'un obstacle est sur le chemin, il lance
+ * une sphere SUR UNE PROFONDEUR. Raser le limbe d'une planete ne masque donc
+ * pas la lune ; passer franchement derriere elle, si.
+ */
+export function segmentDepthInSphere(a, b, center, radius) {
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const f = [a[0] - center[0], a[1] - center[1], a[2] - center[2]];
+  const A = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+  if (A < 1e-9 || !(radius > 0)) return 0;
+  const B = 2 * (f[0] * d[0] + f[1] * d[1] + f[2] * d[2]);
+  const C = f[0] * f[0] + f[1] * f[1] + f[2] * f[2] - radius * radius;
+  const disc = B * B - 4 * A * C;
+  if (disc <= 0) return 0;
+  const s = Math.sqrt(disc);
+  const t0 = Math.max(0, (-B - s) / (2 * A));
+  const t1 = Math.min(1, (-B + s) / (2 * A));
+  return t1 > t0 ? (t1 - t0) * Math.sqrt(A) : 0;
+}
+
+/**
+ * Un corps masque-t-il la lune ?
+ *
+ * La sphere lancee a un rayon (`_sphereCheckRadius`, 150), ce qui revient a
+ * grossir l'obstacle d'autant ; et elle doit rester dedans sur `_checkDepth`
+ * (100) pour que l'obstacle compte. Les deux constantes etaient exportees et
+ * inutilisees.
+ */
+export function occludes(a, b, center, radius,
+                         probe = CHECK_RADIUS, depth = CHECK_DEPTH) {
+  return segmentDepthInSphere(a, b, center, radius + probe) >= depth;
+}
+
+/**
+ * Quaternion orientant l'axe +Z vers une direction donnee.
+ *
+ * `AlignQuantumMoon` tourne la lune vers le joueur : quel que soit l'hote
+ * autour duquel elle s'est effondree, c'est la meme face qu'on voit. Sans lui,
+ * la lune changeait de planete ET d'aspect a chaque saut.
+ */
+export function lookRotation(dir, up = [0, 1, 0]) {
+  const L = Math.hypot(dir[0], dir[1], dir[2]);
+  if (L < 1e-9) return [0, 0, 0, 1];
+  const f = [dir[0] / L, dir[1] / L, dir[2] / L];
+  let r = [up[1] * f[2] - up[2] * f[1], up[2] * f[0] - up[0] * f[2],
+           up[0] * f[1] - up[1] * f[0]];
+  let rl = Math.hypot(r[0], r[1], r[2]);
+  if (rl < 1e-6) {
+    const alt = Math.abs(f[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    r = [alt[1] * f[2] - alt[2] * f[1], alt[2] * f[0] - alt[0] * f[2],
+         alt[0] * f[1] - alt[1] * f[0]];
+    rl = Math.hypot(r[0], r[1], r[2]) || 1;
+  }
+  r = [r[0] / rl, r[1] / rl, r[2] / rl];
+  const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2],
+             f[0] * r[1] - f[1] * r[0]];
+  // matrice (r, u, f) -> quaternion, par la trace
+  const m = [r[0], r[1], r[2], u[0], u[1], u[2], f[0], f[1], f[2]];
+  const tr = m[0] + m[4] + m[8];
+  if (tr > 0) {
+    const s = Math.sqrt(tr + 1) * 2;
+    return [(m[5] - m[7]) / s, (m[6] - m[2]) / s, (m[1] - m[3]) / s, 0.25 * s];
+  }
+  if (m[0] > m[4] && m[0] > m[8]) {
+    const s = Math.sqrt(1 + m[0] - m[4] - m[8]) * 2;
+    return [0.25 * s, (m[3] + m[1]) / s, (m[6] + m[2]) / s, (m[5] - m[7]) / s];
+  }
+  if (m[4] > m[8]) {
+    const s = Math.sqrt(1 + m[4] - m[0] - m[8]) * 2;
+    return [(m[3] + m[1]) / s, 0.25 * s, (m[7] + m[5]) / s, (m[6] - m[2]) / s];
+  }
+  const s = Math.sqrt(1 + m[8] - m[0] - m[4]) * 2;
+  return [(m[6] + m[2]) / s, (m[7] + m[5]) / s, 0.25 * s, (m[1] - m[3]) / s];
+}
+
 /** Hotes possibles, lus depuis data/gameplay.json. */
 export function quantumHosts(gameplay) {
   return ((gameplay.placed && gameplay.placed.QuantumOrbit) || [])
@@ -183,8 +261,17 @@ export function bodyOccluder(bodies, exclude = null) {
       if (b === exclude) continue;
       const r = (b.gravity && b.gravity.upperSurfaceRadius) || 0;
       if (r <= 0) continue;
-      if (segmentHitsSphere(from, to, b.position, r)) return true;
+      if (occludes(from, to, b.position, r)) return true;
     }
     return false;
   };
+}
+
+/**
+ * Orientation de la lune face a l'observateur (`AlignQuantumMoon`).
+ *
+ * @returns quaternion [x, y, z, w] a poser sur le noeud de la lune
+ */
+export function alignToObserver(moonPos, eye) {
+  return lookRotation([eye.x - moonPos[0], eye.y - moonPos[1], eye.z - moonPos[2]]);
 }

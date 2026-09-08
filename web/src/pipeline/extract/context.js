@@ -139,6 +139,64 @@ export class ExtractContext {
     return h && h.m_GameObject ? h.m_GameObject.pathId : 0;
   }
 
+  /**
+   * Composants d'un GameObject, par type moteur.
+   *
+   * Le GameObject porte la liste de ses composants ; c'est le seul chemin qui
+   * mene d'un MonoBehaviour au collider pose a cote de lui. Sans lui, un
+   * DirectionalForceField ou un volume de fluide n'a ni forme ni taille : le
+   * champ vit dans le collider, pas dans le script.
+   */
+  *componentsOf(gid, types = null) {
+    const go = this.gameObjects.get(gid);
+    if (!go || !go.m_Component) return;
+    const want = types ? new Set(types) : null;
+    const file = this.env.get(this.sceneFile);
+    for (const c of go.m_Component) {
+      const o = this.env.deref(c.component, file);
+      if (!o || (want && !want.has(o.type))) continue;
+      yield o;
+    }
+  }
+
+  /**
+   * Volume d'un GameObject, deduit de ses colliders.
+   *
+   * On rend un rayon englobant plutot que la forme exacte : le moteur teste des
+   * appartenances a des volumes, pas des contacts. L'echelle monde du
+   * GameObject est appliquee — un collider de rayon 1 sur un objet a l'echelle
+   * 500 fait bien un volume de 500.
+   *
+   * @returns {shape, radius, center, size} ou null si l'objet n'a pas de volume
+   */
+  volumeOf(gid) {
+    const [, , scl] = this.world(gid);
+    const k = Math.max(Math.abs(scl[0]), Math.abs(scl[1]), Math.abs(scl[2])) || 1;
+    for (const o of this.componentsOf(gid, ["SphereCollider", "BoxCollider",
+                                            "CapsuleCollider", "MeshCollider"])) {
+      const v = this.readEngine(o);
+      if (!v) continue;
+      const c = v.m_Center ? [v.m_Center.x, v.m_Center.y, v.m_Center.z] : [0, 0, 0];
+      if (o.type === "SphereCollider" && v.m_Radius) {
+        return { shape: "sphere", radius: round(v.m_Radius * k, 3),
+                 center: c.map((x) => round(x * k, 3)) };
+      }
+      if (o.type === "BoxCollider" && v.m_Size) {
+        const s = [v.m_Size.x * k, v.m_Size.y * k, v.m_Size.z * k];
+        return { shape: "box", size: s.map((x) => round(x, 3)),
+                 center: c.map((x) => round(x * k, 3)),
+                 radius: round(Math.hypot(s[0], s[1], s[2]) / 2, 3) };
+      }
+      if (o.type === "CapsuleCollider" && v.m_Radius) {
+        const h = Math.max(v.m_Height || 0, v.m_Radius * 2) * k;
+        return { shape: "capsule", radius: round(v.m_Radius * k, 3),
+                 height: round(h, 3), center: c.map((x) => round(x * k, 3)) };
+      }
+      if (o.type === "MeshCollider") return { shape: "mesh", radius: null, center: c };
+    }
+    return null;
+  }
+
   name(gid) {
     const go = this.gameObjects.get(gid);
     return go ? go.m_Name : null;
@@ -211,12 +269,21 @@ export class ExtractContext {
     return null;
   }
 
-  /** Itere les MonoBehaviour de la scene dont la classe est dans `classes`. */
+  /**
+   * Itere les MonoBehaviour de la scene dont la classe est retenue.
+   *
+   * `classes` est une liste de noms, ou un predicat quand on cherche une
+   * famille dont on ne connait pas les noms exacts.
+   */
   *behaviours(classes) {
-    const want = classes ? new Set(classes) : null;
+    const keep = typeof classes === "function" ? classes
+      : classes ? ((cls) => new Set(classes).has(cls)) : (() => true);
+    const want = typeof classes === "function" || !classes
+      ? null : new Set(classes);
     for (const o of this.env.objects({ type: "MonoBehaviour", file: this.sceneFile })) {
       const cls = this.scriptName(o);
-      if (!cls || (want && !want.has(cls))) continue;
+      if (!cls) continue;
+      if (want ? !want.has(cls) : !keep(cls)) continue;
       yield { obj: o, cls };
     }
   }

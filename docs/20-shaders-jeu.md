@@ -68,8 +68,9 @@ prédateurs avaient été portés sans leur décor.
 `V-Fog` reste à zéro, et l'enquête donne une réponse inattendue : il n'existe
 **qu'un seul matériau** de ce nom, appliqué à 18 rendus dont **14 sont des
 `SkinnedMeshRenderer`** — le rig d'un personnage : son corps, son marteau, sa
-brosse, sa loupe. Les 7 autres sont dans `mainData`, un fichier de scène jamais
-exporté.
+brosse, sa loupe. Les 7 autres sont dans `mainData`, un fichier de scène qui
+n'était jamais extrait — il l'est depuis ([`35-monde.md`](35-monde.md) §10),
+mais en inventaire seulement : sa géométrie n'est pas exportée.
 
 Le shader nommé « V-Fog » ne sert donc pas à faire du brouillard. Son absence
 découle de deux limites déjà connues — le skinning non transporté et `mainData`

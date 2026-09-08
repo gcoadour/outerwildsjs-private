@@ -82,5 +82,10 @@ sur le terrain. Porté à 40.
   ont une source. Il n'y a ni entraînement, ni télescope, ni sonde.
 - **`RocketKidConvoController`** et ses compteurs d'atterrissages ne sont pas
   portés.
-- **La sélection d'arbre reste approximative** : elle repose sur le nom du
-  personnage et celui des arbres, là où le jeu tient des références directes.
+- ~~**La sélection d'arbre reste approximative**~~ — **corrigée** : le
+  contrôleur (`CoachConvoController`, `CuratorConvoController`…) porte ses
+  arbres en **référence directe**, et l'extracteur les résout. La règle porte
+  désormais sur le nom du **champ** du contrôleur, pas sur le titre de l'arbre —
+  c'est toute la différence entre lire une référence et chercher ce qui lui
+  ressemble ([`35-monde.md`](35-monde.md) §8). La recherche par nom reste comme
+  repli, pour un build où le contrôleur ne porterait pas ses arbres.

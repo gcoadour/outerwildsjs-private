@@ -3,6 +3,13 @@
 [`08-reste-a-faire.md`](08-reste-a-faire.md) dit **où en est** le portage.
 Cette page-ci dit **quoi faire**, et dans quel ordre.
 
+> **État.** Les dix-huit actions ont été menées, sauf A17 — la compilation sur
+> mesure de Babylon, qui est un choix de projet — et la moitié d'A8, qui attend
+> une régénération de `unity41-types.json`. [`35-monde.md`](35-monde.md) raconte
+> ce que chacune a donné. Les actions restent écrites ici **au présent de
+> l'époque** : elles disent ce qui manquait, et pourquoi ; l'état de chacune est
+> marqué en fin de section.
+
 ## Méthode, et ce qu'elle vaut
 
 La comparaison ne repose pas sur une impression du jeu final : elle confronte
@@ -33,11 +40,11 @@ la contredire.
 | géométrie, matériaux, skinning, animations | **conforme**, aux clips Mecanim près, décodés depuis |
 | mécaniques de lieu (quantique, trou noir, Bramble, croûte) | **conformes** dans leur logique, incomplètes dans leur mise en scène |
 | boucle, mort, ressources, vaisseau, connaissance | **conformes** |
-| **monde physique** : rotation propre, champs directionnels, fluides | **écart** — rien de tout cela n'est appliqué |
-| **éclairage et son placés** : `Light`, portées d'`AudioSource` | **écart** — les valeurs du build sont là et ne sont pas lues |
-| niveau de détail, colliders | **écart assumé** — deux niveaux, un bloc de colliders |
+| **monde physique** : rotation propre, champs directionnels, fluides | ~~écart~~ **porté** — voir [`35-monde.md`](35-monde.md) §1, §4, §5 |
+| **éclairage et son placés** : `Light`, portées d'`AudioSource` | ~~écart~~ **lus**, §2 et §3 |
+| niveau de détail, colliders | **écart** réduit — les seuils du build sont lus quand il en donne, les colliders restent posés d'un bloc |
 | interface, invites, jauges, carte, réglages | **conformes**, aux quelques champs listés plus bas près |
-| commandes | **écart** — clavier et tactile, pas de manette, alors que le build en décrit une |
+| commandes | ~~écart~~ **clavier, tactile et manette**, §7 |
 | ce que l'alpha ne contient pas | **hors d'atteinte**, voir [`08`](08-reste-a-faire.md) §1 |
 
 ## 1. Les données du build qu'on n'écoute pas
@@ -66,6 +73,10 @@ remplace aujourd'hui.
   du sol) ; l'azimut du soleil vu du sol, mesuré à deux instants, dans
   `tools/15_verify.py`.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §1. La rotation est appliquée au
+> repère ancré ; `tests/09-jeu.mjs` garde la cinématique, `tools/15_verify.py`
+> l'azimut du soleil.
+
 ### A2 — Lire les vraies portées audio
 
 - **Le jeu** : chaque `AudioSource` porte `MinDistance`, `MaxDistance`,
@@ -90,6 +101,11 @@ remplace aujourd'hui.
   (aucune ne doit plus valoir exactement 60, 150 ou 300 par construction) ; à
   l'oreille ensuite, mais l'oreille jugera enfin des valeurs du jeu.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §2. `MinDistance`, `MaxDistance`,
+> `rolloffMode`, `Pan2D` et `DopplerLevel` sont lus ; les rayons en pixels ne
+> servent plus qu'à `signalStrength`. `tests/05-extract.mjs` refuse désormais
+> toute portée de repli.
+
 ### A3 — Poser les lumières de la scène
 
 - **Le jeu** : des composants `Light` placés — le type tree est dans
@@ -104,6 +120,10 @@ remplace aujourd'hui.
   de lumières vivantes au sol sur Timber Hearth et la stabilité du temps par
   image.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §3. `pipeline/extract/lighting.js`
+> et `web/src/lights.js`, budget de 8 lumières, les cuites dans les lightmaps
+> écartées.
+
 ### A4 — Lire les `RenderSettings` plutôt que les recopier
 
 - **Le portage** : `fog.js` porte en dur le gris `(0,5 ; 0,5 ; 0,5)` et
@@ -112,6 +132,9 @@ remplace aujourd'hui.
   la classe est dans `unity41-types.json`. Une valeur juste et une valeur
   recopiée se ressemblent jusqu'au jour où l'une des deux change.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §3. Couleur, mode et ambiance
+> viennent de `data/lighting.json` ; `fog.js` n'en garde que le repli.
+
 ### A5 — Le `_checkDepth` de la lune quantique
 
 `quantum.js` exporte `CHECK_RADIUS = 150` et `CHECK_DEPTH = 100` et **n'utilise
@@ -119,6 +142,9 @@ ni l'un ni l'autre** : le test d'occlusion est binaire, là où le jeu lance une
 sphère sur une profondeur ([`14-quantique.md`](14-quantique.md)). Épaissir le
 segment du rayon de la sphère et borner la profondeur reste analytique, donc
 sans coût.
+
+> **Fait** — [`35-monde.md`](35-monde.md) §8. La sphère grossit l'obstacle de
+> 150 et doit y rester sur 100 : raser un limbe ne masque plus.
 
 ### A6 — Les champs de force directionnels
 
@@ -134,6 +160,10 @@ sans coût.
 - **Vérifier** : 34 champs extraits ; un test de sélection dans
   `tests/09-jeu.mjs` (dans le volume, c'est le directionnel qui gagne).
 
+> **Fait** — [`35-monde.md`](35-monde.md) §4. Le volume vient du collider posé
+> à côté ; sans volume ni intensité lisibles, le champ est écarté plutôt que
+> deviné.
+
 ### A7 — Les fluides, et l'océan de Giant's Deep
 
 - **Le jeu** : `SphereOceanFluidVolume` et `SimpleFluidVolume` sont dans la
@@ -148,6 +178,9 @@ sans coût.
   au joueur, au vaisseau, à la sonde et aux fragments.
 - **Vérifier** : le rayon du volume contre celui du corps ; une vitesse limite
   de chute dans le fluide, dans `tests/09-jeu.mjs`.
+
+> **Fait** — [`35-monde.md`](35-monde.md) §5. Les volumes sortent à part de
+> `solar_system.json` ; traînée sur le joueur, le vaisseau et les fragments.
 
 ### A8 — Les niveaux de détail sont dans le build, pas à générer
 
@@ -168,6 +201,11 @@ sans coût.
 - **Vérifier** : nombre de groupes et de niveaux ; poids du lot Timber Hearth
   avant/après ; temps de construction des colliders.
 
+> **À moitié** — les seuils de `CreateLODGroup` sont lus et appliqués,
+> `ChildColliderLOD` est extrait. La classe moteur `LODGroup` (205) est
+> demandée par `tools/16_unity_types.py` mais absente de `unity41-types.json`
+> : il faut relancer l'outil.
+
 ### A9 — `mainData` n'est jamais extrait
 
 `pipeline/worker.js` charge bien les cinq fichiers, mais l'`ExtractContext` est
@@ -182,6 +220,9 @@ de décider quoi en porter.
 
 Ici il faut écrire du code de jeu, mais les données existent.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §10. Scène et composants de
+> `mainData` sont écrits ; reste à les lire pour décider quoi en porter.
+
 ### A10 — La manette
 
 Le build décrit une manette entière (`XboxInput`), l'extracteur d'invites
@@ -194,6 +235,9 @@ leur nommage particulier (`RightTrigger` → `RT.png`)
 ([`33-mobile.md`](33-mobile.md)) — et l'icône affichée dans l'invite.
 C'est le chemin le plus court vers un vrai portage des commandes.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §7. `web/src/gamepad.js`, branché
+> exactement comme la couche tactile.
+
 ### A11 — Les zones d'oxygène
 
 `main.js` passe `inSupply: ship.boarded` : **seul le vaisseau recharge**.
@@ -202,6 +246,9 @@ volumes) ; le brancher s'il existe, l'inscrire dans
 [`08`](08-reste-a-faire.md) §1 s'il n'existe pas. Tant que la question n'est pas
 tranchée, on ne sait pas si c'est un manque du portage ou de l'alpha.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §6. L'extracteur ramasse la famille
+> par motif ; un compte nul répondra que l'alpha n'en pose pas.
+
 ### A12 — Les caméras déportées
 
 `RemoteFlightConsole` et `SatelliteSnapshotController` supposent une caméra
@@ -209,6 +256,9 @@ ailleurs que sur le joueur ([`30-consoles.md`](30-consoles.md)) — et ce moyen
 existe désormais : la caméra embarquée de la sonde
 ([`25-interface.md`](25-interface.md)). **Faire** : réutiliser `ProbeCamera`
 pour les deux consoles ; leurs invites sont déjà au catalogue.
+
+> **Fait** — [`35-monde.md`](35-monde.md) §8. Touche **R** à portée de la
+> console.
 
 ### A13 — Le brouillard, ses habitants et ses zones
 
@@ -220,6 +270,8 @@ pour les deux consoles ; leurs invites sont déjà au catalogue.
   ([`29-brouillards.md`](29-brouillards.md)).
 - **`AlignQuantumMoon`**, qui oriente la lune vers le joueur.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §8, les trois.
+
 ### A14 — Le bruit qui attire les prédateurs
 
 Le `NoiseSensor` est nourri par les **commandes du joueur**, pas par les sources
@@ -228,6 +280,9 @@ sonores réellement en train de jouer ([`16-bramble.md`](16-bramble.md)). Or
 publier un niveau de bruit depuis le champ audio et le donner aux prédateurs.
 Le jour où l'on peut se trahir en laissant tourner un poste de radio, la zone
 change de nature.
+
+> **Fait** — [`35-monde.md`](35-monde.md) §8. `AudioField.emitters()` nourrit
+> un `NoiseField`, et le prédateur va vers ce qu'il entend.
 
 ### A15 — Les petites règles restées de côté
 
@@ -244,6 +299,10 @@ Chacune tient en quelques lignes, toutes sont mesurées :
 
 ## 3. Le poids et la tenue
 
+> **Fait** — [`35-monde.md`](35-monde.md) §8. Trois des six règles étaient
+> déjà en place (distance d'affichage des marqueurs, drapeau de minicarte,
+> panneau de musée) ; les trois autres le sont maintenant.
+
 ### A16 — Les 15 Mo de WAV
 
 Quinze fichiers, 48 kHz 16 bits, sur les 66,1 Mo du démarrage
@@ -253,6 +312,9 @@ worker, **au moment de l'extraction**, une fois pour toutes, avec repli sur le
 WAV là où l'API manque. C'est le pipeline navigateur qui rend cette piste
 possible, et elle n'a pas été essayée.
 
+> **Fait** — [`35-monde.md`](35-monde.md) §9. `pipeline/audioenc.js`, avec son
+> conteneur Ogg et son repli WAV. Le gain reste à mesurer.
+
 ### A17 — Babylon pèse 11,1 Mo
 
 Près d'un cinquième du démarrage, pour un moteur dont on n'utilise qu'une part.
@@ -260,12 +322,18 @@ Une compilation sur mesure les réduirait — au prix d'une étape de constructi
 que le dépôt n'a pas aujourd'hui (« aucune dépendance npm »). À peser comme un
 choix de projet, pas seulement comme une optimisation.
 
+> **Non fait**, délibérément : c'est un choix de projet, pas une optimisation
+> à faire en passant.
+
 ### A18 — Le cache des textures partagées
 
 27 URL demandées jusqu'à cinq fois faute d'en-têtes de cache
 ([`27-poids.md`](27-poids.md)). Le Service Worker sert déjà `data/…` : qu'il
 pose un `Cache-Control` et garde un cache mémoire, et la mesure cesse d'être un
 pire cas.
+
+> **Fait** — [`35-monde.md`](35-monde.md) §9. En-têtes `immutable` et cache
+> mémoire, vidé quand une extraction recommence.
 
 ## 4. Ce qui demande un jugement humain
 
@@ -289,19 +357,13 @@ que d'inventer.
 
 ## Par où commencer
 
-Cinq actions, dans cet ordre, parce qu'elles changent ce qu'on voit et ce qu'on
-entend pour un coût connu, et que chacune remplace une valeur inventée par une
-valeur du build :
+Cinq actions ont été menées d'abord, dans cet ordre, parce qu'elles changent ce
+qu'on voit et ce qu'on entend pour un coût connu, et que chacune remplace une
+valeur inventée par une valeur du build : **A1** la rotation propre, **A2** les
+portées audio, **A3** les lumières, **A7** les fluides, **A8** les niveaux de
+détail. Puis **A10**, la manette, dernier grand pan d'entrée décrit par le build
+et jamais lu.
 
-1. **A1**, la rotation propre des corps — c'est le plus gros écart de monde
-   encore ouvert, et le repère ancré est déjà le bon endroit pour le porter.
-2. **A2**, les portées audio réelles — l'obstacle qui les bloquait a disparu
-   avec UnityPy.
-3. **A3**, les lumières de la scène — deux lumières inventées pour tout un
-   système solaire.
-4. **A7**, les fluides — sans eux, Giant's Deep n'est pas Giant's Deep.
-5. **A8**, les niveaux de détail du build — le seul gain de poids qui ne coûte
-   aucune fidélité.
-
-Puis **A10**, la manette, qui est le dernier grand pan d'entrée décrit par le
-build et jamais lu.
+Le reste a suivi. Ce qu'il en reste tient dans deux lignes : régénérer
+`unity41-types.json` pour finir A8, et décider si le dépôt accepte une étape de
+construction pour A17.

@@ -19,12 +19,13 @@ import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
 import { buildOrbits, advance, currentPosition, period } from "./orbits.js";
 import { loadGameplay } from "./config.js";
-import { Resources } from "./resources.js";
+import { Resources, oxygenZones, inOxygenZone } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { Settings, SettingsUI } from "./settings.js";
-import { shipRecords, ShipComputer, Flashlight, Marshmallow } from "./consoles.js";
+import { shipRecords, ShipComputer, Flashlight, Marshmallow,
+         heatSources, heatAt, remoteConsoles, RemoteConsoles } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust } from "./crust.js";
@@ -35,22 +36,29 @@ import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
 import { TimeLoop } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
-import { PlayerDeathHandler, FlashbackOverlay } from "./death.js";
-import { MeshLOD, Evictor } from "./lod.js";
+import { PlayerDeathHandler, FlashbackOverlay, deathCamera,
+         DEATH_SOUNDS } from "./death.js";
+import { MeshLOD, Evictor, lodThresholds } from "./lod.js";
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
-import { QuantumMoon, quantumHosts, bodyOccluder } from "./quantum.js";
+import { QuantumMoon, quantumHosts, bodyOccluder,
+         alignToObserver } from "./quantum.js";
 import { BlackHole, DebrisField } from "./blackhole.js";
-import { Anglerfish, Thorns } from "./bramble.js";
+import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap } from "./map.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
-import { SECTORS, PlayerData, selectTree } from "./playerdata.js";
+import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
+import { GamepadControls, padAvailable } from "./gamepad.js";
+import { SpinField, sunElevation } from "./spin.js";
+import { directionalFields } from "./gravity.js";
+import { fluidVolumes, FluidField } from "./fluids.js";
+import { loadLighting, LightField } from "./lights.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -106,10 +114,20 @@ async function boot() {
   let anchorBody = null;
   const sub3 = (a, c) => [a[0] - c[0], a[1] - c[1], a[2] - c[2]];
 
+  // Rotation propre : elle s'applique au REPERE, pas a la geometrie (voir
+  // spin.js). Le sol du corps ancre ne bouge donc pas — ses colliders restent
+  // valides — et c'est le reste du monde, etoile comprise, qui tourne autour.
+  // C'est de la que vient le cycle jour/nuit, absent jusqu'ici.
+  const spins = new SpinField(bodies);
+  window.__spin = spins;
+
   /** Exprime toutes les positions dans le repere du corps ancre. */
   function reframe(anchor) {
     const ap = currentPosition(orbits, anchor);
-    for (const b of bodies) b.position = sub3(currentPosition(orbits, b), ap);
+    for (const b of bodies) {
+      const rel = sub3(currentPosition(orbits, b), ap);
+      b.position = b === anchor ? rel : spins.toFrame(anchor, rel);
+    }
     return ap;
   }
 
@@ -195,6 +213,31 @@ async function boot() {
 
   const particleMap = await loadParticleMap();
   const particles = new ParticleField(BABYLON, scene, particleMap);
+
+  // --- ce que le build portait et que rien ne lisait ---
+  //
+  // Cinq familles de donnees deja extraites, restees sans lecteur : les
+  // lumieres posees, les reglages de rendu, les champs de force directionnels,
+  // les volumes de fluide et les zones d'oxygene. Voir docs/34-actions.md.
+  const lighting = await loadLighting();
+  const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
+  // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
+  // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
+  // dans leur volume, comme SingleFieldDetector le veut.
+  const dirFields = directionalFields(gameplay);
+  // Giant's Deep a enfin un ocean, et ce qui tombe dedans freine.
+  const fluids = new FluidField(fluidVolumes(gameplay, data));
+  // Seul le vaisseau rechargeait l'oxygene ; on regarde maintenant ce que la
+  // scene propose. Liste vide = l'alpha n'en pose aucune, ce qui est une
+  // reponse et non un oubli.
+  const oxygen = oxygenZones(gameplay);
+  const heat = heatSources(gameplay);
+  const controllers = convoControllers(gameplay);
+  window.__world = { lighting: placedLights, dirFields, fluids, oxygen, heat,
+                     controllers };
+  console.log(`monde : ${(lighting.lights || []).length} lumieres, ` +
+    `${dirFields.length} champs directionnels, ${fluids.count} fluides, ` +
+    `${oxygen.length} zones d'oxygene, ${heat.length} sources de chaleur`);
 
   // Geometrie a la demande. Seuls le corps de depart et le soleil sont
   // telecharges avant la premiere image ; les autres arrivent quand on s'en
@@ -319,6 +362,9 @@ async function boot() {
   const minimap = new Minimap(document.getElementById("minimap"));
   let lastPhase = "repos";
   let endTimesCued = false;
+  let deathCued = null;
+  // Face nuit du corps ancre : elle n'existe que depuis que les corps tournent.
+  let night = false;
   // Reglages : leur sauvegarde est distincte de celle de la partie, comme
   // SettingsSave l'est de PlayerData dans le jeu.
   const settings = new Settings(iface || {});
@@ -388,7 +434,9 @@ async function boot() {
   };
 
   // --- brouillards : volumes spheriques et coque quantique ---
-  const fog = new FogField(fogVolumes(gameplay));
+  // Couleur et mode de brouillard viennent des RenderSettings de la scene, plus
+  // des constantes recopiees a la main dans fog.js.
+  const fog = new FogField(fogVolumes(gameplay), lighting.settings);
   const qFogConf = ((gameplay.placed || {}).QuantumFogBoundary || [])[0] || null;
   const qFog = qFogConf ? new QuantumFog(qFogConf) : null;
   // La coque quantique est un OBJET, pas du brouillard de rendu : c'est ce qui
@@ -506,9 +554,16 @@ async function boot() {
   // Le premier eteint ce qui est trop petit a l'ecran, le second rend la
   // memoire d'un corps qu'on a quitte pour de bon. Sans le second, traverser le
   // systeme finissait par tout charger et le gain du demarrage se reperdait.
-  const meshLOD = new MeshLOD();
+  //
+  // Les seuils viennent du build quand il en donne : un LODGroup ne simplifie
+  // rien a la volee, il designe le moment ou l'on passe d'un maillage a l'autre,
+  // et ce moment s'exprime dans l'unite que le module calcule deja. Ce qui n'a
+  // pas de seuil lisible garde le seuil general.
+  const lodMap = lodThresholds(gameplay);
+  const meshLOD = new MeshLOD(undefined, undefined, lodMap);
   const evictor = new Evictor(45, bootFiles(home.name));
-  window.__lod = { meshLOD, evictor };
+  window.__lod = { meshLOD, evictor, seuils: lodMap.size };
+  if (lodMap.size) console.log(`niveaux de detail du build : ${lodMap.size} seuils`);
 
   /** Un lot qu'on ne peut pas liberer sans casser ce qui s'y accroche. */
   function evictionGuard(entry) {
@@ -538,7 +593,22 @@ async function boot() {
   const fish = ((gameplay.placed || {}).AnglerfishController || [])
     .map((f) => new Anglerfish(f.position));
   const thorns = new Thorns(((gameplay.placed || {}).BrambleManager || []).length || 10);
-  window.__bramble = { fish, thorns };
+  // Le bruit n'est plus deduit des commandes du joueur : c'est un champ, nourri
+  // par le joueur ET par les sources audio en train de jouer. On peut donc se
+  // trahir en laissant tourner un poste, ou s'en servir comme leurre.
+  const noise = new NoiseField();
+  // Le seuil de decoupe qui gagne la matiere au fil de la boucle.
+  const corruption = new Corruption(((gameplay.placed || {}).CorruptionAnimator || []),
+    (name) => {
+      const e = geo.find((x) => x.file === "darkbramble_pivot.gltf");
+      return e && e.all ? e.all.filter((n) => n.name === name) : null;
+    });
+  // Zones d'epave : elles suspendent la mise a jour du brouillard.
+  const derelicts = ((gameplay.placed || {}).DerelictCloaker || []).map((d) => ({
+    name: d.name, position: d.position,
+    radius: (d.volume && d.volume.radius) || (d.fields || {})._radius || 500,
+  }));
+  window.__bramble = { fish, thorns, noise, corruption, derelicts };
 
   // --- boucle temporelle ---
   const loop = new TimeLoop();
@@ -586,7 +656,11 @@ async function boot() {
   // La sonde est un appareil photo qu'on jette : sa camera embarquee occupe un
   // coin de l'ecran tant qu'elle vole.
   const probeCam = new ProbeCamera(BABYLON, scene, camera, uiRoot);
-  window.__tools = { telescope, probes, probeCam };
+  // Les consoles a camera deportee — piloter le vaisseau depuis l'observatoire,
+  // regarder par le satellite — reutilisent cette meme vue : c'est le moyen qui
+  // leur manquait, et il existe depuis que la sonde a un oeil.
+  const consoles = new RemoteConsoles(remoteConsoles(gameplay));
+  window.__tools = { telescope, probes, probeCam, consoles };
   // Les options de dialogue sont touchables : au clavier on les choisit au
   // chiffre ou au curseur, au doigt on les vise directement.
   const dlgUI = new DialogueUI(document.getElementById("dialogue"), {
@@ -674,6 +748,18 @@ async function boot() {
     }
     if (code === "KeyT") telescope.toggle();
     if (code === "KeyF") probeFired = true;
+    // Consoles a camera deportee : on les prend en main a portee de la main,
+    // et on les lache de la meme touche.
+    if (code === "KeyR" && consoles.count) {
+      const c = consoles.toggle([player.pos.x + framePos[0],
+                                 player.pos.y + framePos[1],
+                                 player.pos.z + framePos[2]]);
+      console.log(c ? `console prise : ${c.name}` : "console lachee");
+    }
+    // La guimauve se mange quand elle est assez grillee (0,6).
+    if (code === "KeyB" && marshmallow.eat()) {
+      console.log(`guimauve mangee (${marshmallow.eaten})`);
+    }
     // GUIMode fait tourner ses quatre modes sur une touche de debogage
     if (code === "KeyG") console.log("mode d'affichage :", guiMode.cycle());
     // Le menu des reglages, comme dans le jeu, met le temps en pause
@@ -721,6 +807,20 @@ async function boot() {
     document.getElementById("touch"), document.getElementById("touchui"),
     { onKey: command, onLook: (dx, dy) => look(dx, dy, 1) });
   if (touchAvailable()) touch.enable();
+
+  // --- manette ---
+  //
+  // Meme principe que le tactile, et pour la meme raison : elle ne cree aucune
+  // commande, elle produit les memes axes et les memes codes. Le build decrit
+  // une manette entiere (`XboxInput`) et les invites portent deja le bouton
+  // attendu, avec son icone — c'etait la derniere entree decrite et jamais lue.
+  const pad = new GamepadControls({ onKey: command,
+                                    onLook: (dx, dy) => look(dx, dy, 1) });
+  window.__pad = pad;
+  addEventListener("gamepadconnected", (e) => {
+    console.log("manette branchee :", e.gamepad && e.gamepad.id);
+  });
+  if (padAvailable()) console.log("manette detectee au demarrage");
   // En paysage de telephone, le coin bas-droit revient aux boutons d'action :
   // la vue de sonde passe a gauche, sous les jauges.
   if (touch.enabled) probeCam.setViewport(0.02, 0.42, 0.26, 0.3);
@@ -749,6 +849,11 @@ async function boot() {
   });
 
   // --- boucle ---
+  //
+  // Position monde de l'origine du repere courant, tenue a jour a chaque image :
+  // les commandes en ont besoin hors de la boucle (les consoles, par exemple,
+  // sont posees en coordonnees monde).
+  let framePos = [0, 0, 0];
   scene.registerBeforeRender(() => {
     // SettingsMenu.Open met Time.timeScale a 0 : le menu fige la partie
     const dt = (settings && settings.open) ? 0
@@ -773,24 +878,38 @@ async function boot() {
     //
     // Hors sequence, clavier et doigt s'additionnent : le manche virtuel est
     // analogique, la touche vaut 1, et la somme est bornee comme un axe l'est.
+    //
+    // La manette se LIT : contrairement au clavier et au doigt, la Gamepad API
+    // ne pousse aucun evenement. Elle s'ajoute aux deux autres, bornee de la
+    // meme facon — les trois peuvent servir sur la meme machine.
     const ax = touch.axes;
+    const gp = pad.poll(dt);
     const axis = (v) => Math.max(-1, Math.min(1, v));
     const input = death.dead ? { forward: 0, right: 0, up: false, boost: false } : {
-      forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward),
-      right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right),
-      up: keys.Space || ax.up,
-      boost: keys.ShiftLeft || keys.ShiftRight || ax.boost,
+      forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward + gp.forward),
+      right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right + gp.right),
+      up: keys.Space || ax.up || gp.up,
+      boost: keys.ShiftLeft || keys.ShiftRight || ax.boost || gp.boost,
     };
-    // 1. avance des orbites, puis re-expression dans le repere du corps ancre
+    // 1. avance des orbites et des rotations propres, puis re-expression dans
+    //    le repere du corps ancre — qui tourne desormais avec lui
     advance(orbits, dt);
+    spins.advance(dt);
     const anchorPos = reframe(anchorBody);
+    framePos = anchorPos;
 
     // vitesse de chute AVANT le pas : apres, le contact l'a deja annulee et
     // l'impact serait toujours nul
     const wasGrounded = player.grounded;
     const fallSpeed = -(player.vel.x * up.x + player.vel.y * up.y + player.vel.z * up.z);
 
-    player.update(dt, bodies, input, { fwd, right, up }, origin);
+    // Le monde tel que la physique le voit : les champs directionnels, qui
+    // priment sur le champ radial dans leur volume, et les fluides, qui
+    // freinent ce qui les traverse.
+    const world = { directional: dirFields, framePos: anchorPos, fluids };
+    fluids.begin();
+    player.update(dt, bodies, input, { fwd, right, up }, origin, world);
+    if (player.fluid) fluids.current = player.fluid.volume;
 
     // 2. changement de corps dominant : on change de repere. La position du
     //    joueur, exprimee dans l'ancien repere, doit etre reportee dans le
@@ -853,7 +972,7 @@ async function boot() {
     let focus = null;
     if (ship) {
       if (autopilot && autopilot.engaged) autopilot.update(dt);
-      ship.update(dt, bodies, input, { fwd, right, up });
+      ship.update(dt, bodies, input, { fwd, right, up }, world);
       ship.sync(BABYLON);
       if (ship.boarded) {
         // le joueur voyage avec le vaisseau
@@ -873,7 +992,8 @@ async function boot() {
     if (interactPressed) {
       if (dialogue.active) dialogue.advance();
       else if (convo) {
-        dialogue.open({ ...convo, tree: selectTree(pdata, convo, dialogue.trees) });
+        dialogue.open({ ...convo,
+                        tree: selectTree(pdata, convo, dialogue.trees, controllers) });
         // CuratorConvoController appelle LearnLaunchCodes : ce sont bien les
         // conversations qui accordent les codes, le LaunchTerminal se contente
         // d'ecouter l'evenement pour se deverrouiller.
@@ -888,8 +1008,14 @@ async function boot() {
     if (!ship || !ship.boarded) {
       focus = interactables.focus(player.pos, anchorPos, fwd);
     }
+    // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
+    // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
+    // comportement d'avant.
+    const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                     player.pos.z + anchorPos[2]];
+    const zone = oxygen.length ? inOxygenZone(oxygen, playerW) : null;
     resources.update(dt, {
-      inSupply: !!(ship && ship.boarded),
+      inSupply: !!(ship && ship.boarded) || !!zone,
       thrusting: !!(input.up || input.forward || input.right),
     });
     interactPressed = false;
@@ -944,10 +1070,16 @@ async function boot() {
     if (prompts) {
       // Au centre : l'objet vise. InteractVolume construit son invite avec le
       // texte de la scene, d'ou le passage explicite.
-      prompts.set("center",
-        (focus && !guiMode.hidden)
-          ? [P("InteractVolume._screenPrompt", focus.prompt || focus.name)] : [],
-        now);
+      //
+      // Une console a camera deportee se prend en main de la meme facon qu'un
+      // interactif : elle emprunte donc la meme invite, avec son nom.
+      const nearConsole = (!focus && !consoles.active && consoles.count)
+        ? consoles.nearest(playerW) : null;
+      const centre = focus ? P("InteractVolume._screenPrompt",
+                               focus.prompt || focus.name)
+        : nearConsole ? P("InteractVolume._screenPrompt", `${nearConsole.name} (R)`)
+        : null;
+      prompts.set("center", (centre && !guiMode.hidden) ? [centre] : [], now);
 
       // A gauche : ce que la situation permet. Les priorites du jeu font le
       // tri — celles de la carte valent 2, celles du telescope 1, le reste 0 —
@@ -1010,8 +1142,24 @@ async function boot() {
         `secteurs ${sectorState.actifs}/${sectorState.total}` +
         (sectorState.secteur ? ` — ${sectorState.secteur.name}` : "") +
         (ship && ship.thrustLimit != null ? ` (poussee ≤ ${ship.thrustLimit})` : ""));
-      if (meshLOD.hidden > 0) bits.push(`LOD ${meshLOD.hidden} maillages eteints`);
+      if (meshLOD.hidden > 0) bits.push(`LOD ${meshLOD.hidden} maillages eteints` +
+        (meshLOD.fromBuild ? ` (${meshLOD.fromBuild} sur seuil du build)` : ""));
       if (evictor.evicted > 0) bits.push(`${evictor.evicted} corps libere(s)`);
+      // Ce que le build portait et que rien ne lisait, rendu visible : sans
+      // cela, on ne saurait pas dire si l'absence vient du portage ou de l'alpha.
+      if (spins.count) bits.push(night ? "nuit" : "jour");
+      if (placedLights.total) bits.push(
+        `lumieres ${placedLights.count}/${placedLights.total}`);
+      if (player.field && player.field.directional) bits.push(
+        `champ dirige : ${player.field.directional.name}`);
+      if (player.fluid) bits.push(
+        `dans ${player.fluid.volume.name} (${player.fluid.depth.toFixed(0)} u)`);
+      if (zone) bits.push(`oxygene : ${zone.name}`);
+      if (consoles.active) bits.push(`console : ${consoles.active.name} — R pour lacher`);
+      if (marshmallow.toast > 0) bits.push(
+        `guimauve ${(marshmallow.toast * 100).toFixed(0)} %` +
+        (marshmallow.edible ? " — B pour manger" : ""));
+      if (pad.connected) bits.push("manette");
       // la geometrie arrive en cours de partie : le dire plutot que de laisser
       // croire a une sphere de substitution definitive
       if (store.busy) bits.push(`chargement ${store.entries.length + store.busy} corps…`);
@@ -1076,12 +1224,34 @@ async function boot() {
     // leur passe donc sa position monde. Sans cette conversion, la distance
     // etait fausse du decalage du repere — plusieurs milliers d'unites — et
     // aucun predateur ne se reveillait jamais.
+    //
+    // Le bruit n'est plus un booleen tire des commandes : c'est un champ. Le
+    // joueur y met ce qu'il fait, et le champ audio ce qui joue reellement — un
+    // predateur va donc vers ce qu'il entend, pas vers le joueur par principe.
     const noisy = !!(input.forward || input.right || input.up || player.grounded === false);
     const playerWorld = { x: player.pos.x + anchorPos[0],
                           y: player.pos.y + anchorPos[1],
                           z: player.pos.z + anchorPos[2] };
-    for (const f of fish) f.update(dt, playerWorld, noisy);
+    noise.clear();
+    if (noisy) {
+      noise.add([playerWorld.x, playerWorld.y, playerWorld.z], input.boost ? 1 : 0.7);
+    }
+    if (audioMap.length) {
+      for (const e of audio.emitters()) noise.add(e.position, e.level, e.radius);
+    }
+    for (const f of fish) f.update(dt, playerWorld, noise);
     thorns.update(loop.fraction);
+    // Le seuil de decoupe des materiaux corrompus suit la fraction de boucle.
+    if (corruption.items.length) corruption.update(loop.fraction);
+    // Zone d'epave : la mise a jour du brouillard y est suspendue.
+    if (derelicts.length) {
+      const inside = derelicts.some((d) => Math.hypot(
+        d.position[0] - playerWorld.x, d.position[1] - playerWorld.y,
+        d.position[2] - playerWorld.z) < d.radius);
+      if (fog.setSuspended(inside)) {
+        console.log(inside ? "EnterDerelictZone" : "ExitDerelictZone");
+      }
+    }
 
     // --- trou noir : capture puis ejection au trou blanc ---
     if (blackHole) {
@@ -1151,7 +1321,12 @@ async function boot() {
     }
     probes.update(dt, player.field);
     syncProbes();
-    probeCam.update(guiMode.hidden ? null : probes.last);
+    // La vue deportee est la meme, avec une autre cible : une console prise en
+    // main passe devant la sonde, qui n'est pas ce qu'on regarde a ce
+    // moment-la.
+    const remoteView = consoles.view(anchorPos,
+      { ship, body: player.field && player.field.body });
+    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last));
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {
@@ -1216,6 +1391,17 @@ async function boot() {
     if (solarMap.open || dialogue.active) flashlight.forceOff();
     flashlight.update(camera, fwd,
       sectorState.secteur ? sectorState.secteur.lightRange || null : null);
+    // Face nuit : la hauteur du soleil au-dessus de l'horizon local. Elle n'a
+    // de sens que depuis que les corps tournent sur eux-memes — sur une planete
+    // figee, la face nuit ne le devenait jamais.
+    if (star0) night = sunElevation(star0.position, [up.x, up.y, up.z]) < 0;
+    // La guimauve ne cuit plus sur commande mais au-dessus des braises : la
+    // chaleur vient du HeatSource le plus proche.
+    if (heat.length) {
+      const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z]);
+      marshmallow.held = h > 0 || marshmallow.toast > 0;
+      marshmallow.update(dt, h);
+    }
     if (!(ship && ship.boarded)) computer.open = false;
     if (computerEl) {
       computerEl.hidden = !computer.open || guiMode.hidden;
@@ -1275,8 +1461,18 @@ async function boot() {
         if (st.exited && quantum.relocate) quantum.relocate();
       }
       const qnode = qgeo && findBodyNode(qgeo, qBody.bodyName);
-      if (qnode) qnode.setAbsolutePosition(
-        new BABYLON.Vector3(...qBody.position));
+      if (qnode) {
+        qnode.setAbsolutePosition(new BABYLON.Vector3(...qBody.position));
+        // `AlignQuantumMoon` : quel que soit l'hote autour duquel elle vient de
+        // s'effondrer, c'est la meme face qu'on voit. Sans lui, la lune changeait
+        // de planete ET d'aspect a chaque saut.
+        const q = alignToObserver(qBody.position, camera.position);
+        if (!qnode.rotationQuaternion) {
+          qnode.rotationQuaternion = new BABYLON.Quaternion(q[0], q[1], q[2], q[3]);
+        } else {
+          qnode.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+        }
+      }
     }
 
     // --- boucle temporelle ---
@@ -1319,10 +1515,34 @@ async function boot() {
 
     if (death.dead) {
       if (!loop.dead) loop.kill(death.cause);
+      // Le son de la mort : la source dont le nom parle de cette cause, ou la
+      // piste Death a defaut. `PlayerDeathHandler` en joue un dans le jeu.
+      if (deathCued !== death.cause) {
+        deathCued = death.cause;
+        const pat = DEATH_SOUNDS[death.cause];
+        const n = (pat ? audio.cueMatching(pat) : 0) || audio.cue("Death");
+        if (n) console.log(`son de mort demande (${death.cause}) : ${n} source(s)`);
+      }
       // la sequence de flashback tient l'ecran, puis la boucle repart
       if (death.update(dt)) respawn();
+    } else if (deathCued) {
+      deathCued = null;
     }
     if (flashOverlay) flashOverlay.update(death.state);
+    // La camera bascule et descend pendant la sequence : on mourait jusqu'ici
+    // sans que l'image bouge d'un pixel.
+    if (death.dead) {
+      const m = deathCamera(death.state);
+      if (m.drop || m.roll) {
+        camera.position.addInPlace(up.scale(-m.drop));
+        const tilt = fwd.scale(Math.cos(m.pitch)).add(up.scale(-Math.sin(m.pitch)));
+        camera.setTarget(camera.position.add(tilt));
+        // le roulis se lit sur la verticale de la camera, pas sur sa cible
+        const axis = tilt.normalizeToNew();
+        camera.upVector = BABYLON.Vector3.TransformCoordinates(
+          up, BABYLON.Matrix.RotationAxis(axis, m.roll));
+      }
+    }
 
     // --- le spectacle de la supernova ---
     const sunState = sunStage.update(loop);
@@ -1341,6 +1561,10 @@ async function boot() {
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
+    // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
+    // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
+    // lieu d'eclairage pour un systeme solaire entier.
+    placedLights.update(player.pos, anchorPos);
     // le champ dominant du joueur tient lieu de `Physics.gravity` pour le
     // `gravityModifier` des systemes de particules
     if (particleMap.length) particles.update(player.pos, anchorPos, player.field);

@@ -25,13 +25,80 @@ export const LOD_RATIO = 0.0022;   // ~1,6 pixel de haut sur 720 lignes
 /** Maillages examines par image. */
 export const LOD_SLICE = 400;
 
+/**
+ * Seuils du build, par objet.
+ *
+ * Un `LODGroup` ne simplifie rien a la volee : il DESIGNE des maillages deja
+ * simplifies et le seuil auquel on passe de l'un a l'autre. Ce seuil est
+ * exprime en hauteur relative a l'ecran — exactement l'unite que `apply()`
+ * calcule. Il n'y a donc rien a inventer, seulement a lire ce que
+ * `CreateLODGroup` porte, quand il le porte : ce qui n'a pas de seuil lisible
+ * retombe sur le seuil unique, qui reste la regle generale.
+ *
+ * @returns Map nom d'objet -> seuil
+ */
+export function lodThresholds(gameplay = {}) {
+  const out = new Map();
+  const placed = gameplay.placed || {};
+  for (const [cls, list] of Object.entries(placed)) {
+    if (!/^(Create)?LODGroup$|^LODLayer$/i.test(cls)) continue;
+    for (const e of list) {
+      const f = e.fields || {};
+      let best = null;
+      for (const [k, v] of Object.entries(f)) {
+        if (!/screen|height|relative|threshold/i.test(k)) continue;
+        const vals = Array.isArray(v) ? v.filter((x) => typeof x === "number")
+                   : (typeof v === "number" ? [v] : []);
+        for (const x of vals) {
+          // un seuil de hauteur d'ecran vit dans ]0, 1[ ; au-dela c'est une
+          // distance, qui ne se compare pas a la meme grandeur
+          if (x > 0 && x < 1 && (best === null || x < best)) best = x;
+        }
+      }
+      if (best !== null && e.name) out.set(e.name, best);
+    }
+  }
+  return out;
+}
+
+/**
+ * Objets portant un `ChildColliderLOD` (21 dans la scene).
+ *
+ * Le portage pose les colliders d'un bloc sur le corps ancre — 441 sur Timber
+ * Hearth, 898 ms de construction. Le jeu, lui, ne garde en collision que ce qui
+ * est assez pres. La liste sert de filtre : quand elle n'est pas vide, seuls
+ * ses objets et leurs enfants entrent dans la construction differee.
+ */
+export function colliderLODNames(gameplay = {}) {
+  return new Set(((gameplay.placed || {}).ChildColliderLOD || [])
+    .map((e) => e.name).filter(Boolean));
+}
+
 export class MeshLOD {
-  constructor(ratio = LOD_RATIO, slice = LOD_SLICE) {
+  /**
+   * @param thresholds Map nom -> hauteur d'ecran, issue de lodThresholds()
+   */
+  constructor(ratio = LOD_RATIO, slice = LOD_SLICE, thresholds = null) {
     this.ratio = ratio;
     this.slice = slice;
+    this.thresholds = thresholds || new Map();
     this.cursor = new Map();     // fichier -> position du parcours tournant
     this.hidden = 0;
     this.tested = 0;
+    this.fromBuild = 0;          // maillages eteints sur un seuil du build
+  }
+
+  /**
+   * Seuil applicable a un maillage : celui du build s'il en a un, le seuil
+   * general sinon. Le nom du noeud glTF est celui du GameObject d'origine.
+   */
+  thresholdFor(mesh) {
+    if (!this.thresholds.size || !mesh || !mesh.name) return this.ratio;
+    const own = this.thresholds.get(mesh.name);
+    if (own !== undefined) return own;
+    const parent = mesh.parent && mesh.parent.name
+      ? this.thresholds.get(mesh.parent.name) : undefined;
+    return parent === undefined ? this.ratio : parent;
   }
 
   /**
@@ -67,12 +134,14 @@ export class MeshLOD {
     if (!(r > 0)) return;
     const d = Math.hypot(c.x - camera.x, c.y - camera.y, c.z - camera.z);
     const ratio = d > 1e-6 ? r / d : Infinity;
-    const on = ratio >= this.ratio;
+    const limit = this.thresholdFor(mesh);
+    const on = ratio >= limit;
     // isVisible plutot que setEnabled : le maillage garde sa place dans la
     // hierarchie et ses enfants, on ne fait que cesser de le dessiner.
     if (mesh.isVisible !== on) {
       mesh.isVisible = on;
       this.hidden += on ? -1 : 1;
+      if (!on && limit !== this.ratio) this.fromBuild += 1;
     }
   }
 

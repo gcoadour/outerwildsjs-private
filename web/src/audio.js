@@ -219,6 +219,27 @@ export class AudioField {
   }
 
   /**
+   * Les sources qui jouent VRAIMENT, en coordonnees monde.
+   *
+   * C'est ce qui manquait au `NoiseSensor` des predateurs de Dark Bramble : le
+   * bruit y etait deduit des commandes du joueur, alors que le champ audio sait
+   * exactement ce qui sonne et a quelle distance ca porte.
+   */
+  emitters() {
+    const out = [];
+    for (const [i, snd] of this.live) {
+      const s = this.sources[i];
+      if (!s || !s.spatial) continue;
+      // SoundState.Started vaut 3 ; une source creee mais muette ne fait pas
+      // de bruit, et ne doit donc rien attirer.
+      if (snd && snd.state !== 3) continue;
+      out.push({ position: s.position, level: Math.min(1, s.volume ?? 1),
+                 radius: s.range || 60, name: s.name });
+    }
+    return out;
+  }
+
+  /**
    * Demande une piste declenchee par evenement — musique, fin des temps.
    * Elle ne se telecharge qu'a ce moment.
    */
@@ -230,13 +251,34 @@ export class AudioField {
     return n;
   }
 
+  /**
+   * Demande les sources dont le NOM correspond a un motif.
+   *
+   * Le jeu joue un son par cause de mort ; la table qui relie l'un a l'autre
+   * vit dans l'assembly, pas dans les assets. Le nom de la source, lui, est la.
+   */
+  cueMatching(pattern) {
+    let n = 0;
+    for (let i = 0; i < this.sources.length; i++) {
+      const s = this.sources[i];
+      if (s.name && pattern.test(s.name)) { this.asked.add(i); n += 1; }
+    }
+    return n;
+  }
+
   _spawn(i, s, p) {
     this.pending.add(i);
+    // Le modele d'attenuation vient de la source : `rolloffMode` vaut
+    // Logarithmic ou Linear dans le build, et WebAudio nomme le premier
+    // « inverse ». Le rayon interieur est `MinDistance` — en deca, le son est
+    // a plein volume ; c'est lui qui distingue une source de proximite d'une
+    // ambiance qui remplit une vallee.
     const opts = {
-      loop: LOOPED.has(s.track),
+      loop: s.loop ?? LOOPED.has(s.track),
       volume: s.volume,
       spatialEnabled: !!s.spatial,
-      spatialDistanceModel: "linear",
+      spatialDistanceModel: s.rolloff === "logarithmic" ? "inverse" : "linear",
+      spatialMinDistance: s.minDistance ?? 1,
       spatialMaxDistance: s.range || 60,
     };
     this.B.CreateSoundAsync(s.name || `src${i}`, `data/audio/${s.file}`, opts)

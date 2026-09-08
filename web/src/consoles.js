@@ -152,6 +152,50 @@ export class Flashlight {
 export const COOK_TIME = 5;
 export const MIN_TOAST = 0.6;
 
+/**
+ * Sources de chaleur posees dans la scene.
+ *
+ * La guimauve grillait SUR COMMANDE : on appuyait, elle cuisait, ou qu'on soit.
+ * Le feu de camp existe pourtant, et la formule du jeu prend une chaleur en
+ * entree. On la lit donc la ou elle est — le composant et son volume — et la
+ * guimauve ne cuit plus qu'au-dessus des braises.
+ */
+export function heatSources(gameplay = {}) {
+  const out = [];
+  for (const [cls, list] of Object.entries(gameplay.placed || {})) {
+    if (!/heat/i.test(cls)) continue;
+    for (const e of list) {
+      const f = e.fields || {};
+      const heat = Object.entries(f).find(([k, v]) =>
+        typeof v === "number" && /heat|temperature|intensity/i.test(k));
+      const radius = (e.volume && e.volume.radius) ||
+        Object.entries(f).find(([k, v]) =>
+          typeof v === "number" && v > 0 && /radius|range/i.test(k))?.[1] || 0;
+      if (!radius) continue;
+      out.push({ name: e.name, position: e.position, radius,
+                 heat: heat ? Math.abs(heat[1]) : 100 });
+    }
+  }
+  return out;
+}
+
+/**
+ * Chaleur recue en un point, en unites de `_toastLevel` (0 a 100).
+ *
+ * Decroissance lineaire jusqu'au bord du volume : c'est ce que fait une lumiere
+ * ponctuelle d'Unity 4 en mode simple, et le jeu ne donne pas d'autre courbe.
+ */
+export function heatAt(sources, world) {
+  let best = 0;
+  for (const s of sources) {
+    const d = Math.hypot(world[0] - s.position[0], world[1] - s.position[1],
+                         world[2] - s.position[2]);
+    if (d >= s.radius) continue;
+    best = Math.max(best, s.heat * (1 - d / s.radius));
+  }
+  return best;
+}
+
 export class Marshmallow {
   constructor(baseColor = [1, 0.98, 0.9]) {
     this.base = baseColor;
@@ -181,5 +225,85 @@ export class Marshmallow {
     this.toast = 0;
     this.held = false;
     return true;
+  }
+}
+
+/**
+ * Consoles a camera deportee.
+ *
+ * `RemoteFlightConsole` — piloter le vaisseau depuis l'observatoire — et
+ * `SatelliteSnapshotController` — regarder par le satellite — supposent une
+ * camera ailleurs que sur le joueur. Le moyen existe depuis que la sonde a la
+ * sienne : c'est la meme vue dans un coin de l'ecran, avec une autre cible.
+ *
+ * Leurs invites sont deja au catalogue, ce qui dit que le jeu attendait bien
+ * une interaction a portee : ces consoles se prennent en main, elles ne
+ * s'allument pas toutes seules.
+ */
+export const CONSOLE_REACH = 8;
+
+export function remoteConsoles(gameplay = {}) {
+  const placed = gameplay.placed || {};
+  const out = [];
+  for (const cls of ["RemoteFlightConsole", "SatelliteSnapshotController"]) {
+    for (const e of placed[cls] || []) {
+      out.push({ name: e.name, kind: cls, position: e.position,
+                 flight: cls === "RemoteFlightConsole" });
+    }
+  }
+  return out;
+}
+
+export class RemoteConsoles {
+  constructor(consoles = [], reach = CONSOLE_REACH) {
+    this.consoles = consoles;
+    this.reach = reach;
+    this.active = null;
+  }
+
+  get count() { return this.consoles.length; }
+
+  /** Console a portee de la main, en coordonnees monde. */
+  nearest(world) {
+    let best = null, bestD = this.reach;
+    for (const c of this.consoles) {
+      const d = Math.hypot(c.position[0] - world[0], c.position[1] - world[1],
+                           c.position[2] - world[2]);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
+
+  /** Prend ou lache la console a portee. @returns la console active, ou null */
+  toggle(world) {
+    if (this.active) { this.active = null; return null; }
+    this.active = this.nearest(world) || null;
+    return this.active;
+  }
+
+  /**
+   * Ce que la camera deportee regarde, dans le repere courant.
+   *
+   * La console de vol suit le vaisseau et regarde devant lui ; le satellite
+   * reste ou il est et vise le corps le plus proche. Le format est celui d'une
+   * sonde, pour que `ProbeCamera` les affiche sans rien savoir d'elles.
+   *
+   * @param frame decalage monde -> repere courant
+   */
+  view(frame = [0, 0, 0], { ship = null, body = null } = {}) {
+    const c = this.active;
+    if (!c) return null;
+    if (c.flight) {
+      if (!ship) return null;
+      const v = [ship.vel.x, ship.vel.y, ship.vel.z];
+      const L = Math.hypot(...v);
+      return { pos: [ship.pos.x, ship.pos.y, ship.pos.z],
+               vel: L > 0.1 ? v : [0, 0, 1] };
+    }
+    const p = [c.position[0] - frame[0], c.position[1] - frame[1],
+               c.position[2] - frame[2]];
+    const t = body ? body.position : [0, 0, 0];
+    const d = [t[0] - p[0], t[1] - p[1], t[2] - p[2]];
+    return { pos: p, vel: Math.hypot(...d) > 1e-3 ? d : [0, 0, 1] };
   }
 }

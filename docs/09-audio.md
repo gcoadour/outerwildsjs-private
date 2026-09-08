@@ -46,15 +46,29 @@ La bonne API en 9.25 est **AudioEngineV2** : `CreateAudioEngineAsync`,
 
 ## Portées d'atténuation
 
-UnityPy n'expose ni `m_MinDistance` ni `m_MaxDistance` sur Unity 4. Les portées
-sont donc **choisies par piste**, faute de mieux :
+### Correction : elles sont dans le build, et le pipeline navigateur les lit
 
-| piste | portée |
+Cette page affirmait qu'« UnityPy n'expose ni `m_MinDistance` ni
+`m_MaxDistance` sur Unity 4 », d'où des portées **choisies par piste** —
+300 u pour Signal, 150 pour Ambience, 60 sinon. La cause était juste, la
+conclusion ne l'est plus : en 4.1 le champ s'appelle **`MinDistance`, sans
+préfixe `m_`**. C'est UnityPy qui ne le trouvait pas ; le type tree de
+`unity41-types.json`, que le pipeline navigateur lit directement, le porte noir
+sur blanc, avec `MaxDistance`, `rolloffMode`, `Pan2D` et `DopplerLevel`.
+
+Sont donc lus, par source :
+
+| champ | ce qu'il donne au moteur |
 |---|---|
-| Signal | 300 u |
-| Ambience | 150 u |
-| Default / Undefined | 60 u |
-| Music, EndTimes, Death | non spatialisé |
+| `MinDistance` | rayon intérieur, à plein volume |
+| `MaxDistance` | portée, `spatialMaxDistance` |
+| `rolloffMode` | modèle d'atténuation — `Logarithmic` devient `inverse` en WebAudio |
+| `Pan2D` | à 1, la source n'est pas spatialisée : on n'a plus à le deviner |
+| `DopplerLevel`, `Loop` | relevés, pour ce qui viendra |
+
+Les valeurs par piste ne servent plus que de **repli**, et
+`tests/05-extract.mjs` échoue si une seule source y tombe. Voir
+[`35-monde.md`](35-monde.md) §2.
 
 ### Correction : les émetteurs ne sont pas des sources spatiales
 
@@ -125,8 +139,13 @@ de 0,75 à 0 en deux secondes pendant que la piste des signaux reste à 1.
   détaché avec la source. Le `_lowPassCutoff` de chaque émetteur est lu depuis la
   source elle-même — l'extracteur le pose déjà sur elle — et non pris comme une
   constante.
-- **15 Mo de WAV non compressés** : voir `docs/27-poids.md`.
-- **L'équilibrage des volumes** demande une écoute humaine.
+- ~~**15 Mo de WAV non compressés**~~ — réencodés en Opus à l'extraction
+  (WebCodecs), avec repli WAV : voir [`27-poids.md`](27-poids.md) et
+  [`35-monde.md`](35-monde.md) §9. Le gain reste à mesurer sur un build.
+- **L'équilibrage des volumes** demande une écoute humaine — mais elle portera
+  désormais sur les portées du jeu, non sur des valeurs choisies par piste.
+- **Le bruit des prédateurs** vient maintenant de ce champ audio : les sources
+  qui jouent vraiment attirent les anglerfish ([`16-bramble.md`](16-bramble.md)).
 
 ## Instanciation à la volée
 

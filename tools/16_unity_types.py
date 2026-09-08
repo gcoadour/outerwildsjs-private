@@ -32,6 +32,9 @@ CLASSES = {
     111: "Animation", 114: "MonoBehaviour", 115: "MonoScript", 119: "Projector",
     120: "LineRenderer", 128: "Font", 135: "SphereCollider",
     136: "CapsuleCollider", 137: "SkinnedMeshRenderer", 198: "ParticleSystem",
+    # 205 LODGroup : les niveaux de detail du build et leurs seuils, exprimes
+    # en hauteur relative a l'ecran -- l'unite que web/src/lod.js calcule deja.
+    205: "LODGroup",
     199: "ParticleSystemRenderer", 212: "SpriteRenderer", 213: "Sprite",
 }
 

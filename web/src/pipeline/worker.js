@@ -22,8 +22,10 @@ import { extractAudio } from "./extract/audio.js";
 import { extractShaders } from "./extract/shaders.js";
 import { extractParticles } from "./extract/particles.js";
 import { extractInterface } from "./extract/interface.js";
+import { extractLighting } from "./extract/lighting.js";
 import { exportSubtree, findRoots } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
+import { encodeOpus, opusAvailable } from "./audioenc.js";
 
 const ROOT = "outerwilds";
 
@@ -235,10 +237,41 @@ async function run(blob, options) {
   phase("audio", "Clips et sources audio…");
   const audioFiles = [];
   const audio = extractAudio(ctx, (name, bytes) => audioFiles.push({ name, bytes }));
-  for (const { name, bytes } of audioFiles) await writeFile(`data/audio/${name}`, bytes);
+  // Les quinze clips que le build stocke DECODES pesent 15 Mo de WAV. On les
+  // reencode ici, une fois pour toutes, avec l'encodeur Opus du navigateur ;
+  // sans lui, ou au moindre accroc, le WAV part tel quel.
+  const renamed = new Map();
+  let opusGain = 0, opusCount = 0;
+  const canOpus = opusAvailable();
+  let n = 0;
+  for (const { name, bytes } of audioFiles) {
+    let out = name, data = bytes;
+    if (canOpus && /\.wav$/i.test(name)) {
+      step(`Reencodage Opus (${++n}/${audioFiles.length})`, n / audioFiles.length);
+      const opus = await encodeOpus(bytes);
+      if (opus && opus.length < bytes.length) {
+        out = name.replace(/\.wav$/i, ".ogg");
+        data = opus;
+        opusGain += bytes.length - opus.length;
+        opusCount += 1;
+        renamed.set(name, out);
+      }
+    }
+    await writeFile(`data/audio/${out}`, data);
+  }
+  for (const s of audio.sources) if (renamed.has(s.file)) s.file = renamed.get(s.file);
   await writeFile("data/audio/sources.json", JSON.stringify(audio));
   summary["clips audio"] = audioFiles.length;
   summary["sources audio"] = audio.sources.length;
+  if (opusCount) {
+    summary["clips en Opus"] = opusCount;
+    summary["Mo economises"] = Math.round(opusGain / (1 << 20) * 10) / 10;
+  }
+
+  phase("lumieres", "Lumieres posees et reglages de rendu…");
+  const lighting = extractLighting(ctx);
+  await writeFile("data/lighting.json", JSON.stringify(lighting));
+  summary.lumieres = lighting.lights.length;
 
   phase("shaders", "Sources ShaderLab…");
   const shaderFiles = [];
@@ -262,6 +295,29 @@ async function run(blob, options) {
   await writeFile("data/interface/interface.json", JSON.stringify(ui));
   summary["invites a l'ecran"] = ui.prompts.catalogue.length;
   summary["polices"] = Object.keys(ui.fonts).length;
+
+  // mainData : la scene de demarrage et les managers.
+  //
+  // Le worker chargeait bien les cinq fichiers, mais l'ExtractContext etait
+  // construit sur `level0` seul : les 989 objets de mainData ne sortaient
+  // jamais. C'est ce qui explique les rendus V-Fog restes introuvables
+  // (docs/20-shaders-jeu.md) et l'absence de menu principal (docs/28-hud.md).
+  // On l'inventorie donc, avant de decider quoi en porter.
+  phase("maindata", "Scene de demarrage (mainData)…");
+  try {
+    const mctx = new ExtractContext(env, universe, "mainData", engineTypes);
+    const mscene = extractScene(mctx);
+    await writeFile("data/scene/maindata.json", JSON.stringify(mscene));
+    const mcomps = extractComponents(mctx);
+    await writeFile("data/components/maindata.json", JSON.stringify(mcomps));
+    summary["objets de mainData"] = mscene.node_count;
+    summary["monobehaviour de mainData"] = mcomps.count;
+  } catch (e) {
+    // Un fichier de demarrage illisible ne doit pas emporter l'extraction du
+    // monde jouable, qui est deja ecrite a ce stade.
+    console.warn("mainData non extrait :", e && e.message);
+    summary["objets de mainData"] = 0;
+  }
 
   if (options.geometry !== false) {
     phase("geometrie", "Export glTF des corps celestes…");

@@ -60,12 +60,14 @@ Son invite est la **seule du jeu posée au-dessus** du centre de l'écran
 
 ## Ce qui reste de ces systèmes
 
-- **`RemoteFlightConsole`** et **`SatelliteSnapshotController`** supposent une
-  caméra déportée — piloter le vaisseau depuis l'observatoire, regarder par le
-  satellite. Leurs invites sont au catalogue, la caméra ne l'est pas.
+- ~~**`RemoteFlightConsole`** et **`SatelliteSnapshotController`**~~ —
+  **portés** : les deux réutilisent la vue de la sonde
+  ([`25-interface.md`](25-interface.md)), prise en main à portée par la touche
+  **R** ([`35-monde.md`](35-monde.md) §8).
 - **`ZeroGTrainingManager`** : l'entraînement en apesanteur. Son invite
   « Training » puis « Training Complete: All Systems Online » est extraite, mais
   le parcours qu'elle accompagne — une série de cibles à atteindre — n'a pas de
   données dans la scène au-delà du gestionnaire lui-même.
-- La **chaleur du feu de camp** n'est pas simulée : la guimauve grille sur
-  commande, pas par proximité d'un `HeatSource`.
+- ~~La **chaleur du feu de camp** n'est pas simulée~~ — **portée** : la guimauve
+  ne cuit qu'au-dessus d'un `HeatSource`, dont le volume vient de son collider.
+  Cinq secondes à chaleur pleine, comme le veut `_cookTime`.

@@ -241,8 +241,9 @@ bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
   bouton : le menu des réglages est celui du jeu, et rien n'y est inventé.
 - **Le pincement ne sert que la carte.** Le télescope garde son bouton, là où un
   pincement serait plus naturel.
-- **Aucune manette** n'est lue, alors que le build en décrit une entière
-  (`XboxInput`) : c'est le chemin le plus court vers un vrai portage de
-  commandes, et il n'est pas emprunté.
+- ~~**Aucune manette** n'est lue~~ — **portée** : `web/src/gamepad.js` lit la
+  Gamepad API et la branche exactement comme cette couche-ci, en produisant les
+  mêmes axes et les mêmes codes ([`35-monde.md`](35-monde.md) §7). Les trois
+  couches — clavier, doigt, manette — s'additionnent sur la même machine.
 - **Une partie jouée sur un vrai téléphone.** Tout est vérifié au chiffre et à
   l'émulation ; rien ne l'est encore au pouce.

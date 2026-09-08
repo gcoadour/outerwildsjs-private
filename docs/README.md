@@ -53,4 +53,5 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 ## Ce qui manque
 
 - [`08-reste-a-faire.md`](08-reste-a-faire.md) — ce qui manque pour un portage complet
-- [`34-actions.md`](34-actions.md) — **le jeu et le portage face à face : les actions à mener**
+- [`34-actions.md`](34-actions.md) — le jeu et le portage face à face : les actions à mener
+- [`35-monde.md`](35-monde.md) — **le monde qu'on ne lisait pas : rotation, lumières, fluides, champs, manette**

@@ -16,6 +16,7 @@ export class Player {
     this.vel = { x: 0, y: 0, z: 0 };
     this.grounded = false;
     this.field = null;
+    this.fluid = null;    // volume de fluide traverse, ou null
     this.thrust = 18;     // acceleration du sac dorsal
     this.mass = 70;
     this.body = null;     // agregat Havok, si physique active
@@ -30,11 +31,38 @@ export class Player {
 
   get physics() { return !!this.body; }
 
-  update(dt, bodies, input, basis, origin) {
-    this.field = dominantField(bodies, this.pos);
+  /**
+   * @param world { directional, framePos, fluids } — le monde au-dela des corps :
+   *        champs de force places, et fluides. Absent, on retrouve exactement le
+   *        comportement d'avant.
+   */
+  update(dt, bodies, input, basis, origin, world = null) {
+    this.field = dominantField(bodies, this.pos, world);
     if (this.physics) this.stepPhysics(dt, input, basis, origin);
     else this.stepAnalytic(dt, bodies, input, basis);
+    this.fluid = this.applyFluid(dt, world);
     return this.field;
+  }
+
+  /**
+   * Trainee et poussee du fluide traverse.
+   *
+   * Sous Havok, la vitesse vit dans le corps physique : la corriger sur `vel`
+   * seul ne ferait rien du tout, il faut la lui rendre.
+   */
+  applyFluid(dt, world) {
+    const field = world && world.fluids;
+    if (!field || !field.count) return null;
+    const o = (world && world.framePos) || [0, 0, 0];
+    const hit = field.apply([this.pos.x + o[0], this.pos.y + o[1], this.pos.z + o[2]],
+                            this.vel, dt, this.field);
+    if (hit && this.physics) {
+      try {
+        this.body.body.setLinearVelocity(
+          new this.BABYLON.Vector3(this.vel.x, this.vel.y, this.vel.z));
+      } catch (e) { /* corps deja libere */ }
+    }
+    return hit;
   }
 
   // --- moteur Havok ---
