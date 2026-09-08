@@ -1070,10 +1070,16 @@ async function boot() {
     if (prompts) {
       // Au centre : l'objet vise. InteractVolume construit son invite avec le
       // texte de la scene, d'ou le passage explicite.
-      prompts.set("center",
-        (focus && !guiMode.hidden)
-          ? [P("InteractVolume._screenPrompt", focus.prompt || focus.name)] : [],
-        now);
+      //
+      // Une console a camera deportee se prend en main de la meme facon qu'un
+      // interactif : elle emprunte donc la meme invite, avec son nom.
+      const nearConsole = (!focus && !consoles.active && consoles.count)
+        ? consoles.nearest(playerW) : null;
+      const centre = focus ? P("InteractVolume._screenPrompt",
+                               focus.prompt || focus.name)
+        : nearConsole ? P("InteractVolume._screenPrompt", `${nearConsole.name} (R)`)
+        : null;
+      prompts.set("center", (centre && !guiMode.hidden) ? [centre] : [], now);
 
       // A gauche : ce que la situation permet. Les priorites du jeu font le
       // tri — celles de la carte valent 2, celles du telescope 1, le reste 0 —
