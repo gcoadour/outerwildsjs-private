@@ -16,6 +16,11 @@
 // n'ajoute donc pas cet effet.
 
 const REF_H = 1080;
+// Plancher de lisibilite. En paysage de telephone, la hauteur d'ecran vaut le
+// tiers de la reference : les proportions du jeu, appliquees telles quelles,
+// donneraient un corps de 7 pixels. On borne donc l'echelle par la LARGEUR
+// disponible, et le corps par ce plancher.
+const MIN_FONT = 12;
 export const LAYOUT = {
   fontSize: 30,
   box: [1200, 300], name: [641, 35], text: [641, 176],
@@ -43,10 +48,13 @@ export function wrap(text, charsPerLine, maxLines) {
 }
 
 export class DialogueUI {
-  constructor(root) {
+  /** @param opts { onChoose(index), onNext() } — le choix au doigt */
+  constructor(root, opts = {}) {
     this.root = root;
     this.scale = 1;
     this.cursor = 0;
+    this.onChoose = opts.onChoose || null;
+    this.onNext = opts.onNext || null;
     this.build();
     addEventListener("resize", () => this.resize());
     this.resize();
@@ -64,14 +72,24 @@ export class DialogueUI {
     this.opts = el("dlg-options");
     this.next = el("dlg-next");
     this.next.textContent = LAYOUT.nextLabel;
+    // « Next » est aussi un bouton : au doigt, il n'y a pas de touche E.
+    this.next.addEventListener("click", () => { if (this.onNext) this.onNext(); });
     this.box.append(this.name, this.text, this.opts, this.next);
     this.root.append(this.box);
     this.root.hidden = true;
   }
 
-  /** Les proportions du jeu sont conservees, mises a l'echelle de la fenetre. */
+  /**
+   * Les proportions du jeu sont conservees, mises a l'echelle de la fenetre.
+   *
+   * Deux bornes s'y ajoutent, pour l'ecran large et bas d'un telephone tenu en
+   * paysage : la boite ne depasse jamais la largeur disponible, et le corps de
+   * police ne descend pas sous `MIN_FONT`.
+   */
   resize() {
-    this.scale = Math.min(1, innerHeight / REF_H) * 1.35;
+    const byHeight = Math.min(1, innerHeight / REF_H) * 1.35;
+    const byWidth = (innerWidth - 32) / LAYOUT.box[0];
+    this.scale = Math.min(byHeight, byWidth);
     const px = (v) => `${Math.round(v * this.scale)}px`;
     this.box.style.width = px(LAYOUT.box[0]);
     this.box.style.minHeight = px(LAYOUT.box[1] * 0.55);
@@ -79,7 +97,8 @@ export class DialogueUI {
     this.text.style.width = px(LAYOUT.text[0]);
     this.text.style.minHeight = px(LAYOUT.text[1] * 0.5);
     this.opts.style.width = px(LAYOUT.options[0]);
-    this.box.style.fontSize = px(LAYOUT.fontSize * 0.52);
+    this.box.style.fontSize =
+      `${Math.max(MIN_FONT, Math.round(LAYOUT.fontSize * 0.52 * this.scale))}px`;
   }
 
   hide() { this.root.hidden = true; }
@@ -106,6 +125,11 @@ export class DialogueUI {
         const line = document.createElement("div");
         line.className = "dlg-option" + (i === this.cursor ? " dlg-sel" : "");
         line.textContent = `${i + 1}. ${o.text || "…"}`;
+        // viser l'option directement : c'est le seul choix possible au doigt
+        line.addEventListener("click", () => {
+          this.cursor = i;
+          if (this.onChoose) this.onChoose(i);
+        });
         this.opts.append(line);
       });
       this.next.hidden = true;

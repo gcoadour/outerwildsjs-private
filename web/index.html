@@ -2,7 +2,10 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#05060a">
 <title>Outer Wilds alpha — moteur navigateur</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
@@ -55,6 +58,13 @@
         </p>
       </details>
 
+      <p class="mobile-note touch-only">
+        Sur telephone ou tablette : tenez l'appareil en <strong>paysage</strong>.
+        L'extraction demande environ 600 Mo de stockage libre et quelques
+        minutes ; laissez l'onglet au premier plan pendant ce temps. Les
+        commandes tactiles apparaissent des l'entree dans le systeme.
+      </p>
+
       <p class="privacy">
         Le fichier n'est pas televerse. Il est lu dans cet onglet, decompresse
         dans un Web Worker, et ce qui en sort reste dans le stockage prive de
@@ -88,6 +98,9 @@
 <canvas id="minimap" width="336" height="336" hidden></canvas>
 <div id="ui"></div>
 <div id="computer" hidden></div>
+<!-- Zones de pilotage tactile : SOUS l'interface, pour que la carte, les
+     dialogues et les reglages restent touchables par-dessus. -->
+<div id="touch" hidden></div>
 <div id="hud">
   <div id="status">Chargement…</div>
   <div id="hud2"></div>
@@ -96,7 +109,17 @@
     <b>ZQSD/WASD</b> se déplacer · <b>Espace</b> monter · <b>Maj</b> accélérer ·
     <b>E</b> interagir/parler · <b>1-9</b>/<b>↑↓⏎</b> répondre · <b>M</b> carte · <b>T</b> télescope · <b>F</b> sonde · <b>G</b> affichage · <b>L</b> lampe · <b>N</b> ordinateur de bord · <b>clic</b> capturer la souris
   </div>
+  <div id="help-touch">
+    <b>gauche</b> se déplacer · <b>droite</b> regarder · <b>tape</b> interagir/parler
+  </div>
 </div>
+
+<!-- Boutons tactiles : AU-DESSUS de tout, pour rester atteignables quand la
+     carte plein ecran est ouverte. -->
+<div id="touchui" hidden></div>
+
+<!-- Le jeu se joue en paysage : en portrait, la page le dit et attend. -->
+<div id="rotate"><p>Tournez l'appareil<span>Ce portage se joue en paysage.</span></p></div>
 
 <script type="module">
 import { initGate } from "./src/gate.js";

@@ -119,6 +119,25 @@ export class ProbeCamera {
     }
   }
 
+  /**
+   * Deplace la vue de sonde. Cadre et viewport vont ENSEMBLE : bouger l'un
+   * sans l'autre decalerait l'image de son cadre. Les fractions sont celles de
+   * Babylon, dont l'origine est en bas a gauche — d'ou le `bottom` du cadre.
+   *
+   * Sert au paysage de telephone, ou le coin bas-droit revient aux boutons.
+   */
+  setViewport(x, y, w, h) {
+    this.cam.viewport = new this.B.Viewport(x, y, w, h);
+    if (!this.frame) return;
+    const st = this.frame.style;
+    st.left = `${x * 100}%`;
+    st.right = "auto";
+    st.bottom = `${y * 100}%`;
+    st.top = "auto";
+    st.width = `${w * 100}%`;
+    st.height = `${h * 100}%`;
+  }
+
   /** @param probe sonde a suivre, ou null */
   update(probe) {
     const want = !!probe;

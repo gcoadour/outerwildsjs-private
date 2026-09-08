@@ -130,9 +130,11 @@ export class Settings {
  * racine, aux dimensions (0,36 ; 0,81) de l'ecran, en gris a 50 %.
  */
 export class SettingsUI {
-  constructor(root, settings, dir = "data/interface/") {
+  /** @param opts { onPick() } — appele apres un choix a la souris ou au doigt */
+  constructor(root, settings, dir = "data/interface/", opts = {}) {
     this.s = settings;
     this.dir = dir;
+    this.onPick = opts.onPick || null;
     this.el = document.createElement("div");
     this.el.className = "ow-settings";
     this.el.hidden = true;
@@ -160,9 +162,18 @@ export class SettingsUI {
     this.title.className = "ow-setting ow-settings-title";
     this.title.textContent = (L.title || {}).text || "Settings";
     this.el.appendChild(this.title);
-    this.rows = this.s.options.map(() => {
+    this.rows = this.s.options.map((o, i) => {
       const d = document.createElement("div");
       d.className = "ow-setting";
+      // Le jeu ne connait que le curseur ; viser une ligne revient a s'y
+      // placer puis a valider, ce que la souris comme le doigt savent faire.
+      d.addEventListener("click", () => {
+        if (o.locked) return;
+        this.s.index = i;
+        this.s.toggle(0);
+        if (this.onPick) this.onPick();
+        this.render();
+      });
       this.el.appendChild(d);
       return d;
     });
@@ -188,6 +199,15 @@ export class SettingsUI {
       this.bg.style.height = `${L.background.size[1] * h}px`;
       this.bg.style.top = `${-L.background.offset[1] * h}px`;
     }
+    // Le menu s'etale sur quelque 400 pixels sous son ancre. Sur un ecran bas
+    // — un telephone tenu en paysage — il sortirait par le bas : on le met
+    // alors a l'echelle de la place disponible, sans toucher a ses
+    // proportions. L'origine est le point d'ancrage, qui reste centre.
+    const span = Math.abs(L.firstOffset + (this.rows.length - 1) * L.step) + 60;
+    const room = innerHeight * L.anchor[1];
+    const k = Math.min(1, room / span);
+    this.el.style.transformOrigin = "0 0";
+    this.el.style.transform = k < 1 ? `scale(${k.toFixed(3)})` : "";
   }
 
   render() {

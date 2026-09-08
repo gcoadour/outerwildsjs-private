@@ -48,6 +48,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`25-interface.md`](25-interface.md) — interface de dialogue et sondes
 - [`28-hud.md`](28-hud.md) — jauges de ressources et invites à l'écran
 - [`30-consoles.md`](30-consoles.md) — ordinateur de bord, lampe, guimauve
+- [`33-mobile.md`](33-mobile.md) — **commandes tactiles et jeu en paysage**
 
 ## Ce qui manque
 

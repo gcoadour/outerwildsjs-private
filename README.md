@@ -24,6 +24,11 @@ Ouvrir la page, déposer `OuterWilds_Alpha_1_2_Linux.zip` (289 268 118 octets,
 SHA-256 `5c7defad…80f05a`). L'extraction complète prend environ **70 secondes**
 et n'est faite qu'une fois : elle est conservée d'une visite à l'autre.
 
+Sur téléphone ou tablette, la page se joue **en paysage** : manche virtuel à
+gauche, regard à droite, boutons pour le reste, carte au pincement. Rien de tout
+cela ne vient du jeu, qui est fait pour le clavier et la manette — voir
+[`docs/33-mobile.md`](docs/33-mobile.md).
+
 En local :
 
 ```bash

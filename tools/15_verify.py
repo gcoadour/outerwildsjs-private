@@ -309,6 +309,50 @@ def run(url, heavy):
                      page.evaluate("() => window.__audioMix.transmitters"
                                    ".reduce((a, t) => a + t.sources.length, 0)"), 1)
 
+        # --- commandes tactiles ------------------------------------------------
+        #
+        # Le navigateur de verification n'est pas tactile : on installe la
+        # couche a la main, puis on lui envoie des evenements de pointeur. Ce
+        # qui est verifie, c'est qu'elle produit les MEMES entrees que le
+        # clavier — un axe analogique et des codes de touche.
+        tactile = page.evaluate("""() => {
+          const t = window.__touch;
+          t.enable();
+          const send = (sel, type, x, y, id) => document.querySelector(sel)
+            .dispatchEvent(new PointerEvent(type, {pointerId: id, clientX: x,
+              clientY: y, bubbles: true, pointerType: 'touch'}));
+          // manche pousse a fond vers l'avant, puis relache
+          send('.tc-zone-move', 'pointerdown', 200, 500, 1);
+          send('.tc-zone-move', 'pointermove', 200, 400, 1);
+          const avant = +t.axes.forward.toFixed(2);
+          send('.tc-zone-move', 'pointerup', 200, 400, 1);
+          const relache = t.axes.forward;
+          // tape breve sur la zone de regard, puis bouton d'action : les deux
+          // envoient la touche que le jeu attend
+          const vus = [];
+          const onKey = t.onKey;
+          t.onKey = (c) => vus.push(c);
+          send('.tc-zone-look', 'pointerdown', 900, 400, 2);
+          send('.tc-zone-look', 'pointerup', 900, 400, 2);
+          document.querySelector('.tc-act').dispatchEvent(
+            new PointerEvent('pointerdown', {pointerId: 3, bubbles: true}));
+          t.onKey = onKey;
+          // un menu ouvert suspend le pilotage
+          t.setContext({menu: true, map: false});
+          const suspendu = document.getElementById('touch')
+            .classList.contains('tc-idle');
+          t.setContext({menu: false, map: false});
+          const boutons = document.querySelectorAll('#touchui .tc-btn').length;
+          t.disable();          // la page est rendue telle qu'elle etait
+          return {avant, relache, vus, suspendu, boutons};
+        }""")
+        rep.eq("manche tactile a fond : axe sature a 1", tactile["avant"], 1)
+        rep.eq("manche relache : axe a zero", tactile["relache"], 0)
+        rep.eq("tape et bouton d'action donnent la touche du jeu",
+               tactile["vus"], ["KeyE", "KeyE"])
+        rep.eq("un menu ouvert suspend le pilotage", tactile["suspendu"], True)
+        rep.eq("boutons tactiles a l'ecran", tactile["boutons"], 18)
+
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------
             page.evaluate("() => { window.__geo.request('brittlehollow_pivot.gltf'); }")

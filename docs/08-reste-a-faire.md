@@ -51,6 +51,8 @@ portage.
 | éviction | un corps quitté depuis 45 s est libéré |
 | champ de débris | ce qui tombe ressort au trou blanc, 750 u |
 | caméra de sonde | vue embarquée dans un coin de l'écran |
+| commandes tactiles | manche analogique, regard, 18 boutons, carte au pincement |
+| jeu en paysage | HUD, dialogue et réglages bornés pour un écran de 800 × 370 |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -108,6 +110,10 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 - **`AlignQuantumMoon`**, **`CorruptionAnimator`**, **`_vanishEffectPrefab`**.
 - **Les pièces du vaisseau n'ont pas de géométrie propre** : une pièce morte se
   lit dans son état, elle ne se voit pas sur la coque.
+- **La manette n'est pas lue**, alors que le build en décrit une entière
+  (`XboxInput`) — les commandes tactiles ajoutées passent par les mêmes codes
+  clavier que le reste (voir [`33-mobile.md`](33-mobile.md)), et le portrait n'a
+  pas d'interface propre.
 
 ## Où lire le détail
 
@@ -122,6 +128,7 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 | courbes variables et `gravityModifier` | [`10-particules.md`](10-particules.md) |
 | mort par prédateur | [`16-bramble.md`](16-bramble.md) |
 | caméra embarquée de la sonde | [`25-interface.md`](25-interface.md) |
+| commandes tactiles et jeu en paysage | [`33-mobile.md`](33-mobile.md) |
 
 ## Estimation honnête
 

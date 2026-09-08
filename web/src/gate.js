@@ -5,6 +5,7 @@
 // Aucune ressource du jeu n'est servie par cette page : elles n'y sont pas.
 
 import { vfs } from "./vfs.js";
+import { touchAvailable, goLandscape } from "./touch.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -158,7 +159,8 @@ export async function initGate() {
     $("gate-error").hidden = false;
     $("gate-error").textContent =
       `Ce navigateur ne fournit pas : ${missing.join(", ")}. `
-      + "Un navigateur recent de bureau est necessaire.";
+      + "Il faut un navigateur recent : Chrome, Edge ou Firefox de bureau, "
+      + "Chrome sur Android, ou Safari 17 et suivants sur iOS.";
     return;
   }
 
@@ -193,7 +195,12 @@ export async function initGate() {
     handleFile(e.dataTransfer.files[0]);
   });
 
-  $("gate-play").addEventListener("click", startEngine);
+  $("gate-play").addEventListener("click", () => {
+    // Le plein ecran et le verrouillage en paysage exigent un geste de
+    // l'utilisateur : c'est CE clic, et pas un moment plus tard.
+    if (touchAvailable()) goLandscape(document.documentElement);
+    startEngine();
+  });
   $("gate-reset").addEventListener("click", async () => {
     await vfs.clear();
     location.reload();
