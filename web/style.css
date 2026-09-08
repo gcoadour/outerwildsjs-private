@@ -333,8 +333,9 @@ body:not(.playing) #ui { display: none; }
 #touchui { z-index: 8; pointer-events: none; }
 #touch[hidden], #touchui[hidden] { display: none; }
 
-/* Zones de pilotage : la gauche pour le manche, la droite pour le regard.
-   Elles sont invisibles — un pouce se pose ou il veut. */
+/* Zones de pilotage : un manche par moitie d'ecran, comme un FPS mobile — le
+   gauche deplace, le droit regarde. Elles sont invisibles : un pouce se pose ou
+   il veut, et seule une empreinte pale dit ou il est attendu. */
 .tc-zone { position: absolute; top: 0; bottom: 0; }
 .tc-zone-move { left: 0; width: 45%; }
 .tc-zone-look { right: 0; width: 55%; }
@@ -342,7 +343,28 @@ body:not(.playing) #ui { display: none; }
    option ferait aussi tourner la tete du joueur derriere */
 #touch.tc-idle .tc-zone { pointer-events: none; }
 
-/* Manche flottant : il apparait la ou le pouce se pose. */
+/* Empreinte : le manche etant flottant, rien ne dirait sans elle qu'il y en a
+   un de chaque cote. Elle s'efface des que le pouce se pose — a partir de la,
+   c'est le manche lui-meme qui montre ou il est. */
+.tc-home {
+  position: absolute; width: 96px; height: 96px; margin: -48px 0 0 -48px;
+  border: 1px dashed rgba(207, 224, 244, .16);
+  border-radius: 50%; pointer-events: none;
+  transition: opacity .18s ease;
+}
+.tc-home::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: rgba(207, 224, 244, .22);
+}
+.tc-zone-move .tc-home { left: 22%; bottom: 26%; }
+.tc-zone-look .tc-home { left: 42%; bottom: 34%; }
+.tc-zone.tc-live .tc-home, #touch.tc-idle .tc-home { opacity: 0; }
+
+/* Manches flottants : ils apparaissent la ou le pouce se pose. Les deux ont la
+   meme geometrie ; seule la couleur du bouton les distingue — ardoise pour le
+   deplacement, ambre pour le regard, comme le HUD distingue ses jauges de ses
+   actions. */
 .tc-stick {
   position: absolute; width: 108px; height: 108px; margin: -54px 0 0 -54px;
   border: 1px solid rgba(207, 224, 244, .25);
@@ -355,6 +377,11 @@ body:not(.playing) #ui { display: none; }
   transform: translate(-50%, -50%);
   background: rgba(207, 224, 244, .3);
   border: 1px solid rgba(207, 224, 244, .5);
+}
+.tc-stick-look { border-color: rgba(255, 217, 160, .22); }
+.tc-stick-look .tc-knob {
+  background: rgba(255, 217, 160, .26);
+  border-color: rgba(255, 217, 160, .5);
 }
 
 /* Boutons. Les couleurs sont celles du HUD : ambre pour l'action, ardoise
@@ -419,7 +446,7 @@ body:not(.playing) #ui { display: none; }
    proportions internes — la geometrie du casque ne change pas — mais leur
    taille et leur coin changent, et ils se rangent pour laisser les pouces
    libres : jauges en haut a gauche, minicarte en haut a droite, bascules en
-   haut au centre, action en bas a droite, manche en bas a gauche. */
+   haut au centre, action en bas a droite, un manche sous chaque pouce. */
 body.touch { overscroll-behavior: none; }
 body.touch #help { display: none; }
 body.touch #help-touch { display: block; }

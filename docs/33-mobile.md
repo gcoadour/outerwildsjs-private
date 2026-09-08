@@ -12,9 +12,16 @@ de touche — et rien en aval ne sait qu'un doigt existe.
 
 ```
 doigt ──► web/src/touch.js ──┬──► axes (forward, right, up, boost) ──► input
+                             ├──► pixels de regard ──────────────────► look()
                              └──► codes clavier (KeyE, KeyM, ...) ──► command()
 clavier ─────────────────────┴──────────────────────────────────────►
+souris ──────────────────────┴──────────────────────────────────────►
 ```
+
+La disposition est celle des FPS sur téléphone : **deux manches**, un par pouce.
+Le gauche déplace, le droit regarde. Ce sont le même objet — `Stick` dans
+`web/src/touch.js` — à deux réglages près, ce qui est tout ce qu'il a fallu pour
+que le côté droit devienne un manche plutôt qu'une simple zone de balayage.
 
 `command(code)` dans `web/src/main.js` était le corps du gestionnaire de
 `keydown` : l'avoir extrait en fonction est tout ce qu'il a fallu pour que les
@@ -24,8 +31,10 @@ boutons de l'écran et les touches partagent le même chemin.
 
 | geste | équivalent clavier | remarque |
 |---|---|---|
-| manche, moitié gauche | `W`/`A`/`S`/`D` | **analogique**, là où la touche vaut 1 |
-| glisser, moitié droite | souris capturée | même formule, gain 1,7 |
+| manche gauche | `W`/`A`/`S`/`D` | **analogique**, là où la touche vaut 1 |
+| manche gauche poussé à fond devant | `Maj` | cran de course, tant qu'il dure |
+| manche droit, glissé | souris capturée | même formule, gain 1,7 |
+| manche droit, tenu | souris capturée | rotation **continue**, 900 px/s à fond |
 | tape brève à droite | `E` | parler, interagir, faire défiler un dialogue |
 | `▲` maintenu | `Espace` | monter |
 | `»` | `Maj` | **latché** : un pouce ne peut pas tenir et viser à la fois |
@@ -37,15 +46,38 @@ boutons de l'écran et les touches partagent le même chemin.
 | taper une option de dialogue | `1`-`9` | le curseur suit le doigt |
 | taper une ligne de réglages | curseur puis `Entrée` | une ligne verrouillée ne fait rien |
 
-Deux choix méritent d'être défendus.
+Quatre choix méritent d'être défendus.
 
-**Le manche est flottant** : il apparaît là où le pouce se pose, au lieu d'être
-dessiné à une place fixe. Sur une vitre sans relief, viser une croix qu'on ne
-sent pas ne marche pas ; se poser n'importe où dans sa moitié d'écran, si. Sa
-zone morte vaut 0,16 du rayon — `PlayerCharacterController` n'en a pas, parce
-qu'une touche ne tremble pas, alors qu'un pouce posé ne tient pas immobile. Au
-sortir de la zone morte l'axe repart de zéro, sans quoi le premier pixel utile
-vaudrait déjà 0,16 et le démarrage serait brusque.
+**Les manches sont flottants** : ils apparaissent là où le pouce se pose, au
+lieu d'être dessinés à une place fixe. Sur une vitre sans relief, viser une
+croix qu'on ne sent pas ne marche pas ; se poser n'importe où dans sa moitié
+d'écran, si. Une empreinte pâle rappelle malgré tout qu'il y a un manche de
+chaque côté, et s'efface dès que le pouce se pose. La zone morte vaut 0,16 du
+rayon à gauche — `PlayerCharacterController` n'en a pas, parce qu'une touche ne
+tremble pas, alors qu'un pouce posé ne tient pas immobile. Au sortir de la zone
+morte l'axe repart de zéro, sans quoi le premier pixel utile vaudrait déjà 0,16
+et le démarrage serait brusque.
+
+**Le regard est une vitesse, et un déplacement.** Un manche tenu doit tourner la
+caméra même quand le doigt ne bouge plus : la déflexion donne donc des pixels de
+souris **par seconde**, appliqués par une boucle `requestAnimationFrame` — un
+`pointermove` ne bat pas, et ne pouvait rien dire d'un pouce immobile. Le
+glissement, lui, garde son effet direct : c'est lui qui permet de viser au
+pixel, là où la vitesse sert à se retourner. Les deux se cumulent, ce qui donne
+le balayage d'avant sans perdre le manche ; `?look=stick` ne garde que la
+vitesse, `?look=swipe` que le glissement.
+
+La réponse du manche droit est **courbée** — un quart de linéaire, le reste en
+cube. Une réponse droite obligerait à choisir entre viser fin et se retourner
+vite : à mi-course la caméra tourne à 22 % de sa vitesse, pas à 50 %. Sa zone
+morte est plus large que celle du déplacement (0,22 contre 0,16) : une caméra
+qui dérive sous un pouce immobile est bien plus pénible qu'un pas parasite.
+
+**Pousser à fond devant, c'est courir.** Le cran de course des FPS mobiles :
+au-delà de 95 % du rayon et dans les 45° de l'avant, `Maj` est tenue tant que le
+manche y reste, et le bouton `»` s'allume pour le dire. Il ne remplace pas le
+bouton, qui reste latché : un pouce ne peut pas à la fois tenir « accélérer » et
+piloter, mais quand il pousse déjà à fond, il peut.
 
 **Une tape brève vaut `E`.** L'action principale du jeu est contextuelle et se
 déclenche partout ; lui demander de viser un bouton à chaque réplique de
@@ -86,11 +118,11 @@ changent, et ils se rangent pour laisser les pouces libres :
 ┌──────────────────────────────────────────────────────────┐
 │ jauges      carte lunette sonde lampe bord vue menu   ⊙   │  minicarte
 │                                                           │
-│                    invite centrale                        │
-│  invites                                        ▲  »  E   │
+│                    invite centrale             ◌          │
+│  invites            ◌                           ▲  »  E   │
 │  bandeau d'état ─────────────────────────────────────────│
 └──────────────────────────────────────────────────────────┘
-   manche flottant                            regard
+   manche gauche : déplacement          manche droit : regard
 ```
 
 Trois bornes s'ajoutent ailleurs, pour la même raison :
@@ -131,21 +163,32 @@ conclure qu'il faut un ordinateur.
 
 ## Vérification
 
-`tools/15_verify.py` installe la couche dans un vrai navigateur, lui envoie des
-événements de pointeur, et contrôle qu'elle produit bien les entrées attendues :
-axe saturé à 1 manche à fond, axe nul manche relâché, `KeyE` sur la tape comme
-sur le bouton d'action, pilotage suspendu dans un menu, 18 boutons à l'écran.
-Puis elle est retirée, et la page rendue telle qu'elle était.
+La géométrie des manches est pure — ce qu'un pouce posé à tel endroit produit
+comme axe — donc elle se vérifie sans navigateur : `tests/09-jeu.mjs` en compte
+dix-huit contrôles, zone morte, saturation, diagonale, courbe du regard et cran
+de course.
+
+Le reste demande un vrai navigateur. `tools/15_verify.py` installe la couche,
+lui envoie des événements de pointeur, et contrôle qu'elle produit bien les
+entrées attendues : axe saturé à 1 manche à fond, course au cran, axe nul manche
+relâché, glissement à droite à son gain direct, **rotation continue à 900 px/s
+manche droit tenu** et plus rien une fois relâché, `KeyE` sur la tape comme sur
+le bouton d'action, pilotage suspendu dans un menu, deux manches, deux
+empreintes et 18 boutons à l'écran. Puis elle est retirée, et la page rendue
+telle qu'elle était.
 
 L'ouverture forcée `?touch=1` installe la disposition tactile sur un poste de
-bureau ; `?touch=0` l'interdit sur un appareil tactile.
+bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
+`?look=swipe` choisissent le regard.
 
 ## Ce qui reste
 
 - **Le portrait** n'a pas d'interface propre, seulement un bandeau.
-- **Rien n'est réglable** : ni la taille des boutons, ni leur côté (le gaucher
-  n'a pas d'option), ni la sensibilité tactile en propre — elle passe par le
-  réglage de regard du jeu, ce qui est cohérent mais pas séparé.
+- **Rien n'est réglable depuis l'écran** : ni la taille des boutons, ni leur
+  côté (le gaucher n'a pas d'option), ni la sensibilité tactile en propre — elle
+  passe par le réglage de regard du jeu, ce qui est cohérent mais pas séparé. Le
+  mode de regard, lui, se choisit par l'adresse (`?look=`) et non par un
+  bouton : le menu des réglages est celui du jeu, et rien n'y est inventé.
 - **Le pincement ne sert que la carte.** Le télescope garde son bouton, là où un
   pincement serait plus naturel.
 - **Aucune manette** n'est lue, alors que le build en décrit une entière

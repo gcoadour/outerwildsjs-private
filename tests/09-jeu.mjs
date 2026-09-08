@@ -25,6 +25,8 @@ import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity } from "../web/src/sectors.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
 import { envelope } from "../web/src/pipeline/extract/particles.js";
+import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
+         LOOK_DEAD_ZONE, SPRINT_AT } from "../web/src/touch.js";
 
 const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
@@ -370,6 +372,52 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         "[0,5]");
   check("sans courbe, rien", envelope({ scalar: 1 }), null);
   check("mmc absente", envelope(null), null);
+}
+
+// --- les deux manches tactiles -------------------------------------------
+//
+// Geometrie pure, donc verifiable sans navigateur : ce qu'un pouce pose a tel
+// endroit produit comme axe. Le reste de la couche — les evenements, les
+// boutons, la boucle du regard — demande un vrai navigateur, et c'est
+// `tools/15_verify.py` qui s'en charge.
+{
+  const R = STICK_RADIUS;
+  const v = (dx, dy, dead) => stickVector(dx, dy, R, dead);
+
+  check("manche au repos : axe nul", v(0, 0).mag, 0);
+  check("dans la zone morte : rien", v(0, -DEAD_ZONE * R * 0.9).mag, 0);
+  check("au sortir de la zone morte : axe reparti de zero",
+        round(v(0, -DEAD_ZONE * R * 1.1).mag, 3), 0.019);
+  check("manche a fond : axe sature a 1", v(0, -R).mag, 1);
+  check("pousse au-dela du rayon : toujours 1", v(0, -3 * R).mag, 1);
+  check("vers le haut de l'ecran, on avance", round(-v(0, -R).y, 3), 1);
+  check("a mi-rayon", round(v(0, -R / 2).mag, 3), 0.405);
+  // La direction est unitaire AVANT l'amplitude : une diagonale a fond donne
+  // bien deux axes egaux, et non deux axes satures.
+  check("diagonale a fond : deux axes egaux",
+        round(v(R, -R).x, 3), round(-v(R, -R).y, 3));
+
+  // Le manche droit a la meme geometrie et une zone morte plus large : une
+  // camera qui derive sous un pouce immobile est pire qu'un pas parasite.
+  const d = 0.23 * R;
+  check("regard : zone morte plus large que celle du deplacement",
+        v(0, -d, LOOK_DEAD_ZONE).mag < v(0, -d, DEAD_ZONE).mag, true);
+
+  // Courbe de reponse du regard : elle passe par les memes bornes qu'une
+  // droite, mais reste sous elle partout entre les deux — c'est ce qui donne
+  // la visee fine sans perdre le demi-tour.
+  check("manche de regard lache : aucune rotation", lookCurve(0), 0);
+  check("manche de regard a fond : vitesse pleine", lookCurve(1), 1);
+  check("a mi-manche, bien moins que la moitie", round(lookCurve(0.5), 3), 0.219);
+  check("courbe croissante", lookCurve(0.3) < lookCurve(0.6), true);
+
+  // Cran de course : a fond, et dans les 45 degres de l'avant.
+  check("a fond devant : le cran de course prend", sprinting(v(0, -R)), true);
+  check("a fond en diagonale : encore dans le cone", sprinting(v(R, -R)), true);
+  check("a fond de cote : pas de course", sprinting(v(R, 0)), false);
+  check("a fond en arriere : pas de course", sprinting(v(0, R)), false);
+  check("pas tout a fait a fond : pas de course",
+        sprinting(v(0, -R * (SPRINT_AT * 0.9))), false);
 }
 
 report();
