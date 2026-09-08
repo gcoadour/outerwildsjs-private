@@ -122,10 +122,10 @@ export function convoControllers(gameplay = {}) {
  * difference entre lire la reference et chercher un titre qui lui ressemble.
  */
 const TREE_RULES = [
-  { when: (d) => !d.hasCompletedTraining, field: /before|training|untrained/i,
+  { when: (d) => !d.hasCompletedTraining, field: /training|untrained/i,
     who: /coach/i },
-  { when: (d) => d.knowsLaunchCodes, field: /withcodes|hascodes|after/i, who: /coach/i },
-  { when: () => true, field: /withoutcodes|nocodes|before/i, who: /coach/i },
+  { when: (d) => d.knowsLaunchCodes, field: /withcodes|hascodes/i, who: /coach/i },
+  { when: () => true, field: /withoutcodes|nocodes/i, who: /coach/i },
   { when: (d) => d.knowsLaunchCodes, field: /goodluck|after|post|launch/i,
     who: /curator/i },
   { when: () => true, field: /preflight|before|initial/i, who: /curator/i },

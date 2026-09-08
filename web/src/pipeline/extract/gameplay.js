@@ -102,6 +102,23 @@ export function extractGameplay(ctx) {
     (placed[cls] ||= []).push(entry);
   }
 
+  // Groupes de niveau de detail : ce sont des composants MOTEUR, pas des
+  // scripts. Ils ne se lisent donc que si la structure de la classe 205 figure
+  // dans unity41-types.json — sinon rien n'est emis, et `lod.js` garde son
+  // seuil unique. Voir tools/16_unity_types.py.
+  for (const o of ctx.env.objects({ type: "LODGroup", file: ctx.sceneFile })) {
+    const v = ctx.readEngine(o);
+    if (!v || !v.m_GameObject) continue;
+    const gid = v.m_GameObject.pathId;
+    const levels = (v.m_LODs || []).map((l) => l.screenRelativeHeight)
+      .filter((h) => typeof h === "number");
+    if (!levels.length) continue;
+    (placed.LODGroup ||= []).push({
+      name: ctx.name(gid), position: ctx.worldPosition(gid),
+      fields: { _screenRelativeHeights: levels },
+    });
+  }
+
   const stats = { classes: Object.keys(placed).length };
   if (Object.keys(discovered).length) stats.decouvertes = discovered;
   for (const [k, v] of Object.entries(placed)) stats[k] = v.length;

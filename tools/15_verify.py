@@ -294,6 +294,62 @@ def run(url, heavy):
         deb = page.evaluate("() => window.__debris ? window.__debris.radius : null")
         rep.eq("rayon du champ de debris", deb, 750)
 
+        # --- rotation propre des corps ------------------------------------------
+        #
+        # Elle s'applique au REPERE ancre, pas a la geometrie : le ciel tourne,
+        # le sol ne bouge pas. C'est ce que ces deux mesures separent — l'azimut
+        # du soleil vu du sol change, la position du corps ancre non.
+        monde = page.evaluate("""() => {
+          const sun = window.__bodies.find(b => (b.gravity.surfaceAcceleration || 0) >= 50);
+          const az = (p) => Math.atan2(p[2], p[0]);
+          return { corps: window.__spin.count,
+                   azimut: sun ? az(sun.position) : null,
+                   ancre: window.__bodies.map(b => Math.hypot(...b.position) < 1e-6)
+                            .filter(Boolean).length };
+        }""")
+        rep.at_least("corps qui tournent sur eux-memes", monde["corps"], 1)
+        rep.eq("le corps ancre reste a l'origine de son repere", monde["ancre"], 1)
+        page.wait_for_timeout(1500)
+        azimut2 = page.evaluate("""() => {
+          const sun = window.__bodies.find(b => (b.gravity.surfaceAcceleration || 0) >= 50);
+          return sun ? Math.atan2(sun.position[2], sun.position[0]) : null;
+        }""")
+        rep.check("l'azimut du soleil change avec le temps",
+                  monde["azimut"] is not None and azimut2 is not None
+                  and abs(azimut2 - monde["azimut"]) > 1e-6,
+                  azimut2, f"!= {monde['azimut']}")
+
+        # --- ce que le build portait et que rien ne lisait ----------------------
+        #
+        # Un compte nul n'est pas forcement un echec du portage : il dit que
+        # l'alpha ne pose pas cette chose-la. On mesure donc, et on affiche.
+        w = page.evaluate("""() => ({
+          lumieres: window.__world.lighting.total,
+          allumees: window.__world.lighting.count,
+          champs: window.__world.dirFields.length,
+          fluides: window.__world.fluids.count,
+          oxygene: window.__world.oxygen.length,
+          chaleur: window.__world.heat.length,
+          controleurs: window.__world.controllers.length,
+          seuilsLOD: window.__lod.seuils,
+        })""")
+        rep.at_least("lumieres extraites de la scene", w["lumieres"], 1)
+        rep.at_most("lumieres allumees a la fois", w["allumees"], 8)
+        for label, key in [("champs de force directionnels", "champs"),
+                           ("volumes de fluide", "fluides"),
+                           ("zones d'oxygene", "oxygene"),
+                           ("sources de chaleur", "chaleur"),
+                           ("controleurs de dialogue", "controleurs"),
+                           ("seuils de niveau de detail du build", "seuilsLOD")]:
+            rep.at_least(label, w[key], 0)
+
+        # --- brouillard : les RenderSettings, non plus recopies ------------------
+        rs = page.evaluate("() => ({ couleur: window.__fog.fog.color,"
+                           " mode: window.__fog.fog.mode })")
+        rep.eq("mode de brouillard lu dans la scene", rs["mode"], "exp2")
+        rep.eq("couleur de brouillard lue dans la scene",
+               [round(c, 2) for c in rs["couleur"]], [0.5, 0.5, 0.5])
+
         # --- camera embarquee de la sonde ---------------------------------------
         page.keyboard.press("KeyF")
         page.wait_for_timeout(600)
