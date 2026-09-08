@@ -1,5 +1,10 @@
 # Ce qui manque encore pour un portage complet
 
+Cette page fait l'inventaire de l'**état** du portage.
+[`34-actions.md`](34-actions.md) reprend la comparaison sous forme d'**actions
+ordonnées**, et y ajoute les écarts trouvés en confrontant les extracteurs au
+moteur — des données du build déjà extraites que personne ne lit.
+
 Inventaire fondé sur les composants et assets réellement présents dans le
 build, pas sur une impression. Ce document dit honnêtement où en est le
 portage.
@@ -84,8 +89,10 @@ dans l'alpha.
 
 Tout est vérifié au chiffre, rien ne l'est au rendu.
 
-- **L'équilibrage des volumes audio** — les portées sont choisies par piste,
-  faute de `m_MinDistance` sur Unity 4.
+- **L'équilibrage des volumes audio** — les portées sont aujourd'hui choisies
+  par piste. Ce n'est plus une fatalité : le champ existe en 4.1 sous le nom
+  `MinDistance`, sans préfixe, et le pipeline navigateur le lit dans le type
+  tree. À corriger avant de juger à l'oreille, voir [`34-actions.md`](34-actions.md) A2.
 - **L'équilibrage visuel des particules** — les tailles vont jusqu'à 140 unités.
 - **Le rendu général** : atmosphères, surface stellaire, brouillards et
   explosion sont des implémentations originales visant un résultat comparable,
@@ -98,7 +105,8 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   demanderait un second rendu complet de la scène — doubler les 6,1 ms — pour
   **deux matériaux dans tout le jeu**.
 - **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
-  en enchaîne plusieurs sur des maillages simplifiés.
+  en enchaîne plusieurs sur des maillages simplifiés — qui sont dans le build,
+  et donc à exporter plutôt qu'à générer ([`34-actions.md`](34-actions.md) A8).
 - **Les 21 `ChildColliderLOD`** : les colliders sont posés d'un bloc sur le
   corps ancré.
 - **15 Mo de WAV non compressés** et **11,1 Mo de Babylon** sur les 66 du
@@ -114,6 +122,24 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   (`XboxInput`) — les commandes tactiles ajoutées passent par les mêmes codes
   clavier que le reste (voir [`33-mobile.md`](33-mobile.md)), et le portrait n'a
   pas d'interface propre.
+
+### 4. Ce que la comparaison extracteurs / moteur a fait apparaître
+
+Des données du build **déjà extraites, et que rien ne lit** — ou des composants
+que les extracteurs ne regardent pas. Le détail et la marche à suivre sont dans
+[`34-actions.md`](34-actions.md) ; en résumé :
+
+| écart | où |
+|---|---|
+| **rotation propre des corps** : `spin` et `spinSpeed` extraits, jamais appliqués — pas de cycle jour/nuit | A1 |
+| **portées audio** inventées par piste, et rayon en pixels d'un émetteur pris pour des unités de monde | A2 |
+| **aucune lumière du build** n'est extraite : une directionnelle et une hémisphérique pour tout le système | A3 |
+| `RenderSettings` recopiés à la main au lieu d'être lus | A4 |
+| `CHECK_RADIUS` et `CHECK_DEPTH` exportés et inutilisés | A5 |
+| **34 `DirectionalForceField`** ignorés, contre 10 `GravityWell` portés | A6 |
+| **fluides** : `SphereOceanFluidVolume` listé par l'extracteur mais jamais émis — Giant's Deep n'a pas d'océan | A7 |
+| **`mainData`** chargé par le worker mais jamais extrait : 989 objets hors périmètre | A9 |
+| **zones d'oxygène** : seul le vaisseau recharge, sans qu'on ait cherché ce que la scène propose | A11 |
 
 ## Où lire le détail
 
