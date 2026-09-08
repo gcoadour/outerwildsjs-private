@@ -90,6 +90,26 @@ export function signalStrength(dPixels, hotspot, falloff) {
   return s * s;
 }
 
+/** `_lowPassCutoff` d'un AudioTransmitter, en hertz. */
+export const TRANSMITTER_LOWPASS = 1000;
+/** Bande passante d'un signal parfaitement cadre : plus de filtre du tout. */
+export const OPEN_BAND = 20000;
+
+/**
+ * Frequence de coupure d'un emetteur, selon la force du signal recu.
+ *
+ * Ce qui vient du build : le filtre, et sa valeur de 1 000 Hz. Ce qui n'en
+ * vient pas : la facon dont il s'ouvre. Le rapprochement avec `panLevel`, qui
+ * suit `1 - force`, dit que le signal se degage a mesure qu'on le cadre ; la
+ * progression retenue ici est GEOMETRIQUE, parce qu'une octave se parcourt en
+ * multipliant et non en ajoutant — a mi-course l'oreille entend bien le milieu.
+ */
+export function transmitterCutoff(strength, muffled = TRANSMITTER_LOWPASS,
+                                  open = OPEN_BAND) {
+  const s = Math.max(0, Math.min(1, strength));
+  return muffled * Math.pow(open / muffled, s);
+}
+
 export async function loadAudioMap() {
   try {
     const res = await fetch("data/audio/sources.json", { cache: "no-store" });
@@ -111,6 +131,8 @@ export class AudioField {
     this.pending = new Set();  // creations en cours, pour eviter les doublons
     this.unlocked = false;
     this.failed = 0;
+    this.filters = new Map();  // index -> BiquadFilterNode insere
+    this.filterState = null;   // "ok" | "absent", decide au premier essai
   }
 
   async init() {
@@ -229,12 +251,101 @@ export class AudioField {
       .catch(() => { this.pending.delete(i); this.failed++; });
   }
 
+  /**
+   * Insere un passe-bas sur la sortie d'une source.
+   *
+   * Babylon ne publie pas de filtre : son graphe audio est prive. Mais il est
+   * fait de vrais noeuds WebAudio, et le dernier de la chaine d'une source est
+   * un `GainNode` relie au bus de sortie. On s'intercale entre les deux.
+   *
+   * Toute la manoeuvre est defensive : on ne coupe l'arete existante qu'APRES
+   * avoir branche le filtre sur la destination, et le moindre accroc annule
+   * tout. Une version de Babylon qui changerait sa structure interne ferait
+   * donc perdre le filtre, jamais le son.
+   */
+  _insertFilter(snd) {
+    try {
+      const out = snd && snd._subGraph && snd._subGraph._outNode;
+      const dest = snd && snd.outBus && snd.outBus._inNode;
+      if (!out || !dest || typeof out.connect !== "function" ||
+          typeof dest.connect !== "function") return null;
+      const ctx = out.context;
+      if (!ctx || typeof ctx.createBiquadFilter !== "function") return null;
+
+      const f = ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.value = OPEN_BAND;
+      f.connect(dest);
+      try {
+        out.disconnect(dest);
+      } catch (e) {
+        // l'arete attendue n'existe pas : on defait plutot que de doubler le
+        // signal en ajoutant un second chemin
+        f.disconnect();
+        return null;
+      }
+      out.connect(f);
+      this.filterState = "ok";
+      return f;
+    } catch (e) {
+      this.filterState = "absent";
+      return null;
+    }
+  }
+
+  /**
+   * Coupure passe-bas d'une source, en hertz. Sans graphe atteignable, la
+   * demande est ignoree — le son reste tel quel, jamais coupe.
+   */
+  setLowPass(i, hz) {
+    if (this.filterState === "absent") return false;
+    const snd = this.live.get(i);
+    if (!snd) return false;
+    let f = this.filters.get(i);
+    if (!f) {
+      f = this._insertFilter(snd);
+      if (!f) { this.filterState = this.filterState || "absent"; return false; }
+      this.filters.set(i, f);
+    }
+    f.frequency.value = Math.max(40, Math.min(OPEN_BAND, hz));
+    return true;
+  }
+
+  /**
+   * Indices des sources d'un emetteur.
+   *
+   * L'extracteur pose `transmitter` sur la source quand elle partage son
+   * GameObject avec un AudioTransmitter : c'est ce lien-la qui fait foi, le nom
+   * ne servant qu'a designer lequel.
+   */
+  indicesNamed(name) {
+    const out = [];
+    for (let i = 0; i < this.sources.length; i++) {
+      const s = this.sources[i];
+      if (s.name === name && (s.transmitter || s.track === "Signal")) out.push(i);
+    }
+    return out;
+  }
+
+  /**
+   * Applique la coupure correspondant a une force de signal, en prenant le
+   * `_lowPassCutoff` de l'emetteur lui-meme quand l'extracteur l'a releve.
+   */
+  lowPassFor(i, strength) {
+    const s = this.sources[i];
+    const muffled = (s && s.transmitter && s.transmitter.lowpass) || TRANSMITTER_LOWPASS;
+    return this.setLowPass(i, transmitterCutoff(strength, muffled));
+  }
+
   _despawn(i) {
     const snd = this.live.get(i);
     if (snd) {
       try { snd.stop(); } catch (e) { /* deja arrete */ }
       try { snd.dispose(); } catch (e) { /* deja libere */ }
     }
+    const f = this.filters.get(i);
+    if (f) { try { f.disconnect(); } catch (e) { /* deja detache */ } }
+    this.filters.delete(i);
     this.live.delete(i);
   }
 

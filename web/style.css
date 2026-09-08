@@ -98,6 +98,24 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: fill; transition: opacity .12s linear;
 }
+/* Flashback : le battement des images, puis le fondu au blanc. L'opacite est
+   pilotee image par image par death.js — surtout pas de transition CSS, qui
+   lisserait justement le rythme qu'on cherche a rendre. */
+/* Cadre de la camera embarquee de la sonde. Les fractions sont celles du
+   viewport Babylon (0,755 / 0,03 / 0,23 / 0,23), dont l'origine est en bas. */
+.ow-probeview {
+  position: absolute; right: 1.5%; bottom: 3%; width: 23%; height: 23%;
+  border: 1px solid rgba(159, 214, 196, .55); pointer-events: none;
+}
+.ow-probeview::after {
+  content: "SONDE"; position: absolute; left: 4px; top: 2px;
+  font-family: "OW Helmet", ui-monospace, monospace;
+  font-size: 11px; letter-spacing: 1px; color: rgba(159, 214, 196, .8);
+}
+.ow-flashback {
+  position: absolute; inset: 0; background: #fff; pointer-events: none;
+  opacity: 0;
+}
 /* « low fuel / low health / low oxygen », a droite du centre de l'ecran :
    PlayerResourceGUI.OnGUI les pose a x = largeur/2 + 50, en corps 20, rouge */
 .ow-warn {

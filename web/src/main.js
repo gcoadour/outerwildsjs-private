@@ -34,16 +34,19 @@ import { loadAudioMap, AudioField, AudioMixer, signalStrength } from "./audio.js
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
 import { TimeLoop } from "./timeloop.js";
+import { SunStage, SupernovaView } from "./supernova.js";
+import { PlayerDeathHandler, FlashbackOverlay } from "./death.js";
+import { MeshLOD, Evictor } from "./lod.js";
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
-import { QuantumMoon, quantumHosts } from "./quantum.js";
-import { BlackHole } from "./blackhole.js";
+import { QuantumMoon, quantumHosts, bodyOccluder } from "./quantum.js";
+import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns } from "./bramble.js";
-import { Sectors, sectorMap } from "./sectors.js";
+import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap } from "./map.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree } from "./playerdata.js";
-import { Telescope, ProbeLauncher } from "./tools.js";
+import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
@@ -79,6 +82,8 @@ async function boot() {
   const camera = new BABYLON.FreeCamera("cam", BABYLON.Vector3.Zero(), scene);
   camera.minZ = 0.1;
   camera.maxZ = 200000;
+  // Calque des billes de sonde : visible du joueur, pas de la sonde elle-meme.
+  camera.layerMask = 0x2FFFFFFF;
   scene.activeCamera = camera;
 
   // Une lumiere ponctuelle s'attenuerait a 8 500 unites du soleil. Pour une
@@ -86,7 +91,11 @@ async function boot() {
   // le bon eclairage sans probleme de portee.
   const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(0, -1, 0), scene);
   sun.intensity = 1.15;
-  new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0, 1, 0), scene).intensity = 0.1;
+  // L'ambiance n'est pas une constante : chaque secteur porte sa propre portee
+  // d'eclairage ambiant (`_ambientLightRange`), de 750 sur Giant's Deep a 0 sur
+  // la comete. On garde la lumiere sous la main pour la suivre.
+  const ambient = new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0, 1, 0), scene);
+  ambient.intensity = 0.1;
 
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
@@ -213,6 +222,12 @@ async function boot() {
   }
   const starEntry = entries.find((e) => e.isStar);
   if (starEntry) mats.sun = makeSun(BABYLON, scene, starEntry.mesh);
+  // Mise en scene de la fin des temps : progression, contraction, explosion,
+  // onde de choc. La vue ne se monte qu'au moment ou elle sert.
+  const sunStage = new SunStage((star0 && star0.gravity.upperSurfaceRadius) || 2000);
+  const supernovaView = starEntry
+    ? new SupernovaView(BABYLON, scene, starEntry.mesh) : null;
+  window.__supernova = { stage: sunStage, view: supernovaView };
 
   // le soleil garde sa sphere : le shader maison la rend mieux que sa
   // geometrie d'origine, qui ne compte que deux maillages
@@ -257,6 +272,7 @@ async function boot() {
   }
   // --- vaisseau ---
   let ship = null;
+  let shipStart = [0, 0, 0];
   {
     const entry = entryForBody(geo, home.name);
     const node = entry ? findBodyNode(entry, "Ship_Body") : null;
@@ -265,15 +281,24 @@ async function boot() {
       const local = [spawnWorld[0] - home.position0[0],
                      spawnWorld[1] - home.position0[1],
                      spawnWorld[2] - home.position0[2]];
+      shipStart = local.slice();
       ship = new Ship((gameplay.singletons.ShipThrusterModel || {}).fields || {},
-                      node, local);
+                      node, local,
+                      (gameplay.singletons.ShipDamageController || {}).fields || {});
       ship.sync(BABYLON);
+      // le vaisseau ne doit jamais s'effacer par niveau de detail : c'est
+      // l'objet qu'on cherche des yeux depuis le sol
+      if (node && node.getChildMeshes) {
+        for (const m of node.getChildMeshes(false)) MeshLOD.pin(m);
+      }
     }
   }
   // --- lune quantique ---
   const qHosts = quantumHosts(gameplay);
   const qBody = bodies.find((b) => /quantum/i.test(b.name));
   const quantum = qHosts.length && qBody ? new QuantumMoon(qHosts, bodies) : null;
+  // Occlusion : tout corps du systeme sauf la lune elle-meme peut la masquer.
+  const qOccluder = bodyOccluder(bodies, qBody);
   window.__quantum = quantum;
 
   // --- interface de jeu : jauges et invites ---
@@ -312,6 +337,9 @@ async function boot() {
     position: t.position,
     hotspot: (t.fields || {})._hotspotRadius ?? 1,
     falloff: (t.fields || {})._falloffRadius ?? 100,
+    // Sources audio du meme GameObject : l'emetteur porte les rayons, la source
+    // porte le son. C'est par elles que passe la coupure passe-bas.
+    sources: audio.indicesNamed(t.name),
   }));
   let mixedEndTimes = false, mixedDeath = false;
   window.__audioMix = { mixer, transmitters };
@@ -416,6 +444,45 @@ async function boot() {
                     (whiteVol.fields || {})._radius || 50) : null;
   window.__blackhole = blackHole;
 
+  // Champ de debris du trou blanc : ce que le trou noir avale ressort la-bas,
+  // un morceau apres l'autre, dans une sphere de 750 unites.
+  const debris = whiteVol
+    ? new DebrisField((whiteVol.fields || {})._debrisRadius || 750) : null;
+  const debrisMeshes = [];
+  let debrisBase = null;
+  window.__debris = debris;
+
+  function syncDebris(dt, framePos) {
+    if (!debris) return;
+    const fresh = debris.update(dt);
+    if (fresh.length && !debrisBase) {
+      debrisBase = BABYLON.MeshBuilder.CreateSphere("debris",
+        { diameter: 24, segments: 6 }, scene);
+      const m = new BABYLON.StandardMaterial("debrisMat", scene);
+      m.diffuseColor = new BABYLON.Color3(0.32, 0.28, 0.30);
+      m.specularColor = new BABYLON.Color3(0, 0, 0);
+      debrisBase.material = m;
+      debrisBase.isPickable = false;
+      MeshLOD.pin(debrisBase);
+    }
+    for (const item of fresh) {
+      // Le maillage de base EST le premier morceau, les suivants en sont des
+      // instances : un seul appel de rendu pour les 122, et pas de maillage
+      // source eteint dont les instances dependraient.
+      const inst = debrisMeshes.length
+        ? debrisBase.createInstance(`debris_${item.seed}`) : debrisBase;
+      inst.isPickable = false;
+      debrisMeshes.push({ inst, item });
+    }
+    if (!debrisMeshes.length) return;
+    const base = whiteVol.position;
+    for (const { inst, item } of debrisMeshes) {
+      inst.position.set(base[0] - framePos[0] + item.position[0],
+                        base[1] - framePos[1] + item.position[1],
+                        base[2] - framePos[2] + item.position[2]);
+    }
+  }
+
   // --- croute de Brittle Hollow : les fragments tombent pour de bon ---
   const crust = bhBody
     ? new Crust(crustCarriers(gameplay),
@@ -434,6 +501,39 @@ async function boot() {
   window.__sectors = sectors;
   window.__geo = store;
 
+  // --- niveau de detail par maillage, et eviction ---
+  //
+  // Le premier eteint ce qui est trop petit a l'ecran, le second rend la
+  // memoire d'un corps qu'on a quitte pour de bon. Sans le second, traverser le
+  // systeme finissait par tout charger et le gain du demarrage se reperdait.
+  const meshLOD = new MeshLOD();
+  const evictor = new Evictor(45, bootFiles(home.name));
+  window.__lod = { meshLOD, evictor };
+
+  /** Un lot qu'on ne peut pas liberer sans casser ce qui s'y accroche. */
+  function evictionGuard(entry) {
+    if (anchorBody && BODY_TO_FILE[anchorBody.name] === entry.file) return true;
+    if (colliderFile && colliderFile.startsWith(entry.file + "/")) return true;
+    // les fragments de croute deja resolus pointent vers des noeuds de ce lot
+    if (crust && crust.resolved && bhBody &&
+        BODY_TO_FILE[bhBody.name] === entry.file) return true;
+    return false;
+  }
+
+  function evictFile(file) {
+    return store.evict(file, (entry) => {
+      if (evictionGuard(entry)) return true;
+      // un casteur d'ombre libere sans etre retire du generateur laisse une
+      // reference morte dans la passe d'ombres
+      if (shadowGen) {
+        for (const m of entry.meshes) {
+          try { shadowGen.removeShadowCaster(m); } catch (e) { /* jamais ajoute */ }
+        }
+      }
+      return false;
+    });
+  }
+
   // --- Dark Bramble ---
   const fish = ((gameplay.placed || {}).AnglerfishController || [])
     .map((f) => new Anglerfish(f.position));
@@ -447,8 +547,14 @@ async function boot() {
   loop.loopCount = pdata.loopCount || 0;
   const spawn0 = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
 
+  // Mort et flashback : une seule porte d'entree pour toutes les causes.
+  const death = new PlayerDeathHandler();
+  const flashOverlay = uiRoot ? new FlashbackOverlay(uiRoot) : null;
+  window.__death = death;
+
   function respawn() {
     loop.restart();
+    death.revive();
     resources.oxygen = resources.maxOxygen;
     resources.fuel = resources.maxFuel;
     resources.health = resources.maxHealth;
@@ -457,7 +563,14 @@ async function boot() {
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
     player.vel.x = player.vel.y = player.vel.z = 0;
     if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
-    if (ship) { ship.boarded = false; ship.vel.x = ship.vel.y = ship.vel.z = 0; }
+    if (ship) {
+      ship.boarded = false;
+      ship.vel.x = ship.vel.y = ship.vel.z = 0;
+      // le vaisseau repart entier : la boucle remet le monde a son etat de
+      // depart, coque comprise
+      ship.damage.reset();
+      ship.pos.x = shipStart[0]; ship.pos.y = shipStart[1]; ship.pos.z = shipStart[2];
+    }
     if (starEntry) starEntry.mesh.scaling.setAll(1);
   }
   window.__loop = loop;
@@ -470,7 +583,10 @@ async function boot() {
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   const telescope = new Telescope();
   const probes = new ProbeLauncher();
-  window.__tools = { telescope, probes };
+  // La sonde est un appareil photo qu'on jette : sa camera embarquee occupe un
+  // coin de l'ecran tant qu'elle vole.
+  const probeCam = new ProbeCamera(BABYLON, scene, camera, uiRoot);
+  window.__tools = { telescope, probes, probeCam };
   // Les options de dialogue sont touchables : au clavier on les choisit au
   // chiffre ou au curseur, au doigt on les vise directement.
   const dlgUI = new DialogueUI(document.getElementById("dialogue"), {
@@ -480,6 +596,7 @@ async function boot() {
 
   // Rendu des sondes : une petite sphere emissive par sonde en vol, reutilisee
   // d'une sonde a l'autre plutot que recreee.
+  const PROBE_LAYER = 0x20000000;
   const probeMeshes = [];
   const probeMat = new BABYLON.StandardMaterial("probeMat", scene);
   probeMat.emissiveColor = new BABYLON.Color3(0.6, 0.9, 1.0);
@@ -491,6 +608,10 @@ async function boot() {
           { diameter: 0.6, segments: 6 }, scene);
         m.material = probeMat;
         m.isPickable = false;
+        // La sonde ne se filme pas elle-meme : sa bille est sur un calque que
+        // la camera embarquee ne regarde pas, sans quoi elle remplirait
+        // l'image — elle est a 30 cm de l'objectif.
+        m.layerMask = PROBE_LAYER;
         probeMeshes.push(m);
       }
       const p = probes.probes[i].pos;
@@ -600,6 +721,9 @@ async function boot() {
     document.getElementById("touch"), document.getElementById("touchui"),
     { onKey: command, onLook: (dx, dy) => look(dx, dy, 1) });
   if (touchAvailable()) touch.enable();
+  // En paysage de telephone, le coin bas-droit revient aux boutons d'action :
+  // la vue de sonde passe a gauche, sous les jauges.
+  if (touch.enabled) probeCam.setViewport(0.02, 0.42, 0.26, 0.3);
   window.__touch = touch;   // sonde de verification
   // La carte capte glisser, pincer, taper et la molette quand elle est
   // ouverte. Les trois premiers sont des evenements de POINTEUR : le meme code
@@ -643,11 +767,15 @@ async function boot() {
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
 
-    // Clavier et doigt s'additionnent : le manche virtuel est analogique, la
-    // touche vaut 1, et la somme est bornee comme un axe l'est.
+    // Un mort ne pilote plus : PlayerDeathHandler coupe les commandes le temps
+    // de la sequence. Sans cela on continuait a marcher pendant son propre
+    // flashback.
+    //
+    // Hors sequence, clavier et doigt s'additionnent : le manche virtuel est
+    // analogique, la touche vaut 1, et la somme est bornee comme un axe l'est.
     const ax = touch.axes;
     const axis = (v) => Math.max(-1, Math.min(1, v));
-    const input = {
+    const input = death.dead ? { forward: 0, right: 0, up: false, boost: false } : {
       forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward),
       right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right),
       up: keys.Space || ax.up,
@@ -656,6 +784,11 @@ async function boot() {
     // 1. avance des orbites, puis re-expression dans le repere du corps ancre
     advance(orbits, dt);
     const anchorPos = reframe(anchorBody);
+
+    // vitesse de chute AVANT le pas : apres, le contact l'a deja annulee et
+    // l'impact serait toujours nul
+    const wasGrounded = player.grounded;
+    const fallSpeed = -(player.vel.x * up.x + player.vel.y * up.y + player.vel.z * up.z);
 
     player.update(dt, bodies, input, { fwd, right, up }, origin);
 
@@ -667,6 +800,17 @@ async function boot() {
       const newPos = currentPosition(orbits, fb);
       const shift = sub3(anchorPos, newPos);
       player.pos.x += shift[0]; player.pos.y += shift[1]; player.pos.z += shift[2];
+      // Tout ce qui vit dans le repere courant doit suivre, pas seulement le
+      // joueur. Le vaisseau restait en arriere au changement de corps dominant :
+      // on volait vers une planete et il se retrouvait a des milliers d'unites,
+      // le temps que le pilote automatique le ramene. Les sondes en vol ont le
+      // meme probleme, en plus court.
+      if (ship) {
+        ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
+      }
+      for (const p of probes.probes) {
+        p.pos[0] += shift[0]; p.pos[1] += shift[1]; p.pos[2] += shift[2];
+      }
       anchorBody = fb;
       reframe(anchorBody);
       origin.offset.x = fb.position0[0];
@@ -841,14 +985,14 @@ async function boot() {
     const hud2 = document.getElementById("hud2");
     if (hud2) {
       const bits = [`boucle ${loop.loopCount} — ${loop.label}` +
-                    (loop.dead ? ` — mort (${loop.deathCause})` : ""),
+                    (death.dead ? ` — mort : ${death.label} (${death.state.phase})` : ""),
                     resources.summary()];
       if (particleMap.length) bits.push(
         `particules ${particles.count} (${particles.particles})`);
       if (audioMap.length) bits.push(
         `audio ${audio.playing}/${audio.count}` + (audio.unlocked ? "" : " (clic pour activer)"));
-      if (ship && ship.integrity < 100) bits.push(
-        `coque ${ship.integrity.toFixed(0)}%` +
+      if (ship && (ship.integrity < 100 || ship.destroyed)) bits.push(
+        ship.damage.summary +
         (ship.lastImpact ? ` (impact ${ship.lastImpact} u/s)` : ""));
       if (autopilot && autopilot.engaged) bits.push(`pilote auto : ${autopilot.phase}`);
       if (ship) bits.push(ship.boarded
@@ -864,13 +1008,18 @@ async function boot() {
       if (probes.active) bits.push(`${probes.active} sonde(s)`);
       if (sectors) bits.push(
         `secteurs ${sectorState.actifs}/${sectorState.total}` +
-        (sectorState.secteur ? ` — ${sectorState.secteur.name}` : ""));
+        (sectorState.secteur ? ` — ${sectorState.secteur.name}` : "") +
+        (ship && ship.thrustLimit != null ? ` (poussee ≤ ${ship.thrustLimit})` : ""));
+      if (meshLOD.hidden > 0) bits.push(`LOD ${meshLOD.hidden} maillages eteints`);
+      if (evictor.evicted > 0) bits.push(`${evictor.evicted} corps libere(s)`);
       // la geometrie arrive en cours de partie : le dire plutot que de laisser
       // croire a une sphere de substitution definitive
       if (store.busy) bits.push(`chargement ${store.entries.length + store.busy} corps…`);
       const chasing = fish.filter((f) => f.state !== "repos").length;
       if (chasing) bits.push(`anglerfish : ${chasing} en alerte`);
       if (blackHole && blackHole.transits) bits.push(`trou noir : ${blackHole.transits} transit(s)`);
+      if (debris && (debris.grown || debris.pending)) bits.push(
+        `debris : ${debris.grown} ressorti(s), ${debris.pending} en file`);
       if (quantum) bits.push(
         `lune quantique : ${quantum.hostName}` +
         (quantum.observed ? " (observee)" : ` (${quantum.collapses} sauts)`));
@@ -896,11 +1045,42 @@ async function boot() {
         const ent = entryForBody(geo, e.data.name);
         e.mesh.isVisible = !ent || !sectors.active.has(ent.file);
       }
+      // La limite de poussee du secteur s'applique enfin au vaisseau : 20
+      // partout, 200 sur la premiere jumelle, illimitee sur Giant's Deep.
+      if (ship) ship.thrustLimit = sectors.thrustLimit;
+      // L'eclairage ambiant suit `_ambientLightRange`, mesure depuis le centre
+      // du secteur courant.
+      const sec = sectorState.secteur;
+      if (sec) {
+        const d = Math.hypot(sec.position[0] - anchorPos[0] - player.pos.x,
+                             sec.position[1] - anchorPos[1] - player.pos.y,
+                             sec.position[2] - anchorPos[2] - player.pos.z);
+        ambient.intensity = ambientIntensity(d, sec.lightRange);
+      } else {
+        ambient.intensity = ambientIntensity(0, 0);
+      }
+
+      // niveau de detail par maillage, sur les lots effectivement affiches
+      meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));
+
+      // eviction : ce qui est hors de portee depuis assez longtemps est rendu
+      for (const e of geo) evictor.see(e.file, sectors.inRange.has(e.file));
+      const freed = evictor.update(dt, evictFile);
+      for (const f of freed) console.log("geometrie liberee :", f);
     }
 
     // --- Dark Bramble : les predateurs suivent le bruit ---
+    //
+    // Les predateurs sont poses en coordonnees MONDE, comme tout ce qui vient
+    // de gameplay.json ; le joueur, lui, vit dans le repere du corps ancre. On
+    // leur passe donc sa position monde. Sans cette conversion, la distance
+    // etait fausse du decalage du repere — plusieurs milliers d'unites — et
+    // aucun predateur ne se reveillait jamais.
     const noisy = !!(input.forward || input.right || input.up || player.grounded === false);
-    for (const f of fish) f.update(dt, player.pos, noisy);
+    const playerWorld = { x: player.pos.x + anchorPos[0],
+                          y: player.pos.y + anchorPos[1],
+                          z: player.pos.z + anchorPos[2] };
+    for (const f of fish) f.update(dt, playerWorld, noisy);
     thorns.update(loop.fraction);
 
     // --- trou noir : capture puis ejection au trou blanc ---
@@ -945,13 +1125,18 @@ async function boot() {
               pos: [local.x, local.y, local.z],
               vel: [0, 0, 0],   // _escapeFromParentSpeed vaut 0 dans le build
               apply: (p) => f.node.position.set(p[0], p[1], p[2]),
-              remove: () => f.node.setEnabled(false),
+              remove: () => {
+                f.node.setEnabled(false);
+                // avale par le trou noir : il prend la file du trou blanc
+                if (debris) debris.swallow(f.node.name);
+              },
             };
           });
         }
       }
       blackHole.fragmentsDetached = crust.detached;
     }
+    syncDebris(dt, anchorPos);
 
     // --- outils du joueur ---
     camera.fov = telescope.update(dt);
@@ -966,6 +1151,7 @@ async function boot() {
     }
     probes.update(dt, player.field);
     syncProbes();
+    probeCam.update(guiMode.hidden ? null : probes.last);
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {
@@ -984,20 +1170,30 @@ async function boot() {
     // sont des distances en pixels a l'ecran, pas des portees dans le monde.
     // Le volume de la lunette est la somme des forces des emetteurs vises.
     telescope.signalStrength = 0;
-    if (telescope.active && transmitters.length) {
+    if (transmitters.length) {
       const eng = engine;
       const w = eng.getRenderWidth(), h = eng.getRenderHeight();
       const centre = [w / 2, h / 2];
       for (const t of transmitters) {
-        const p = new BABYLON.Vector3(t.position[0] - anchorPos[0],
-                                      t.position[1] - anchorPos[1],
-                                      t.position[2] - anchorPos[2]);
-        if (BABYLON.Vector3.TransformCoordinates(p, scene.getViewMatrix()).z <= 0) continue;
-        const sp = BABYLON.Vector3.Project(p, BABYLON.Matrix.Identity(),
-                                           scene.getTransformMatrix(),
-                                           camera.viewport.toGlobal(w, h));
-        const d = Math.hypot(sp.x - centre[0], sp.y - centre[1]);
-        telescope.addSignalStrength(signalStrength(d, t.hotspot, t.falloff));
+        let s = 0;
+        if (telescope.active) {
+          const p = new BABYLON.Vector3(t.position[0] - anchorPos[0],
+                                        t.position[1] - anchorPos[1],
+                                        t.position[2] - anchorPos[2]);
+          if (BABYLON.Vector3.TransformCoordinates(p, scene.getViewMatrix()).z > 0) {
+            const sp = BABYLON.Vector3.Project(p, BABYLON.Matrix.Identity(),
+                                               scene.getTransformMatrix(),
+                                               camera.viewport.toGlobal(w, h));
+            const d = Math.hypot(sp.x - centre[0], sp.y - centre[1]);
+            s = signalStrength(d, t.hotspot, t.falloff);
+            telescope.addSignalStrength(s);
+          }
+        }
+        // Coupure passe-bas : un signal qu'on n'a pas cadre reste etouffe a
+        // 1 000 Hz, et se degage a mesure qu'on le vise. C'est le dernier
+        // morceau des emetteurs qui manquait — la boucle tourne meme lunette
+        // baissee, sans quoi le filtre ne serait jamais pose.
+        for (const i of t.sources || []) audio.lowPassFor(i, s);
       }
     }
 
@@ -1057,7 +1253,11 @@ async function boot() {
 
     // --- lune quantique : elle se deplace des qu'on cesse de la regarder ---
     if (quantum && qBody) {
-      quantum.update(player.pos, fwd);
+      // Le test de visibilite tient compte des occlusions : une lune cachee
+      // derriere une planete n'est pas observee, et rien n'empeche alors le
+      // saut. Avant, il suffisait de la garder dans le champ de vision, mur ou
+      // pas mur, pour la verrouiller.
+      quantum.update(player.pos, fwd, { occluded: qOccluder });
       qBody.position = quantum.position.slice();
       const qe = entries.find((e) => e.data === qBody);
       if (qe) qe.mesh.position.set(...qBody.position);
@@ -1092,18 +1292,42 @@ async function boot() {
     if (loop.supernova && !endTimesCued) {
       endTimesCued = audio.cue("EndTimes") > 0;
     }
-    if (resources.dead && !loop.dead) loop.kill("asphyxie");
-    if (loop.dead && !loop._respawning) {
-      loop._respawning = true;
-      setTimeout(() => { respawn(); loop._respawning = false; }, 2500);
+    // --- les causes de mort ---
+    //
+    // Elles passent toutes par le meme handler, qui ne retient que la
+    // premiere : mourir asphyxie pendant que l'onde de choc arrive reste une
+    // seule mort, avec une seule cause affichee.
+    if (resources.dead) death.kill("asphyxie");
+    if (loop.dead) death.kill(loop.deathCause || "supernova");
+    // Devore : un predateur de Dark Bramble qui atteint sa proie.
+    if (fish.some((f) => f.caught)) death.kill("digestion");
+    // Incineration : entrer dans l'etoile. Le corps est la, son rayon aussi ;
+    // rien n'empechait d'y voler jusqu'ici.
+    if (starBody && sunDist != null &&
+        sunDist < (starBody.gravity.upperSurfaceRadius || 0)) {
+      death.kill("incineration");
     }
-    // l'etoile enfle a l'approche de la supernova, puis explose
-    if (starEntry) {
-      const grow = loop.supernova
-        ? 1 + loop.shockwaveRadius / (starBody.gravity.upperSurfaceRadius || 2000)
-        : 1 + loop.fraction * 0.35;
-      starEntry.mesh.scaling.setAll(Math.min(grow, 40));
+    // Le vaisseau detruit tue son pilote. Hors du vaisseau, il tombe.
+    if (ship && ship.destroyed && ship.boarded) death.kill("impact");
+    // Impact : la chute. `Resources.applyImpact` portait les seuils du build
+    // (20 et 40 u/s) sans que rien ne l'appelle jamais.
+    if (player.grounded && !wasGrounded && fallSpeed > resources.minImpact) {
+      const lost = resources.applyImpact(fallSpeed);
+      if (lost > 0 && resHUD) resHUD.damage(now);
+      if (resources.dead) death.kill("impact");
     }
+
+    if (death.dead) {
+      if (!loop.dead) loop.kill(death.cause);
+      // la sequence de flashback tient l'ecran, puis la boucle repart
+      if (death.update(dt)) respawn();
+    }
+    if (flashOverlay) flashOverlay.update(death.state);
+
+    // --- le spectacle de la supernova ---
+    const sunState = sunStage.update(loop);
+    if (starEntry) starEntry.mesh.scaling.setAll(sunState.scale);
+    if (supernovaView && starBody) supernovaView.update(sunState, starBody.position);
 
     // coques atmospheriques : elles suivent leur corps
     for (const a of mats.atmospheres) {
@@ -1117,7 +1341,9 @@ async function boot() {
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
-    if (particleMap.length) particles.update(player.pos, anchorPos);
+    // le champ dominant du joueur tient lieu de `Physics.gravity` pour le
+    // `gravityModifier` des systemes de particules
+    if (particleMap.length) particles.update(player.pos, anchorPos, player.field);
 
     const speed = Math.hypot(player.vel.x, player.vel.y, player.vel.z);
     setStatus(

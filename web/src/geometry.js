@@ -82,7 +82,10 @@ async function loadFile(BABYLON, scene, file) {
   // quatre GameObjects « AnglerFish ». La liste complete permet de tous les
   // retrouver.
   const all = [...(res.transformNodes || []), ...res.meshes];
-  return { file, container, meshes, nodes, all, center: null };
+  // Les groupes d'animation sont retenus pour pouvoir etre liberes : ils
+  // survivent a la destruction de leurs cibles et continueraient a les animer.
+  const groups = res.animationGroups || [];
+  return { file, container, meshes, nodes, all, groups, center: null };
 }
 
 /**
@@ -142,6 +145,37 @@ export class GeometryStore {
       .finally(() => this.pending.delete(file));
     this.pending.set(file, p);
     return p;
+  }
+
+  /**
+   * Libere un lot : maillages, materiaux, textures, groupes d'animation.
+   *
+   * Rien ne se dechargeait jusqu'ici. Traverser le systeme finissait donc par
+   * tout charger, et le poids gagne au demarrage se reperdait en cours de
+   * partie. Un lot libere se recharge exactement comme la premiere fois — il
+   * sort de `entries`, donc `entryForBody` le voit a nouveau absent et la
+   * sphere de substitution reprend la main.
+   *
+   * @param file  fichier a liberer
+   * @param guard (entry) => vrai s'il faut le garder malgre tout (colliders du
+   *              corps ancre, fragments de croute deja resolus)
+   */
+  evict(file, guard = null) {
+    const i = this.entries.findIndex((e) => e.file === file);
+    if (i < 0) return false;
+    const entry = this.entries[i];
+    if (guard && guard(entry)) return false;
+    this.entries.splice(i, 1);
+    try {
+      for (const g of entry.groups || []) g.dispose();
+      // dispose(false, true) libere aussi les materiaux et leurs textures : sans
+      // le second drapeau, les textures resteraient en memoire GPU et
+      // l'eviction ne rendrait presque rien.
+      entry.container.dispose(false, true);
+    } catch (e) {
+      console.warn("liberation partielle de", file, e.message);
+    }
+    return true;
   }
 
   /** Demande plusieurs fichiers et attend qu'ils soient tous la. */

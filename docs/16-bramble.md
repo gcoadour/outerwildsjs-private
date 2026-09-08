@@ -60,11 +60,20 @@ Croissance des ronces : 0, 5 puis 10 sur 10 aux quarts de boucle.
 
 - **L'espace replié**, qui n'est pas dans le build — ce n'est donc pas un
   manque du portage mais de l'alpha elle-même.
-- **Le brouillard**, `FogCloak` et `FogLight` ne sont pas portés : les
-  prédateurs sont visibles de loin, ce qui retire tout leur intérêt.
+- **Le brouillard**, `FogCloak` et `FogLight` sont portés depuis (voir
+  [`29-brouillards.md`](29-brouillards.md)).
 - **Le son comme signal**, faute de lien entre le système audio et le
   `NoiseSensor` : le bruit est ici déduit des commandes du joueur, pas des
   sources sonores réelles.
-- **La mort par prédateur** : ils poursuivent mais ne tuent pas.
+- ~~**La mort par prédateur**~~ — **portée** : un prédateur qui atteint sa proie
+  la mange (voir [`32-mort.md`](32-mort.md)). Le rayon de prise, 25 unités,
+  n'est pas dans le build — il décrit la détection et la poursuite, pas la
+  prise, qui passe par un volume de collision sur la bouche.
+
+  Au passage, un défaut de fond : les prédateurs sont posés en coordonnées
+  **monde**, et la position du joueur s'exprime dans le repère du corps ancré.
+  La distance était donc fausse du décalage entre les deux — plusieurs milliers
+  d'unités — et aucun prédateur ne pouvait se réveiller. Le portage convertit
+  maintenant la position du joueur avant de la leur passer.
 - `CorruptionAnimator`, qui pilote un seuil de découpe de matériau sur la
   fraction de boucle.

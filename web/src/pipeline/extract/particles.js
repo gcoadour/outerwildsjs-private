@@ -13,10 +13,35 @@ import { round } from "./context.js";
 const SHAPES = { 0: "sphere", 1: "sphereShell", 2: "hemisphere", 3: "hemisphereShell",
                  4: "cone", 5: "box", 6: "mesh", 7: "coneShell", 8: "coneVolume" };
 
-/** Scalaire d'une MinMaxCurve ; les courbes variables sont approximees. */
+/** Scalaire d'une MinMaxCurve. */
 function curve(c, def = 1) {
   if (!c || typeof c.scalar !== "number") return def;
   return c.scalar;
+}
+
+/**
+ * Enveloppe d'une MinMaxCurve : [minimum, maximum] sur toute sa duree.
+ *
+ * `minMaxState` distingue quatre modes — constante, courbe, deux courbes, deux
+ * constantes — mais les quatre se lisent de la meme facon : le minimum est le
+ * plus petit sommet de `minCurve`, le maximum le plus grand de `maxCurve`, et
+ * `scalar` multiplie les deux. Une constante a simplement les deux courbes
+ * plates a la meme valeur.
+ *
+ * Retourne null quand l'enveloppe est plate : la valeur scalaire suffit alors,
+ * et transporter deux nombres identiques n'apprendrait rien au moteur.
+ */
+export function envelope(mmc) {
+  if (!mmc) return null;
+  const scalar = typeof mmc.scalar === "number" ? mmc.scalar : 1;
+  const keysOf = (ac) => ((ac && ac.m_Curve) || []).map((k) => k.value);
+  const lo = keysOf(mmc.minCurve), hi = keysOf(mmc.maxCurve);
+  const all = lo.concat(hi);
+  if (!all.length) return null;
+  const min = Math.min(...(lo.length ? lo : hi)) * scalar;
+  const max = Math.max(...(hi.length ? hi : lo)) * scalar;
+  if (!isFinite(min) || !isFinite(max)) return null;
+  return Math.abs(max - min) < 1e-6 ? null : [round(min, 5), round(max, 5)];
 }
 
 /**
@@ -162,6 +187,12 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
       lifetime: round(init ? curve(init.startLifetime, 1) : 1, 4),
       startSpeed: round(init ? curve(init.startSpeed, 1) : 1, 4),
       size: round(init ? curve(init.startSize, 1) : 1, 4),
+      // Courbes variables : jusqu'ici les trois valeurs initiales etaient
+      // aplaties a leur scalaire, ce qui donnait des particules toutes
+      // identiques la ou le jeu tire entre deux bornes.
+      lifetimeRange: init ? envelope(init.startLifetime) : null,
+      speedRange: init ? envelope(init.startSpeed) : null,
+      sizeRange: init ? envelope(init.startSize) : null,
       color: init ? unpackColor32(init.startColor
         && (init.startColor.maxColor || init.startColor.minColor)).map((v) => round(v, 4))
         : [1, 1, 1, 1],

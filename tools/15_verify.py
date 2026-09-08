@@ -256,6 +256,59 @@ def run(url, heavy):
         rep.near("decroissance cubique a mi-chemin", fog["milieu"], 0.00125, 1e-5)
         rep.near("densite pleine au rayon interieur", fog["coeur"], 0.01, 1e-5)
 
+        # --- mort, flashback et supernova ---------------------------------------
+        fin = page.evaluate("""() => {
+          const d = window.__death, s = window.__supernova.stage;
+          const fb = d.flashback;
+          const at = (f, left, nova, r) => s.update({fraction: f, secondsRemaining: left,
+                                                     supernova: nova, shockwaveRadius: r});
+          return {images: fb.frames.length, duree: +fb.duration.toFixed(2),
+                  progression: at(0.5, 600, false, 0).phase,
+                  contraction: +at(1, 0, false, 0).scale.toFixed(2),
+                  explosion: at(1, 0, true, 5000).phase,
+                  causes: Object.keys(window.__death.byCause).length};
+        }""")
+        rep.eq("images du flashback", fin["images"], 22)
+        rep.eq("duree de la sequence de mort (s)", fin["duree"], 8.21)
+        rep.eq("l'etoile se contracte avant d'exploser", fin["contraction"], 0.62)
+        rep.eq("phase d'explosion", fin["explosion"], "explosion")
+        rep.eq("aucune mort au demarrage", fin["causes"], 0)
+
+        # --- degats du vaisseau -------------------------------------------------
+        # Les valeurs de l'alpha eteignent les degats localises : on verifie que
+        # c'est bien CE qu'on lit dans le build, pas une hypothese du portage.
+        dmg = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return null;
+          const d = s.damage;
+          return {masque: d.mask, generique: d.generic, moteur: d.engine,
+                  coupe: d.disableDamagedThrusters, poussee: s.effectiveThrust};
+        }""")
+        if dmg:
+            rep.eq("masque de position d'impact du build", dmg["masque"], 0)
+            rep.eq("modificateur de piece generique", dmg["generique"], 0)
+            rep.eq("modificateur de reacteur", dmg["moteur"], 0)
+            rep.eq("coupure des propulseurs endommages", dmg["coupe"], False)
+
+        # --- champ de debris du trou blanc --------------------------------------
+        deb = page.evaluate("() => window.__debris ? window.__debris.radius : null")
+        rep.eq("rayon du champ de debris", deb, 750)
+
+        # --- camera embarquee de la sonde ---------------------------------------
+        page.keyboard.press("KeyF")
+        page.wait_for_timeout(600)
+        rep.eq("la sonde allume sa camera",
+               page.evaluate("() => (window.__scene || BABYLON.Engine.LastCreatedScene)"
+                             ".activeCameras.map(c => c.name)"),
+               ["cam", "probeCam"])
+        rep.eq("cadre de la vue de sonde",
+               page.evaluate("() => !document.querySelector('.ow-probeview').hidden"), True)
+
+        # --- coupure passe-bas des emetteurs -------------------------------------
+        rep.at_least("sources reliees a un emetteur",
+                     page.evaluate("() => window.__audioMix.transmitters"
+                                   ".reduce((a, t) => a + t.sources.length, 0)"), 1)
+
         # --- commandes tactiles ------------------------------------------------
         #
         # Le navigateur de verification n'est pas tactile : on installe la
@@ -316,6 +369,14 @@ def run(url, heavy):
             rep.eq("toute la croute part sur une boucle",
                    page.evaluate("() => window.__crust.detached + window.__crust.shattered"),
                    122)
+
+            # Le niveau de detail travaille des qu'une planete entiere est la :
+            # sur 12 Mo de geometrie, une partie est toujours trop petite a
+            # l'ecran pour valoir un appel de rendu.
+            rep.at_least("maillages eteints par le niveau de detail",
+                         page.evaluate("() => window.__lod.meshLOD.hidden"), 1)
+            rep.at_least("maillages examines par image",
+                         page.evaluate("() => window.__lod.meshLOD.tested"), 1)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()

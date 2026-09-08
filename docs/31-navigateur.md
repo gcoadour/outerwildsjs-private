@@ -155,8 +155,40 @@ croit lire des fichiers servis. C'est aussi ce qui impose une origine sûre —
 - **`Resources/unity default resources` est chargé.** `level0` pointe vers lui ;
   sans ce fichier, 72 shaders intégrés et les renvois vers les polices d'Unity
   restaient invisibles.
-- **Les animations ne sont pas exportées en glTF.** Le décodage des clips
-  Mecanim (voir [`26-muscleclip.md`](26-muscleclip.md)) n'est pas porté ; les
-  squelettes, eux, le sont. Les corps sortent donc en pose de repos.
 - **`docs/01-build.md` annonçait 28 286 objets.** C'était une erreur d'addition :
   989 + 24 032 + 174 + 621 + 2 390 = 28 206. Corrigé.
+
+## Les animations, dernier module resté en Python
+
+Le premier passage laissait les corps en pose de repos : les squelettes
+sortaient, pas les clips. C'était le dernier écart de fond avec le pipeline
+Python, et il est comblé — `web/src/pipeline/unity/muscle.js` porte
+`tools/lib_muscle.py`, et l'exporteur glTF pose les canaux.
+
+Trois choses ont dû suivre le décodeur.
+
+**Deux classes moteur de plus.** Un clip Mecanim ne nomme pas ses os : il les
+désigne par un CRC32, que seule la table `m_TOS` d'un `Avatar` sait traduire. Et
+la liste des clips d'un `Animator` vit dans son `AnimatorController`, avec
+l'état par défaut qui dit lequel démarre. Ni l'un ni l'autre n'était dans
+`unity41-types.json` ; `tools/16_unity_types.py` les y ajoute (classes 90 et
+91), sans rien changer aux 35 autres, vérifié octet pour octet.
+
+**Le nom du tableau de couches.** Le Python cherchait `m_LayerArray` pour savoir
+quelle machine à états lire. En 4.1 le champ s'appelle `m_HumanLayerArray` : la
+recherche ne trouvait jamais rien et retombait sur la machine 0. Les deux noms
+sont désormais lus, et un index hors bornes retombe sur la première machine
+plutôt que de renoncer — auquel cas *tous* les clips se déclareraient par
+défaut, et se disputeraient les mêmes os.
+
+**Un flux dense n'a pas de tangentes.** Le Python levait une `IndexError` si un
+clip en portait un et qu'on demandait les tangentes. Aucun clip du build n'est
+dans ce cas, donc rien ne l'avait jamais montré ; le portage l'a rencontré sur
+un flux fabriqué. Les deux versions retombent maintenant en interpolation
+linéaire, ce qu'une courbe sans tangentes appelle.
+
+Le décodeur JavaScript et le décodeur Python ont été comparés sur des flux
+fabriqués — sentinelles, images à composantes désalignées, flux dense — et
+rendent les mêmes valeurs et les mêmes tangentes, à 10⁻⁶ près. `tests/08-animation.mjs`
+garde cette vérification, moitié sans le build (le flux fabriqué et un monde de
+trois objets qui traverse tout l'exporteur), moitié dessus.

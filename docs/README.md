@@ -18,7 +18,8 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`06-orbites.md`](06-orbites.md) — orbites simulées et référentiels
 - [`07-gameplay.md`](07-gameplay.md) — ressources, vaisseau, interaction
 - [`12-boucle.md`](12-boucle.md) — boucle temporelle de 20 minutes et supernova
-- [`17-secteurs.md`](17-secteurs.md) — secteurs et niveau de détail
+- [`32-mort.md`](32-mort.md) — **mourir, et la fin des temps**
+- [`17-secteurs.md`](17-secteurs.md) — secteurs, niveau de détail par maillage et éviction
 - [`18-vaisseau.md`](18-vaisseau.md) — pilote automatique et dégâts
 - [`23-connaissance.md`](23-connaissance.md) — la connaissance débloque le jeu
 
@@ -47,7 +48,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`25-interface.md`](25-interface.md) — interface de dialogue et sondes
 - [`28-hud.md`](28-hud.md) — jauges de ressources et invites à l'écran
 - [`30-consoles.md`](30-consoles.md) — ordinateur de bord, lampe, guimauve
-- [`32-mobile.md`](32-mobile.md) — **commandes tactiles et jeu en paysage**
+- [`33-mobile.md`](33-mobile.md) — **commandes tactiles et jeu en paysage**
 
 ## Ce qui manque
 

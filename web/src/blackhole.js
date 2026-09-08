@@ -14,6 +14,8 @@
 export const CAPTURE_RADIUS = 40;
 export const EXIT_CONE_DEG = 60;
 export const DETACHABLE_FRACTION = 0.25;
+/** `_debrisRadius` du WhiteHoleVolume : l'etendue ou ressort ce qui est tombe. */
+export const DEBRIS_RADIUS = 750;
 
 const len = (v) => Math.hypot(v[0], v[1], v[2]);
 const norm = (v) => { const l = len(v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -84,4 +86,66 @@ export class BlackHole {
     this.fragmentsDetached = Math.floor(detachable * Math.min(1, loopFraction));
     return this.fragmentsDetached;
   }
+}
+
+/**
+ * Champ de debris du trou blanc.
+ *
+ * Le WhiteHoleVolume porte deux choses que le portage laissait de cote : un
+ * `_debrisRadius` de 750, et une file d'attente de croissance (`_growQueue`)
+ * par laquelle ce qui est tombe dans le trou noir REVIENT — pas d'un coup,
+ * mais un morceau apres l'autre.
+ *
+ * Ce qui vient du build : le rayon de 750, et le fait que la sortie soit mise
+ * en file plutot qu'immediate. Ce qui n'en vient pas : la cadence, que le nom
+ * `_growQueue` ne chiffre pas. Deux secondes par morceau donnent une croute qui
+ * met une boucle a ressortir, ce qui est l'echelle de temps du jeu.
+ *
+ * Le placement est tire d'une graine, donc reproductible : la meme croute
+ * ressort au meme endroit d'une session a l'autre, sans quoi rien ne serait
+ * verifiable.
+ */
+export class DebrisField {
+  constructor(radius = DEBRIS_RADIUS, everySeconds = 2) {
+    this.radius = radius;
+    this.every = everySeconds;
+    this.queue = [];
+    this.items = [];
+    this.t = 0;
+  }
+
+  /** Un morceau tombe dans le trou noir : il prend la file. */
+  swallow(seed) { this.queue.push(String(seed)); return this.queue.length; }
+
+  /** Position stable dans la sphere de debris, tiree du nom du morceau. */
+  place(seed) {
+    let h = 2166136261;
+    for (let i = 0; i < seed.length; i++) {
+      h ^= seed.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const a = ((h >>> 0) % 10000) / 10000 * Math.PI * 2;
+    const b = ((h >>> 8) % 10000) / 10000 * Math.PI - Math.PI / 2;
+    // racine cubique : sans elle, tout s'agglutine sur la coquille exterieure
+    const r = this.radius * Math.cbrt(((h >>> 16) % 10000) / 10000);
+    return [r * Math.cos(b) * Math.cos(a), r * Math.sin(b), r * Math.cos(b) * Math.sin(a)];
+  }
+
+  /** @returns les morceaux ressortis a cette image */
+  update(dt) {
+    const out = [];
+    if (!this.queue.length) { this.t = 0; return out; }
+    this.t += dt;
+    while (this.t >= this.every && this.queue.length) {
+      this.t -= this.every;
+      const seed = this.queue.shift();
+      const item = { seed, position: this.place(seed) };
+      this.items.push(item);
+      out.push(item);
+    }
+    return out;
+  }
+
+  get pending() { return this.queue.length; }
+  get grown() { return this.items.length; }
 }

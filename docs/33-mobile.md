@@ -104,6 +104,10 @@ Trois bornes s'ajoutent ailleurs, pour la même raison :
 - **Le bandeau d'état** s'arrête avant les boutons d'action, tient sur une ligne
   par entrée, et disparaît dans un menu comme dans le mode « masqué » de
   `GUIMode` — qui ne cachait jusqu'ici que ce que le moteur dessine.
+- **La vue de la sonde** occupait le coin bas-droit, désormais celui des boutons
+  d'action : elle passe à gauche, sous les jauges. Son cadre HTML et le viewport
+  Babylon bougent **ensemble** (`ProbeCamera.setViewport`) — déplacer l'un sans
+  l'autre décalerait l'image de son cadre.
 
 ## Le portrait
 
