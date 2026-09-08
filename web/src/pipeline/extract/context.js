@@ -211,6 +211,52 @@ export class ExtractContext {
     return null;
   }
 
+  /**
+   * Volume d'un composant, lu sur le collider de son GameObject.
+   *
+   * Un `ForceVolume` d'Unity n'est rien d'autre qu'un declencheur : sa portee
+   * n'est pas dans ses champs, elle est dans le collider pose a cote. Sans lui,
+   * un champ de force directionnel n'a aucune etendue et le portage devrait
+   * l'inventer.
+   *
+   * Le rayon est mis a l'echelle MONDE : un collider de rayon 1 sur un objet
+   * mis a l'echelle 300 fait 300 unites.
+   */
+  volumeOf(gid) {
+    if (!this.collidersByGid) {
+      this.collidersByGid = new Map();
+      for (const type of ["SphereCollider", "BoxCollider", "CapsuleCollider"]) {
+        for (const o of this.env.objects({ type, file: this.sceneFile })) {
+          const v = this.readEngine(o);
+          if (!v || !v.m_GameObject) continue;
+          const id = v.m_GameObject.pathId;
+          if (!this.collidersByGid.has(id)) this.collidersByGid.set(id, { type, v });
+        }
+      }
+    }
+    const hit = this.collidersByGid.get(gid);
+    if (!hit) return null;
+    const { type, v } = hit;
+    const [, , scl] = this.world(gid);
+    const s = Math.max(Math.abs(scl[0]), Math.abs(scl[1]), Math.abs(scl[2])) || 1;
+    const c = v.m_Center || { x: 0, y: 0, z: 0 };
+    const center = [round(c.x * scl[0], 3), round(c.y * scl[1], 3), round(c.z * scl[2], 3)];
+    if (type === "SphereCollider") {
+      return { shape: "sphere", center, radius: round((v.m_Radius || 0) * s, 3),
+               trigger: !!v.m_IsTrigger };
+    }
+    if (type === "CapsuleCollider") {
+      return { shape: "capsule", center, radius: round((v.m_Radius || 0) * s, 3),
+               height: round((v.m_Height || 0) * s, 3), axis: v.m_Direction ?? 1,
+               trigger: !!v.m_IsTrigger };
+    }
+    const sz = v.m_Size || { x: 0, y: 0, z: 0 };
+    return { shape: "box", center,
+             size: [round(sz.x * Math.abs(scl[0]), 3), round(sz.y * Math.abs(scl[1]), 3),
+                    round(sz.z * Math.abs(scl[2]), 3)],
+             trigger: !!v.m_IsTrigger };
+  }
+
   /** Itere les MonoBehaviour de la scene dont la classe est dans `classes`. */
   *behaviours(classes) {
     const want = classes ? new Set(classes) : null;

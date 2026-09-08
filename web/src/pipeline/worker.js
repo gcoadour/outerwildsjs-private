@@ -19,6 +19,7 @@ import { extractSolarSystem } from "./extract/solar.js";
 import { extractGameplay } from "./extract/gameplay.js";
 import { extractDialogue } from "./extract/dialogue.js";
 import { extractAudio } from "./extract/audio.js";
+import { extractLights } from "./extract/lights.js";
 import { extractShaders } from "./extract/shaders.js";
 import { extractParticles } from "./extract/particles.js";
 import { extractInterface } from "./extract/interface.js";
@@ -240,6 +241,11 @@ async function run(blob, options) {
   summary["clips audio"] = audioFiles.length;
   summary["sources audio"] = audio.sources.length;
 
+  phase("lumieres", "Lumieres placees et reglages de rendu…");
+  const lights = extractLights(ctx);
+  await writeFile("data/lights.json", JSON.stringify(lights));
+  summary.lumieres = lights.lights.length;
+
   phase("shaders", "Sources ShaderLab…");
   const shaderFiles = [];
   const shaders = extractShaders(ctx, (name, src) => shaderFiles.push({ name, src }));
@@ -262,6 +268,40 @@ async function run(blob, options) {
   await writeFile("data/interface/interface.json", JSON.stringify(ui));
   summary["invites a l'ecran"] = ui.prompts.catalogue.length;
   summary["polices"] = Object.keys(ui.fonts).length;
+
+  // --- mainData ---
+  //
+  // Les cinq fichiers etaient bien ouverts, mais l'ExtractContext n'etait bati
+  // que sur `level0` : les 989 objets de `mainData` — scene de demarrage et
+  // managers — ne sortaient jamais. C'est ce qui explique les 7 rendus `V-Fog`
+  // restes introuvables (docs/20-shaders-jeu.md) et l'absence de menu principal
+  // (docs/28-hud.md).
+  //
+  // On l'inventorie avant de decider quoi en porter : le graphe de scene et les
+  // valeurs des composants, rien de plus. Ce qui merite d'etre porte se decide
+  // en lisant ce qui en sort, pas en le devinant ici.
+  phase("mainData", "Scene de demarrage et managers…");
+  try {
+    const mainCtx = new ExtractContext(env, universe, "mainData", engineTypes);
+    const mainScene = extractScene(mainCtx);
+    await writeFile("data/scene/mainData.json", JSON.stringify(mainScene));
+    const mainComps = extractComponents(mainCtx);
+    await writeFile("data/components/mainData.json", JSON.stringify(mainComps));
+    const mainGameplay = extractGameplay(mainCtx);
+    await writeFile("data/mainData.json", JSON.stringify({
+      scene: { nodes: mainScene.node_count, components: mainScene.component_count },
+      inventory: mainGameplay.inventory,
+      singletons: Object.keys(mainGameplay.singletons),
+      placed: Object.fromEntries(
+        Object.entries(mainGameplay.placed).map(([k, v]) => [k, v.length])),
+    }));
+    summary["objets de mainData"] = mainScene.node_count;
+    summary["classes de mainData"] = Object.keys(mainGameplay.inventory).length;
+  } catch (e) {
+    // mainData n'est pas indispensable au jeu : s'il ne se lit pas, on le dit
+    // et le reste de l'extraction tient.
+    summary["mainData"] = `illisible : ${e.message}`;
+  }
 
   if (options.geometry !== false) {
     phase("geometrie", "Export glTF des corps celestes…");

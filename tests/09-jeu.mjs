@@ -20,6 +20,11 @@ import { Ship } from "../web/src/ship.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
+import { SpinField, spinOf, dayLength } from "../web/src/spin.js";
+import { dominantField, directionalFields, insideVolume,
+         DirectionalFields } from "../web/src/gravity.js";
+import { fluidVolumes, fluidAcceleration, terminalSpeed,
+         FluidField, DRAG_FALLBACK } from "../web/src/fluids.js";
 import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity } from "../web/src/sectors.js";
@@ -230,6 +235,28 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         moon.isObserved(eye, fwd, { occluded: () => false }), true);
   check("non observee derriere un corps",
         moon.isObserved(eye, fwd, { occluded: bodyOccluder(bodies, null) }), false);
+  // La sphere de verification : le segment est epaissi de _sphereCheckRadius,
+  // et borne de _checkDepth du cote de la lune.
+  {
+    const frole = [{ bodyName: "Frole", position: [220, 0, 500],
+                     gravity: { upperSurfaceRadius: 100 } }];
+    check("un corps qui frole la ligne de vue masque",
+          bodyOccluder(frole)([0, 0, 0], [0, 0, 1000]), true);
+    check("... mais pas au-dela du rayon de la sphere",
+          bodyOccluder(frole, null, { radius: 0 })([0, 0, 0], [0, 0, 1000]), false);
+    // La profondeur borne le segment du cote de la lune. Avec les valeurs du
+    // build la sphere (150) est plus large que la profondeur (100), si bien que
+    // sa calotte recouvre la troncature : le bornage ne se voit que sur un
+    // obstacle plus petit que le rayon de balayage.
+    const colle = [{ bodyName: "Colle", position: [0, 0, 950],
+                     gravity: { upperSurfaceRadius: 20 } }];
+    check("les cent dernieres unites ne comptent pas",
+          bodyOccluder(colle, null, { radius: 10 })([0, 0, 0], [0, 0, 1000]), false);
+    check("... elles compteraient sans la profondeur",
+          bodyOccluder(colle, null, { radius: 10, depth: 0 })([0, 0, 0], [0, 0, 1000]),
+          true);
+  }
+
   check("la garde de 150 u tient malgre l'occlusion",
         new QuantumMoon(hosts, bodies).isObserved(
           { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 },
@@ -247,6 +274,131 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   calme.update(0.1, { x: 10, y: 0, z: 0 }, false);
   check("immobile et silencieux, on ne risque rien", calme.caught, false);
   check("rayon de prise", FISH.catchRadius, 25);
+}
+
+// --- rotation propre des corps -------------------------------------------
+//
+// Cinematique pure : ce qui tourne est le REPERE, donc le sol reste ou il est
+// et c'est le ciel qui defile.
+{
+  const im = { name: "Planete", position: [0, 0, 0],
+               orbit: { spinAxis: { x: 0, y: 2, z: 0 }, spinSpeed: 0.03 } };
+  const s = spinOf(im);
+  check("axe normalise", JSON.stringify(s.axis), "[0,1,0]");
+  check("vitesse lue en rad/s", s.rate, 0.03);
+  check("InitialMotion l'emporte", s.source, "InitialMotion");
+  check("duree du jour", round(dayLength(im), 1), 209.4);
+
+  // RotateTransform, lui, compte en DEGRES par seconde.
+  const rt = { name: "Accessoire",
+               spin: { axis: { x: 0, y: 0, z: 1 }, degreesPerSecond: 18 } };
+  check("RotateTransform en degres", round(spinOf(rt).rate, 6),
+        round(18 * Math.PI / 180, 6));
+  check("sans rien, pas de rotation", spinOf({ name: "Fixe" }), null);
+
+  // L'axe est donne dans le repere PROPRE du corps : l'orientation monde du
+  // corps le remet dans le repere de travail. Un quart de tour autour de X
+  // couche l'axe Y sur Z.
+  const incline = { name: "Inclinee", bodyRotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+                    orbit: { spinAxis: { x: 0, y: 1, z: 0 }, spinSpeed: 0.03 } };
+  check("axe ramene dans le repere de travail",
+        spinOf(incline).axis.map((v) => round(v, 3)).join(),
+        "0,0,1");
+
+  const field = new SpinField([im, rt, { name: "Fixe" }]);
+  check("corps tournants retenus", field.count, 2);
+
+  // Le soleil vu du sol : un point fixe du monde defile en sens inverse.
+  const soleil = [0, 0, 1000];
+  check("azimut inchange a t = 0",
+        field.intoFrame(im, soleil).map((v) => round(v)).join(), "0,0,1000");
+  field.advance(Math.PI / 2 / 0.03);          // un quart de tour
+  const q = field.intoFrame(im, soleil).map((v) => round(v));
+  check("apres un quart de tour, le soleil a bascule", q.join(), "-1000,0,0");
+  check("la distance ne change pas", round(Math.hypot(...q)), 1000);
+  field.advance(3 * Math.PI / 2 / 0.03);      // le tour complet
+  check("un jour entier ramene le ciel a sa place",
+        field.intoFrame(im, soleil).map((v) => round(v)).join(), "0,0,1000");
+  check("l'angle reste borne a un tour", field.angle(im) < 2 * Math.PI, true);
+  check("le sol, lui, ne bouge jamais",
+        field.intoFrame(im, [0, 0, 0]).map((v) => round(v)).join(), "0,0,0");
+}
+
+// --- champs de force directionnels ---------------------------------------
+//
+// SingleFieldDetector ne combine pas : dans son volume, le champ directionnel
+// l'emporte sur le champ radial.
+{
+  const gameplay = { placed: { DirectionalForceField: [
+    { name: "GravityTrail", position: [0, 200, 0], rotation: [0, 0, 0, 1],
+      volume: { shape: "sphere", center: [0, 0, 0], radius: 50 },
+      fields: { _fieldMagnitude: 8 } },
+    { name: "Couloir", position: [0, 0, 400], rotation: [0, 0, 0, 1],
+      volume: { shape: "box", center: [0, 0, 0], size: [20, 20, 200] },
+      fields: { _fieldMagnitude: 5 } },
+    { name: "Muet", position: [500, 0, 0], rotation: [0, 0, 0, 1],
+      volume: { shape: "sphere", center: [0, 0, 0], radius: 10 }, fields: {} },
+  ] } };
+  const list = directionalFields(gameplay);
+  check("champs directionnels lus", list.length, 3);
+  check("un champ sans intensite lisible ne s'applique pas",
+        list.filter((f) => f.usable).length, 2);
+  check("intensite lue dans les champs", list[0].magnitude, 8);
+  // Sans vecteur ni axe serialise, la direction est le BAS local de l'objet.
+  check("direction par defaut : le bas local",
+        list[0].dir.map((v) => round(v)).join(), "0,-1,0");
+
+  check("dans le volume", insideVolume(list[0], 0, 220, 0), true);
+  check("hors du volume", insideVolume(list[0], 0, 260, 0), false);
+  check("boite : dans la longueur", insideVolume(list[1], 0, 0, 480), true);
+  check("boite : au-dela du bout", insideVolume(list[1], 0, 0, 520), false);
+
+  const planete = [{ name: "P", bodyName: "P", position: [0, 0, 0],
+                     gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 100,
+                                lowerSurfaceRadius: 100, cutoffRadius: 0,
+                                falloffType: 0 } }];
+  const champs = new DirectionalFields(list);
+  const dehors = dominantField(planete, { x: 0, y: 150, z: 0 }, champs);
+  check("hors des volumes, le champ radial garde la main",
+        dehors.dir.y < 0 && dehors.directional === undefined, true);
+  const dedans = dominantField(planete, { x: 0, y: 200, z: 0 }, champs);
+  check("dans le volume, le directionnel l'emporte", dedans.directional, "GravityTrail");
+  check("... avec son intensite a lui", dedans.magnitude, 8);
+  check("... et le corps reste celui du champ radial", dedans.body.name, "P");
+  check("sans champ radial, rien a remplacer",
+        dominantField([], { x: 0, y: 200, z: 0 }, champs), null);
+}
+
+// --- fluides --------------------------------------------------------------
+{
+  const solar = { fluids: [
+    { name: "Ocean", position: [0, 0, 0], radius: 500,
+      dragCoefficient: 2, density: 0, body: "GiantsDeep" },
+    { name: "SansRayon", position: [0, 0, 0], radius: null },
+  ] };
+  const vols = fluidVolumes(solar, {});
+  check("l'ocean est enfin emis", vols.length, 1);
+  check("trainee lue dans le volume", vols[0].drag, 2);
+
+  // Trainee lineaire : la vitesse limite est exactement g / c.
+  check("vitesse limite de chute", terminalSpeed(12, vols[0]), 6);
+  // La fonction ne rend QUE l'apport du fluide : a la vitesse limite, il vaut
+  // exactement l'oppose de la gravite, et la somme des deux est nulle.
+  const a = fluidAcceleration({ x: 0, y: -6, z: 0 }, { x: 0, y: -12, z: 0 }, vols[0]);
+  check("a la vitesse limite, la trainee compense la gravite", round(a.y, 6), 12);
+  check("une poussee neutre annule la gravite",
+        round(fluidAcceleration({ x: 0, y: 0, z: 0 }, { x: 0, y: -12, z: 0 },
+                                { drag: 0, buoyancy: 1 }).y, 6), 12);
+
+  const field = new FluidField(vols);
+  const obj = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 100, y: 0, z: 0 } };
+  check("dedans", field.at(obj.pos, [0, 0, 0]).name, "Ocean");
+  check("dehors", field.at({ x: 0, y: 0, z: 900 }, [0, 0, 0]), null);
+  check("le repere est pris en compte", field.at(obj.pos, [0, 0, 900]), null);
+  field.apply(0.5, obj, null, [0, 0, 0], "joueur");
+  check("le fluide freine", obj.vel.x, 0);
+  check("... et l'on sait ou l'on est", field.inside.get("joueur").name, "Ocean");
+  check("sans mesure, la trainee de repli", DRAG_FALLBACK, 1);
 }
 
 // --- niveau de detail ---------------------------------------------------

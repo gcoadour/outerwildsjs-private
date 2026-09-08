@@ -20,6 +20,15 @@ const NEAR = 1.4;          // marge d'instanciation, en multiple de la portee
 const LOOPED = new Set(["Ambience", "Music", "Signal"]);
 
 /**
+ * AudioRolloffMode d'Unity -> modele de distance WebAudio.
+ *
+ * Une courbe personnalisee (`custom`) n'a pas d'equivalent : on retombe sur le
+ * lineaire, qui est la plus proche des deux du point de vue de la portee — au
+ * moins le son s'eteint bien a MaxDistance.
+ */
+const DISTANCE_MODEL = { logarithmic: "inverse", linear: "linear", custom: "linear" };
+
+/**
  * Pistes de l'AudioMixer. Le jeu en tient six, chacune avec son volume et ses
  * fondus : `MixEndTimes` fait tomber la musique et l'ambiance a zero quand la
  * supernova arrive, `MixDeath` isole la piste de mort.
@@ -236,7 +245,12 @@ export class AudioField {
       loop: LOOPED.has(s.track),
       volume: s.volume,
       spatialEnabled: !!s.spatial,
-      spatialDistanceModel: "linear",
+      // Le modele vient de `rolloffMode` : le logarithmique d'Unity est le
+      // modele « inverse » de WebAudio, ou le son garde sa pleine intensite
+      // jusqu'a MinDistance puis decroit. Sans rolloff lu, on garde le lineaire
+      // qui servait a tout le monde.
+      spatialDistanceModel: DISTANCE_MODEL[s.rolloff] || "linear",
+      spatialMinDistance: s.minDistance ?? 1,
       spatialMaxDistance: s.range || 60,
     };
     this.B.CreateSoundAsync(s.name || `src${i}`, `data/audio/${s.file}`, opts)

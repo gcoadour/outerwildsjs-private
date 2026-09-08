@@ -48,12 +48,12 @@ export function orbitTilt(fields = {}, seed = "") {
 /**
  * Un segment coupe-t-il une sphere ?
  *
- * C'est le test d'occlusion : la lune n'est observee que si RIEN ne se trouve
- * entre l'oeil et elle. Le jeu lance une sphere de `_sphereCheckRadius` sur une
- * profondeur de `_checkDepth` ; ici le test est analytique contre les corps du
+ * C'est le coeur du test d'occlusion : la lune n'est observee que si RIEN ne se
+ * trouve entre l'oeil et elle. Le test est analytique contre les corps du
  * systeme, ce qui coute trois produits scalaires au lieu d'un lancer de rayon
  * dans la scene, et ne depend pas de la geometrie chargee — une planete pas
- * encore telechargee masque quand meme la lune.
+ * encore telechargee masque quand meme la lune. Le rayon de la sphere du jeu
+ * et sa profondeur sont appliques par `bodyOccluder`, plus bas.
  */
 export function segmentHitsSphere(a, b, center, radius) {
   const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -174,16 +174,41 @@ export class QuantumMoon {
 /**
  * Test d'occlusion contre les corps du systeme.
  *
+ * Le jeu ne lance pas un rayon mais une SPHERE de `_sphereCheckRadius` sur une
+ * profondeur de `_checkDepth`. Les deux constantes etaient exportees et
+ * inutilisees, le test se reduisant a un segment nu. Elles servent ici :
+ *
+ *   - le rayon EPAISSIT le segment : un corps qui frole la ligne de vue a
+ *     moins de 150 unites masque, comme le ferait le balayage d'une sphere.
+ *     C'est ce qui fait qu'on ne verrouille pas la lune par-dessus un limbe ;
+ *   - la profondeur BORNE le segment du cote de la lune : ce qui se trouve
+ *     dans ses cent dernieres unites — son hote quand elle passe devant, sa
+ *     propre coque de brouillard — ne compte pas comme un obstacle. Avec les
+ *     valeurs du build la sphere est plus large (150) que la profondeur (100),
+ *     donc sa calotte recouvre la troncature : le bornage ne change quelque
+ *     chose que pour un obstacle plus petit que le rayon de balayage. C'est ce
+ *     que disent les valeurs mesurees, pas un choix de ce portage.
+ *
+ * Ou commence exactement le balayage du jeu n'est pas mesure ; cette lecture
+ * est celle qui donne un role aux deux valeurs sans defaire ce qui etait deja
+ * verifie, a savoir qu'un corps lointain masque, geometrie chargee ou non.
+ *
  * @param bodies  corps, dont la position est exprimee dans le repere courant
  * @param exclude corps a ignorer — la lune elle-meme, qui se masquerait sinon
  */
-export function bodyOccluder(bodies, exclude = null) {
+export function bodyOccluder(bodies, exclude = null,
+                             { radius = CHECK_RADIUS, depth = CHECK_DEPTH } = {}) {
   return (from, to) => {
+    const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    const L = Math.hypot(d[0], d[1], d[2]);
+    // segment raccourci de `depth` avant la lune, sans jamais s'inverser
+    const k = L > depth ? (L - depth) / L : 0;
+    const end = [from[0] + d[0] * k, from[1] + d[1] * k, from[2] + d[2] * k];
     for (const b of bodies) {
       if (b === exclude) continue;
       const r = (b.gravity && b.gravity.upperSurfaceRadius) || 0;
       if (r <= 0) continue;
-      if (segmentHitsSphere(from, to, b.position, r)) return true;
+      if (segmentHitsSphere(from, end, b.position, r + radius)) return true;
     }
     return false;
   };

@@ -13,11 +13,14 @@
 
 import { loadSolarSystem, playerConstants } from "./config.js";
 import { buildBodies, syncBodies } from "./bodies.js";
+import { directionalFields, DirectionalFields } from "./gravity.js";
+import { fluidVolumes, FluidField } from "./fluids.js";
 import { Player } from "./player.js";
 import { FloatingOrigin } from "./origin.js";
 import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
 import { buildOrbits, advance, currentPosition, period } from "./orbits.js";
+import { SpinField, dayLength } from "./spin.js";
 import { loadGameplay } from "./config.js";
 import { Resources } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
@@ -27,6 +30,7 @@ import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
+import { loadSceneLights, placedLights, SceneLights } from "./scenelights.js";
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
 import { Ship, shipSpawn } from "./ship.js";
@@ -62,6 +66,9 @@ async function boot() {
   const data = await loadSolarSystem();
   // charge avant le calcul du point d'apparition, qui s'appuie dessus
   const gameplay = await loadGameplay();
+  // Lumieres placees et RenderSettings : les deux servent des le montage de la
+  // scene, la seconde jusque dans la couleur du brouillard.
+  const lightData = await loadSceneLights();
   const resources = new Resources(
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
@@ -96,20 +103,54 @@ async function boot() {
   // la comete. On garde la lumiere sous la main pour la suivre.
   const ambient = new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0, 1, 0), scene);
   ambient.intensity = 0.1;
+  // Sa COULEUR, elle, est dans RenderSettings : plus besoin de la deviner.
+  if (lightData.render && lightData.render.ambient) {
+    const a = lightData.render.ambient;
+    ambient.diffuse = new BABYLON.Color3(a[0], a[1], a[2]);
+    ambient.groundColor = new BABYLON.Color3(a[0] * 0.5, a[1] * 0.5, a[2] * 0.5);
+  }
+  // Les lumieres du build : posees a la volee, dans un budget, celles dont la
+  // portee atteint la camera.
+  const sceneLights = new SceneLights(BABYLON, scene, placedLights(lightData));
+  window.__lights = { field: sceneLights, total: lightData.lights.length,
+                      posees: placedLights(lightData).length,
+                      render: lightData.render };
 
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
 
+  // Gravites locales et fluides : deux pans du monde physique que le portage
+  // ignorait, alors que le build les decrit tous les deux.
+  const directional = new DirectionalFields(directionalFields(gameplay));
+  const fluids = new FluidField(fluidVolumes(data, gameplay));
+  window.__monde = { directional, fluids };
+
   // Orbites : positions d'origine conservees, l'etat orbital vit dans `orbits`.
   for (const b of bodies) b.position0 = (b.bodyPosition || b.position).slice();
   const orbits = buildOrbits(bodies);
+  // Rotation propre : elle s'applique au repere ancre, pas a la geometrie.
+  const spin = new SpinField(bodies);
   let anchorBody = null;
   const sub3 = (a, c) => [a[0] - c[0], a[1] - c[1], a[2] - c[2]];
 
-  /** Exprime toutes les positions dans le repere du corps ancre. */
+  /**
+   * Exprime toutes les positions dans le repere du corps ancre — un repere qui
+   * TOURNE avec lui. Le corps ancre reste a l'origine et son sol immobile ;
+   * c'est le ciel qui defile, ce qui donne le cycle jour/nuit sans deplacer un
+   * seul collider.
+   *
+   * Ce qui vient de gameplay.json (interactifs, conversations, sources audio,
+   * volumes) garde la conversion par simple translation : ces objets sont
+   * attaches a leur corps, donc leur position relative au corps ancre est deja
+   * exprimee dans le repere co-rotatif. Pour ceux qui sont poses sur un AUTRE
+   * corps, elle reste l'approximation en monde fige qu'elle etait deja.
+   */
   function reframe(anchor) {
     const ap = currentPosition(orbits, anchor);
-    for (const b of bodies) b.position = sub3(currentPosition(orbits, b), ap);
+    for (const b of bodies) {
+      const rel = sub3(currentPosition(orbits, b), ap);
+      b.position = b === anchor ? rel : spin.intoFrame(anchor, rel);
+    }
     return ap;
   }
 
@@ -388,7 +429,7 @@ async function boot() {
   };
 
   // --- brouillards : volumes spheriques et coque quantique ---
-  const fog = new FogField(fogVolumes(gameplay));
+  const fog = new FogField(fogVolumes(gameplay), lightData.render);
   const qFogConf = ((gameplay.placed || {}).QuantumFogBoundary || [])[0] || null;
   const qFog = qFogConf ? new QuantumFog(qFogConf) : null;
   // La coque quantique est un OBJET, pas du brouillard de rendu : c'est ce qui
@@ -638,6 +679,10 @@ async function boot() {
   window.__look = (y, p) => { yaw = y; pitch = p; };
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
+  // Rotation propre : de quoi mesurer l'azimut du soleil a deux instants sans
+  // rien deviner du repere (voir tools/15_verify.py).
+  window.__spin = { field: spin, anchor: () => anchorBody,
+                    day: () => dayLength(anchorBody) };
 
   // --- entrees ---
   let yaw = 0, pitch = 0;
@@ -781,8 +826,10 @@ async function boot() {
       up: keys.Space || ax.up,
       boost: keys.ShiftLeft || keys.ShiftRight || ax.boost,
     };
-    // 1. avance des orbites, puis re-expression dans le repere du corps ancre
+    // 1. avance des orbites et des rotations propres, puis re-expression dans
+    //    le repere du corps ancre
     advance(orbits, dt);
+    spin.advance(dt);
     const anchorPos = reframe(anchorBody);
 
     // vitesse de chute AVANT le pas : apres, le contact l'a deja annulee et
@@ -790,7 +837,11 @@ async function boot() {
     const wasGrounded = player.grounded;
     const fallSpeed = -(player.vel.x * up.x + player.vel.y * up.y + player.vel.z * up.z);
 
-    player.update(dt, bodies, input, { fwd, right, up }, origin);
+    // Les champs directionnels et les fluides vivent en coordonnees monde : le
+    // repere de travail change a chaque changement de corps ancre, il faut le
+    // leur redire avant de les interroger.
+    directional.setFrame(anchorPos);
+    player.update(dt, bodies, input, { fwd, right, up }, origin, directional);
 
     // 2. changement de corps dominant : on change de repere. La position du
     //    joueur, exprimee dans l'ancien repere, doit etre reportee dans le
@@ -849,11 +900,21 @@ async function boot() {
       if (d.lengthSquared() > 0) sun.direction = d.normalize();
     }
 
+    // --- fluides : l'ocean de Giant's Deep freine et porte ---
+    //
+    // Le joueur d'abord, dont l'acceleration passe par le corps physique ;
+    // le vaisseau et les sondes ensuite, qui s'integrent par leur vitesse.
+    {
+      const { a } = fluids.accelerationFor(player, player.field, anchorPos, "joueur");
+      if (a) player.addAcceleration(a, dt);
+    }
+
     // --- vaisseau, ressources, interaction ---
     let focus = null;
     if (ship) {
       if (autopilot && autopilot.engaged) autopilot.update(dt);
       ship.update(dt, bodies, input, { fwd, right, up });
+      fluids.apply(dt, ship, player.field, anchorPos, "vaisseau");
       ship.sync(BABYLON);
       if (ship.boarded) {
         // le joueur voyage avec le vaisseau
@@ -1010,6 +1071,11 @@ async function boot() {
         `secteurs ${sectorState.actifs}/${sectorState.total}` +
         (sectorState.secteur ? ` — ${sectorState.secteur.name}` : "") +
         (ship && ship.thrustLimit != null ? ` (poussee ≤ ${ship.thrustLimit})` : ""));
+      if (directional.current) bits.push(`champ local : ${directional.current.name}`);
+      if (fluids.inside.get("joueur")) bits.push(
+        `dans ${fluids.inside.get("joueur").name}`);
+      if (sceneLights.lights.length) bits.push(
+        `lumieres ${sceneLights.count}/${sceneLights.lights.length}`);
       if (meshLOD.hidden > 0) bits.push(`LOD ${meshLOD.hidden} maillages eteints`);
       if (evictor.evicted > 0) bits.push(`${evictor.evicted} corps libere(s)`);
       // la geometrie arrive en cours de partie : le dire plutot que de laisser
@@ -1150,6 +1216,18 @@ async function boot() {
       probeFired = false;
     }
     probes.update(dt, player.field);
+    // Une sonde tiree dans l'ocean n'y file pas droit. Ses positions sont des
+    // tableaux, la ou le champ de fluide travaille sur {x, y, z} : on lui passe
+    // une vue, et on ne recopie que si un fluide a repondu.
+    if (fluids.count) {
+      for (const p of probes.probes) {
+        const vue = { pos: { x: p.pos[0], y: p.pos[1], z: p.pos[2] },
+                      vel: { x: p.vel[0], y: p.vel[1], z: p.vel[2] } };
+        if (fluids.apply(dt, vue, player.field, anchorPos)) {
+          p.vel[0] = vue.vel.x; p.vel[1] = vue.vel.y; p.vel[2] = vue.vel.z;
+        }
+      }
+    }
     syncProbes();
     probeCam.update(guiMode.hidden ? null : probes.last);
 
@@ -1248,6 +1326,8 @@ async function boot() {
     // sont fixes dans le monde et que le corps ancre, lui, orbite.
     fog.update(camera.position, anchorPos, now);
     fog.apply(BABYLON, scene, camera);
+    // --- lumieres du build a portee de la camera ---
+    sceneLights.update(camera.position, anchorPos);
     cloaks.update(camera.position, anchorPos, fog.inBramble, fog.density);
     if (lights) lights.update(camera, anchorPos, dt, fog.inBramble);
 
@@ -1355,6 +1435,8 @@ async function boot() {
               : geo.length ? " — collision analytique" : "") +
       (anchorBody && period(orbits, anchorBody)
         ? ` — orbite ${(period(orbits, anchorBody) / 60).toFixed(1)} min` : "") +
+      (anchorBody && dayLength(anchorBody)
+        ? ` — jour ${(dayLength(anchorBody) / 60).toFixed(1)} min` : "") +
       (data.synthetic ? "  [systeme de substitution]" : "")
     );
   });

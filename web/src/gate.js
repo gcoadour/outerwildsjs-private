@@ -135,6 +135,11 @@ async function handleFile(file) {
     const options = { geometry: $("opt-geometry").checked,
                       maxTexture: Number($("opt-texture").value) || 512 };
     const result = await runPipeline(file, options);
+    // Le Service Worker garde en memoire les fichiers qu'il a servis : une
+    // nouvelle extraction les remplace tous, il doit les oublier.
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: "vider-cache" });
+    }
     showSummary(result.summary, result.seconds);
     $("gate-step-work").hidden = true;
     $("gate-step-done").hidden = false;

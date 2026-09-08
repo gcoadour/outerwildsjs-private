@@ -30,11 +30,31 @@ export class Player {
 
   get physics() { return !!this.body; }
 
-  update(dt, bodies, input, basis, origin) {
-    this.field = dominantField(bodies, this.pos);
+  update(dt, bodies, input, basis, origin, directional = null) {
+    this.field = dominantField(bodies, this.pos, directional);
     if (this.physics) this.stepPhysics(dt, input, basis, origin);
     else this.stepAnalytic(dt, bodies, input, basis);
     return this.field;
+  }
+
+  /**
+   * Acceleration exterieure appliquee sur un pas : la trainee et la poussee
+   * d'un fluide. Sous Havok elle passe par la vitesse du corps physique, sans
+   * quoi elle serait ecrasee au pas suivant ; en repli, par la notre.
+   */
+  addAcceleration(a, dt) {
+    if (!a || dt <= 0) return;
+    if (this.physics) {
+      const B = this.BABYLON, body = this.body.body;
+      const v = body.getLinearVelocity();
+      body.setLinearVelocity(
+        new B.Vector3(v.x + a.x * dt, v.y + a.y * dt, v.z + a.z * dt));
+      this.vel.x = v.x + a.x * dt;
+      this.vel.y = v.y + a.y * dt;
+      this.vel.z = v.z + a.z * dt;
+    } else {
+      this.vel.x += a.x * dt; this.vel.y += a.y * dt; this.vel.z += a.z * dt;
+    }
   }
 
   // --- moteur Havok ---

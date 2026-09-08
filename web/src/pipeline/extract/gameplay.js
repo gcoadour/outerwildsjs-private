@@ -9,7 +9,23 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "QuantumMoon", "QuantumOrbit", "QuantumFogBoundary", "FogVolume",
                 "FogLight", "MakeChildrenBreakable", "SectorData",
                 "DetachableFragment", "BlackHoleVolume", "WhiteHoleVolume",
-                "BrambleManager", "AnglerfishController", "FogCloak"];
+                "BrambleManager", "AnglerfishController", "FogCloak",
+                // Le monde physique : 34 champs de force directionnels contre
+                // 10 GravityWell, et les volumes de fluide.
+                "DirectionalForceField", "SimpleFluidVolume",
+                "SphereOceanFluidVolume", "SimpleFluidDetector",
+                // Habitants du brouillard et de la lune quantique.
+                "CorruptionAnimator", "DerelictCloaker", "AlignQuantumMoon",
+                // Petites regles restees de cote : marqueurs de carte, source
+                // de chaleur de la guimauve.
+                "MapMarker", "HeatSource"];
+
+// Classes dont la portee vient d'un collider et non de leurs champs, et celles
+// dont l'orientation compte (un champ directionnel pousse dans SON axe).
+const WITH_VOLUME = new Set(["DirectionalForceField", "SimpleFluidVolume",
+                             "SphereOceanFluidVolume", "FogVolume", "HeatSource",
+                             "BlackHoleVolume", "WhiteHoleVolume"]);
+const ORIENTED = new Set(["DirectionalForceField", "SimpleFluidVolume"]);
 
 export function extractGameplay(ctx) {
   // OWRigidbody -> nom du GameObject, pour resoudre les references entre
@@ -24,12 +40,28 @@ export function extractGameplay(ctx) {
   const placed = {};
   const wanted = new Set([...SINGLETONS, ...PLACED]);
 
-  for (const { obj, cls } of ctx.behaviours(wanted)) {
+  // Inventaire de TOUTES les classes de la scene, pas seulement de celles
+  // qu'on retient. Il ne coute rien — la boucle les nomme deja pour filtrer —
+  // et il repond aux questions qu'on ne peut pas trancher depuis le depot :
+  // quel composant fournit l'oxygene, quel autre chauffe la guimauve. Sans lui
+  // on ne sait pas si un manque est celui du portage ou celui de l'alpha.
+  const inventory = {};
+
+  for (const { obj, cls } of ctx.behaviours(null)) {
+    inventory[cls] = (inventory[cls] || 0) + 1;
+    if (!wanted.has(cls)) continue;
     const fields = ctx.scriptFields(obj);
     if (!fields) continue;
     const plain = ctx.plain(fields);
     const gid = ctx.ownerId(obj);
     const entry = { name: ctx.name(gid), position: ctx.worldPosition(gid), fields: plain };
+    if (WITH_VOLUME.has(cls)) {
+      const vol = ctx.volumeOf(gid);
+      if (vol) entry.volume = vol;
+    }
+    if (ORIENTED.has(cls)) {
+      entry.rotation = ctx.world(gid)[1].map((v) => Math.round(v * 1e6) / 1e6);
+    }
 
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;
     if (!PLACED.includes(cls)) continue;
@@ -55,5 +87,6 @@ export function extractGameplay(ctx) {
     (placed[cls] ||= []).push(entry);
   }
 
-  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, singletons, placed };
+  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, singletons, placed,
+           inventory };
 }

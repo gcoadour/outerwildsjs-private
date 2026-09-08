@@ -294,6 +294,39 @@ def run(url, heavy):
         deb = page.evaluate("() => window.__debris ? window.__debris.radius : null")
         rep.eq("rayon du champ de debris", deb, 750)
 
+        # --- rotation propre : l'azimut du soleil vu du sol ---------------------
+        #
+        # Mesure a deux instants, la seule facon de voir tourner un repere. Ce
+        # qui est verifie n'est pas que le soleil bouge — une orbite le ferait
+        # bouger aussi — mais qu'il defile EXACTEMENT a la vitesse de rotation
+        # du corps sur lequel on se tient, et en sens inverse.
+        azimut = page.evaluate("""() => {
+          const s = window.__spin;
+          if (!s || !s.day()) return null;   // corps sans rotation propre
+          const star = window.__bodies.find(
+            b => (b.gravity.surfaceAcceleration || 0) >= 50);
+          if (!star) return null;
+          return {a: Math.atan2(star.position[0], star.position[2]),
+                  angle: s.field.angle(s.anchor()), jour: s.day()};
+        }""")
+        if azimut:
+            page.wait_for_timeout(2000)
+            apres = page.evaluate("""() => {
+              const s = window.__spin;
+              const star = window.__bodies.find(
+                b => (b.gravity.surfaceAcceleration || 0) >= 50);
+              return {a: Math.atan2(star.position[0], star.position[2]),
+                      angle: s.field.angle(s.anchor())};
+            }""")
+            tourne = apres["angle"] - azimut["angle"]
+            defile = apres["a"] - azimut["a"]
+            rep.check("le corps ancre tourne sur lui-meme", tourne > 1e-4,
+                      round(tourne, 5), "> 0")
+            rep.near("le soleil defile a la vitesse de rotation, en sens inverse",
+                     round(defile + tourne, 4), 0.0, 0.002)
+            rep.check("duree du jour dans les valeurs relevees",
+                      60 <= azimut["jour"] <= 600, round(azimut["jour"]), "60 a 600 s")
+
         # --- camera embarquee de la sonde ---------------------------------------
         page.keyboard.press("KeyF")
         page.wait_for_timeout(600)

@@ -12,10 +12,18 @@ import { round } from "./context.js";
 const TRACKS = { 1: "Default", 2: "Music", 4: "Ambience",
                  8: "EndTimes", 16: "Signal", 32: "Death" };
 
-// Portees par defaut : Unity 4 n'expose pas min/max distance dans le type tree
-// des AudioSource du build.
-const DEFAULT_RANGE = { Music: 0, Ambience: 150, Signal: 300, Default: 60,
-                        EndTimes: 0, Death: 0, Undefined: 60 };
+// Portees de REPLI, gardees pour le seul cas ou la source est illisible.
+//
+// Elles ont longtemps servi a TOUTES les sources, au motif que « Unity 4
+// n'expose pas min/max distance ». C'etait vrai du pipeline Python : UnityPy
+// cherchait `m_MinDistance`, or en 4.1 le champ s'appelle `MinDistance`, sans
+// prefixe. Il est bien dans le type tree d'unity41-types.json, que ce pipeline
+// lit directement — l'obstacle avait disparu, la note ne l'avait pas suivi.
+const FALLBACK_RANGE = { Music: 0, Ambience: 150, Signal: 300, Default: 60,
+                         EndTimes: 0, Death: 0, Undefined: 60 };
+
+// AudioRolloffMode d'Unity 4.
+const ROLLOFF = { 0: "logarithmic", 1: "linear", 2: "custom" };
 
 function trackName(v) {
   if (!v) return "Undefined";
@@ -83,7 +91,18 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
     const gid = src.m_GameObject ? src.m_GameObject.pathId : 0;
     const track = trackOf.get(gid) || "Undefined";
     const tx = transmitterOf.get(gid) || null;
-    const range = tx && tx.falloff ? tx.falloff : DEFAULT_RANGE[track] ?? 60;
+
+    // Portee spatiale : celle de la SOURCE. Les rayons d'un AudioTransmitter
+    // ne servent plus ici — ce sont des distances en pixels a l'ecran, lues a
+    // travers la lunette, et les prendre pour des unites de monde faisait de
+    // 400 px un rayon de 400 u (voir docs/09-audio.md et web/src/audio.js).
+    const min = Number.isFinite(src.MinDistance) ? round(src.MinDistance, 3) : null;
+    const max = Number.isFinite(src.MaxDistance) ? round(src.MaxDistance, 3) : null;
+    // `Pan2D` est le nom serialise de `panLevel` : 0 rend la source purement
+    // 2D, 1 la rend pleinement spatiale.
+    const pan = Number.isFinite(src.Pan2D) ? round(src.Pan2D, 3) : null;
+    const range = max !== null ? max : (FALLBACK_RANGE[track] ?? 60);
+    if (max === null) bump("portee de repli");
 
     sources.push({
       name: ctx.name(gid),
@@ -94,10 +113,23 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
       playOnAwake: !!src.m_PlayOnAwake,
       track,
       range,
-      spatial: !!range,
+      minDistance: min,
+      rolloff: ROLLOFF[src.rolloffMode] ?? null,
+      panLevel: pan,
+      doppler: Number.isFinite(src.DopplerLevel) ? round(src.DopplerLevel, 3) : null,
+      spatial: range > 0 && (pan === null || pan > 0),
       transmitter: tx,
     });
     bump("sources placees");
+  }
+
+  // Repli : si la lecture de `Pan2D` rendait TOUTES les sources plates, le
+  // portage perdrait son audio spatial d'un coup. On retombe alors sur la
+  // piste, comme avant — et on le dit dans les statistiques plutot que de le
+  // laisser passer pour une mesure.
+  if (sources.length && !sources.some((s) => s.spatial)) {
+    for (const s of sources) s.spatial = (FALLBACK_RANGE[s.track] ?? 60) > 0;
+    bump("spatialisation retombee sur la piste");
   }
 
   return { unity: ctx.env.get(ctx.sceneFile).unityVersion, sources, stats };

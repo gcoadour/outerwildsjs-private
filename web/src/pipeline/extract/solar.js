@@ -83,6 +83,11 @@ export function extractSolarSystem(ctx) {
       bodyName: owner ? owner.m_Name : null,
       bodyPosition: ctx.transformOf.has(ownerGid)
         ? ctx.world(ownerGid)[0].map((v) => round(v, 3)) : null,
+      // Orientation monde du CORPS, pas du GravityWell : c'est elle qui
+      // exprime dans le repere de travail l'axe de rotation propre, donne par
+      // InitialMotion dans le repere propre du corps (voir web/src/spin.js).
+      bodyRotation: ctx.transformOf.has(ownerGid)
+        ? ctx.world(ownerGid)[1].map((v) => round(v, 6)) : null,
       // Orbite : InitialMotion donne une vitesse initiale, il n'y a pas de
       // rotation de pivot. Voir docs/04-gravite.md.
       orbit: im ? {
@@ -97,6 +102,40 @@ export function extractSolarSystem(ctx) {
     });
   }
 
+  // --- fluides ---
+  //
+  // `SphereOceanFluidVolume` figurait dans BODY_CLASSES mais n'etait JAMAIS
+  // emis : la boucle ci-dessus n'ecrit un corps que s'il porte un GravityWell
+  // ou un PlanetoidSector. Giant's Deep n'avait donc pas d'ocean, et rien ne
+  // freinait dans un fluide — alors que `SimpleFluidDetector` applique un
+  // `_dragCoefficient` de 10 aux fragments de croute.
+  //
+  // Le rayon vient des champs quand ils le portent, du collider sinon : un
+  // volume de fluide d'Unity est un declencheur, sa portee est son collider.
+  const fluids = [];
+  for (const [gid, cs] of comps) {
+    const f = cs.SphereOceanFluidVolume;
+    if (!f) continue;
+    const go = ctx.gameObjects.get(gid);
+    if (!go || !ctx.transformOf.has(gid)) continue;
+    const vol = ctx.volumeOf(gid);
+    const radius = f._radius ?? f._outerRadius ?? (vol && vol.radius) ?? null;
+    const ownerGid = owningBody(gid);
+    fluids.push({
+      name: go.m_Name,
+      kind: "sphere",
+      position: ctx.world(gid)[0].map((v) => round(v, 3)),
+      radius: radius !== null ? round(radius, 3) : null,
+      // FluidType d'Unity : l'ocean est un liquide, la trainee y est celle du
+      // detecteur, pas une valeur choisie ici.
+      fluidType: f._fluidType ?? null,
+      dragCoefficient: f._dragCoefficient ?? null,
+      density: f._density ?? null,
+      body: (ctx.gameObjects.get(ownerGid) || {}).m_Name || null,
+      volume: vol,
+    });
+  }
+
   const dist = (p) => Math.hypot(p[0] || 0, p[1] || 0, p[2] || 0);
   bodies.sort((a, b) => dist(a.position) - dist(b.position));
 
@@ -107,5 +146,5 @@ export function extractSolarSystem(ctx) {
   }
 
   return { unity: ctx.env.get(ctx.sceneFile).unityVersion,
-           source: ctx.sceneFile, bodies, constants };
+           source: ctx.sceneFile, bodies, fluids, constants };
 }
