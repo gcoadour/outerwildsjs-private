@@ -24,9 +24,10 @@ Ouvrir la page, déposer `OuterWilds_Alpha_1_2_Linux.zip` (289 268 118 octets,
 SHA-256 `5c7defad…80f05a`). L'extraction complète prend environ **70 secondes**
 et n'est faite qu'une fois : elle est conservée d'une visite à l'autre.
 
-Sur téléphone ou tablette, la page se joue **en paysage** : manche virtuel à
-gauche, regard à droite, boutons pour le reste, carte au pincement. Rien de tout
-cela ne vient du jeu, qui est fait pour le clavier et la manette — voir
+Sur téléphone ou tablette, la page se joue **en paysage**, à deux manches comme
+un FPS mobile : le gauche déplace, le droit regarde — glissé pour viser, tenu
+pour tourner — boutons pour le reste, carte au pincement. Rien de tout cela ne
+vient du jeu, qui est fait pour le clavier et la manette — voir
 [`docs/33-mobile.md`](docs/33-mobile.md).
 
 En local :
@@ -104,7 +105,7 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | Maillages décodés | 1 569, 929 529 sommets, concordants avec UnityPy |
 | Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
-| Logique de jeu, sans le build | 107 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules |
+| Logique de jeu, sans le build | 125 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, géométrie des manches tactiles |
 
 Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips
 d'animation s'éprouve sur un flux fabriqué, l'export glTF sur un monde de

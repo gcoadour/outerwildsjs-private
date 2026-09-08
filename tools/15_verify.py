@@ -314,40 +314,74 @@ def run(url, heavy):
         # Le navigateur de verification n'est pas tactile : on installe la
         # couche a la main, puis on lui envoie des evenements de pointeur. Ce
         # qui est verifie, c'est qu'elle produit les MEMES entrees que le
-        # clavier — un axe analogique et des codes de touche.
+        # clavier — un axe analogique et des codes de touche — et que le
+        # manche droit tourne bien la camera tant qu'il est tenu, ce qu'aucun
+        # evenement de pointeur ne dit : c'est une vitesse, pas un deplacement.
         tactile = page.evaluate("""() => {
           const t = window.__touch;
           t.enable();
           const send = (sel, type, x, y, id) => document.querySelector(sel)
             .dispatchEvent(new PointerEvent(type, {pointerId: id, clientX: x,
               clientY: y, bubbles: true, pointerType: 'touch'}));
-          // manche pousse a fond vers l'avant, puis relache
+          const vus = [];
+          const onKey = t.onKey, onLook = t.onLook;
+          t.onKey = (c) => vus.push(c);
+          let tourne = 0;
+          t.onLook = (dx) => { tourne += dx; };
+
+          // manche gauche pousse a fond vers l'avant : axe sature, et le cran
+          // de course s'allume comme si Maj etait tenue
           send('.tc-zone-move', 'pointerdown', 200, 500, 1);
           send('.tc-zone-move', 'pointermove', 200, 400, 1);
           const avant = +t.axes.forward.toFixed(2);
+          const course = t.axes.boost;
           send('.tc-zone-move', 'pointerup', 200, 400, 1);
-          const relache = t.axes.forward;
-          // tape breve sur la zone de regard, puis bouton d'action : les deux
-          // envoient la touche que le jeu attend
-          const vus = [];
-          const onKey = t.onKey;
-          t.onKey = (c) => vus.push(c);
+          const relache = t.axes.forward, apresCourse = t.axes.boost;
+
+          // manche droit tenu a fond : la camera tourne SANS que le doigt
+          // bouge encore — c'est une vitesse, en pixels par seconde
           send('.tc-zone-look', 'pointerdown', 900, 400, 2);
-          send('.tc-zone-look', 'pointerup', 900, 400, 2);
+          send('.tc-zone-look', 'pointermove', 1000, 400, 2);
+          const glisse = Math.round(tourne);
+          tourne = 0;
+          t.applyLookRate(0.1);
+          const vitesse = Math.round(tourne / 0.1);
+          send('.tc-zone-look', 'pointerup', 1000, 400, 2);
+          tourne = 0;
+          t.applyLookRate(0.1);
+          const arret = tourne;
+
+          // tape breve sur le manche droit, puis bouton d'action : les deux
+          // envoient la touche que le jeu attend
+          send('.tc-zone-look', 'pointerdown', 900, 400, 3);
+          send('.tc-zone-look', 'pointerup', 900, 400, 3);
           document.querySelector('.tc-act').dispatchEvent(
-            new PointerEvent('pointerdown', {pointerId: 3, bubbles: true}));
-          t.onKey = onKey;
+            new PointerEvent('pointerdown', {pointerId: 4, bubbles: true}));
+          t.onKey = onKey; t.onLook = onLook;
+
           // un menu ouvert suspend le pilotage
           t.setContext({menu: true, map: false});
           const suspendu = document.getElementById('touch')
             .classList.contains('tc-idle');
           t.setContext({menu: false, map: false});
+          const manches = document.querySelectorAll('#touch .tc-stick').length;
+          const empreintes = document.querySelectorAll('#touch .tc-home').length;
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
-          return {avant, relache, vus, suspendu, boutons};
+          return {avant, course, relache, apresCourse, glisse, vitesse, arret,
+                  vus, suspendu, manches, empreintes, boutons};
         }""")
-        rep.eq("manche tactile a fond : axe sature a 1", tactile["avant"], 1)
+        rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
+        rep.eq("a fond devant : le cran de course prend", tactile["course"], True)
         rep.eq("manche relache : axe a zero", tactile["relache"], 0)
+        rep.eq("manche relache : course finie", tactile["apresCourse"], False)
+        rep.eq("un manche par pouce", tactile["manches"], 2)
+        rep.eq("empreinte sous chaque pouce", tactile["empreintes"], 2)
+        rep.eq("glisser au manche droit garde son effet direct",
+               tactile["glisse"], round(100 * 1.7))
+        rep.eq("manche droit tenu a fond : rotation continue",
+               tactile["vitesse"], 900)
+        rep.eq("manche droit relache : plus de rotation", tactile["arret"], 0)
         rep.eq("tape et bouton d'action donnent la touche du jeu",
                tactile["vus"], ["KeyE", "KeyE"])
         rep.eq("un menu ouvert suspend le pilotage", tactile["suspendu"], True)
