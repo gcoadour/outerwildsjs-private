@@ -122,6 +122,7 @@ export function directionalFields(gameplay) {
     out.push({
       name: e.name,
       position: e.position,
+      rotation: e.rotation || null,
       direction: d,
       magnitude: Math.abs(magnitude),
       volume: e.volume,
@@ -139,14 +140,26 @@ export function rotateByQuaternion(q, v) {
           vz + w * tz + x * ty - y * tx];
 }
 
-/** Le point est-il dans le volume du champ ? */
+/**
+ * Le point est-il dans le volume du champ ?
+ *
+ * Le centre du collider et les demi-cotes d'une boite sont donnes dans le
+ * repere LOCAL de l'objet : il faut donc y ramener le point avant de comparer,
+ * sinon un couloir pose de biais est teste comme s'il etait aligne sur les axes
+ * du monde.
+ */
 export function insideVolume(field, worldPoint) {
   const v = field.volume;
   if (!v) return false;
   const c = v.center || [0, 0, 0];
-  const p = [worldPoint[0] - field.position[0] - c[0],
-             worldPoint[1] - field.position[1] - c[1],
-             worldPoint[2] - field.position[2] - c[2]];
+  let d = [worldPoint[0] - field.position[0],
+           worldPoint[1] - field.position[1],
+           worldPoint[2] - field.position[2]];
+  if (field.rotation) {
+    const q = field.rotation;
+    d = rotateByQuaternion([-q[0], -q[1], -q[2], q[3]], d);
+  }
+  const p = [d[0] - c[0], d[1] - c[1], d[2] - c[2]];
   if (v.shape === "box" && v.size) {
     return Math.abs(p[0]) <= v.size[0] / 2 && Math.abs(p[1]) <= v.size[1] / 2 &&
            Math.abs(p[2]) <= v.size[2] / 2;

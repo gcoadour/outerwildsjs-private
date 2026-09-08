@@ -517,6 +517,20 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
   check("dedans la boite", insideVolume(fields[0], [5, 4, 10]), true);
   check("dehors la boite", insideVolume(fields[0], [5, 6, 10]), false);
+  // Un couloir pose de biais : le point se ramene dans le repere local du
+  // volume avant d'etre compare, sinon la boite est testee alignee sur les
+  // axes du monde. Ici un quart de tour autour de Y echange X et Z.
+  const biais = directionalFields({ placed: { DirectionalForceField: [
+    { name: "Biais", position: [0, 0, 0],
+      rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+      fields: { _fieldMagnitude: 8, _fieldDirection: [0, -1, 0] },
+      volume: { shape: "box", size: [20, 10, 40], center: [0, 0, 0], radius: 23 } },
+  ] } })[0];
+  check("la boite tournee suit son objet", insideVolume(biais, [18, 0, 0]), true);
+  check("... et ne deborde plus dans l'autre sens",
+        insideVolume(biais, [0, 0, 18]), false);
+  check("la direction du champ tourne avec lui",
+        biais.direction.map((v) => round(v, 3)).join(","), "0,-1,0");
   check("dedans la sphere", insideVolume(fields[1], [110, 0, 0]), true);
   check("dehors la sphere", insideVolume(fields[1], [120, 0, 0]), false);
   check("hors de tout volume : aucun champ dirige",
@@ -775,6 +789,15 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("... et va vers la source, pas vers le joueur",
         fish.position[2] > 10 && Math.abs(fish.position[0]) < 5, true);
   check("il ne devore pas un joueur silencieux et distant", fish.caught, false);
+
+  // Un champ VIDE est un objet, donc « vrai » : le predateur ne doit pas
+  // poursuivre pour autant. C'est le piege de la conversion booleenne.
+  const silence = new Anglerfish([0, 0, 0]);
+  const vide = new NoiseField();
+  for (let i = 0; i < 100; i++) silence.update(0.05, { x: 0, y: 0, z: 50 }, vide);
+  check("champ de bruit vide : le predateur reste au repos", silence.state, "repos");
+  check("... et ne bouge pas de chez lui",
+        round(Math.hypot(...silence.position), 3), 0);
 
   // Compatibilite : un booleen continue de designer le joueur lui-meme.
   const direct = new Anglerfish([0, 0, 0]);

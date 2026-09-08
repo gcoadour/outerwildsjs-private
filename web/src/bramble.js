@@ -105,10 +105,13 @@ export class Anglerfish {
                                 this.position[1] - this.home[1],
                                 this.position[2] - this.home[2]);
 
-    const heard = (noisy && typeof noisy === "object" && noisy.strongestAt)
-      ? noisy.strongestAt(this.position, this.cfg.noiseRadius) : null;
+    // Un champ de bruit est un objet, donc toujours « vrai » : sans cette
+    // distinction, un champ vide valait « le joueur fait du bruit » et le
+    // predateur poursuivait une proie parfaitement silencieuse.
+    const field = !!(noisy && typeof noisy === "object" && noisy.strongestAt);
+    const heard = field ? noisy.strongestAt(this.position, this.cfg.noiseRadius) : null;
     const noise = heard ? heard.position : [player.x, player.y, player.z];
-    const audible = heard ? true : (!!noisy && d < this.cfg.noiseRadius);
+    const audible = field ? !!heard : (!!noisy && d < this.cfg.noiseRadius);
     this.heard = heard;
 
     // Ce qui echappe, c'est la SOURCE poursuivie : un joueur parti loin ne

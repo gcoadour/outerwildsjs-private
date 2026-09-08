@@ -24,6 +24,12 @@
 // corps ancre — sources audio, volumes, objets interactifs — et c'est juste,
 // puisque cela tourne avec lui.
 
+// Une approximation assumee : `_localAxis` est, comme son nom le dit, un axe
+// LOCAL. On l'emploie tel quel comme axe monde. Les corps du systeme n'ont pas
+// de rotation propre a leur transform — leur repere local et le repere monde
+// coincident — et l'axe releve est de toute facon presque toujours l'axe Y.
+// Le jour ou un corps arriverait incline, il faudrait composer sa rotation.
+
 /** Sous laquelle une rotation ne se distingue plus d'un corps fixe. */
 export const MIN_RATE = 1e-6;
 
