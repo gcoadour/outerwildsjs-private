@@ -91,9 +91,14 @@ jeu.
   d'explosion. À noter : la branche « éclats de débris » de `Shatter()` est un
   **bloc vide** dans cette alpha (`if (_debrisShardPrefab != null) { }`), il n'y
   a donc rien de plus à porter de ce côté-là.
-- **Pas de champ de débris** autour du trou blanc (`_debrisRadius = 750`), ni de
-  file d'attente de croissance (`_growQueue`), par laquelle le jeu fait
-  réapparaître progressivement ce qui est tombé.
+- ~~**Pas de champ de débris**~~ — **porté**. `_debrisRadius = 750` et la file
+  d'attente de croissance (`_growQueue`) disent ensemble que ce qui tombe dans
+  le trou noir **ressort au trou blanc**, un morceau après l'autre et non d'un
+  coup. Chaque fragment avalé prend la file, et son emplacement dans la sphère
+  de 750 unités est tiré de son nom — donc le même d'une session à l'autre,
+  sans quoi rien ne serait vérifiable. La cadence, elle, n'est pas dans le
+  build : deux secondes par morceau, ce qui met une boucle à faire ressortir
+  une croûte entière.
 - **Pas d'effet visuel** : ni disparition, ni distorsion. Le
   `_vanishEffectPrefab` référencé n'est pas porté.
 - **Le vaisseau n'est pas concerné.** `_onlyAffectsPlayerAndShip` vaut `false`

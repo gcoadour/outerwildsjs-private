@@ -80,6 +80,9 @@ export class Sectors {
   update(playerPos, framePos = null) {
     let actifs = 0, total = 0;
     this.current = null;
+    // Fichiers encore a portee de chargement : c'est cette liste que
+    // l'eviction consulte pour savoir ce qu'elle peut liberer.
+    this.inRange = new Set();
     for (const b of this.bodies) {
       const file = this.fileFor ? this.fileFor(b) : (this.geoFor(b) || {}).file;
       if (!file) continue;   // corps sans geometrie exportee
@@ -93,7 +96,10 @@ export class Sectors {
       // le secteur courant vaut meme sans geometrie : c'est lui qui porte la
       // limite de poussee
       if (on && s && d < s.horizon * 1.5) this.current = s;
-      if (this.request && d < horizon * ACTIVATION + PRELOAD_MARGIN) this.request(file);
+      if (d < horizon * ACTIVATION + PRELOAD_MARGIN) {
+        this.inRange.add(file);
+        if (this.request) this.request(file);
+      }
       const entry = this.geoFor(b);
       if (!entry) continue;   // pas encore charge : la sphere de substitution tient
       if (on) actifs += 1;
@@ -108,7 +114,10 @@ export class Sectors {
                            v.position[1] - (framePos ? framePos[1] : 0) - playerPos.y,
                            v.position[2] - (framePos ? framePos[2] : 0) - playerPos.z);
       const on = d < v.radius * ACTIVATION;
-      if (this.request && d < v.radius * ACTIVATION + PRELOAD_MARGIN) this.request(v.file);
+      if (d < v.radius * ACTIVATION + PRELOAD_MARGIN) {
+        this.inRange.add(v.file);
+        if (this.request) this.request(v.file);
+      }
       const entry = this.entryFor ? this.entryFor(v.file) : null;
       if (!entry) continue;
       if (on) actifs += 1;
@@ -123,4 +132,28 @@ export class Sectors {
     const t = this.current && this.current.thrustLimit;
     return (typeof t === "number" && isFinite(t)) ? t : null;
   }
+
+  /** Portee d'eclairage ambiant du secteur courant (`_ambientLightRange`). */
+  get lightRange() {
+    const r = this.current && this.current.lightRange;
+    return (typeof r === "number" && isFinite(r)) ? r : 0;
+  }
+}
+
+/**
+ * Intensite de l'eclairage ambiant a une distance donnee.
+ *
+ * `_ambientLightRange` va de 750 sur Giant's Deep a 0 sur la premiere jumelle
+ * et la comete. Le sens de cette portee est celui d'une lumiere de secteur :
+ * pleine au centre, eteinte au-dela. Un secteur a 0 n'en a tout simplement pas
+ * — et c'est bien ce qu'on veut sentir en arrivant sur la comete, dont le ciel
+ * n'est eclaire que par l'etoile.
+ *
+ * L'attenuation lineaire est celle des lumieres ponctuelles d'Unity 4 en mode
+ * simple ; le jeu n'en donne pas d'autre.
+ */
+export function ambientIntensity(distance, range, base = 0.1, full = 0.35) {
+  if (!(range > 0)) return base;
+  const k = Math.max(0, 1 - distance / range);
+  return base + (full - base) * k;
 }

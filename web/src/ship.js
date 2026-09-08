@@ -12,10 +12,10 @@
 // a tourner que le sac dorsal (7).
 
 import { dominantField } from "./gravity.js";
-import { impactDamage, DAMAGE } from "./autopilot.js";
+import { ShipDamage } from "./shipdamage.js";
 
 export class Ship {
-  constructor(consts, node, startPos) {
+  constructor(consts, node, startPos, damageFields = {}) {
     this.thrust = consts._maxTranslationalThrust ?? 50;
     this.angularDrag = consts._angularDrag ?? 0.92;
     this.node = node;                       // noeud glTF du vaisseau
@@ -24,8 +24,24 @@ export class Ship {
     this.boarded = false;
     this.landed = false;
     this.radius = 6;                        // demi-taille approximative
-    this.integrity = DAMAGE.total;
-    this.lastImpact = 0;
+    // Degats : l'integrite globale et les pieces vivent dans ShipDamage, qui
+    // porte les quatre champs de ShipDamageController.
+    this.damage = new ShipDamage(damageFields);
+    // Limite de poussee du secteur courant (PlanetoidSector._thrustLimit), ou
+    // null hors de tout secteur. Le vaisseau garde sa pleine puissance sur la
+    // premiere jumelle, ou la limite vaut 200 contre 20 partout ailleurs.
+    this.thrustLimit = null;
+  }
+
+  get integrity() { return this.damage.integrity; }
+  get destroyed() { return this.damage.destroyed; }
+  get lastImpact() { return this.damage.lastImpact; }
+
+  /** Poussee effective : bornee par le secteur, nulle si le vaisseau est detruit. */
+  get effectiveThrust() {
+    if (this.destroyed) return 0;
+    const t = this.thrust;
+    return this.thrustLimit != null ? Math.min(t, this.thrustLimit) : t;
   }
 
   /** Rapproche la geometrie de la position simulee. */
@@ -50,11 +66,15 @@ export class Ship {
     }
 
     if (this.boarded) {
-      const t = this.thrust * dt * (input.boost ? 2 : 1);
-      this.vel.x += (basis.fwd.x * input.forward + basis.right.x * input.right) * t;
-      this.vel.y += (basis.fwd.y * input.forward + basis.right.y * input.right) * t;
-      this.vel.z += (basis.fwd.z * input.forward + basis.right.z * input.right) * t;
-      if (input.up && f) {
+      const t = this.effectiveThrust * dt * (input.boost ? 2 : 1);
+      // Chaque direction passe par son propulseur : une piece morte coupe le
+      // sien quand `_disableDamagedThrusters` est vrai.
+      const fw = input.forward * this.damage.thrustFactor(input.forward > 0 ? "arriere" : "avant");
+      const rt = input.right * this.damage.thrustFactor(input.right > 0 ? "gauche" : "droite");
+      this.vel.x += (basis.fwd.x * fw + basis.right.x * rt) * t;
+      this.vel.y += (basis.fwd.y * fw + basis.right.y * rt) * t;
+      this.vel.z += (basis.fwd.z * fw + basis.right.z * rt) * t;
+      if (input.up && f && this.damage.thrustFactor("bas")) {
         this.vel.x -= f.dir.x * t;
         this.vel.y -= f.dir.y * t;
         this.vel.z -= f.dir.z * t;
@@ -81,12 +101,15 @@ export class Ship {
       this.pos.z = b.position[2] + n[2] * R;
       const vn = this.vel.x * n[0] + this.vel.y * n[1] + this.vel.z * n[2];
       if (vn < 0) {
-        // degats a l'impact, selon la vitesse normale a la surface
-        const dmg = impactDamage(-vn);
-        if (dmg > 0) {
-          this.integrity = Math.max(0, this.integrity - dmg);
-          this.lastImpact = Math.round(-vn);
-        }
+        // Degats a l'impact, selon la vitesse normale a la surface. La normale
+        // est exprimee dans le repere du vaisseau — celui de la camera quand on
+        // le pilote — pour que la position de l'impact ait un sens.
+        const local = basis ? [
+          -(n[0] * basis.right.x + n[1] * basis.right.y + n[2] * basis.right.z),
+          -(n[0] * basis.up.x + n[1] * basis.up.y + n[2] * basis.up.z),
+          -(n[0] * basis.fwd.x + n[1] * basis.fwd.y + n[2] * basis.fwd.z),
+        ] : null;
+        this.lastHit = this.damage.impact(-vn, local);
         this.vel.x -= vn * n[0]; this.vel.y -= vn * n[1]; this.vel.z -= vn * n[2];
       }
       this.vel.x *= 0.7; this.vel.y *= 0.7; this.vel.z *= 0.7;

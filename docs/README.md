@@ -18,7 +18,8 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`06-orbites.md`](06-orbites.md) — orbites simulées et référentiels
 - [`07-gameplay.md`](07-gameplay.md) — ressources, vaisseau, interaction
 - [`12-boucle.md`](12-boucle.md) — boucle temporelle de 20 minutes et supernova
-- [`17-secteurs.md`](17-secteurs.md) — secteurs et niveau de détail
+- [`32-mort.md`](32-mort.md) — **mourir, et la fin des temps**
+- [`17-secteurs.md`](17-secteurs.md) — secteurs, niveau de détail par maillage et éviction
 - [`18-vaisseau.md`](18-vaisseau.md) — pilote automatique et dégâts
 - [`23-connaissance.md`](23-connaissance.md) — la connaissance débloque le jeu
 

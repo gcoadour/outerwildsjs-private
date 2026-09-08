@@ -45,13 +45,52 @@ les petits corps à 4 000 u pour Giant's Deep.
 La limite de poussée du secteur courant est bien remontée (20 dans les deux
 premiers cas).
 
+## Le LOD par maillage
+
+`web/src/lod.js`. Un `LODGroup` d'Unity se déclenche sur la **hauteur relative à
+l'écran** de l'objet — c'est-à-dire, exactement, le rapport entre le rayon de sa
+sphère englobante et sa distance à la caméra. Il n'y a donc rien à inventer :
+on mesure ce rapport et on éteint ce qui tombe sous le seuil, fixé à 0,0022,
+soit environ 1,6 pixel de haut sur 720 lignes.
+
+Deux précautions comptent plus que le seuil :
+
+- **le coût.** Parcourir 12 000 maillages à chaque image coûterait plus cher que
+  ce qu'on économise. Le parcours est **tournant** : 400 maillages par image, le
+  tour complet en quelques images.
+- **les gros objets.** Une planète a un rapport énorme et ne disparaît jamais ;
+  un caillou posé dessus, oui. Comme le seuil est un rapport et non une
+  distance, les deux cas se traitent sans exception — sauf le vaisseau et les
+  débris, épinglés parce qu'on les cherche des yeux.
+
+## L'éviction
+
+Le chargement à la demande (voir [`27-poids.md`](27-poids.md)) ne relâchait
+jamais rien : traverser le système finissait par tout charger, et les 60 Mo du
+démarrage redevenaient 200. Un corps quitté depuis **45 secondes** est
+maintenant libéré — maillages, matériaux et textures — et se rechargera comme la
+première fois si l'on revient.
+
+Le délai compte autant que la distance : sans lui, franchir la limite dans un
+sens puis dans l'autre déclencherait un cycle libération/téléchargement.
+
+Trois lots ne sont jamais libérés : celui du corps ancré, celui qui porte les
+colliders, et Brittle Hollow une fois sa croûte résolue — ses fragments
+pointent vers des nœuds de ce lot.
+
+## Les deux réglages de secteur, appliqués
+
+- **`_thrustLimit`** borne la poussée du vaisseau : 20 partout, 200 sur la
+  première jumelle, illimitée sur Giant's Deep.
+- **`_ambientLightRange`** pilote l'intensité de la lumière d'ambiance, pleine
+  au centre du secteur et éteinte au-delà de la portée. Un secteur à 0 — la
+  première jumelle, la comète — n'a tout simplement pas d'ambiance : son ciel
+  n'est éclairé que par l'étoile.
+
 ## Ce qui manque
 
-- **Le LOD par maillage.** La bascule est tout ou rien à l'échelle du corps ;
-  le jeu réduit progressivement le détail des maillages.
-- **Le chargement à la demande.** Les sept fichiers sont téléchargés au
-  démarrage ; seul leur *rendu* est conditionnel. Un vrai découpage
-  n'irait chercher un fichier qu'à l'approche de son secteur.
-- **La limite de poussée n'est pas appliquée** au vaisseau, seulement remontée
-  à l'affichage.
-- **L'éclairage ambiant par secteur** (`_ambientLightRange`) n'est pas exploité.
+- **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
+  en enchaîne plusieurs sur des maillages simplifiés. Simplifier un maillage à
+  la volée coûterait plus que ce qu'il rapporte ici.
+- **Les 21 `ChildColliderLOD`** ne sont pas portés : les colliders sont posés
+  d'un bloc sur le corps ancré.

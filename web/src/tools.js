@@ -77,4 +77,62 @@ export class ProbeLauncher {
   }
 
   get active() { return this.probes.length; }
+
+  /** La derniere sonde lancee, celle que la camera embarquee suit. */
+  get last() { return this.probes.length ? this.probes[this.probes.length - 1] : null; }
+}
+
+/**
+ * Camera embarquee de la sonde.
+ *
+ * `ProbeLauncher` en porte une dans le jeu : la sonde est un appareil photo
+ * qu'on jette, et c'est par son oeil qu'on voit ce qu'il y a au fond d'un
+ * gouffre. Ici c'est une seconde camera, dessinee dans un coin de l'ecran tant
+ * qu'une sonde vole, et rangee des qu'il n'y en a plus.
+ *
+ * Une seule chose merite attention : Babylon ne dessine plusieurs cameras que
+ * par `activeCameras`. Y laisser la camera du joueur seule quand la sonde
+ * disparait est indispensable — une liste vide donne un ecran noir.
+ */
+export class ProbeCamera {
+  constructor(BABYLON, scene, mainCamera, root = null) {
+    this.B = BABYLON;
+    this.scene = scene;
+    this.main = mainCamera;
+    this.cam = new BABYLON.FreeCamera("probeCam", BABYLON.Vector3.Zero(), scene);
+    this.cam.minZ = 0.5;
+    this.cam.maxZ = 200000;
+    this.cam.fov = 1.0;                 // grand angle : c'est un objectif jete
+    this.cam.viewport = new BABYLON.Viewport(0.755, 0.03, 0.23, 0.23);
+    this.on = false;
+    // Cadre : le vide d'un cote et le vide de l'autre se ressemblent trop pour
+    // qu'on voie ou commence l'image de la sonde. Le cadre est en HTML, cale
+    // sur les memes fractions que le viewport de Babylon — dont l'origine est
+    // en BAS a gauche, d'ou le `bottom`.
+    this.frame = null;
+    if (root) {
+      const el = document.createElement("div");
+      el.className = "ow-probeview";
+      el.hidden = true;
+      root.appendChild(el);
+      this.frame = el;
+    }
+  }
+
+  /** @param probe sonde a suivre, ou null */
+  update(probe) {
+    const want = !!probe;
+    if (want) {
+      this.cam.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
+      const v = probe.vel, L = Math.hypot(v[0], v[1], v[2]) || 1;
+      this.cam.setTarget(new this.B.Vector3(
+        probe.pos[0] + v[0] / L, probe.pos[1] + v[1] / L, probe.pos[2] + v[2] / L));
+    }
+    if (want === this.on) return this.on;
+    this.on = want;
+    this.main.viewport = new this.B.Viewport(0, 0, 1, 1);
+    this.scene.activeCameras = want ? [this.main, this.cam] : [this.main];
+    if (this.frame) this.frame.hidden = !want;
+    return this.on;
+  }
 }

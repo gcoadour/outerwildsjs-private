@@ -44,221 +44,92 @@ portage.
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
-| vérification | `tools/15_verify.py`, 30 invariants dans un vrai navigateur |
+| mort et flashback | 5 causes, 22 images, 8,21 s, commandes coupées |
+| supernova | progression, contraction, explosion, onde de choc |
+| dégâts du vaisseau | pièces, propulseurs coupés, destruction |
+| LOD par maillage | hauteur relative à l'écran, parcours tournant |
+| éviction | un corps quitté depuis 45 s est libéré |
+| champ de débris | ce qui tombe ressort au trou blanc, 750 u |
+| caméra de sonde | vue embarquée dans un coin de l'écran |
+| vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
-## Ce qui manque, par ordre de coût
+## Ce qui manque, par famille
 
-### 1. Shaders — partiellement porté (voir `docs/11-shaders.md`)
+La liste par système a fondu : les entrées qui restaient ouvertes ont été
+reprises une par une (voir l'historique des pages ci-dessous). Ce qui reste ne
+se range plus par mécanique mais par **nature de l'obstacle**, et c'est plus
+utile ainsi — la moitié de ce qui manque ne se comble pas en portant mieux.
 
-Les 122 shaders sont exportés et classés : **85 sont des shaders Unity
-standard** (inutile de les réécrire, un matériau Babylon suffit) et **37 sont
-écrits par l'équipe**.
+### 1. Ce qui n'est pas dans le build
 
-**Premier lot appliqué** (voir `docs/20-shaders-jeu.md`) : 200 affectations
-traitées via cinq familles — `diamond shader`, `DoubleSidedCutout*`,
-`SelfIllumin*` — plus la coque atmosphérique et la surface stellaire.
+Aucune de ces choses ne s'obtient en travaillant davantage : elles ne sont pas
+dans l'alpha.
 
-**Second lot fait** : `RimShader`, `CrackShader`, `DistortionShader` et
-`FireBall` portent le total à **203 affectations, 0 erreur**. Tous les shaders
-du jeu effectivement utilisés dans la scène sont traités ; les 18 jamais
-utilisés sont laissés de côté délibérément.
+| manque | ce que le build en dit |
+|---|---|
+| l'espace replié de Dark Bramble | aucun volume de distorsion ; le conteneur s'appelle `DarkBramble_TestBed` |
+| quatre des cinq savoirs | un seul a une source vivante ; les autres sont du code mort |
+| le déblocage par branche de dialogue | les 20 attributs `eventbased` valent tous `"false"` |
+| les machines à états d'animation | 11 états, **zéro transition** dans tout le build |
+| les dégâts localisés du vaisseau | masque et modificateurs à **0** : la mécanique est câblée, les réglages ne l'allument pas |
+| les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
+| le modèle de sonde | `_probePrefab` n'est pas résolu |
+| les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
+| la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
+| `RocketKidConvoController`, l'entraînement, le ciblage | aucune source |
 
-La mesure d'usage avait corrigé une erreur de ma part : `CrackShader`,
-`RimShader` et `HeatDistortion` ne portaient PAS l'identité visuelle.
+### 2. Ce qui demande un œil ou une oreille humaine
 
-Reste approximatif : la distorsion, faute de capture du fond dans une texture
-intermédiaire.
+Tout est vérifié au chiffre, rien ne l'est au rendu.
 
-### 2. Audio — porté (voir `docs/09-audio.md`)
+- **L'équilibrage des volumes audio** — les portées sont choisies par piste,
+  faute de `m_MinDistance` sur Unity 4.
+- **L'équilibrage visuel des particules** — les tailles vont jusqu'à 140 unités.
+- **Le rendu général** : atmosphères, surface stellaire, brouillards et
+  explosion sont des implémentations originales visant un résultat comparable,
+  pas des transpositions de shaders.
+- **Une partie jouée**, tout simplement.
 
-**92 sources** et **31 clips** exportés et joués en spatial, le **mixage par
-piste** avec ses fondus, et les **neuf émetteurs de signal** — dont la
-découverte que leurs rayons sont des distances **en pixels à l'écran** : on
-trouve un signal en visant à la lunette, et le volume de celle-ci est la somme
-des forces des émetteurs visés.
+### 3. Ce qui reste techniquement ouvert
 
-Restent : la coupure passe-bas des `AudioTransmitter`, et une écoute humaine
-pour équilibrer les volumes.
+- **La distorsion** reste une approximation délibérée : capturer le fond
+  demanderait un second rendu complet de la scène — doubler les 6,1 ms — pour
+  **deux matériaux dans tout le jeu**.
+- **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
+  en enchaîne plusieurs sur des maillages simplifiés.
+- **Les 21 `ChildColliderLOD`** : les colliders sont posés d'un bloc sur le
+  corps ancré.
+- **15 Mo de WAV non compressés** et **11,1 Mo de Babylon** sur les 66 du
+  démarrage (voir [`27-poids.md`](27-poids.md)).
+- **Le son comme signal** pour les prédateurs : le bruit est déduit des
+  commandes du joueur, pas des sources sonores réelles.
+- **`_checkDepth = 100`** de la lune quantique : le test d'occlusion est
+  binaire, là où le jeu lance une sphère sur une profondeur.
+- **`AlignQuantumMoon`**, **`CorruptionAnimator`**, **`_vanishEffectPrefab`**.
+- **Les pièces du vaisseau n'ont pas de géométrie propre** : une pièce morte se
+  lit dans son état, elle ne se voit pas sur la coque.
 
-### 3. Particules — portées (voir `docs/10-particules.md`)
+## Où lire le détail
 
-**135 systèmes** et 15 textures exportés et rendus, avec budget et
-instanciation à la volée. Restent : les courbes variables, aplaties à leur
-scalaire ; les modules secondaires (couleur, taille, vitesse, force, rotation,
-animation de sprites, collision) ; `gravityModifier`, à brancher sur le champ
-dominant ; et l'équilibrage visuel, qui demande un œil humain.
-
-### 4. Animation — skinning porté (voir `docs/21-skinning.md`)
-
-Le décodage direct des flux de sommets remplace l'intermédiaire OBJ :
-**55 squelettes et 33 maillages skinnés** exportés sur les neuf corps, poids
-sommant à 1 à 4,5 × 10⁻⁸ près, chargés par Babylon en squelettes de 53 à 58 os.
-
-**Animations portées**, Mecanim compris (voir `docs/22-animations.md` puis
-`docs/26-muscleclip.md`). Les 16 clips se répartissent en 7 legacy et 9
-Mecanim ; ces derniers laissaient leurs courbes vides, tout vivant dans
-`m_MuscleClip`. Le flux est décodé : **33 animations, 8 148 canaux, 0 os non
-résolu**, et Timber Hearth passe de 0 à 17 animations — précisément les
-villageois.
-
-Les **tangentes** sont portées aussi : 4 022 canaux en `CUBICSPLINE`. Quant aux
-`AnimatorController`, il n'y a **rien à porter** — 11 états et zéro transition
-dans tout le build (voir 6 bis).
-
-### 5. Dialogues — portés (voir `docs/13-dialogue.md`)
-
-**26 arbres, 72 branches, 44 options**, 13 des 14 conversations reliées, et la
-**mémoire entre boucles** qui survit à la supernova et au rechargement. Sur les
-73 TextAsset, 47 sont en fait les textes bruts des objets lisibles, pas des
-dialogues.
-
-**La connaissance débloque désormais le jeu** (voir `docs/23-connaissance.md`) :
-les codes de lancement conditionnent le décollage, l'exploration remplit la
-carte, les drapeaux de `PlayerData` sélectionnent l'arbre de dialogue, et tout
-survit à la supernova comme au rechargement.
-
-À noter : les 20 attributs `eventbased` du build valent tous `"false"` — le
-déblocage se fait au niveau des arbres entiers, pas des branches.
-
-**Outils portés** (voir `docs/24-outils.md`) : télescope (60° → 10° en 2 s) et
-lanceur de sonde, tous deux portés par la caméra du joueur dans la scène.
-L'audit des cinq savoirs montre qu'**un seul a une source vivante** dans le
-build ; les autres sont du code mort ou des drapeaux jamais câblés.
-
-Correction : les codes de lancement viennent des **conversations**
-(`CuratorConvoController`), pas du vaisseau — `LaunchTerminal` se contente
-d'écouter l'événement.
-
-**Interface de dialogue portée** (voir `docs/25-interface.md`) aux proportions
-du build (1200×300, 50 caractères sur 4 lignes pour un personnage, 70 sur 5
-pour un panneau), avec curseur au clavier. Le rendu des sondes est en place.
-
-Restent : l'entraînement et le ciblage sans source dans le build, le modèle de
-sonde (`_probePrefab`), la caméra embarquée, et `RocketKidConvoController`.
-
-### 6. Logique du vaisseau — portée (voir `docs/18-vaisseau.md`)
-
-Pilote automatique en quatre phases (alignement, vol, approche, égalisation) et
-modèle de dégâts aux seuils réels. Vérifié : trajet de 3 000 u avec pointe à
-375 u/s et arrivée à 50 u d'erreur.
-
-Restent : la courbe de dégâts exacte, que le build ne donne pas ; les dégâts
-localisés par pièce ; la destruction du vaisseau ; et la sélection de cible,
-qui suppose la carte.
-
-### 6 bis. Trois limites mesurées plutôt que supposées
-
-Trois points restaient au tableau « à faire ». Les avoir mesurés en a supprimé
-deux et chiffré le troisième.
-
-- **Machines à états d'animation** — *rien à porter*. Les huit
-  `AnimatorController` totalisent 11 états et **zéro transition** ; les trois
-  qui ont deux états n'ont aucun moyen d'aller de l'un à l'autre. Voir
-  `docs/22-animations.md`.
-- **Coût des ombres** — *3,3 ms par image*, mesuré à l'instrumentation de scène
-  (9,4 ms allumées contre 6,1 éteintes) et non au compteur d'images, trop
-  bruité sous rendu logiciel.
-- **Shader de distorsion** — *approximation délibérée*. Capturer le fond
-  demanderait un second rendu complet de la scène, soit doubler les 6,1 ms, pour
-  **deux matériaux dans tout le jeu**. Voir `docs/20-shaders-jeu.md`.
-
-### 7. Mécaniques spéciales
-
-- **Lune quantique** : **portée** (voir `docs/14-quantique.md`). Elle change de
-  planète hôte dès qu'on cesse de la regarder, parmi quatre orbites. Son
-  **brouillard est porté** (voir `docs/29-brouillards.md`) : une coque opaque de
-  100 à 110 unités, fondue sur 30 de part et d'autre, dont la sortie force
-  l'effondrement. Restent le test d'occlusion et l'inclinaison d'orbite.
-- **Dark Bramble** : **porté** (voir `docs/16-bramble.md`). Découverte au
-  passage : **l'espace replié n'existe pas dans cette alpha** — aucun volume de
-  distorsion, et le conteneur s'appelle `DarkBramble_TestBed`. `BrambleManager`
-  fait croître les ronces, il ne gère pas de dimension. Les prédateurs
-  sensibles au bruit sont portés, et le **brouillard aussi** (voir
-  `docs/29-brouillards.md`) : 1200 → 1400 unités, décroissance cubique jusqu'à
-  une densité de 0,01. Restent `FogCloak`, `FogLight` et la mort.
-- **Brittle Hollow** : **porté** (voir `docs/15-trounoir.md`). Capture à 40 u,
-  éjection au trou blanc dans un cône de 60°, effondrement de 25 % de la croûte
-  au fil de la boucle. Restent la chute réelle des fragments, le champ de
-  débris et les effets visuels.
-
-Chacune est une mécanique de jeu entière, pas un détail de rendu.
-
-### 8. Boucle temporelle — portée (voir `docs/12-boucle.md`)
-
-La boucle fait **20 minutes** dans cette alpha, pas 22 : le build porte
-`_loopDurationInMinutes = 20`. Compte à rebours, supernova, onde de choc à
-2 000 u/s, mort et redémarrage sont portés et vérifiés sur quatre cycles.
-
-Restent : **la mémoire entre boucles**, qui est tout l'intérêt du jeu et
-suppose le système de dialogue et `PlayerData` ; la séquence de flashback ; le
-spectacle de la supernova ; les autres causes de mort.
-
-### 9. Interface — carte portée (voir `docs/19-carte.md`)
-
-La carte du système solaire est en place (touche **M**) : orbites, marqueurs
-typés, zoom borné aux valeurs du jeu, et sélection de cible qui engage le
-pilote automatique.
-
-**`PlayerResourceGUI` et `PromptManager` sont portés** (voir `docs/28-hud.md`) :
-les jauges d'oxygène et de carburant avec leurs textures et leurs formules
-d'animation, la silhouette de santé à quatre paliers, la vignette rouge, les
-alertes, et les 46 invites du jeu réparties en trois zones avec leur tri par
-priorité.
-
-**`Minimap`, `AutopilotGUI` et `GUIMode` sont portés** eux aussi : la minicarte
-est un globe vu depuis la direction du joueur, avec ses traces de 100 points à
-5 degrés d'écart ; les dix messages du pilote automatique sont repris au mot
-près ; et les quatre modes d'affichage cachent bien ce qu'ils doivent — en mode
-capture, l'invite du centre reste, celles du bas et de la gauche partent.
-
-**`SettingsMenu` est porté** lui aussi — j'avais eu tort de l'écarter : sept
-options, dont cinq portent sur quelque chose que ce portage possède, et trois
-sont persistées dans une sauvegarde distincte de celle de la partie. Les icônes
-de manette des invites sont reprises, et la minicarte lit le drapeau
-`_useMinimap` du secteur plutôt qu'une heuristique de distance.
-
-Les **marqueurs de carte** suivent maintenant `MapMarker` — crochets dessinés,
-deux couleurs, distances d'affichage —, la disposition du menu est celle de la
-scène, et les **quatre polices du jeu** sont enfin utilisées : elles étaient
-extraites depuis le début sans que rien ne s'en serve.
-
-### 10. Secteurs et LOD — porté (voir `docs/17-secteurs.md`)
-
-Chaque corps bascule entre géométrie complète et sphère de substitution selon
-le secteur. Mesuré : **3 corps actifs sur 12** au sol.
-
-Le **chargement à la demande** est branché sur cette même mesure de distance
-(voir `docs/27-poids.md`) : seuls le corps de départ et le soleil partent avant
-la première image, les autres arrivent 3 000 unités avant d'être affichés.
-
-Restent : le LOD par maillage, l'éviction (rien n'est jamais déchargé), et
-l'application réelle des limites de poussée et d'éclairage ambiant.
+| ce qui a été fermé | page |
+|---|---|
+| mort, flashback, supernova | [`32-mort.md`](32-mort.md) |
+| dégâts par pièce, destruction, limite de poussée | [`18-vaisseau.md`](18-vaisseau.md) |
+| LOD par maillage, éviction, éclairage ambiant | [`17-secteurs.md`](17-secteurs.md) |
+| occlusion et inclinaison de la lune quantique | [`14-quantique.md`](14-quantique.md) |
+| champ de débris du trou blanc | [`15-trounoir.md`](15-trounoir.md) |
+| coupure passe-bas des émetteurs | [`09-audio.md`](09-audio.md) |
+| courbes variables et `gravityModifier` | [`10-particules.md`](10-particules.md) |
+| mort par prédateur | [`16-bramble.md`](16-bramble.md) |
+| caméra embarquée de la sonde | [`25-interface.md`](25-interface.md) |
 
 ## Estimation honnête
 
-Le socle — physique, orbites, référentiels, géométrie, collision — est fait, et
-c'est la partie qui conditionnait tout le reste. Ce qui manque est surtout du
-**volume** : ~31 600 lignes de logique de jeu dont une fraction est portée, plus
-le rendu et le contenu.
+Le socle — physique, orbites, référentiels, géométrie, collision — est fait
+depuis longtemps, et c'est lui qui conditionnait tout le reste. Ce qui manquait
+ensuite était du **volume** de logique de jeu ; il a été porté système par
+système.
 
-Trois familles ont été traitées depuis :
-
-- **Le poids au démarrage** (`docs/27-poids.md`) : 199,6 Mo avant la première
-  image, 60,0 Mo après.
-- **L'interface** (`docs/28-hud.md`) : jauges de ressources et 46 invites.
-- **Les brouillards** (`docs/29-brouillards.md`) : Dark Bramble et la coque
-  quantique.
-
-Ce qui reste tient en trois familles :
-
-- **Le contenu absent du build.** Un seul des cinq savoirs a une source vivante,
-  les 20 attributs `eventbased` valent tous `"false"`, et l'espace replié de
-  Dark Bramble n'existe pas. Ces manques-là ne se comblent pas en portant mieux.
-- **La finition par mécanique.** Chute réelle des fragments de croûte,
-  `FogCloak` et `FogLight`, modules secondaires de particules, tangentes
-  d'animation, distorsion, machines à états d'animation.
-- **La profondeur dans les systèmes déjà portés.** Le passe-bas des émetteurs,
-  l'équilibrage des volumes, le LOD par maillage, l'éviction, les 11,1 Mo de
-  Babylon sur les 66, les 15 Mo de WAV non compressés.
-- **Une partie jouée par un humain.** Tout est vérifié au chiffre, rien ne l'est
-  à l'œil ni à l'oreille.
+Ce qui reste tient en une phrase : **le contenu que l'alpha n'a pas, et le
+jugement qu'une machine ne rend pas**. Le premier ne se comble pas ; le second
+demande quelqu'un qui joue, regarde et écoute.
