@@ -165,7 +165,7 @@ export class AudioField {
     try { await this.engine.unlockAsync(); } catch (e) { /* deja debloque */ }
     this.unlocked = true;
     for (const [i, snd] of this.live) {
-      if (snd && this.sources[i].playOnAwake) this._play(snd);
+      if (snd && (this.sources[i].playOnAwake || this.asked.has(i))) this._play(snd);
     }
   }
 
@@ -308,7 +308,14 @@ export class AudioField {
           snd.spatial.position = new this.B.Vector3(p[0], p[1], p[2]);
         }
         this.live.set(i, snd);
-        if (this.unlocked && (s.playOnAwake || LOOPED.has(s.track))) this._play(snd);
+        // Une piste DEMANDEE doit jouer. Sans `this.asked`, une source
+        // declenchee par evenement — la musique de fin des temps, le son de
+        // mort — se telechargeait a la demande puis restait muette : ni
+        // `playOnAwake`, ni une piste en boucle, donc aucune raison de partir.
+        if (this.unlocked &&
+            (s.playOnAwake || LOOPED.has(s.track) || this.asked.has(i))) {
+          this._play(snd);
+        }
       })
       .catch(() => { this.pending.delete(i); this.failed++; });
   }

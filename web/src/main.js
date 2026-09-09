@@ -953,8 +953,8 @@ async function boot() {
     let focus = null;
     if (ship) {
       if (autopilot && autopilot.engaged) autopilot.update(dt);
-      ship.update(dt, bodies, input, { fwd, right, up });
-      fluids.apply(dt, ship, player.field, anchorPos, "vaisseau");
+      ship.update(dt, bodies, input, { fwd, right, up }, directional);
+      fluids.apply(dt, ship, ship.field, anchorPos, "vaisseau");
       ship.sync(BABYLON);
       if (ship.boarded) {
         // le joueur voyage avec le vaisseau
@@ -1125,7 +1125,11 @@ async function boot() {
       if (marshmallow.held) bits.push(
         `guimauve ${(marshmallow.toast * 100).toFixed(0)} %` +
         (marshmallow.burnt ? " (brulee)" : marshmallow.edible ? " (prete)" : ""));
-      if (directional.current) bits.push(`champ local : ${directional.current.name}`);
+      // `directional.current` retient le DERNIER interroge, joueur ou vaisseau :
+      // c'est le champ du joueur qu'on veut afficher, et il est sur son field.
+      if (player.field && player.field.directional) {
+        bits.push(`champ local : ${player.field.directional}`);
+      }
       if (fluids.inside.get("joueur")) bits.push(
         `dans ${fluids.inside.get("joueur").name}`);
       if (sceneLights.lights.length) bits.push(
@@ -1358,8 +1362,6 @@ async function boot() {
 
     // --- lampe, ordinateur de bord, guimauve ---
     //
-    // La lampe s'eteint d'elle-meme dans le vaisseau, la carte ou une
-    // conversation : le jeu appelle TurnOff sur chacun de ces evenements.
     // La guimauve cuit par PROXIMITE d'une source de chaleur, pas sur commande :
     // au feu de camp on la tend, ailleurs on la range.
     {
@@ -1367,6 +1369,8 @@ async function boot() {
       marshmallow.held = heat > 0;
       marshmallow.update(dt, heat);
     }
+    // La lampe s'eteint d'elle-meme dans le vaisseau, la carte ou une
+    // conversation : le jeu appelle TurnOff sur chacun de ces evenements.
     if (ship && ship.boarded) flashlight.forceOff();
     if (solarMap.open || dialogue.active) flashlight.forceOff();
     flashlight.update(camera, fwd,

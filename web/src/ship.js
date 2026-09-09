@@ -31,6 +31,9 @@ export class Ship {
     // null hors de tout secteur. Le vaisseau garde sa pleine puissance sur la
     // premiere jumelle, ou la limite vaut 200 contre 20 partout ailleurs.
     this.thrustLimit = null;
+    // Champ dominant a sa position, retenu par `update` : il sert au fluide,
+    // dont la poussee s'oppose a la gravite subie la ou est le vaisseau.
+    this.field = null;
   }
 
   get integrity() { return this.damage.integrity; }
@@ -57,8 +60,13 @@ export class Ship {
     return Math.hypot(this.pos.x - p.x, this.pos.y - p.y, this.pos.z - p.z);
   }
 
-  update(dt, bodies, input, basis) {
-    const f = dominantField(bodies, this.pos);
+  update(dt, bodies, input, basis, directional = null) {
+    // Le vaisseau subit les memes champs que le joueur, gravites locales
+    // comprises : voler dans un couloir de gravite doit se sentir aux commandes.
+    const f = dominantField(bodies, this.pos, directional);
+    // retenu : la poussee d'un fluide s'oppose a la gravite subie ICI, qui
+    // n'est pas forcement celle du joueur
+    this.field = f;
     if (f) {
       this.vel.x += f.dir.x * f.magnitude * dt;
       this.vel.y += f.dir.y * f.magnitude * dt;
