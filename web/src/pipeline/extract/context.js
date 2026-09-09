@@ -59,15 +59,16 @@ export class ExtractContext {
 
     // --- noms d'assets, pour rendre les PPtr lisibles ---
     //
-    // Indexe par path_id seul. Ces identifiants se repetent d'un fichier a
-    // l'autre, donc la table est ambigue : elle ne sert qu'a l'affichage, ou un
-    // homonyme est sans consequence. Tout ce qui doit designer un objet
-    // precisement passe par assetName(objet), qui ne peut pas se tromper.
+    // Indexe par cle canonique `fichier:path_id`. Un path_id NU se repete d'un
+    // fichier a l'autre : indexer dessus rendait la table ambigue, et c'est
+    // exactement ce qui faisait resoudre les arbres de dialogue des
+    // `*ConvoController` vers des os de squelette (`anglerfish_rig:UpTail4`).
+    // Voir docs/36-audit.md §2.7.
     this.assetNames = new Map();
     for (const type of ["Texture2D", "Mesh", "Material", "AudioClip"]) {
       for (const o of env.objects({ type })) {
         const n = this.assetName(o);
-        if (n !== null && !this.assetNames.has(o.pathId)) this.assetNames.set(o.pathId, n);
+        if (n !== null) this.assetNames.set(refKey(o), n);
       }
     }
 
@@ -75,8 +76,32 @@ export class ExtractContext {
     this.texts = new Map();
     for (const o of env.objects({ type: "TextAsset" })) {
       const v = env.read(o);
-      if (v) this.texts.set(o.pathId, new TextDecoder("utf-8").decode(v.m_Script));
+      if (v) this.texts.set(refKey(o), new TextDecoder("utf-8").decode(v.m_Script));
     }
+  }
+
+  /** Le fichier de la scene, comme objet — le point de depart de tout PPtr. */
+  get sceneObj() { return this.env.get(this.sceneFile); }
+
+  /**
+   * Cle canonique d'un objet resolu : `fichier:path_id`.
+   *
+   * Elle est la SEULE facon sure de designer un objet : les path_id se
+   * repetent d'un fichier a l'autre, et un pointeur qui ignore son `fileId`
+   * tombe sur l'homonyme du fichier courant.
+   */
+  refKey(obj) { return refKey(obj); }
+
+  /** Suit un PPtr en tenant compte de son `fileId`, et rend sa cle. */
+  refOf(ptr, file = null) {
+    const t = this.env.deref(ptr, file || this.sceneObj);
+    return t ? refKey(t) : null;
+  }
+
+  /** Texte d'un TextAsset vise par un PPtr, ou null si la cible n'en est pas un. */
+  textFor(ptr, file = null) {
+    const key = this.refOf(ptr, file);
+    return key !== null && this.texts.has(key) ? this.texts.get(key) : null;
   }
 
   /** Arbre de type d'une classe de script, memoise. */
@@ -189,8 +214,13 @@ export class ExtractContext {
       }
       if (o.type === "CapsuleCollider" && v.m_Radius) {
         const h = Math.max(v.m_Height || 0, v.m_Radius * 2) * k;
+        // `m_Direction` dit sur QUEL axe la capsule s'allonge (0=X, 1=Y, 2=Z).
+        // Sans lui, les huit tornades de Giant's Deep — r=40, h=305 — se
+        // lisaient comme des spheres de rayon 40 : 225 unites de colonne
+        // tombaient hors du volume.
         return { shape: "capsule", radius: round(v.m_Radius * k, 3),
-                 height: round(h, 3), center: c.map((x) => round(x * k, 3)) };
+                 height: round(h, 3), axis: v.m_Direction ?? 1,
+                 center: c.map((x) => round(x * k, 3)) };
       }
       if (o.type === "MeshCollider") return { shape: "mesh", radius: null, center: c };
     }
@@ -248,22 +278,32 @@ export class ExtractContext {
    * lecture, alors qu'un nom apprend qu'un FogLight eclaire « AnglerfishLure »
    * plutot qu'« EscapePodBeacon » — toute la difference entre un phare et un piege.
    */
-  plain(v, depth = 0) {
+  plain(v, depth = 0, file = null) {
+    const from = file || this.sceneObj;
     if (depth > 8) return null;
     if (v === null || typeof v === "string" || typeof v === "boolean") return v;
     if (typeof v === "number") return Number.isFinite(v) ? v : null;
     if (v instanceof Uint8Array) return { __bytes__: v.length };
-    if (Array.isArray(v)) return v.map((x) => this.plain(x, depth + 1));
+    if (Array.isArray(v)) return v.map((x) => this.plain(x, depth + 1, from));
     if (typeof v === "object") {
       if ("fileId" in v && "pathId" in v) {
         if (!v.pathId) return null;
-        const ref = { $ref: v.pathId };
-        const nm = this.assetNames.get(v.pathId) || this.name(v.pathId);
+        // Le `fileId` etait JETE ici : `{ $ref: v.pathId }`. Le nom qui suivait
+        // venait alors d'un homonyme du fichier de la scene, d'ou des arbres
+        // de dialogue qui se resolvaient en os de squelette. On suit le
+        // pointeur pour de bon, et l'identite emise est celle de la CIBLE.
+        const target = this.env.deref(v, from);
+        if (!target) return { $ref: null, $missing: v.pathId };
+        const key = refKey(target);
+        const ref = { $ref: key };
+        const nm = this.assetNames.get(key) ||
+                   (fileKey(target.file.name) === fileKey(this.sceneFile)
+                     ? this.name(target.pathId) : null);
         if (nm) ref.name = nm;
         return ref;
       }
       const out = {};
-      for (const [k, x] of Object.entries(v)) out[k] = this.plain(x, depth + 1);
+      for (const [k, x] of Object.entries(v)) out[k] = this.plain(x, depth + 1, from);
       return out;
     }
     return null;
@@ -288,5 +328,18 @@ export class ExtractContext {
     }
   }
 }
+
+/**
+ * `fichier:path_id` — l'identite d'un objet, sans ambiguite entre fichiers.
+ *
+ * Le nom est normalise comme le fait `UnityEnv` : nom nu, en minuscules. Un
+ * en-tete peut ecrire « Library/unity default resources » la ou un autre ecrit
+ * le nom seul, et deux ecritures du meme fichier donneraient deux cles.
+ */
+export function fileKey(name) {
+  return String(name).replace(/\\/g, "/").split("/").pop().toLowerCase();
+}
+
+export function refKey(obj) { return `${fileKey(obj.file.name)}:${obj.pathId}`; }
 
 export { round };

@@ -128,3 +128,34 @@ export function period(orbits, body) {
   return (!s || s.kind !== "circular" || !s.omega)
     ? null : Math.abs((2 * Math.PI) / s.omega);
 }
+
+/**
+ * Vitesse d'un corps dans le repere monde.
+ *
+ * C'est ce qui manquait au changement de referentiel (docs/36-audit.md §2.4) :
+ * la boucle reportait les POSITIONS d'une ancre a l'autre et laissait les
+ * vitesses telles quelles. On arrivait donc TOUJOURS a l'arret relatif de sa
+ * cible, ce qui supprime une competence entiere — l'egalisation de vitesse
+ * avec le referentiel d'arrivee est la quatrieme phase de l'`Autopilot`, et
+ * dans le jeu la difficulte centrale du vol.
+ *
+ * Entre Timber Hearth et sa lune l'ecart vaut environ sqrt(mu) = sqrt(12 x 250)
+ * ~ 55 u/s : c'est exactement la vitesse qu'il faut desormais annuler.
+ *
+ *   circulaire  v = omega x r, plus la vitesse du primaire
+ *   integree    la vitesse portee par l'etat
+ *   statique    nulle
+ */
+export function frameVelocity(orbits, body, depth = 0) {
+  const s = orbits && orbits.states.get(body);
+  if (!s || depth > 8) return [0, 0, 0];
+  if (s.kind === "integrated") return s.vel.slice();
+  if (s.kind !== "circular") return [0, 0, 0];
+  const c = orbits.states.get(s.primary).pos;
+  const r = sub(s.pos, c);
+  // omega porte par la normale au plan de l'orbite : u x v est unitaire, les
+  // deux vecteurs de base l'etant et etant orthogonaux.
+  const n = norm(cross(s.u, s.v));
+  const w = scale(n, s.omega);
+  return add(cross(w, r), frameVelocity(orbits, s.primary, depth + 1));
+}

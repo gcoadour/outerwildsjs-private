@@ -20,7 +20,7 @@ export function extractSolarSystem(ctx) {
     const gid = ctx.ownerId(obj);
     if (cls === "OWRigidbody") {
       const nm = ctx.name(gid);
-      if (nm) rbOwner.set(obj.pathId, nm);
+      if (nm) rbOwner.set(ctx.refKey(obj), nm);
     }
     const fields = ctx.scriptFields(obj);
     if (!fields) continue;
@@ -88,7 +88,7 @@ export function extractSolarSystem(ctx) {
       // Orbite : InitialMotion donne une vitesse initiale, il n'y a pas de
       // rotation de pivot. Voir docs/04-gravite.md.
       orbit: im ? {
-        primary: im._primaryBody ? (rbOwner.get(im._primaryBody.pathId) || null) : null,
+        primary: im._primaryBody ? (rbOwner.get(ctx.refOf(im._primaryBody)) || null) : null,
         orbitAngle: im._orbitAngle,
         impulseScalar: im._orbitImpulseScalar,
         initLinearDirection: ctx.plain(im._initLinearDirection),
@@ -118,11 +118,18 @@ export function extractSolarSystem(ctx) {
       if (!radius) continue;
       const drag = Object.entries(f).find(([k, v]) =>
         typeof v === "number" && /drag/i.test(k));
+      // La densite etait laissee de cote au motif qu'« aucun volume n'en
+      // porte ». Mesure sur le build : TOUS en portent, de 0,2 a 500. Sans
+      // elle, ce meme ocean ressortait ici sans densite et effacait, un pas
+      // sur deux, celui que `gameplay.json` decrit correctement.
       fluids.push({
         name: ctx.name(gid), kind: cls,
         position: ctx.world(gid)[0].map((v) => round(v, 3)),
         radius: round(radius, 3),
         drag: drag ? drag[1] : null,
+        density: typeof f._density === "number" ? f._density : null,
+        deepDensity: typeof f._deepDensity === "number" ? f._deepDensity : null,
+        priority: typeof f._priority === "number" ? f._priority : null,
       });
     }
   }

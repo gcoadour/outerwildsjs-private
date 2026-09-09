@@ -27,6 +27,43 @@ const DEFAULT_RANGE = { Music: 0, Ambience: 150, Signal: 300, Default: 60,
 // AudioRolloffMode { Logarithmic, Linear, Custom }
 const ROLLOFF = { 0: "logarithmic", 1: "linear", 2: "custom" };
 
+/**
+ * Echantillonne une `rolloffCustomCurve`.
+ *
+ * 83 des 97 sources placees sont en attenuation `custom` — le mode dont le
+ * portage ne lisait rien, et qu'il rendait en LINEAIRE, le seul que le build
+ * n'emploie jamais (docs/36-audit.md §1.3). La courbe est une AnimationCurve
+ * dont le temps parcourt 0..1 entre `MinDistance` et `MaxDistance` et dont la
+ * valeur est le gain. On la transporte echantillonnee : le moteur n'a pas
+ * besoin des tangentes, seulement du gain a une distance donnee.
+ */
+function rolloffCurve(ac, n = 9) {
+  const keys = (ac && (ac.m_Curve || ac.curve || ac)) || null;
+  if (!Array.isArray(keys) || keys.length < 2) return null;
+  const pts = keys
+    .filter((k) => k && typeof k.time === "number" && typeof k.value === "number")
+    .map((k) => [k.time, k.value])
+    .sort((a, b) => a[0] - b[0]);
+  if (pts.length < 2) return null;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const span = (t1 - t0) || 1;
+  const at = (u) => {
+    const t = t0 + u * span;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (a[0] <= t && t <= b[0]) {
+        const w = (t - a[0]) / ((b[0] - a[0]) || 1);
+        return a[1] + (b[1] - a[1]) * w;
+      }
+    }
+    return pts[pts.length - 1][1];
+  };
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(round(at(i / (n - 1)), 4));
+  // Une courbe plate n'apprend rien : le modele de distance suffit alors.
+  return out.some((v) => Math.abs(v - out[0]) > 1e-4) ? out : null;
+}
+
 function trackName(v) {
   if (!v) return "Undefined";
   for (const [bit, name] of Object.entries(TRACKS)) if (v & Number(bit)) return name;
@@ -117,6 +154,7 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
       range,
       minDistance: minD !== null ? round(minD, 3) : null,
       rolloff: ROLLOFF[src.rolloffMode] || null,
+      rolloffCurve: rolloffCurve(src.rolloffCustomCurve),
       doppler: Number.isFinite(src.DopplerLevel) ? round(src.DopplerLevel, 3) : null,
       spatial: !flat && !!range,
       transmitter: tx,

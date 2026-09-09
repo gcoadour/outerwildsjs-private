@@ -26,6 +26,19 @@ Le basculement en approche à 1 547 u est exactement le point où la distance de
 freinage rejoint la distance restante. Le vaisseau atteint 375 u/s en pointe
 puis s'arrête net à la surface.
 
+### L'égalisation avait un nom, un affichage, et rien à faire
+
+La quatrième phase annule la vitesse relative au référentiel d'arrivée. Elle
+était portée, affichée — et vide de sens : la boucle reportait les **positions**
+d'une ancre à l'autre et laissait les vitesses, si bien qu'on arrivait
+**toujours à l'arrêt relatif** de sa cible.
+
+Depuis [`37-corrections.md`](37-corrections.md) §4, `frameVelocity()` donne
+l'écart entre les deux référentiels — environ `√μ = √(12 × 250) ≈ 55 u/s` entre
+Timber Hearth et sa lune — et il est ajouté au joueur, au vaisseau et aux
+sondes. C'est cet écart que l'égalisation annule, et c'est dans le jeu la
+difficulté centrale du vol.
+
 ## Les dégâts
 
 Seuils de `ShipDamageController` : impact léger au-delà de **15 u/s**, moyen

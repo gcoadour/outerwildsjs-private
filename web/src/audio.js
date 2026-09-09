@@ -110,6 +110,44 @@ export function transmitterCutoff(strength, muffled = TRANSMITTER_LOWPASS,
   return muffled * Math.pow(open / muffled, s);
 }
 
+/**
+ * Modele d'attenuation d'une source.
+ *
+ * Mesure sur le build : 83 sources sur 97 sont en `custom`, 14 en
+ * `logarithmic`, AUCUNE en lineaire. Le portage ecrivait
+ * `rolloff === "logarithmic" ? "inverse" : "linear"` : il rendait donc les 83
+ * dans le seul mode que le build n'emploie jamais. Une courbe personnalisee
+ * d'Unity part presque toujours d'une decroissance rapide — `inverse` en est
+ * bien plus proche que `linear`.
+ */
+export function rolloffModel(rolloff) {
+  return rolloff === "linear" ? "linear" : "inverse";
+}
+
+/**
+ * Gain lu sur la courbe d'attenuation echantillonnee.
+ *
+ * `curve` est la table de `rolloffCustomCurve`, N valeurs regulierement
+ * espacees entre `MinDistance` et `MaxDistance`. En deca du minimum le son est
+ * a plein volume, au-dela du maximum on garde la derniere valeur — c'est ce
+ * que fait Unity, qui ne coupe pas mais plafonne.
+ *
+ * A verifier sur un build : l'axe des temps de la courbe pourrait aussi bien
+ * parcourir 0..`MaxDistance` que `MinDistance`..`MaxDistance`. C'est la
+ * seconde lecture qui est retenue, celle que decrit docs/36-audit.md §2.6 ;
+ * le controle est dans `tools/15_verify.py`, pas ici, parce qu'il demande le
+ * gain REELLEMENT rendu.
+ */
+export function curveGain(curve, distance, minD = 1, maxD = 60) {
+  if (!curve || curve.length < 2) return 1;
+  const span = Math.max(1e-6, maxD - minD);
+  const u = Math.max(0, Math.min(1, (distance - minD) / span));
+  const x = u * (curve.length - 1);
+  const i = Math.min(curve.length - 2, Math.floor(x));
+  const w = x - i;
+  return curve[i] + (curve[i + 1] - curve[i]) * w;
+}
+
 export async function loadAudioMap() {
   try {
     const res = await fetch("data/audio/sources.json", { cache: "no-store" });
@@ -208,10 +246,19 @@ export class AudioField {
       } else if (this.live.has(i)) {
         this._despawn(i);
       }
-      if (mixer && this.live.has(i)) {
+      // Volume rendu : celui de la source, module par la piste et, quand la
+      // source porte une `rolloffCustomCurve`, par le gain de cette courbe a
+      // la distance courante. WebAudio ne connait que trois modeles de
+      // distance ; la courbe se rend donc a la main.
+      if ((mixer || s.rolloffCurve) && this.live.has(i)) {
         const snd = this.live.get(i);
         if (snd) {
-          try { snd.volume = (s.volume ?? 1) * mixer.volume(s.track); }
+          let v = s.volume ?? 1;
+          if (mixer) v *= mixer.volume(s.track);
+          if (s.rolloffCurve) {
+            v *= curveGain(s.rolloffCurve, d, s.minDistance ?? 1, s.range || 60);
+          }
+          try { snd.volume = v; }
           catch (e) { /* certaines versions n'exposent pas le setter */ }
         }
       }
@@ -277,10 +324,14 @@ export class AudioField {
       loop: s.loop ?? LOOPED.has(s.track),
       volume: s.volume,
       spatialEnabled: !!s.spatial,
-      spatialDistanceModel: s.rolloff === "logarithmic" ? "inverse" : "linear",
+      spatialDistanceModel: rolloffModel(s.rolloff),
       spatialMinDistance: s.minDistance ?? 1,
       spatialMaxDistance: s.range || 60,
     };
+    // Une source qui porte sa propre courbe ne doit pas etre attenuee DEUX
+    // fois : on met le facteur du modele a zero — `inverse` vaut alors 1
+    // partout — et c'est `update` qui applique le gain de la courbe.
+    if (s.rolloffCurve) opts.spatialRolloffFactor = 0;
     this.B.CreateSoundAsync(s.name || `src${i}`, `data/audio/${s.file}`, opts)
       .then((snd) => {
         this.pending.delete(i);

@@ -32,12 +32,40 @@ export function oxygenZones(gameplay = {}) {
   return out;
 }
 
-/** Le joueur est-il dans une zone d'oxygene ? (position monde) */
-export function inOxygenZone(zones, world) {
+/**
+ * Le detecteur d'oxygene porte par le joueur.
+ *
+ * Le build en pose un : une CAPSULE de rayon 0,5 sur 2 de haut. Le portage
+ * testait un POINT, ce qui rate la zone d'un demi-metre au bord — un ecart
+ * mineur, mais mesurable, et le composant etait extrait sans etre lu
+ * (docs/36-audit.md §2.9).
+ */
+export function oxygenDetector(gameplay = {}) {
+  for (const [cls, list] of Object.entries(gameplay.placed || {})) {
+    if (!/oxygendetector/i.test(cls)) continue;
+    for (const e of list) {
+      const v = e.volume || {};
+      const r = v.radius || 0;
+      const h = v.height || 0;
+      if (!r && !h) continue;
+      // portee = demi-encombrement de la capsule le long de son axe
+      return { radius: r, height: h, reach: Math.max(r, h / 2) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Le joueur est-il dans une zone d'oxygene ? (position monde)
+ *
+ * `reach` est le demi-encombrement de son detecteur : la zone est atteinte des
+ * que la capsule la touche, pas seulement quand son centre y entre.
+ */
+export function inOxygenZone(zones, world, reach = 0) {
   for (const z of zones) {
     const d = Math.hypot(world[0] - z.position[0], world[1] - z.position[1],
                          world[2] - z.position[2]);
-    if (d <= z.radius) return z;
+    if (d <= z.radius + reach) return z;
   }
   return null;
 }

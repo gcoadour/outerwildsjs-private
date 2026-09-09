@@ -74,6 +74,84 @@ export function colliderLODNames(gameplay = {}) {
     .map((e) => e.name).filter(Boolean));
 }
 
+/** Portee de repli d'un groupe de colliders qui n'en declare aucune. */
+export const COLLIDER_LOD_RANGE = 200;
+
+/**
+ * Les 21 `ChildColliderLOD`, avec leur portee et ce qu'ils suivent.
+ *
+ * `LODGroup` ne valait pas la regeneration qu'on lui promettait : il y en a
+ * DEUX dans la scene, et les cinq `CreateLODGroup` ne portent aucun champ
+ * serialise (docs/36-audit.md §2.8). Le vrai gain de niveau de detail est ici :
+ * `_trackPlayer`, `_trackShip` et `_trackProbe` disent qui reveille le groupe,
+ * et les colliders d'un groupe endormi n'ont pas a exister.
+ */
+export function colliderLODs(gameplay = {}) {
+  const out = [];
+  for (const e of ((gameplay.placed || {}).ChildColliderLOD || [])) {
+    if (!e.name) continue;
+    const f = e.fields || {};
+    const radius = (typeof f._radius === "number" && f._radius > 0) ? f._radius
+      : (e.volume && e.volume.radius) || COLLIDER_LOD_RANGE;
+    out.push({
+      name: e.name,
+      position: e.position || [0, 0, 0],
+      radius,
+      trackPlayer: f._trackPlayer !== false,
+      trackShip: f._trackShip === true,
+      trackProbe: f._trackProbe === true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Quels groupes sont eveilles, et depuis quand.
+ *
+ * Les positions sont en coordonnees MONDE des deux cotes. `changed` ne passe a
+ * vrai que lorsque l'ensemble bouge vraiment : reconstruire les colliders coute
+ * pres d'une seconde, on ne le fait donc pas parce qu'un groupe a clignote.
+ */
+export class ColliderLODs {
+  constructor(groups = []) {
+    this.groups = groups;
+    this.awake = new Set(groups.map((g) => g.name));   // tout eveille au depart
+    this.changed = false;
+  }
+
+  get count() { return this.groups.length; }
+
+  /**
+   * @param who { player, ship, probe } positions monde, chacune facultative
+   * @returns l'ensemble des noms eveilles
+   */
+  update(who = {}) {
+    const next = new Set();
+    for (const g of this.groups) {
+      const pts = [];
+      if (g.trackPlayer && who.player) pts.push(who.player);
+      if (g.trackShip && who.ship) pts.push(who.ship);
+      if (g.trackProbe && who.probe) pts.push(who.probe);
+      // Un groupe que rien ne suit reste eveille : on ne coupe pas une
+      // collision faute d'avoir compris qui la reveille.
+      if (!pts.length) { next.add(g.name); continue; }
+      for (const p of pts) {
+        if (Math.hypot(p[0] - g.position[0], p[1] - g.position[1],
+                       p[2] - g.position[2]) <= g.radius) { next.add(g.name); break; }
+      }
+    }
+    this.changed = next.size !== this.awake.size ||
+                   [...next].some((n) => !this.awake.has(n));
+    this.awake = next;
+    return next;
+  }
+
+  /** Les groupes endormis : leurs colliders ne sont pas construits. */
+  asleep() {
+    return new Set(this.groups.map((g) => g.name).filter((n) => !this.awake.has(n)));
+  }
+}
+
 export class MeshLOD {
   /**
    * @param thresholds Map nom -> hauteur d'ecran, issue de lodThresholds()

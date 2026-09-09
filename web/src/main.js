@@ -17,9 +17,11 @@ import { Player } from "./player.js";
 import { FloatingOrigin } from "./origin.js";
 import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
-import { buildOrbits, advance, currentPosition, period } from "./orbits.js";
+import { buildOrbits, advance, currentPosition, period,
+         frameVelocity } from "./orbits.js";
 import { loadGameplay } from "./config.js";
-import { Resources, oxygenZones, inOxygenZone } from "./resources.js";
+import { Resources, oxygenZones, inOxygenZone,
+         oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
@@ -38,7 +40,7 @@ import { TimeLoop } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
 import { PlayerDeathHandler, FlashbackOverlay, deathCamera,
          DEATH_SOUNDS } from "./death.js";
-import { MeshLOD, Evictor, lodThresholds } from "./lod.js";
+import { MeshLOD, Evictor, lodThresholds, colliderLODs, ColliderLODs } from "./lod.js";
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
 import { QuantumMoon, quantumHosts, bodyOccluder,
          alignToObserver } from "./quantum.js";
@@ -56,8 +58,8 @@ import { initPhysics, buildColliders, disposeColliders,
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable } from "./gamepad.js";
 import { SpinField, sunElevation } from "./spin.js";
-import { directionalFields } from "./gravity.js";
-import { fluidVolumes, FluidField } from "./fluids.js";
+import { directionalFields, polarFields } from "./gravity.js";
+import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { loadLighting, LightField } from "./lights.js";
 
 function setStatus(msg) {
@@ -178,7 +180,7 @@ async function boot() {
               up0[0] * side[1] - up0[1] * side[0]];
   const tl = Math.hypot(...tang) || 1;
   tang = tang.map((v) => (v / tl) * 9);
-  const player = new Player(playerConstants(data),
+  const player = new Player(playerConstants(data, gameplay),
     [up0[0] * hr + tang[0], up0[1] * hr + tang[1], up0[2] * hr + tang[2]]);
 
   // le conteneur amene le contenu du glTF dans le repere du corps ancre :
@@ -225,18 +227,26 @@ async function boot() {
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
   // dans leur volume, comme SingleFieldDetector le veut.
   const dirFields = directionalFields(gameplay);
-  // Giant's Deep a enfin un ocean, et ce qui tombe dedans freine.
-  const fluids = new FluidField(fluidVolumes(gameplay, data));
+  // `PolarForceField` : un seul volume, d'acceleration -10, radiale a un axe.
+  // Il etait extrait et jamais lu (docs/36-audit.md §2.9).
+  const polFields = polarFields(gameplay);
+  // Giant's Deep a enfin un ocean qui porte, des tornades qui poussent, et une
+  // trainee lue sur les detecteurs plutot qu'une constante uniforme.
+  const fluids = new FluidField(fluidVolumes(gameplay, data), fluidDetectors(gameplay));
   // Seul le vaisseau rechargeait l'oxygene ; on regarde maintenant ce que la
   // scene propose. Liste vide = l'alpha n'en pose aucune, ce qui est une
   // reponse et non un oubli.
   const oxygen = oxygenZones(gameplay);
+  // `OxygenDetector` : une capsule r=0,5 h=2 portee par le joueur. Elle etait
+  // extraite et jamais lue, et le test de zone restait ponctuel.
+  const oxyDet = oxygenDetector(gameplay);
   const heat = heatSources(gameplay);
   const controllers = convoControllers(gameplay);
-  window.__world = { lighting: placedLights, dirFields, fluids, oxygen, heat,
-                     controllers };
+  window.__world = { lighting: placedLights, dirFields, polFields, fluids, oxygen,
+                     heat, controllers };
   console.log(`monde : ${(lighting.lights || []).length} lumieres, ` +
-    `${dirFields.length} champs directionnels, ${fluids.count} fluides, ` +
+    `${dirFields.length} champs directionnels, ${polFields.length} champs polaires, ` +
+    `${fluids.count} fluides, ` +
     `${oxygen.length} zones d'oxygene, ${heat.length} sources de chaleur`);
 
   // Geometrie a la demande. Seuls le corps de depart et le soleil sont
@@ -282,6 +292,14 @@ async function boot() {
   const plugin = geo.length ? await initPhysics(BABYLON, scene) : null;
 
   let colliders = null, colliderFile = null, playerAgg = null;
+  // Les 21 `ChildColliderLOD` : ce qui n'est pas a portee n'a pas de collider.
+  // `LODGroup` ne valait pas la regeneration annoncee — il y en a deux, et les
+  // cinq `CreateLODGroup` sont vides (docs/36-audit.md §2.8).
+  const colLOD = new ColliderLODs(colliderLODs(gameplay));
+  let colLODAt = 0;   // date de la derniere reconstruction due au LOD
+  Object.defineProperty(window.__world, "colliderLOD", {   // sonde de verification
+    get: () => ({ groupes: colLOD.count, eveilles: colLOD.awake.size }),
+  });
 
   function bodyIsAnchorable(b) {
     return !!entryForBody(geo, b.name) || !geo.length;
@@ -292,17 +310,22 @@ async function boot() {
    * un fichier de pivot contient aussi ses lunes, qui elles se deplacent sur
    * leur orbite et rendraient leurs colliders faux.
    */
-  function rebuildColliders(body) {
+  function rebuildColliders(body, force = false) {
     const entry = entryForBody(geo, body.name);
     const key = entry ? entry.file + "/" + body.bodyName : null;
-    if (!entry || key === colliderFile) return;
+    // `force` : le corps n'a pas change, mais l'ensemble des groupes de
+    // colliders eveilles, si. Sans lui la reconstruction demandee par le
+    // niveau de detail sortait ici sans rien faire.
+    if (!entry || (!force && key === colliderFile)) return;
     disposeColliders(colliders);
     const t0 = performance.now();
     colliders = buildColliders(BABYLON, scene,
-      meshesForBody(entry, body.bodyName, ["Ship_Body"]));
+      meshesForBody(entry, body.bodyName, ["Ship_Body"]),
+      { asleep: colLOD.asleep() });
     colliderFile = key;
     console.log(`colliders : ${colliders.aggregates.length} sur ${key} ` +
-      `(${colliders.skipped} ignores) en ${(performance.now() - t0).toFixed(0)} ms`);
+      `(${colliders.skipped} ignores, ${colliders.dormants} endormis) en ` +
+      `${(performance.now() - t0).toFixed(0)} ms`);
   }
 
   if (plugin) {
@@ -328,6 +351,41 @@ async function boot() {
       ship = new Ship((gameplay.singletons.ShipThrusterModel || {}).fields || {},
                       node, local,
                       (gameplay.singletons.ShipDamageController || {}).fields || {});
+      // Le vaisseau porte desormais son orientation : sans la poser une
+      // premiere fois, son « haut » serait celui du repere de travail et non
+      // la verticale locale, et sa poussee verticale partirait de travers.
+      {
+        const l = Math.hypot(...local) || 1;
+        ship.orientTo([local[0] / l, local[1] / l, local[2] / l], null);
+      }
+      // Terrain reel : Havok sait ou est le sol, et le vaisseau se posait
+      // jusqu'ici sur une sphere de rayon `upperSurfaceRadius` — donc au-dessus
+      // des vallees (docs/36-audit.md §1.2). La sonde n'existe que lorsque la
+      // physique est la ; sinon la sphere analytique reste le modele.
+      if (plugin) {
+        ship.probe = (pos, up, reach) => {
+          const eng = scene.getPhysicsEngine();
+          if (!eng || !eng.raycast) return null;
+          const from = new BABYLON.Vector3(pos.x + up[0] * reach,
+                                           pos.y + up[1] * reach,
+                                           pos.z + up[2] * reach);
+          const to = new BABYLON.Vector3(pos.x - up[0] * reach,
+                                         pos.y - up[1] * reach,
+                                         pos.z - up[2] * reach);
+          try {
+            const hit = eng.raycast(from, to);
+            if (!hit || !hit.hasHit) return null;
+            const q = hit.hitPointWorld || hit.hitPoint;
+            if (!q) return null;
+            const d = (q.x - pos.x) * up[0] + (q.y - pos.y) * up[1] + (q.z - pos.z) * up[2];
+            const n = hit.hitNormalWorld || hit.hitNormal;
+            return { distance: -d, point: [q.x + up[0] * ship.radius,
+                                           q.y + up[1] * ship.radius,
+                                           q.z + up[2] * ship.radius],
+                     normal: n ? [n.x, n.y, n.z] : null };
+          } catch (e) { return null; }
+        };
+      }
       ship.sync(BABYLON);
       // le vaisseau ne doit jamais s'effacer par niveau de detail : c'est
       // l'objet qu'on cherche des yeux depuis le sol
@@ -712,6 +770,7 @@ async function boot() {
   window.__look = (y, p) => { yaw = y; pitch = p; };
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
+  window.__player = player;   // sonde de verification : marche, saut, sac dorsal
 
   // --- entrees ---
   let yaw = 0, pitch = 0;
@@ -791,11 +850,21 @@ async function boot() {
    * `Axis` : brut x facteur d'inversion x sensibilite / 5. La sensibilite 5
    * laisse donc la valeur d'origine inchangee. Le gain sert au doigt, qui
    * parcourt moins de pixels qu'une souris.
+   *
+   * Le facteur maison de 0,0022 par pixel est remplace par `_turnRate` (160
+   * degres par seconde) rapporte a la LARGEUR DE L'ECRAN : parcourir l'ecran
+   * entier tourne donc de `_turnRate` degres, et la sensibilite ne depend plus
+   * de la definition. `_telescopeTurnScalar` (0,5) ralentit de moitie a la
+   * lunette — le portage n'avait pas ce ralenti (docs/36-audit.md §1.1).
    */
+  const TURN = (player.c.turnRate ?? 160) * Math.PI / 180;
   function look(dx, dy, gain = 1) {
     const f = settings.lookFactor();
-    yaw += dx * 0.0022 * gain * Math.abs(f);
-    pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * 0.0022 * gain * f));
+    const w = Math.max(320, (window.innerWidth || 1280));
+    const k = (TURN / w) * (telescope && telescope.active
+      ? (player.c.telescopeTurnScalar ?? 0.5) : (player.c.suitTurnScalar ?? 1));
+    yaw += dx * k * gain * Math.abs(f);
+    pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * k * gain * f));
   }
 
   // --- commandes tactiles ---
@@ -862,8 +931,12 @@ async function boot() {
 
     // repere camera aligne sur la verticale locale du champ dominant
     const f = player.field;
-    const up = f ? new BABYLON.Vector3(-f.dir.x, -f.dir.y, -f.dir.z)
-                 : new BABYLON.Vector3(0, 1, 0);
+    // `_affectsAlignment` : un champ directionnel sur 34 pousse SANS retourner
+    // ce qu'il tient. `alignDir` porte donc la verticale a suivre, qui n'est
+    // pas toujours la direction de la force (docs/36-audit.md §2.9).
+    const ad = f ? (f.alignDir || f.dir) : null;
+    const up = ad ? new BABYLON.Vector3(-ad.x, -ad.y, -ad.z)
+                  : new BABYLON.Vector3(0, 1, 0);
     const ref = Math.abs(up.y) > 0.95 ? new BABYLON.Vector3(1, 0, 0)
                                       : new BABYLON.Vector3(0, 1, 0);
     const east = BABYLON.Vector3.Cross(up, ref).normalize();
@@ -885,12 +958,22 @@ async function boot() {
     const ax = touch.axes;
     const gp = pad.poll(dt);
     const axis = (v) => Math.max(-1, Math.min(1, v));
-    const input = death.dead ? { forward: 0, right: 0, up: false, boost: false } : {
-      forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward + gp.forward),
-      right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right + gp.right),
-      up: keys.Space || ax.up || gp.up,
-      boost: keys.ShiftLeft || keys.ShiftRight || ax.boost || gp.boost,
-    };
+    //
+    // L'accelerateur (« boost ») du portage — x3 au joueur, x2 au vaisseau —
+    // n'a AUCUNE source dans le build : il est supprime. La touche reste lue,
+    // mais elle ne multiplie plus rien ; elle sert au bruit qu'on fait, ce qui
+    // est un choix assume de ce portage. En echange, le roulis apparait : la
+    // manette et le clavier le prevoyaient, le vaisseau n'avait pas d'axe.
+    const input = death.dead
+      ? { forward: 0, right: 0, up: false, roll: 0, loud: false } : {
+        forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward + gp.forward),
+        right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right + gp.right),
+        up: keys.Space || ax.up || gp.up,
+        // Q et Z : E sert deja a interagir, et le roulis a besoin d'une paire
+        // libre. La manette prend le cinquieme axe quand elle en a un.
+        roll: axis((keys.KeyZ ? 1 : 0) - (keys.KeyQ ? 1 : 0) + (gp.roll || 0)),
+        loud: keys.ShiftLeft || keys.ShiftRight || ax.boost || gp.boost,
+      };
     // 1. avance des orbites et des rotations propres, puis re-expression dans
     //    le repere du corps ancre — qui tourne desormais avec lui
     advance(orbits, dt);
@@ -906,7 +989,12 @@ async function boot() {
     // Le monde tel que la physique le voit : les champs directionnels, qui
     // priment sur le champ radial dans leur volume, et les fluides, qui
     // freinent ce qui les traverse.
-    const world = { directional: dirFields, framePos: anchorPos, fluids };
+    const world = { directional: dirFields, polar: polFields,
+                    framePos: anchorPos, fluids,
+                    // Coriolis et centrifuge du repere ancre, qui TOURNE avec
+                    // son corps : sans eux le sol ne defile pas sous un
+                    // stationnaire (docs/36-audit.md §1.2).
+                    inertial: (p, v) => spins.inertial(anchorBody, p, v) };
     fluids.begin();
     player.update(dt, bodies, input, { fwd, right, up }, origin, world);
     if (player.fluid) fluids.current = player.fluid.volume;
@@ -918,7 +1006,17 @@ async function boot() {
     if (fb && fb !== anchorBody && bodyIsAnchorable(fb)) {
       const newPos = currentPosition(orbits, fb);
       const shift = sub3(anchorPos, newPos);
+      // Les VITESSES aussi changent de repere, et c'est ce qui manquait.
+      //
+      // La boucle recalait les positions et laissait les vitesses telles
+      // quelles : on arrivait donc TOUJOURS a l'arret relatif de sa cible.
+      // Entre Timber Hearth et sa lune les deux referentiels different
+      // d'environ sqrt(mu) = sqrt(12 x 250) ~ 55 u/s, et annuler cet ecart est
+      // justement la quatrieme phase de l'Autopilot — dans le jeu, la
+      // difficulte centrale du vol (docs/36-audit.md §2.4).
+      const dv = sub3(frameVelocity(orbits, anchorBody), frameVelocity(orbits, fb));
       player.pos.x += shift[0]; player.pos.y += shift[1]; player.pos.z += shift[2];
+      player.vel.x += dv[0]; player.vel.y += dv[1]; player.vel.z += dv[2];
       // Tout ce qui vit dans le repere courant doit suivre, pas seulement le
       // joueur. Le vaisseau restait en arriere au changement de corps dominant :
       // on volait vers une planete et il se retrouvait a des milliers d'unites,
@@ -926,10 +1024,14 @@ async function boot() {
       // meme probleme, en plus court.
       if (ship) {
         ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
+        ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2];
       }
       for (const p of probes.probes) {
         p.pos[0] += shift[0]; p.pos[1] += shift[1]; p.pos[2] += shift[2];
+        if (p.vel) { p.vel[0] += dv[0]; p.vel[1] += dv[1]; p.vel[2] += dv[2]; }
       }
+      console.log(`repere : ${anchorBody.name} -> ${fb.name}, ` +
+        `ecart de vitesse ${Math.hypot(...dv).toFixed(1)} u/s`);
       anchorBody = fb;
       reframe(anchorBody);
       origin.offset.x = fb.position0[0];
@@ -939,6 +1041,26 @@ async function boot() {
       if (geo.length) syncGeometry(geo, origin);
       if (plugin) {
         rebuildColliders(fb);
+        if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
+      }
+    }
+
+    // 2 bis. groupes de colliders : ce qui n'est plus a portee s'endort, et ce
+    //    qui revient se reveille. Reconstruire coute pres d'une seconde, on ne
+    //    le fait donc qu'au changement REEL de l'ensemble, et au plus une fois
+    //    toutes les deux secondes.
+    if (plugin && colLOD.count) {
+      const w = (v) => [v.x + anchorPos[0], v.y + anchorPos[1], v.z + anchorPos[2]];
+      colLOD.update({
+        player: w(player.pos),
+        ship: ship ? w(ship.pos) : null,
+        probe: probes.probes.length ? [probes.probes[0].pos[0] + anchorPos[0],
+                                       probes.probes[0].pos[1] + anchorPos[1],
+                                       probes.probes[0].pos[2] + anchorPos[2]] : null,
+      });
+      if (colLOD.changed && now - colLODAt > 2) {
+        colLODAt = now;
+        rebuildColliders(anchorBody, true);
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
       }
     }
@@ -975,13 +1097,24 @@ async function boot() {
       ship.update(dt, bodies, input, { fwd, right, up }, world);
       ship.sync(BABYLON);
       if (ship.boarded) {
-        // le joueur voyage avec le vaisseau
-        player.pos.x = ship.pos.x; player.pos.y = ship.pos.y + 3; player.pos.z = ship.pos.z;
+        // Le joueur voyage avec le vaisseau, et desormais dans SON repere : le
+        // poste de pilotage est trois unites au-dessus du plancher, donc le
+        // long de l'axe propre du vaisseau et non d'un « haut » de camera.
+        const a = ship.axes;
+        player.pos.x = ship.pos.x + a.up[0] * 3;
+        player.pos.y = ship.pos.y + a.up[1] * 3;
+        player.pos.z = ship.pos.z + a.up[2] * 3;
+        player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
       if (interactPressed && !dialogue.active) {
-        if (ship.boarded) { ship.boarded = false; player.pos.y += 4; }
-        else if (ship.distanceTo(player.pos) < SHIP_REACH && pdata.knowsLaunchCodes) {
+        if (ship.boarded) {
+          ship.boarded = false;
+          const a = ship.axes;
+          player.pos.x += a.up[0] * 4; player.pos.y += a.up[1] * 4;
+          player.pos.z += a.up[2] * 4;
+        } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
+                   pdata.knowsLaunchCodes) {
           ship.boarded = true;
         }
       }
@@ -1013,10 +1146,14 @@ async function boot() {
     // comportement d'avant.
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
-    const zone = oxygen.length ? inOxygenZone(oxygen, playerW) : null;
+    const zone = oxygen.length
+      ? inOxygenZone(oxygen, playerW, oxyDet ? oxyDet.reach : 0) : null;
+    // Le carburant etait consomme EN MARCHANT : `thrusting` valait vrai des
+    // qu'une touche de deplacement etait tenue. Seul le sac dorsal brule
+    // (docs/36-audit.md §1.1) — et il ne brule pas quand on pilote.
     resources.update(dt, {
       inSupply: !!(ship && ship.boarded) || !!zone,
-      thrusting: !!(input.up || input.forward || input.right),
+      thrusting: !!player.jetpack && !(ship && ship.boarded),
     });
     interactPressed = false;
 
@@ -1234,7 +1371,8 @@ async function boot() {
                           z: player.pos.z + anchorPos[2] };
     noise.clear();
     if (noisy) {
-      noise.add([playerWorld.x, playerWorld.y, playerWorld.z], input.boost ? 1 : 0.7);
+      noise.add([playerWorld.x, playerWorld.y, playerWorld.z],
+                (player.jetpack || input.loud) ? 1 : 0.7);
     }
     if (audioMap.length) {
       for (const e of audio.emitters()) noise.add(e.position, e.level, e.radius);

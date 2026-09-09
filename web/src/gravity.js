@@ -69,22 +69,44 @@ export function dominantField(bodies, point, opts = null) {
       best = { body: b, magnitude: mag, distance: d, dir: { x: dx / d, y: dy / d, z: dz / d } };
     }
   }
-  const dirs = opts && opts.directional;
-  if (dirs && dirs.length) {
-    const o = (opts && opts.framePos) || [0, 0, 0];
-    const w = [point.x + o[0], point.y + o[1], point.z + o[2]];
-    const f = strongestDirectional(dirs, w);
-    // Le corps reste celui du champ radial : c'est lui qui donne l'ancre du
-    // repere, le rayon de surface et le nom affiche. Seules la direction et
-    // l'intensite viennent du volume. Hors de toute influence radiale on ne
-    // fabrique pas de corps : le reste du moteur en attend un.
-    if (f && best) {
-      return { body: best.body, magnitude: f.magnitude, distance: best.distance,
-               dir: { x: f.direction[0], y: f.direction[1], z: f.direction[2] },
-               directional: f };
-    }
+  if (best) best.alignDir = best.dir;
+  const o = (opts && opts.framePos) || [0, 0, 0];
+  const w = [point.x + o[0], point.y + o[1], point.z + o[2]];
+  const f = localField(opts, w);
+  // Le corps reste celui du champ radial : c'est lui qui donne l'ancre du
+  // repere, le rayon de surface et le nom affiche. Seules la direction et
+  // l'intensite viennent du volume. Hors de toute influence radiale on ne
+  // fabrique pas de corps : le reste du moteur en attend un.
+  if (f && best) {
+    return { body: best.body, magnitude: f.magnitude, distance: best.distance,
+             dir: { x: f.direction[0], y: f.direction[1], z: f.direction[2] },
+             // `_affectsAlignment` est faux sur un champ sur 34 : celui-la
+             // pousse sans retourner ce qu'il tient, et la verticale reste
+             // celle de la planete. Il etait lu et jamais consulte.
+             alignDir: f.affectsAlignment === false ? best.dir
+               : { x: f.direction[0], y: f.direction[1], z: f.direction[2] },
+             directional: f };
   }
   return best;
+}
+
+/**
+ * Le champ local qui l'emporte en un point monde : directionnel ou polaire.
+ *
+ * Les deux familles se comparent sur le meme pied — priorite d'abord,
+ * intensite ensuite — parce que le detecteur du jeu n'en connait qu'une
+ * notion : le champ actif.
+ */
+function localField(opts, world) {
+  const dirs = (opts && opts.directional) || [];
+  const pol = (opts && opts.polar) || [];
+  let best = dirs.length ? strongestDirectional(dirs, world) : null;
+  if (!pol.length) return best;
+  const p = strongestPolar(pol, world);
+  if (!p) return best;
+  if (!best) return p;
+  const a = p.priority ?? 0, b = best.priority ?? 0;
+  return (a > b || (a === b && p.magnitude > best.magnitude)) ? p : best;
 }
 
 /**
@@ -195,7 +217,37 @@ export function rotateByQuaternion(q, v) {
 export function insideVolume(field, worldPoint) {
   const v = field.volume;
   if (!v) return false;
-  const c = v.center || [0, 0, 0];
+  const p = localPoint(field, worldPoint);
+  if (v.shape === "box" && v.size) {
+    return Math.abs(p[0]) <= v.size[0] / 2 && Math.abs(p[1]) <= v.size[1] / 2 &&
+           Math.abs(p[2]) <= v.size[2] / 2;
+  }
+  // Une capsule n'est pas une sphere : la traiter comme telle raccourcissait
+  // les colonnes des tornades de 305 unites a 80.
+  if (v.shape === "capsule" && v.radius > 0) {
+    return distanceToAxis(p, v) <= v.radius;
+  }
+  return v.radius > 0 && Math.hypot(p[0], p[1], p[2]) <= v.radius;
+}
+
+/**
+ * Distance d'un point LOCAL au segment d'axe d'une capsule.
+ *
+ * Le point le plus proche est sur l'AXE — il faut donc annuler les deux autres
+ * composantes, pas seulement borner celle de l'axe : ne borner que l'axe donne
+ * toujours une distance nulle, et la capsule engloutirait tout l'espace.
+ */
+export function distanceToAxis(p, v) {
+  const i = v.axis === 0 ? 0 : (v.axis === 2 ? 2 : 1);
+  const half = Math.max(0, (v.height || 0) / 2 - v.radius);
+  const q = [0, 0, 0];
+  q[i] = Math.max(-half, Math.min(half, p[i]));
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+}
+
+/** Point monde ramene dans le repere local d'un volume pose et oriente. */
+export function localPoint(field, worldPoint) {
+  const c = (field.volume && field.volume.center) || [0, 0, 0];
   let d = [worldPoint[0] - field.position[0],
            worldPoint[1] - field.position[1],
            worldPoint[2] - field.position[2]];
@@ -203,12 +255,7 @@ export function insideVolume(field, worldPoint) {
     const q = field.rotation;
     d = rotateByQuaternion([-q[0], -q[1], -q[2], q[3]], d);
   }
-  const p = [d[0] - c[0], d[1] - c[1], d[2] - c[2]];
-  if (v.shape === "box" && v.size) {
-    return Math.abs(p[0]) <= v.size[0] / 2 && Math.abs(p[1]) <= v.size[1] / 2 &&
-           Math.abs(p[2]) <= v.size[2] / 2;
-  }
-  return v.radius > 0 && Math.hypot(p[0], p[1], p[2]) <= v.radius;
+  return [d[0] - c[0], d[1] - c[1], d[2] - c[2]];
 }
 
 /**
@@ -225,6 +272,75 @@ export function strongestDirectional(fields, worldPoint) {
     if (!best) { best = f; continue; }
     const p = f.priority ?? 0, bp = best.priority ?? 0;
     if (p > bp || (p === bp && f.magnitude > best.magnitude)) best = f;
+  }
+  return best;
+}
+
+/**
+ * Champs polaires (`PolarForceField`).
+ *
+ * Le build en pose UN, d'acceleration -10 : une force RADIALE a un axe, pas a
+ * un point. Le signe negatif attire vers l'axe, le positif en ecarte — c'est
+ * ainsi qu'un puits cylindrique tient ce qui le traverse. Il n'etait pas lu.
+ *
+ * L'axe est local : il faut la rotation du volume pour l'orienter, exactement
+ * comme pour la direction d'un champ directionnel.
+ */
+export function polarFields(gameplay) {
+  const out = [];
+  for (const [cls, list] of Object.entries((gameplay && gameplay.placed) || {})) {
+    if (!/polar.*forcefield|forcefield.*polar/i.test(cls)) continue;
+    for (const e of list) {
+      const f = e.fields || {};
+      const acc = typeof f._acceleration === "number" ? f._acceleration
+        : (typeof f._fieldMagnitude === "number" ? f._fieldMagnitude : null);
+      if (!acc || !e.volume) continue;
+      let axis = vec3(f._localAxis) || vec3(f._axis) || [0, 1, 0];
+      const L = Math.hypot(axis[0], axis[1], axis[2]);
+      if (!(L > 1e-6)) continue;
+      axis = [axis[0] / L, axis[1] / L, axis[2] / L];
+      out.push({
+        name: e.name, kind: cls, position: e.position, rotation: e.rotation || null,
+        axis, acceleration: acc, magnitude: Math.abs(acc),
+        priority: typeof f._overridePriority === "number" ? f._overridePriority : 0,
+        // Un champ polaire ne designe pas un « bas » constant : on ne s'aligne
+        // pas dessus a moins que le build ne le demande explicitement.
+        affectsAlignment: f._affectsAlignment === true,
+        volume: e.volume,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Direction d'un champ polaire en un point : la perpendiculaire a l'axe, vers
+ * l'axe quand l'acceleration est negative. Sur l'axe meme, il n'y a pas de
+ * direction — le champ ne s'applique alors pas.
+ */
+export function polarDirection(field, worldPoint) {
+  const p = localPoint(field, worldPoint);
+  const a = field.axis;
+  const along = p[0] * a[0] + p[1] * a[1] + p[2] * a[2];
+  let r = [p[0] - a[0] * along, p[1] - a[1] * along, p[2] - a[2] * along];
+  const L = Math.hypot(r[0], r[1], r[2]);
+  if (!(L > 1e-6)) return null;
+  const s = Math.sign(field.acceleration) / L;
+  r = [r[0] * s, r[1] * s, r[2] * s];
+  return field.rotation ? rotateByQuaternion(field.rotation, r) : r;
+}
+
+/** Le champ polaire qui l'emporte en un point, direction comprise. */
+export function strongestPolar(fields, worldPoint) {
+  let best = null;
+  for (const f of fields) {
+    if (!insideVolume(f, worldPoint)) continue;
+    const dir = polarDirection(f, worldPoint);
+    if (!dir) continue;
+    const cand = { ...f, direction: dir };
+    if (!best) { best = cand; continue; }
+    const p = cand.priority ?? 0, bp = best.priority ?? 0;
+    if (p > bp || (p === bp && cand.magnitude > best.magnitude)) best = cand;
   }
   return best;
 }

@@ -20,9 +20,9 @@ portage.
 | géométrie des 7 corps | complète, 69 Mo en glTF |
 | matériaux et textures | 251 matériaux, 200 textures, normales désentrelacées |
 | collision | Havok, colliders trimesh du corps ancré |
-| déplacement du joueur | constantes réelles |
+| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** |
 | ressources | oxygène, carburant, santé, intégrité |
-| vaisseau | embarquement, vol, appui au sol |
+| vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
 | détection d'interaction | 39 interactifs, 34 lisibles |
 | audio spatial | 92 sources, 31 clips, instanciation à la volée |
 | particules | 135 systèmes, 15 textures, budget de 14 simultanés |
@@ -63,11 +63,14 @@ portage.
 | lumières placées | extraites, instanciées à la volée dans un budget de 8 |
 | portées audio | `MinDistance` / `MaxDistance` / `rolloffMode` du build |
 | champs directionnels | 34 volumes, prioritaires sur le champ radial |
-| fluides | volumes émis, traînée et poussée appliquées |
+| fluides | densité, poussée d'Archimède, **courants et tornades**, traînée du détecteur |
 | zones d'oxygène et chaleur | ramassées par motif, avec le volume de leur collider |
 | manette | Gamepad API, mêmes axes et mêmes codes que le clavier |
 | caméras déportées | les deux consoles réutilisent la vue de la sonde |
 | `mainData` | inventorié : scène de démarrage et managers |
+| référentiels | positions **et vitesses** reportées au changement d'ancre |
+| repère tournant | Coriolis et force centrifuge : le sol défile sous un stationnaire |
+| colliders par portée | les 21 `ChildColliderLOD` endorment leur sous-arbre |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -126,8 +129,16 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   régénérer `unity41-types.json` n'y changerait presque rien. Le seuil unique
   de 0,0022 reste la règle, et l'effort utile est ailleurs : les 21
   `ChildColliderLOD`, et les impostures de `LODCameraSnapshot` (×5).
-- **Les 21 `ChildColliderLOD`** sont extraits, mais les colliders sont toujours
-  posés d'un bloc sur le corps ancré — 441 sur Timber Hearth.
+- ~~**Les 21 `ChildColliderLOD`** sont extraits, mais les colliders sont
+  toujours posés d'un bloc.~~ **Fermé** ([`37`](37-corrections.md) §7) : un
+  groupe hors de portée n'entre plus dans la construction, et l'ensemble
+  éveillé est réévalué en continu — mais reconstruit au plus une fois toutes
+  les deux secondes, parce que reconstruire coûte près d'une seconde.
+- **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
+  restent ouvertes : le jeu affiche un système entier parce que les planètes
+  lointaines sont des textures rafraîchies une fois par seconde. Le portage a
+  résolu le même problème autrement — sphères et secteurs — ce qui est
+  légitime, mais le ciel n'y ressemble pas.
 - **11,1 Mo de Babylon** sur les 66 du démarrage
   ([`27-poids.md`](27-poids.md)) : les réduire demande une étape de
   construction, que le dépôt n'a pas. C'est un choix de projet, pas une
@@ -152,9 +163,17 @@ Ce qu'il faut en retenir vaut pour la suite : **avant de conclure qu'une chose
 manque au build, vérifier qu'on la lit**. Six des neuf écarts étaient des
 lecteurs absents, pas des données absentes.
 
-Reste à mesurer sur un vrai build ce que ces extracteurs sortent — la session
-qui les a écrits ne l'avait pas. `tests/05-extract.mjs` et `tools/15_verify.py`
-relèvent les comptes ; les chiffres entreront ici quand ils seront tombés.
+C'est fait : [`36-audit.md`](36-audit.md) a mesuré ces extracteurs sur le build,
+et [`37-corrections.md`](37-corrections.md) dit ce que ses neuf actions ont
+donné. La leçon se prolonge d'une seconde — **avant de conclure qu'on lit une
+chose, la mesurer** : quatre des écarts de l'audit étaient des lecteurs
+présents qui lisaient à côté, et deux étaient des tests qui gardaient le vide.
+
+Les chiffres de l'audit sont désormais des invariants de `tests/05-extract.mjs`
+plutôt que des phrases : tous les volumes de fluide portent une densité, des
+volumes portent un courant et ce sont des capsules, aucune source audio n'est
+en atténuation linéaire, et aucun pointeur de contrôleur de dialogue ne vise
+autre chose qu'un texte.
 
 ## Où lire le détail
 
