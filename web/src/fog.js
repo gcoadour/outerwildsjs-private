@@ -19,13 +19,16 @@
 //
 // Le second decroit vers le centre : on entre dans une poche degagee.
 
-// RenderSettings de la scene : gris moyen, exponentiel au carre (m_FogMode 3).
+// RenderSettings de la scene : exponentiel au carre (m_FogMode 3).
 //
 // Ces deux valeurs etaient recopiees ici a la main. Elles sont maintenant LUES
 // (data/lighting.json, voir pipeline/extract/lighting.js) et ne servent plus
 // que de repli — une valeur juste et une valeur recopiee se ressemblent
-// jusqu'au jour ou l'une des deux change.
-export const FOG_COLOR = [0.5, 0.5, 0.5];
+// jusqu'au jour ou l'une des deux change. Ce jour est arrive : le gris moyen
+// (0,5 ; 0,5 ; 0,5) qui figurait ici etait FAUX. Mesure sur le build, le
+// brouillard de la scene est un vert-gris tres sombre — trois fois plus
+// sombre que ce qui etait recopie.
+export const FOG_COLOR = [0.1456, 0.1567, 0.1403];
 export const FOG_MODE = "exp2";
 export const MAX_DENSITY = 0.5;        // FogDetector._maxDensity
 export const FOG_FAR_CLIP = 2400;      // PlayerCameraController.LateUpdate

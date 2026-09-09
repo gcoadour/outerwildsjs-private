@@ -550,6 +550,44 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("dans le volume, le dirige prend la main", dirigee.magnitude, 8);
   check("... et garde le corps du champ radial", dirigee.body.name, "Planete");
   check("... en le signalant", !!dirigee.directional, true);
+
+  // La forme REELLE du build, mesuree sur les 34 champs de level0 :
+  // `_fieldDirection` y est un Vector3 serialise {x, y, z} et non un tableau,
+  // `_fieldMagnitude` vaut 10 sur 29 champs, et `_forceScaleFactor` vaut 1
+  // partout. Ce dernier repondait a /force/i et sortait gagnant de la
+  // recherche par motif : les champs valaient tous 1.
+  const reel = directionalFields({ placed: { DirectionalForceField: [
+    { name: "DirectionalField", position: [0, 0, 0], rotation: [0, 0, 0, 1],
+      fields: { _forceScaleFactor: 1, _fieldDirection: { x: 0, y: -1, z: 0 },
+                _fieldMagnitude: 10, _overridePriority: 5,
+                _affectsAlignment: true },
+      volume: { shape: "sphere", radius: 50, center: [0, 0, 0] } },
+    // Le build en pose un a direction nulle : il ne designe aucun bas.
+    { name: "Nul", position: [0, 0, 0], rotation: [0, 0, 0, 1],
+      fields: { _forceScaleFactor: 1, _fieldDirection: { x: 0, y: 0, z: 0 },
+                _fieldMagnitude: 10 },
+      volume: { shape: "sphere", radius: 50, center: [0, 0, 0] } },
+    // Priorite basse mais intensite haute : la priorite doit l'emporter.
+    { name: "Faible priorite", position: [0, 0, 0], rotation: [0, 0, 0, 1],
+      fields: { _forceScaleFactor: 1, _fieldDirection: { x: 0, y: 0, z: -1 },
+                _fieldMagnitude: 13, _overridePriority: 1 },
+      volume: { shape: "sphere", radius: 50, center: [0, 0, 0] } },
+  ] } });
+  check("un champ a direction nulle est ecarte", reel.length, 2);
+  check("_fieldMagnitude est lu, pas _forceScaleFactor", reel[0].magnitude, 10);
+  check("Vector3 {x,y,z} lu comme direction", reel[0].direction.join(","), "0,-1,0");
+  check("_overridePriority retenu", reel[0].priority, 5);
+  check("_affectsAlignment retenu", reel[0].affectsAlignment, true);
+  check("la priorite passe avant l'intensite",
+        strongestDirectional(reel, [0, 0, 0]).name, "DirectionalField");
+  // Le facteur d'echelle multiplie, il ne remplace pas.
+  const double = directionalFields({ placed: { DirectionalForceField: [
+    { name: "Double", position: [0, 0, 0], rotation: [0, 0, 0, 1],
+      fields: { _forceScaleFactor: 2, _fieldDirection: { x: 0, y: -1, z: 0 },
+                _fieldMagnitude: 10 },
+      volume: { shape: "sphere", radius: 50, center: [0, 0, 0] } },
+  ] } });
+  check("_forceScaleFactor multiplie l'intensite", double[0].magnitude, 20);
 }
 
 // --- fluides ------------------------------------------------------------
