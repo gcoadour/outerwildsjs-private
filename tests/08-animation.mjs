@@ -194,7 +194,14 @@ for (const a of ASSEMBLIES) {
   u.add(a, new Uint8Array(readFileSync(join(BUILD, "Managed", `${a}.dll`))));
 }
 const env = await loadEnv();
-const ctx = new ExtractContext(env, u, "level0");
+// Les structures des classes moteur (unity41-types.json) sont INDISPENSABLES :
+// `Animator`, `Animation` et `AnimatorController` en font partie. Sans elles,
+// readEngine retombe sur les quelques lecteurs ecrits en dur et rend null pour
+// tous les trois — le test mesurait alors un pipeline ampute, et comptait zero
+// animation sur un build qui en porte.
+const engineTypes = JSON.parse(readFileSync(
+  "web/src/pipeline/unity/unity41-types.json", "utf8"));
+const ctx = new ExtractContext(env, u, "level0", engineTypes);
 
 let animations = 0, channels = 0, cubic = 0, linear = 0, unresolved = 0;
 let quaternions = 0, worstNorm = 0, badTimes = 0, badTargets = 0, badCubic = 0;

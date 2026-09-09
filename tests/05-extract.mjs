@@ -69,15 +69,28 @@ console.log("     lisibles avec texte:", withText, "| systemes uniques:", Object
 
 console.time("audio");
 const audioFiles = [];
+// `maxClips` doit rester HAUT. Une source n'est retenue que si le nom de son
+// clip a ete enregistre, et ce nom ne l'est qu'au moment de l'export : avec
+// maxClips a 0, la carte des sources sortait VIDE, et l'invariant « aucune
+// portee de repli » passait sur une liste vide sans rien verifier. Les octets,
+// eux, sont jetes ici — ce qu'on mesure, c'est la carte.
 const audio = extractAudio(ctx, (name, bytes) => audioFiles.push({ name, bytes }),
-                           { maxClips: 0 });
+                           { maxClips: 400 });
 console.timeEnd("audio");
 // A2 : MinDistance / MaxDistance existent bien en 4.1 sans le prefixe m_.
 // Une portee de repli signale une source dont le champ n'a pas ete lu.
+check("des sources audio sont placees", audio.sources.length > 0, true);
 check("aucune portee audio de repli", audio.stats["portee de repli"] ?? 0, 0);
 const ranges = new Set((audio.sources || []).map((s) => s.range));
-console.log("     portees distinctes:", ranges.size,
-            "| rolloff:", new Set(audio.sources.map((s) => s.rolloff)).size, "modes");
+// Les portees du build ne ressemblent pas aux replis par piste (60/150/300) :
+// elles vont de 10 a 4 000. Une distribution qui s'y reduirait signalerait un
+// retour en arriere.
+check("les portees ne sont pas les trois valeurs inventees", ranges.size > 3, true);
+const rolloffs = audio.sources.reduce((a, s) => (a[s.rolloff] = (a[s.rolloff] || 0) + 1, a), {});
+console.log("     sources:", audio.sources.length,
+            "| portees distinctes:", ranges.size,
+            `[${[...ranges].sort((a, b) => a - b).join(", ")}]`,
+            "| rolloff:", JSON.stringify(rolloffs));
 
 console.time("lumieres");
 const lighting = extractLighting(ctx);

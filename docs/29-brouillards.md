@@ -46,11 +46,16 @@ poche dégagée. C'est l'inverse du premier, et c'est délibéré.
 
 `FogDetector` plafonne la somme à **0,5**, et bascule le moteur en
 `FogMode.ExponentialSquared`. La couleur ne vient pas du code mais des
-`RenderSettings` de la scène : un gris moyen `(0,5, 0,5, 0,5)`, avec
-`m_FogMode = 3` qui confirme l'exponentiel au carré. Ces deux valeurs étaient
-**recopiées à la main** dans `fog.js` ; elles sont désormais **lues**
-(`data/lighting.json`, voir [`35-monde.md`](35-monde.md) §3) et ne servent plus
-ici que de repli.
+`RenderSettings` de la scène, avec `m_FogMode = 3` qui confirme l'exponentiel
+au carré. Ces deux valeurs étaient **recopiées à la main** dans `fog.js` ;
+elles sont désormais **lues** (`data/lighting.json`, voir
+[`35-monde.md`](35-monde.md) §3) et ne servent plus ici que de repli.
+
+> **Correction, mesurée sur le build** ([`36-audit.md`](36-audit.md)). La
+> couleur recopiée — un gris moyen `(0,5 ; 0,5 ; 0,5)` — était **fausse**. Les
+> `RenderSettings` de `level0` donnent `(0,1456 ; 0,1567 ; 0,1403)` : un
+> vert-gris très sombre, trois fois plus sombre que ce qui était noté. Le repli
+> de `fog.js` porte maintenant la valeur mesurée. Le mode, lui, était juste.
 
 Et `PlayerCameraController.LateUpdate` resserre le plan lointain à **2400**
 quand la densité atteint 0,01 — vérifié dans le portage : la caméra passe de

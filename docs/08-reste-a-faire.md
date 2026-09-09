@@ -38,7 +38,7 @@ portage.
 | carte du système | orbites, marqueurs, sélection de cible |
 | shaders du jeu | **203 affectations**, tous les shaders utilisés couverts |
 | skinning | 55 squelettes, 33 maillages skinnés, décodage direct |
-| animations | 33 animations, 8 148 canaux, Mecanim compris |
+| animations | 34 animations, 8 148 canaux, Mecanim compris (mesure) |
 | connaissance | codes, exploration et boucle persistants et signifiants |
 | outils | télescope ×6 et lanceur de sonde, 3/6 savoirs gagnables |
 | interface de dialogue | proportions du build, curseur, sondes rendues |
@@ -93,7 +93,12 @@ dans l'alpha.
 | le modèle de sonde | `_probePrefab` n'est pas résolu |
 | les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
 | la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
-| `RocketKidConvoController`, l'entraînement, le ciblage | aucune source |
+| l'entraînement et le ciblage | aucune source |
+
+> **Corrigé par la mesure** ([`36-audit.md`](36-audit.md)).
+> `RocketKidConvoController` **est** dans le build, lisible, et porte trois
+> arbres (`_introduction`, `_successfulLanding`, `_tooManyCrashes`). Il sort
+> donc de cette liste : c'est un manque du portage, pas de l'alpha.
 
 ### 2. Ce qui demande un œil ou une oreille humaine
 
@@ -114,11 +119,13 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 - **La distorsion** reste une approximation délibérée : capturer le fond
   demanderait un second rendu complet de la scène — doubler les 6,1 ms — pour
   **deux matériaux dans tout le jeu**.
-- **Les niveaux de détail du build** ne sont lus qu'à moitié. `lod.js` applique
-  les seuils que porte `CreateLODGroup`, mais la classe moteur `LODGroup` (205)
-  n'est pas encore dans `unity41-types.json` : `tools/16_unity_types.py` la
-  demande, il faut relancer l'outil pour l'obtenir. Sans elle, rien n'est émis
-  et le seuil unique de 0,0022 reste la règle.
+- **Les niveaux de détail du build** ne valent pas ce qu'on en attendait.
+  Mesure faite ([`36-audit.md`](36-audit.md)) : `level0` ne contient que
+  **deux** objets de classe `LODGroup` (205), et les cinq `CreateLODGroup` ont
+  des champs **vides**. `lodThresholds()` n'en tire donc aucun seuil, et
+  régénérer `unity41-types.json` n'y changerait presque rien. Le seuil unique
+  de 0,0022 reste la règle, et l'effort utile est ailleurs : les 21
+  `ChildColliderLOD`, et les impostures de `LODCameraSnapshot` (×5).
 - **Les 21 `ChildColliderLOD`** sont extraits, mais les colliders sont toujours
   posés d'un bloc sur le corps ancré — 441 sur Timber Hearth.
 - **11,1 Mo de Babylon** sur les 66 du démarrage

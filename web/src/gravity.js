@@ -99,24 +99,61 @@ export function dominantField(bodies, point, opts = null) {
  * intensite lisible, le champ est ECARTE plutot que devine — le champ radial
  * reprend alors la main, ce qui est le comportement d'avant.
  */
+/** Un Vector3 serialise : le build l'ecrit {x, y, z}, les fixtures en tableau. */
+function vec3(v) {
+  if (Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === "number")) {
+    return v.slice();
+  }
+  if (v && typeof v === "object" &&
+      ["x", "y", "z"].every((k) => typeof v[k] === "number")) {
+    return [v.x, v.y, v.z];
+  }
+  return null;
+}
+
 export function directionalFields(gameplay) {
   const out = [];
   for (const e of ((gameplay.placed || {}).DirectionalForceField || [])) {
     const f = e.fields || {};
-    let magnitude = null, direction = null, axisIndex = null;
-    for (const [k, v] of Object.entries(f)) {
-      if (typeof v === "number" && magnitude === null &&
-          /magnitude|acceleration|force|strength|gravity/i.test(k)) magnitude = v;
-      if (Array.isArray(v) && v.length === 3 && direction === null &&
-          /direction|axis|vector/i.test(k)) direction = v;
-      if (typeof v === "number" && axisIndex === null && direction === null &&
-          /direction|axis/i.test(k)) axisIndex = v;
+
+    // Les champs PORTENT leur nom : `_fieldMagnitude` est l'intensite,
+    // `_forceScaleFactor` un multiplicateur, `_fieldDirection` la direction
+    // locale. On les lit d'abord, et la recherche par motif ne sert plus que
+    // de repli pour une variante qui les nommerait autrement.
+    //
+    // Le piege corrige ici : `_forceScaleFactor` repond a /force/i, et sortait
+    // donc GAGNANT de la recherche par motif, qui prenait le premier champ
+    // rencontre. Les 34 champs du build le portent a 1, quand
+    // `_fieldMagnitude` vaut 10 sur 29 d'entre eux : toutes les gravites
+    // locales etaient dix fois trop faibles, et le champ radial de la planete
+    // (12) les ecrasait au lieu de leur ceder la place.
+    let magnitude = typeof f._fieldMagnitude === "number" ? f._fieldMagnitude : null;
+    let direction = vec3(f._fieldDirection);
+    let axisIndex = null;
+    if (magnitude === null || direction === null) {
+      for (const [k, v] of Object.entries(f)) {
+        // un facteur d'echelle n'est pas une intensite, quel que soit son nom
+        if (typeof v === "number" && magnitude === null &&
+            !/scale|factor|priority/i.test(k) &&
+            /magnitude|acceleration|force|strength|gravity/i.test(k)) magnitude = v;
+        const w = vec3(v);
+        if (w && direction === null && /direction|axis|vector/i.test(k)) direction = w;
+        if (typeof v === "number" && axisIndex === null && direction === null &&
+            /direction|axis/i.test(k)) axisIndex = v;
+      }
     }
+    // `_forceScaleFactor` multiplie l'intensite, il ne la remplace pas.
+    const scale = typeof f._forceScaleFactor === "number" ? f._forceScaleFactor : 1;
+    if (magnitude !== null) magnitude *= scale;
+
     if (!magnitude || !e.volume) continue;
     // Axe nomme par un enum : Unity range les six directions dans cet ordre.
     const AXES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
     let d = direction || AXES[axisIndex] || [0, -1, 0];
-    const L = Math.hypot(d[0], d[1], d[2]) || 1;
+    let L = Math.hypot(d[0], d[1], d[2]);
+    // Un champ dont la direction est nulle ne designe rien : le build en pose
+    // un. On l'ecarte plutot que de lui inventer un bas.
+    if (!(L > 1e-6)) continue;
     d = [d[0] / L, d[1] / L, d[2] / L];
     if (e.rotation) d = rotateByQuaternion(e.rotation, d);
     out.push({
@@ -125,6 +162,13 @@ export function directionalFields(gameplay) {
       rotation: e.rotation || null,
       direction: d,
       magnitude: Math.abs(magnitude),
+      // `_overridePriority` departage les volumes qui se recouvrent : le build
+      // le fait varier de 0 a 5. Sans lui, deux champs superposes se
+      // departageaient a l'intensite, ce qui n'est pas la regle du jeu.
+      priority: typeof f._overridePriority === "number" ? f._overridePriority : 0,
+      // `_affectsAlignment` dit si le champ REORIENTE ce qu'il tient (33 sur
+      // 34 le font). Lu ici, il reste a en tenir compte a l'alignement.
+      affectsAlignment: f._affectsAlignment !== false,
       volume: e.volume,
     });
   }
@@ -167,12 +211,20 @@ export function insideVolume(field, worldPoint) {
   return v.radius > 0 && Math.hypot(p[0], p[1], p[2]) <= v.radius;
 }
 
-/** Le plus fort des champs directionnels contenant le point, ou null. */
+/**
+ * Le champ directionnel qui l'emporte en un point, ou null.
+ *
+ * La priorite passe AVANT l'intensite : `_overridePriority` est le champ que
+ * le jeu consulte quand deux volumes se recouvrent, et il va de 0 a 5 dans le
+ * build. A priorite egale, l'intensite departage.
+ */
 export function strongestDirectional(fields, worldPoint) {
   let best = null;
   for (const f of fields) {
     if (!insideVolume(f, worldPoint)) continue;
-    if (!best || f.magnitude > best.magnitude) best = f;
+    if (!best) { best = f; continue; }
+    const p = f.priority ?? 0, bp = best.priority ?? 0;
+    if (p > bp || (p === bp && f.magnitude > best.magnitude)) best = f;
   }
   return best;
 }
