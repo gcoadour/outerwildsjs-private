@@ -116,6 +116,69 @@ const volumes = (gp.placed.DirectionalForceField || []).filter((e) => e.volume).
 console.log("     champs avec volume mesure:", volumes,
             "/", n("DirectionalForceField"));
 
+// --- ce que l'audit a mesure, garde en invariant ---
+//
+// docs/36-audit.md. Chaque ligne ci-dessous chiffre une affirmation du portage
+// que la mesure a dementie : elles ne peuvent plus redevenir fausses en
+// silence.
+
+// §1.2 : « la poussee d'Archimede n'est pas dans le build ». TOUS les volumes
+// portent une densite, de 0,2 a 500.
+const milieux = [];
+for (const [cls, list] of Object.entries(gp.placed)) {
+  if (!/fluid|ocean/i.test(cls) || /detector/i.test(cls)) continue;
+  for (const e of list) milieux.push({ cls, e });
+}
+check("le build pose des volumes de fluide", milieux.length > 0, true);
+check("tous portent une densite",
+      milieux.filter(({ e }) => typeof (e.fields || {})._density === "number").length,
+      milieux.length);
+
+// §1.2 : les tornades de Giant's Deep portent un COURANT, et c'est le contenu
+// jouable de la planete. Le portage les lisait comme de simples volumes.
+const courants = milieux.filter(({ e }) => (e.fields || {})._flowSpeed);
+console.log("     fluides:", milieux.length, "| avec courant:", courants.length,
+            "| densites:", JSON.stringify([...new Set(milieux
+              .map(({ e }) => (e.fields || {})._density))].sort((a, b) => a - b)));
+check("des volumes portent un courant", courants.length > 0, true);
+check("... et ce sont des capsules, pas des spheres",
+      courants.every(({ e }) => !e.volume || e.volume.shape === "capsule"), true);
+
+// §2.3 : la trainee est portee par le DETECTEUR, pas par le volume.
+const detecteurs = Object.entries(gp.placed)
+  .filter(([cls]) => /fluiddetector/i.test(cls))
+  .flatMap(([cls, l]) => l.map((e) => ({ cls, e })));
+check("les detecteurs de fluide sont extraits", detecteurs.length > 0, true);
+check("... et portent leur facteur de trainee",
+      detecteurs.some(({ e }) => typeof (e.fields || {})._dragFactor === "number"), true);
+
+// §2.9 : `PolarForceField` etait extrait et jamais lu.
+const polaires = Object.entries(gp.placed)
+  .filter(([cls]) => /polar.*forcefield/i.test(cls))
+  .flatMap(([, l]) => l);
+console.log("     champs polaires:", polaires.length,
+            polaires.map((e) => (e.fields || {})._acceleration).join(", "));
+
+// §1.3 : 83 sources sur 97 sont en attenuation `custom`, 14 en `logarithmic`,
+// AUCUNE en lineaire — le seul mode dans lequel le portage les rendait.
+check("aucune source n'est en attenuation lineaire", rolloffs.linear ?? 0, 0);
+check("l'attenuation `custom` est majoritaire",
+      (rolloffs.custom ?? 0) > (rolloffs.logarithmic ?? 0), true);
+const courbes = audio.sources.filter((x) => x.rolloffCurve).length;
+console.log("     sources avec courbe echantillonnee:", courbes,
+            "/", (rolloffs.custom ?? 0));
+
+// §2.7 : l'objet vise par un controleur de dialogue est un ARBRE, jamais un
+// Transform. Le `fileId` etait perdu au dereferencement, et les pointeurs se
+// resolvaient en os de squelette (`anglerfish_rig:UpTail4`).
+check("aucun pointeur de controleur ne vise autre chose qu'un texte",
+      gp.stats["references non textuelles"] ?? null, null);
+const ctrls = Object.entries(gp.placed)
+  .filter(([cls]) => /convocontroller|convotrigger/i.test(cls))
+  .flatMap(([cls, l]) => l.map((e) => ({ cls, e })));
+console.log("     controleurs de dialogue:", ctrls.length,
+            "| avec arbres:", ctrls.filter(({ e }) => e.trees).length);
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");

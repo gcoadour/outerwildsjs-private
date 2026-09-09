@@ -43,12 +43,15 @@ export function extractGameplay(ctx) {
   const rbOwner = new Map();
   for (const { obj, cls } of ctx.behaviours(["OWRigidbody"])) {
     const nm = ctx.name(ctx.ownerId(obj));
-    if (nm) rbOwner.set(obj.pathId, nm);
+    if (nm) rbOwner.set(ctx.refKey(obj), nm);
   }
 
   const singletons = {};
   const placed = {};
   const discovered = {};
+  // Controleurs dont au moins un pointeur ne vise PAS un texte : c'est ce que
+  // l'ancien index par path_id nu laissait passer pour un arbre.
+  const ecartes = new Set();
   const named = new Set([...SINGLETONS, ...PLACED]);
   const keep = (cls) => named.has(cls) || PLACED_PATTERNS.some((p) => p.test(cls));
 
@@ -80,24 +83,29 @@ export function extractGameplay(ctx) {
     }
     // Texte des objets lisibles, resolu depuis le TextAsset.
     if (cls === "ReadableObject") {
-      const ref = plain._displayTextAsset;
-      if (ref && ctx.texts.has(ref.$ref)) entry.text = ctx.texts.get(ref.$ref);
+      const t = ctx.textFor(fields._displayTextAsset);
+      if (t !== null) entry.text = t;
       else if (plain._displayText) entry.text = plain._displayText;
     }
     // Fiches de l'ordinateur de bord : une notice par lieu, lisible seulement
     // apres avoir explore l'endroit.
     if (cls === "SectorData") {
-      const ref = plain._description;
-      if (ref && ctx.texts.has(ref.$ref)) entry.text = ctx.texts.get(ref.$ref);
+      const t = ctx.textFor(fields._description);
+      if (t !== null) entry.text = t;
     }
     // Arbres de dialogue portes par un controleur de personnage. Le portage
     // les cherchait par NOM (« ...WithCodes », « ...Preflight ») faute de les
-    // avoir sous la main ; ce sont pourtant des references directes, et un
-    // TextAsset se nomme ici sans ambiguite.
+    // avoir sous la main ; ce sont pourtant des references directes.
+    //
+    // INVARIANT : ce que vise un controleur de dialogue est un TextAsset, et
+    // rien d'autre. `ctx.texts` est desormais indexe par `fichier:path_id`, et
+    // le pointeur suit son `fileId` : un `Transform` d'un autre fichier ne
+    // peut plus se faire passer pour un arbre parce que son path_id tombe sur
+    // celui d'un texte de la scene (docs/36-audit.md §2.7).
     for (const [k, v] of Object.entries(plain)) {
-      if (v && typeof v === "object" && "$ref" in v && ctx.texts.has(v.$ref)) {
-        (entry.trees ||= {})[k] = v.$ref;
-      }
+      if (!v || typeof v !== "object" || !("$ref" in v)) continue;
+      if (v.$ref !== null && ctx.texts.has(v.$ref)) (entry.trees ||= {})[k] = v.$ref;
+      else if (/convocontroller|convotrigger/i.test(cls)) ecartes.add(cls);
     }
     (placed[cls] ||= []).push(entry);
   }
@@ -120,6 +128,7 @@ export function extractGameplay(ctx) {
   }
 
   const stats = { classes: Object.keys(placed).length };
+  if (ecartes.size) stats["references non textuelles"] = [...ecartes].sort();
   if (Object.keys(discovered).length) stats.decouvertes = discovered;
   for (const [k, v] of Object.entries(placed)) stats[k] = v.length;
 

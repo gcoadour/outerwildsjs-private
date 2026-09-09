@@ -131,7 +131,41 @@ export class SpinField {
     if (!s) return vec;
     return rotateAbout(vec, s.axis, this.angles.get(body));
   }
+
+  /** Vecteur rotation du repere ancre sur ce corps, ou null. */
+  omega(body) {
+    const s = this.spins.get(body);
+    return s ? [s.axis[0] * s.rate, s.axis[1] * s.rate, s.axis[2] * s.rate] : null;
+  }
+
+  /**
+   * Acceleration d'inertie subie dans le repere tournant du corps ancre.
+   *
+   * Le repere de travail TOURNE avec le corps ancre — c'est ce qui garde ses
+   * colliders immobiles — mais rien n'en tirait les consequences : en vol
+   * stationnaire au-dessus de Timber Hearth, le sol ne defilait pas
+   * (docs/36-audit.md §1.2). A 0,05 rad/s et 250 unites, il devrait passer a
+   * 12,5 u/s.
+   *
+   *   a = -2 omega x v  -  omega x (omega x r)
+   *
+   * Le premier terme est Coriolis, le second la force centrifuge. Les deux
+   * s'expriment dans le repere tournant, ou vivent deja `pos` et `vel`.
+   */
+  inertial(body, pos, vel) {
+    const w = this.omega(body);
+    if (!w) return null;
+    const r = [pos.x ?? pos[0], pos.y ?? pos[1], pos.z ?? pos[2]];
+    const v = [vel.x ?? vel[0], vel.y ?? vel[1], vel.z ?? vel[2]];
+    const cor = cross(w, v);
+    const cen = cross(w, cross(w, r));
+    return [-2 * cor[0] - cen[0], -2 * cor[1] - cen[1], -2 * cor[2] - cen[2]];
+  }
 }
+
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                         a[2] * b[0] - a[0] * b[2],
+                         a[0] * b[1] - a[1] * b[0]];
 
 /**
  * Hauteur du soleil au-dessus de l'horizon local, en radians.

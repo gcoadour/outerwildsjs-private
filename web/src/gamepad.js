@@ -69,7 +69,8 @@ const pressed = (b) => (typeof b === "number" ? b > TRIGGER_AT : !!(b && b.press
  * regard, qui se compte en vitesse.
  */
 export function padState(gp, dead = PAD_DEAD_ZONE) {
-  const zero = { forward: 0, right: 0, up: false, boost: false, lookX: 0, lookY: 0 };
+  const zero = { forward: 0, right: 0, up: false, boost: false, roll: 0,
+                 lookX: 0, lookY: 0 };
   if (!gp || !gp.axes) return zero;
   const ax = gp.axes, btn = gp.buttons || [];
   const lx = deadZone(ax[0] || 0, dead), ly = deadZone(ax[1] || 0, dead);
@@ -81,6 +82,11 @@ export function padState(gp, dead = PAD_DEAD_ZONE) {
     right: lx,
     up: pressed(btn[0]) || value(btn[LEFT_TRIGGER]) > TRIGGER_AT,
     boost: value(btn[RIGHT_TRIGGER]) > TRIGGER_AT || pressed(btn[10]),
+    // Roulis : le vaisseau en a un depuis qu'il tourne par la physique
+    // (docs/36-audit.md §2.2). Une manette standard n'a que quatre axes ; le
+    // cinquieme, quand il existe, est la torsion — sinon le roulis reste au
+    // clavier.
+    roll: deadZone(ax[4] || 0, dead),
     lookX: rx * k,
     lookY: ry * k,
   };
@@ -119,7 +125,7 @@ export class GamepadControls {
   constructor(opts = {}) {
     this.onKey = opts.onKey || (() => {});
     this.onLook = opts.onLook || (() => {});
-    this.axes = { forward: 0, right: 0, up: false, boost: false };
+    this.axes = { forward: 0, right: 0, up: false, boost: false, roll: 0 };
     this.held = null;
     this.connected = false;
     this.index = null;
@@ -146,7 +152,7 @@ export class GamepadControls {
     this.connected = !!gp;
     if (!gp) {
       this.axes.forward = 0; this.axes.right = 0;
-      this.axes.up = false; this.axes.boost = false;
+      this.axes.up = false; this.axes.boost = false; this.axes.roll = 0;
       this.held = null;
       return this.axes;
     }
@@ -155,6 +161,7 @@ export class GamepadControls {
     this.axes.right = s.right;
     this.axes.up = s.up;
     this.axes.boost = s.boost;
+    this.axes.roll = s.roll;
     const { codes, state } = padEdges(gp, this.held);
     this.held = state;
     for (const c of codes) this.onKey(c);

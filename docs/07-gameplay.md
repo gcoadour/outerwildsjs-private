@@ -7,6 +7,33 @@ audio, 16 points d'apparition, 14 conversations, 7 secteurs.
 Les textes (invites, objets lisibles, dialogues) sont du contenu narratif du
 jeu : ils sortent dans `data/`, non versionné, et sont chargés à l'exécution.
 
+## Déplacement du joueur — `web/src/player.js`
+
+Longtemps, cette page a décrit les constantes de `PlayerCharacterController`
+sans dire que le moteur ne s'en servait pas. La mesure l'a établi
+([`36-audit.md`](36-audit.md) §1.1) : **le portage n'avait pas de marche**, la
+même poussée servait au sol et dans le vide, et les constantes chargées
+dormaient dans un champ jamais lu.
+
+Elles sont maintenant appliquées, en deux régimes :
+
+| grandeur | valeur | où |
+|---|---|---|
+| marche avant | `_groundSpeed` **7** | au sol |
+| pas de côté | `_strafeSpeed` **5** | au sol |
+| mise en vitesse | `_groundAcceleration` **0,5** par pas fixe | au sol |
+| saut | `_jumpSpeed` **6**, sur front de touche | au sol |
+| pente praticable | `_maxAngleToBeGrounded` **45°** | au sol |
+| sonde d'appui | sphère `0,46` lancée sur `0,6` | au sol |
+| sac dorsal | `_maxTranslationalThrust` **7** | loin de toute surface |
+| poussée verticale | `_surfaceVerticalThrust` **12** | près d'une surface |
+| poussée latérale | `_surfaceLateralThrust` **5** | près d'une surface |
+| visée | `_turnRate` **160**°/s, ×0,5 à la lunette | partout |
+
+Le détail de la mise en œuvre — et pourquoi `_groundAcceleration` se lit par
+**pas fixe** et non par seconde — est dans
+[`37-corrections.md`](37-corrections.md) §1.
+
 ## Ressources — `web/src/resources.js`
 
 Constantes réelles de `PlayerResources` :
@@ -31,6 +58,12 @@ est donc sept fois plus puissant et bien plus lourd à tourner.
 
 Sa géométrie était déjà dans `timberhearth_pivot.gltf`, sous
 `TimberHearth_Body/ShipContainer/Ship_Body`.
+
+`_usePhysicsToRotate` vaut **vrai**, et la traînée angulaire est enfin
+employée : le vaisseau porte son propre quaternion et la caméra le **suit** au
+lieu de le commander ([`37-corrections.md`](37-corrections.md) §2). Il tournait
+jusqu'ici comme une caméra, ce qui effaçait toute la lourdeur que ces trois
+constantes décrivent.
 
 ### Les positions enregistrées ne sont pas les positions de départ
 

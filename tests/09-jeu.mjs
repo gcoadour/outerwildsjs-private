@@ -16,7 +16,17 @@ import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS } from "../web/src/shipdamage.js";
-import { Ship } from "../web/src/ship.js";
+import { Ship, spinStep, quatRotate, terminalAngularSpeed } from "../web/src/ship.js";
+import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
+         jumpHeight, frameFriction } from "../web/src/player.js";
+import { playerConstants } from "../web/src/config.js";
+import { buildOrbits, advance, frameVelocity } from "../web/src/orbits.js";
+import { polarFields, polarDirection, strongestPolar,
+         distanceToAxis } from "../web/src/gravity.js";
+import { rolloffModel, curveGain } from "../web/src/audio.js";
+import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
+import { oxygenDetector } from "../web/src/resources.js";
+import { underAsleep } from "../web/src/physics.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
@@ -33,7 +43,8 @@ import { bodySpin, spinPeriod, rotateAbout, SpinField,
          sunElevation } from "../web/src/spin.js";
 import { directionalFields, insideVolume, strongestDirectional,
          dominantField } from "../web/src/gravity.js";
-import { fluidVolumes, fluidAt, depthIn, applyDrag, terminalSpeed,
+import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
+         applyDrag, terminalSpeed, densityAt, mediumVelocity,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
@@ -592,22 +603,39 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- fluides ------------------------------------------------------------
 //
-// SphereOceanFluidVolume etait lu par l'extracteur puis jete : la boucle
-// n'ecrivait un corps que s'il portait un GravityWell. Giant's Deep n'avait
-// donc pas d'ocean, et le _dragCoefficient de 10 des fragments de croute ne
-// s'appliquait jamais.
+// Trois manques mesures sur le build (docs/36-audit.md §1.2) : la trainee est
+// portee par le DETECTEUR, la densite est presente PARTOUT, et les tornades
+// portent un COURANT. Le portage lisait un volume sur trois, appliquait
+// `DEFAULT_DRAG = 1` a tout le monde et retombait sur `density ?? 0` — donc
+// rien ne flottait et rien n'etait pousse.
 {
   const solar = { fluids: [{ name: "Ocean", kind: "SphereOceanFluidVolume",
                              position: [0, 0, 0], radius: 700, drag: 2 }] };
-  const gameplay = { placed: { SimpleFluidVolume: [
-    { name: "Mare", position: [0, 0, 2000], fields: { _radius: 50, _dragCoefficient: 4 } },
-    { name: "SansRayon", position: [0, 0, 0], fields: {} },
-  ] } };
+  const gameplay = { placed: {
+    SimpleFluidVolume: [
+      { name: "Mare", position: [0, 0, 2000], fields: { _radius: 50, _dragCoefficient: 4 } },
+      { name: "SansRayon", position: [0, 0, 0], fields: {} },
+    ],
+    SimpleFluidDetector: [{ name: "PlayerDetector", fields: { _dragFactor: 0.5 } }],
+    ShipFluidDetector: [{ name: "ShipDetector", fields: { _dragFactor: 1 } }],
+  } };
   const vols = fluidVolumes(gameplay, solar);
   check("volumes emis, celui sans rayon ecarte", vols.length, 2);
+  check("un detecteur n'est pas un milieu",
+        vols.some((v) => /detector/i.test(v.kind)), false);
   check("l'ocean vient du systeme solaire",
         vols.find((v) => v.ocean).name, "Ocean");
   check("coefficient de trainee lu", vols[0].drag, 4);
+
+  // Le detecteur porte le facteur, pas le volume : 0,5 pour le joueur, 1 pour
+  // le vaisseau. C'est ce que `DEFAULT_DRAG = 1` uniforme effacait.
+  const dets = fluidDetectors(gameplay);
+  check("detecteurs lus", dets.length, 2);
+  check("celui du joueur freine deux fois moins",
+        dragFactorFor(dets, "SimpleFluidDetector"), 0.5);
+  check("celui du vaisseau freine a plein",
+        dragFactorFor(dets, "ShipFluidDetector"), 1);
+  check("un mobile sans detecteur garde 1", dragFactorFor(dets, "sonde"), 1);
 
   const ocean = vols.find((v) => v.name === "Ocean");
   check("hors du volume, aucune profondeur", depthIn(ocean, [0, 0, 900]), 0);
@@ -638,13 +666,93 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la chute se stabilise a la vitesse limite",
         Math.abs(-vel.y - terminalSpeed(12, 4)) < 0.2, true);
 
-  // Poussee d'Archimede : elle n'est PAS dans le build (aucune densite), donc
-  // nulle par defaut. A densite non nulle, elle s'oppose a la gravite.
+  // Le facteur du detecteur divise la trainee, donc double la vitesse limite.
+  const lent = { x: 0, y: 0, z: 0 };
+  for (let i = 0; i < 4000; i++) {
+    lent.y += g.dir.y * g.magnitude * 0.01;
+    field.apply([0, 0, 0], lent, 0.01, g, { dragFactor: 0.5 });
+  }
+  check("un detecteur a 0,5 double la vitesse limite",
+        Math.abs(-lent.y - terminalSpeed(12, 2)) < 0.3, true);
+
+  // Poussee d'Archimede : a = -g (rho - 1). A densite 1 un corps ne monte ni
+  // ne descend ; a densite 2 il remonte a une pesanteur. L'ancienne formule
+  // rendait 2 g, et `density ?? 0` la mettait a zero partout.
+  const neutre = new FluidField([{ name: "Neutre", position: [0, 0, 0], radius: 100,
+                                   drag: 0, density: 1 }]);
+  const vn = { x: 0, y: 0, z: 0 };
+  neutre.apply([0, 0, 0], vn, 1, g);
+  check("a densite 1, le fluide ne porte ni ne coule", round(vn.y, 6), 0);
+
   const flot = new FluidField([{ name: "Eau", position: [0, 0, 0], radius: 100,
                                  drag: 0, density: 2 }]);
   const vf = { x: 0, y: 0, z: 0 };
   flot.apply([0, 0, 0], vf, 1, g);
-  check("a densite 2, la poussee remonte le mobile", round(vf.y, 3), 24);
+  check("a densite 2, la poussee remonte le mobile a une pesanteur",
+        round(vf.y, 3), 12);
+
+  // `_deepDensity` : l'ocean porte 10 en surface et 100 au fond, ce qui rend
+  // le fond infranchissable sans etre un mur.
+  const profond = { name: "Ocean", position: [0, 0, 0], radius: 100,
+                    drag: 1, density: 10, deepDensity: 100 };
+  check("en surface, la densite est celle du volume",
+        round(densityAt(profond, 0), 3), 10);
+  check("au coeur, c'est la densite profonde",
+        round(densityAt(profond, 100), 3), 100);
+  check("a mi-profondeur, on interpole", round(densityAt(profond, 50), 3), 55);
+
+  // Une tornade est une CAPSULE (r=40, h=305) qui pousse a 300 u/s vers le
+  // haut en tournant. La lire comme une sphere de rayon 40 laissait 225 unites
+  // de colonne hors du volume.
+  const tornade = fluidVolumes({ placed: { TornadoFluidVolume: [{
+    name: "Tornade", position: [0, 0, 0], rotation: null,
+    volume: { shape: "capsule", radius: 40, height: 305, axis: 1, center: [0, 0, 0] },
+    fields: { _density: 2, _flowSpeed: 300, _localLinearFlow: { x: 0, y: 1, z: 0 },
+              _angularSpeed: 10, _localRotationAxis: { x: 0, y: 1, z: 0 },
+              _dragCoefficient: 1, _priority: 5 },
+  }] } }, {})[0];
+  // A 150 unites de hauteur on est encore DANS la colonne (demi-hauteur utile
+  // 112,5, plus le rayon 40), mais tout pres du bouchon : 2,5 d'immersion.
+  check("la capsule porte toute sa colonne",
+        round(depthIn(tornade, [0, 150, 0]), 3), 2.5);
+  check("... et une sphere de rayon 40 ne l'aurait pas fait",
+        depthIn({ ...tornade, volume: { shape: "sphere", radius: 40 } }, [0, 150, 0]), 0);
+  check("au coeur de la colonne, on est au rayon entier",
+        round(depthIn(tornade, [0, 0, 0]), 3), 40);
+  check("hors de la capsule, rien", depthIn(tornade, [50, 0, 0]), 0);
+
+  const vm = mediumVelocity(tornade, [10, 0, 0]);
+  check("le courant monte a 300", round(vm[1], 3), 300);
+  check("... et tourne autour de l'axe", round(vm[2], 3), -100);
+  check("un volume sans courant n'en a pas", mediumVelocity(ocean, [0, 0, 0]), null);
+
+  // Vitesse d'ejection : la trainee tire le mobile vers la vitesse du milieu.
+  // Sans courant, la tornade ne faisait que freiner.
+  const cyclone = new FluidField([tornade]);
+  const vc = { x: 0, y: 0, z: 0 };
+  for (let i = 0; i < 2000; i++) {
+    vc.y -= 12 * 0.01;
+    cyclone.apply([0, 0, 0], vc, 0.01, { magnitude: 12, dir: { x: 0, y: -1, z: 0 } });
+  }
+  check("la tornade ejecte vers le haut", vc.y > 250, true);
+
+  // `_priority` tranche avant la profondeur : l'interieur du vaisseau est a
+  // 100, le centre d'une tornade a 5, l'ocean a 1.
+  const empiles = [
+    { name: "Ocean", position: [0, 0, 0], radius: 500, drag: 1, density: 10, priority: 1 },
+    { name: "Cabine", position: [0, 0, 0], radius: 3, drag: 1, density: 0, priority: 100 },
+  ];
+  check("la priorite passe avant la profondeur",
+        fluidAt(empiles, [0, 0, 0]).volume.name, "Cabine");
+
+  // Le meme ocean sortait de `gameplay` (avec densite) et de `solar` (sans) :
+  // les deux s'annulaient, et rien ne flottait sur Giant's Deep.
+  const double = fluidVolumes(
+    { placed: { SphereOceanFluidVolume: [{ name: "Ocean", position: [0, 0, 0],
+                                           fields: { _radius: 498, _density: 10 } }] } },
+    { fluids: [{ name: "Ocean", position: [0, 0, 0], radius: 500, density: null }] });
+  check("l'ocean ne sort qu'une fois", double.length, 1);
+  check("... et c'est celui qui porte la densite", double[0].density, 10);
 }
 
 // --- lumieres posees ----------------------------------------------------
@@ -1000,6 +1108,448 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         new TextDecoder().decode(ogg).includes("OpusTags"), true);
   check("le flux se termine par une page de fin",
         [...ogg.slice(-1000)].length > 0, true);
+}
+
+
+// --- marche, saut et sac dorsal -----------------------------------------
+//
+// Le plus gros ecart du portage : il n'y avait PAS de marche. On se deplacait
+// au sol comme dans le vide, a la poussee, sans vitesse maximale, sans
+// acceleration, sans saut — alors que toutes les constantes etaient extraites,
+// chargees, rangees dans `this.c` et jamais lues (docs/36-audit.md §2.1).
+{
+  const c = PLAYER_FALLBACK;
+  const basis = { fwd: { x: 0, y: 0, z: 1 }, right: { x: 1, y: 0, z: 0 },
+                  up: { x: 0, y: 1, z: 0 } };
+
+  check("en avant, on vise _groundSpeed",
+        round(groundTarget({ forward: 1, right: 0 }, basis, c).z, 3), 7);
+  check("de cote, on vise _strafeSpeed",
+        round(groundTarget({ forward: 0, right: 1 }, basis, c).x, 3), 5);
+  // Composer 7 et 5 sans borner donnerait 8,6 en diagonale : plus vite en
+  // biais qu'en ligne droite, ce qui est le defaut classique.
+  const diag = groundTarget({ forward: 1, right: 1 }, basis, c);
+  check("en diagonale, on ne va pas plus vite qu'en avant",
+        Math.hypot(diag.x, diag.z) <= 7 + 1e-9, true);
+
+  // Regime etabli : v -> _groundSpeed a 1 % pres. `_groundAcceleration` est
+  // une fraction par PAS FIXE (50 Hz), pas par seconde : la mise en vitesse se
+  // compte en dixiemes de seconde, pas en dizaines.
+  let v = 0;
+  for (let i = 0; i < 60; i++) v = approach(v, 7, c.acceleration, 1 / 60);
+  check("la vitesse de regime est _groundSpeed a 1 % pres",
+        Math.abs(v - 7) / 7 < 0.01, true);
+  let court = 0;
+  for (let i = 0; i < 12; i++) court = approach(court, 7, c.acceleration, 1 / 60);
+  check("... et elle est atteinte en un cinquieme de seconde",
+        Math.abs(court - 7) / 7 < 0.01, true);
+  // Meme mise en vitesse quelle que soit la cadence (le principe du §2.5).
+  const apres1s = (fps) => {
+    let u = 0;
+    for (let i = 0; i < fps; i++) u = approach(u, 7, c.acceleration, 1 / fps);
+    return u;
+  };
+  check("la mise en vitesse ne depend pas de la frequence d'images",
+        Math.abs(apres1s(30) - apres1s(144)) < 1e-9, true);
+  check("l'approche ne depasse jamais sa cible", approach(0, 7, 1, 1), 7);
+
+  // Pente praticable : _maxAngleToBeGrounded vaut 45 degres. Le portage
+  // n'avait aucun seuil, et on tenait sur une paroi verticale.
+  const up = [0, 1, 0];
+  const pente = (deg) => [Math.sin(deg * Math.PI / 180), Math.cos(deg * Math.PI / 180), 0];
+  check("un sol plat porte", walkable(pente(0), up), true);
+  check("une pente a 44 degres porte encore", walkable(pente(44), up), true);
+  check("une pente a 46 degres ne porte plus", walkable(pente(46), up), false);
+  check("une paroi verticale ne porte pas", walkable(pente(90), up), false);
+
+  // Hauteur de saut : _jumpSpeed 6 sous la pesanteur de Timber Hearth (12).
+  check("hauteur de saut : v^2 / 2g", round(jumpHeight(6, 12), 4), 1.5);
+
+  // Un joueur pose sur une sphere : il marche, il saute, et il retombe.
+  const corps = [{ name: "P", position: [0, 0, 0],
+                   gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 250,
+                              lowerSurfaceRadius: 250, cutoffRadius: 0,
+                              falloffType: 0, alignmentRadius: 400 } }];
+  const p = new Player({}, [0, 251.7, 0]);
+  const vertical = { fwd: { x: 0, y: 0, z: 1 }, right: { x: 1, y: 0, z: 0 },
+                     up: { x: 0, y: 1, z: 0 } };
+  const rien = { forward: 0, right: 0, up: false };
+  for (let i = 0; i < 60; i++) p.update(1 / 60, corps, rien, vertical, null);
+  check("pose au sol", p.grounded, true);
+  check("... et immobile", round(Math.hypot(p.vel.x, p.vel.y, p.vel.z), 2), 0);
+
+  // Marche : douze secondes en avant, et la vitesse tangentielle vaut 7.
+  for (let i = 0; i < 60 * 12; i++) {
+    p.update(1 / 60, corps, { forward: 1, right: 0, up: false }, vertical, null);
+  }
+  const tang = Math.hypot(p.vel.x, p.vel.z);
+  check("on marche a _groundSpeed", Math.abs(tang - 7) / 7 < 0.02, true);
+  check("marcher ne brule pas de carburant", p.jetpack, false);
+
+  // Saut : sur le FRONT de la touche, et une seule fois.
+  const q = new Player({}, [0, 251.7, 0]);
+  for (let i = 0; i < 60; i++) q.update(1 / 60, corps, rien, vertical, null);
+  q.update(1 / 60, corps, { forward: 0, right: 0, up: true }, vertical, null);
+  check("le saut part a _jumpSpeed", round(q.vel.y, 1), 5.8);
+  check("... et quitte le sol", q.grounded, false);
+
+  // Sac dorsal : 7 loin de tout, 12 en vertical pres d'une surface, 5 de cote.
+  const r = new Player({}, [0, 300, 0]);
+  r.field = { body: corps[0], distance: 300, magnitude: 12,
+              dir: { x: 0, y: -1, z: 0 } };
+  check("pres d'une surface, la poussee verticale vaut 12",
+        round(r.jetpackAccel({ forward: 0, right: 0, up: true }, vertical,
+                             { x: 0, y: 1, z: 0 }).y, 3), 12);
+  check("... et la poussee laterale 5",
+        round(r.jetpackAccel({ forward: 1, right: 0, up: false }, vertical,
+                             { x: 0, y: 1, z: 0 }).z, 3), 5);
+  r.field = { body: corps[0], distance: 5000, magnitude: 0.6,
+              dir: { x: 0, y: -1, z: 0 } };
+  check("loin de tout, c'est _maxTranslationalThrust",
+        round(r.jetpackAccel({ forward: 1, right: 0, up: false }, vertical,
+                             { x: 0, y: 1, z: 0 }).z, 3), 7);
+  check("le sac dorsal qui pousse se declare", r.jetpack, true);
+
+  // Les constantes viennent des DEUX composants, et rien n'est invente : ce
+  // que le build ne donne pas est absent, `Player` complete avec son repli.
+  const consts = playerConstants(
+    { constants: { PlayerCharacterController: { _groundSpeed: 9, _turnRate: 200 } } },
+    { singletons: { JetpackThrusterModel: { fields: { _maxTranslationalThrust: 7,
+                                                      _surfaceVerticalThrust: 12 } } } });
+  check("la marche vient de PlayerCharacterController", consts.groundSpeed, 9);
+  check("le sac dorsal vient de JetpackThrusterModel",
+        consts.surfaceVerticalThrust, 12);
+  check("ce que le build ne donne pas n'est pas invente",
+        "jumpSpeed" in consts, false);
+  check("... et le repli le fournit",
+        new Player(consts, [0, 0, 0]).c.jumpSpeed, 6);
+
+  // Desequilibre a l'atterrissage : _tumbleDuration 1,5.
+  const t = new Player({ tumbleThreshold: 10, tumbleDuration: 1.5 }, [0, 260, 0]);
+  t.vel.y = -40;
+  for (let i = 0; i < 30; i++) t.update(1 / 60, corps, rien, vertical, null);
+  check("un atterrissage rapide desequilibre", t.tumble > 0, true);
+  const avant = { x: t.vel.x, z: t.vel.z };
+  t.update(1 / 60, corps, { forward: 1, right: 0, up: false }, vertical, null);
+  check("... et coupe les commandes le temps de se relever",
+        round(Math.hypot(t.vel.x - avant.x, t.vel.z - avant.z), 6), 0);
+}
+
+// --- frottements ramenes a dt --------------------------------------------
+//
+// `vel *= 0,86` etait applique PAR IMAGE : a 30 im/s le freinage etait deux
+// fois plus faible qu'a 60, et la distance de glissade dependait de la machine
+// (docs/36-audit.md §2.5).
+{
+  check("a 60 im/s, le facteur d'origine est inchange",
+        round(frameFriction(0.86, 1 / 60), 6), 0.86);
+  // Une seconde de freinage doit donner le meme resultat quelle que soit la
+  // cadence : c'est tout ce que l'invariant demande.
+  const apres = (fps) => {
+    let v = 10;
+    for (let i = 0; i < fps; i++) v *= frameFriction(0.86, 1 / fps);
+    return v;
+  };
+  check("une seconde a 30 im/s freine autant qu'a 60",
+        Math.abs(apres(30) - apres(60)) < 1e-9, true);
+  check("... et autant qu'a 144", Math.abs(apres(144) - apres(60)) < 1e-9, true);
+  check("un pas nul ne freine pas", frameFriction(0.86, 0), 1);
+}
+
+// --- vaisseau : inertie de rotation et roulis -----------------------------
+//
+// `_usePhysicsToRotate` vaut VRAI et `_angularDrag` 0,92 etait lu sans jamais
+// servir : le vaisseau collait instantanement au repere camera, il tournait
+// comme une camera (docs/36-audit.md §2.2).
+{
+  const consts = { _maxTranslationalThrust: 50, _maxRotationalThrust: 2,
+                   _angularDrag: 0.92, _usePhysicsToRotate: true };
+  const ship = new Ship(consts, null, [0, 0, 0]);
+  check("la poussee rotationnelle est lue", ship.rotationalThrust, 2);
+  check("la trainee angulaire aussi", ship.angularDrag, 0.92);
+  check("et elle est desormais employee", ship.usePhysicsToRotate, true);
+
+  // Le nez part sur +Z ; on demande un quart de tour vers +X.
+  ship.boarded = true;
+  const cible = { fwd: { x: 1, y: 0, z: 0 }, right: { x: 0, y: 0, z: -1 },
+                  up: { x: 0, y: 1, z: 0 } };
+  const nez = () => ship.axes.fwd;
+  check("le vaisseau ne se retourne pas dans l'image",
+        round(nez()[0], 3), 0);
+  let images = 0;
+  while (nez()[0] < 0.99 && images < 60 * 30) {
+    ship.rotate(1 / 60, { roll: 0 }, cible);
+    images += 1;
+  }
+  check("le quart de tour prend un temps fini", images < 60 * 30, true);
+  check("... et se compte en secondes, pas en images", images > 30, true);
+  check("le nez finit par viser le regard", round(nez()[0], 1), 1);
+
+  // Vitesse angulaire terminale : couple / (1 - trainee), par pas fixe.
+  check("vitesse angulaire terminale", round(terminalAngularSpeed(2, 0.92), 4),
+        round((2 / 60) / 0.08, 4));
+
+  // Roulis : la manette et le clavier le prevoyaient, le vaisseau n'avait
+  // aucun axe.
+  const roul = new Ship(consts, null, [0, 0, 0]);
+  roul.boarded = true;
+  const droit = { fwd: { x: 0, y: 0, z: 1 }, right: { x: 1, y: 0, z: 0 },
+                  up: { x: 0, y: 1, z: 0 } };
+  for (let i = 0; i < 60; i++) roul.rotate(1 / 60, { roll: 1 }, droit);
+  check("le roulis tourne le vaisseau autour de son nez",
+        round(roul.axes.fwd[2], 2), 1);
+  check("... et incline son haut", Math.abs(roul.axes.up[0]) > 0.1, true);
+
+  // Un pas d'integration d'orientation ne change pas la norme.
+  const q = spinStep([0, 0, 0, 1], [0, 3, 0], 0.1);
+  check("le quaternion reste unitaire",
+        round(Math.hypot(q[0], q[1], q[2], q[3]), 6), 1);
+  check("une rotation de 0,3 rad autour de Y tourne bien +Z vers +X",
+        quatRotate(q, [0, 0, 1])[0] > 0, true);
+
+  // Sans physique de rotation, on retrouve exactement l'ancien comportement.
+  const colle = new Ship({ ...consts, _usePhysicsToRotate: false }, null, [0, 0, 0]);
+  colle.boarded = true;
+  colle.rotate(1 / 60, { roll: 1 }, cible);
+  check("_usePhysicsToRotate faux : le vaisseau ne tourne pas seul",
+        colle.quat.join(","), "0,0,0,1");
+
+  // Orientation initiale : le « haut » du vaisseau doit etre la verticale
+  // locale, sinon sa poussee verticale part de travers des la premiere image.
+  const pose = new Ship(consts, null, [0, 0, 0]);
+  pose.orientTo([0, 0, 1], null);
+  check("orientTo pose le haut du vaisseau sur la verticale donnee",
+        pose.axes.up.map((v) => round(v, 6)).join(","), "0,0,1");
+}
+
+// --- report des vitesses au changement de referentiel ---------------------
+//
+// La boucle recalait les POSITIONS d'une ancre a l'autre et laissait les
+// vitesses : on arrivait toujours a l'arret relatif de sa cible, ce qui
+// supprime la quatrieme phase de l'Autopilot — dans le jeu, la difficulte
+// centrale du vol (docs/36-audit.md §2.4).
+{
+  const soleil = { name: "Soleil", bodyName: "Soleil", position: [0, 0, 0],
+                   bodyPosition: [0, 0, 0],
+                   gravity: { surfaceAcceleration: 100, upperSurfaceRadius: 2000,
+                              lowerSurfaceRadius: 2000, cutoffRadius: 0,
+                              falloffType: 1 } };
+  const planete = { name: "Planete", bodyName: "Planete", position: [0, 0, 8600],
+                    bodyPosition: [0, 0, 8600],
+                    gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 250,
+                               lowerSurfaceRadius: 250, cutoffRadius: 0,
+                               falloffType: 0 },
+                    orbit: { primary: "Soleil", impulseScalar: 1 } };
+  // mu = a R = 12 x 250 = 3000, donc v = sqrt(mu) ~ 54,8 u/s
+  const lune = { name: "Lune", bodyName: "Lune", position: [0, 0, 8600 + 1000],
+                 bodyPosition: [0, 0, 8600 + 1000],
+                 gravity: { surfaceAcceleration: 5, upperSurfaceRadius: 100,
+                            lowerSurfaceRadius: 100, cutoffRadius: 0,
+                            falloffType: 0 },
+                 orbit: { primary: "Planete", impulseScalar: 1 } };
+  const orb = buildOrbits([soleil, planete, lune]);
+
+  check("un corps fixe n'a pas de vitesse de repere",
+        frameVelocity(orb, soleil).join(","), "0,0,0");
+  const vp = frameVelocity(orb, planete);
+  check("la planete se deplace a sa vitesse orbitale",
+        round(Math.hypot(...vp), 3), round(orb.states.get(planete).speed, 3));
+
+  // La lune porte SA vitesse plus celle de sa planete : c'est bien l'ecart
+  // entre les deux reperes qu'on doit annuler en arrivant.
+  const dv = frameVelocity(orb, planete).map((v, i) => v - frameVelocity(orb, lune)[i]);
+  check("l'ecart entre les deux reperes vaut sqrt(mu)",
+        Math.abs(Math.hypot(...dv) - Math.sqrt(12 * 250 * 250 / 1000)) < 30, true);
+  check("... et il n'est pas nul", Math.hypot(...dv) > 10, true);
+
+  // Il reste coherent apres integration : ce n'est pas une valeur de depart.
+  advance(orb, 137);
+  const vp2 = frameVelocity(orb, planete);
+  check("la vitesse suit l'orbite",
+        round(Math.hypot(...vp2), 3), round(Math.hypot(...vp), 3));
+  check("... mais a change de direction",
+        Math.abs(vp2[0] - vp[0]) > 1, true);
+}
+
+// --- champs polaires et alignement ---------------------------------------
+//
+// `PolarForceField` : un volume, `_acceleration -10`, radiale a un AXE et non
+// a un point. Il etait extrait et jamais lu. `_affectsAlignment` non plus, sur
+// les champs directionnels (docs/36-audit.md §2.9).
+{
+  const gameplay = { placed: { PolarForceField: [{
+    name: "Puits", position: [0, 0, 0], rotation: null,
+    volume: { shape: "capsule", radius: 30, height: 200, axis: 1, center: [0, 0, 0] },
+    fields: { _acceleration: -10, _localAxis: { x: 0, y: 1, z: 0 } },
+  }] } };
+  const pf = polarFields(gameplay);
+  check("le champ polaire est lu", pf.length, 1);
+  check("son acceleration est celle du build", pf[0].acceleration, -10);
+  check("son intensite est le module", pf[0].magnitude, 10);
+
+  // Acceleration negative : on est attire VERS l'axe, quelle que soit la
+  // hauteur a laquelle on se trouve.
+  const d = polarDirection(pf[0], [10, 40, 0]);
+  check("la force pointe vers l'axe", d.map((v) => round(v, 3)).join(","), "-1,0,0");
+  check("... et n'a pas de composante le long de l'axe", round(d[1], 6), 0);
+  check("sur l'axe meme, il n'y a pas de direction",
+        polarDirection(pf[0], [0, 0, 0]), null);
+  check("le volume est bien une capsule",
+        round(distanceToAxis([10, 40, 0], pf[0].volume), 3), 10);
+  check("hors du volume, aucun champ", strongestPolar(pf, [90, 0, 0]), null);
+  check("dedans, il l'emporte", strongestPolar(pf, [10, 0, 0]).name, "Puits");
+
+  // `_affectsAlignment` : un champ sur 34 pousse SANS retourner ce qu'il tient.
+  const corps = [{ name: "P", position: [0, 0, 0],
+                   gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 250,
+                              lowerSurfaceRadius: 250, cutoffRadius: 0,
+                              falloffType: 0 } }];
+  const couloir = (align) => directionalFields({ placed: { DirectionalForceField: [{
+    name: "Couloir", position: [0, 260, 0], rotation: null,
+    volume: { shape: "sphere", radius: 20, center: [0, 0, 0] },
+    fields: { _fieldMagnitude: 10, _fieldDirection: { x: 1, y: 0, z: 0 },
+              _affectsAlignment: align },
+  }] } });
+  const suit = dominantField(corps, { x: 0, y: 260, z: 0 },
+                             { directional: couloir(true), framePos: [0, 0, 0] });
+  check("un champ qui aligne impose sa verticale",
+        round(suit.alignDir.x, 3), 1);
+  const pousse = dominantField(corps, { x: 0, y: 260, z: 0 },
+                               { directional: couloir(false), framePos: [0, 0, 0] });
+  check("un champ qui n'aligne pas pousse quand meme",
+        round(pousse.dir.x, 3), 1);
+  check("... mais laisse la verticale a la planete",
+        round(pousse.alignDir.y, 3), -1);
+
+  // Les deux familles se comparent sur le meme pied : priorite, puis intensite.
+  const melange = dominantField(corps, { x: 10, y: 0, z: 0 },
+    { directional: [], polar: pf, framePos: [0, 0, 0] });
+  check("le champ polaire prend la main dans son volume",
+        round(melange.dir.x, 3), -1);
+}
+
+// --- attenuation audio : 83 sources sur 97 sont en courbe ------------------
+//
+// Le portage ecrivait `rolloff === "logarithmic" ? "inverse" : "linear"` : il
+// rendait donc les 83 sources `custom` dans le seul mode que le build n'emploie
+// JAMAIS (docs/36-audit.md §2.6).
+{
+  check("logarithmique -> inverse", rolloffModel("logarithmic"), "inverse");
+  check("custom -> inverse, pas lineaire", rolloffModel("custom"), "inverse");
+  check("lineaire reste lineaire", rolloffModel("linear"), "linear");
+  check("une source sans mode connu ne tombe pas en lineaire",
+        rolloffModel(null), "inverse");
+
+  // La courbe est echantillonnee entre MinDistance et MaxDistance.
+  const c = [1, 0.5, 0.2, 0.05, 0];
+  check("au minimum, plein volume", curveGain(c, 5, 10, 50), 1);
+  check("en deca du minimum aussi", curveGain(c, 0, 10, 50), 1);
+  check("a mi-portee, on suit la courbe", round(curveGain(c, 30, 10, 50), 3), 0.2);
+  check("au-dela du maximum, on plafonne", curveGain(c, 500, 10, 50), 0);
+  check("un point intermediaire s'interpole",
+        round(curveGain(c, 25, 10, 50), 3), 0.35);
+  check("sans courbe, le gain est neutre", curveGain(null, 30, 10, 50), 1);
+}
+
+// --- colliders par niveau de detail ---------------------------------------
+//
+// A8 etait surestimee : il y a DEUX `LODGroup` dans la scene et les cinq
+// `CreateLODGroup` sont vides. Le vrai gain est dans les 21 `ChildColliderLOD`,
+// qui portent `_trackPlayer` et font tomber les 441 colliders de Timber Hearth
+// (docs/36-audit.md §2.8).
+{
+  const gameplay = { placed: { ChildColliderLOD: [
+    { name: "Village", position: [0, 0, 0], fields: { _trackPlayer: true },
+      volume: { shape: "sphere", radius: 120 } },
+    { name: "Observatoire", position: [500, 0, 0],
+      fields: { _trackPlayer: true, _trackShip: true, _radius: 80 } },
+    { name: "Sans suivi", position: [9000, 0, 0], fields: { _trackPlayer: false } },
+  ] } };
+  const groupes = colliderLODs(gameplay);
+  check("les groupes sont lus", groupes.length, 3);
+  check("la portee vient du collider quand le champ n'y est pas",
+        groupes[0].radius, 120);
+  check("... et du champ quand il y est", groupes[1].radius, 80);
+  check("le vaisseau reveille l'observatoire", groupes[1].trackShip, true);
+
+  const lod = new ColliderLODs(groupes);
+  lod.update({ player: [0, 0, 0] });
+  check("pres du village, il est eveille", lod.awake.has("Village"), true);
+  check("l'observatoire dort", lod.awake.has("Observatoire"), false);
+  check("un groupe que rien ne suit reste eveille",
+        lod.awake.has("Sans suivi"), true);
+  check("les colliders endormis sont nommes", lod.asleep().has("Observatoire"), true);
+
+  lod.update({ player: [0, 0, 0] });
+  check("un ensemble stable ne declenche pas de reconstruction",
+        lod.changed, false);
+  lod.update({ player: [0, 0, 0], ship: [480, 0, 0] });
+  check("le vaisseau qui arrive reveille son groupe",
+        lod.awake.has("Observatoire"), true);
+  check("... et cela demande une reconstruction", lod.changed, true);
+
+  // Le filtre porte sur le SOUS-ARBRE : un maillage descend d'un noeud endormi.
+  const parent = { name: "Observatoire", parent: null };
+  const enfant = { name: "Toit", parent };
+  check("un enfant de groupe endormi est ecarte",
+        underAsleep(enfant, new Set(["Observatoire"])), true);
+  check("... et un maillage libre ne l'est pas",
+        underAsleep({ name: "Sol", parent: null }, new Set(["Observatoire"])), false);
+  check("sans groupe endormi, rien n'est ecarte",
+        underAsleep(enfant, new Set()), false);
+}
+
+// --- detecteur d'oxygene ---------------------------------------------------
+//
+// `OxygenDetector` : une capsule r=0,5 h=2 portee par le joueur. Elle etait
+// extraite et jamais lue, et le test de zone restait ponctuel (§2.9).
+{
+  const gameplay = { placed: { OxygenDetector: [{
+    name: "PlayerDetector", position: [0, 0, 0],
+    volume: { shape: "capsule", radius: 0.5, height: 2, axis: 1, center: [0, 0, 0] },
+    fields: {},
+  }] } };
+  const det = oxygenDetector(gameplay);
+  check("le detecteur est lu", det.radius, 0.5);
+  check("sa portee est son demi-encombrement", det.reach, 1);
+  check("sans detecteur, pas de portee", oxygenDetector({}), null);
+
+  const zones = [{ name: "Arbres", position: [0, 0, 0], radius: 24 }];
+  check("un point hors zone reste hors zone",
+        inOxygenZone(zones, [24.5, 0, 0]), null);
+  check("mais la capsule du joueur y touche",
+        inOxygenZone(zones, [24.5, 0, 0], det.reach).name, "Arbres");
+}
+
+// --- repere tournant : Coriolis et force centrifuge ------------------------
+//
+// Le repere de travail TOURNE avec le corps ancre — c'est ce qui garde ses
+// colliders immobiles — et rien n'en tirait les consequences : en vol
+// stationnaire, le sol ne defilait pas (docs/36-audit.md §1.2).
+{
+  const corps = { spin: { axis: [0, 1, 0], degreesPerSecond: 0.05 * 180 / Math.PI } };
+  const champ = new SpinField([corps]);
+  check("le vecteur rotation est lu",
+        champ.omega(corps).map((v) => round(v, 6)).join(","), "0,0.05,0");
+  check("un corps qui ne tourne pas n'en a pas",
+        champ.omega({ spin: null }), null);
+
+  // A 250 unites et 0,05 rad/s, le sol defile a 12,5 u/s sous un joueur qui
+  // reste immobile dans le repere inertiel.
+  const r = { x: 250, y: 0, z: 0 };
+  const w = champ.omega(corps);
+  const v = { x: -(w[1] * r.z - w[2] * r.y), y: -(w[2] * r.x - w[0] * r.z),
+              z: -(w[0] * r.y - w[1] * r.x) };
+  check("le sol defile a omega r", round(Math.hypot(v.x, v.y, v.z), 3), 12.5);
+
+  // Pour un tel corps, Coriolis et centrifuge se composent exactement en
+  // l'acceleration centripete qui le maintient sur son cercle apparent.
+  const a = champ.inertial(corps, r, v);
+  check("l'acceleration d'inertie est centripete", round(a[0], 6), -0.625);
+  check("... et vaut omega^2 r", round(-a[0], 6), round(0.05 ** 2 * 250, 6));
+  check("elle n'a pas de composante hors du plan", round(a[1], 9), 0);
+  check("un corps immobile dans le repere tournant ne subit que le centrifuge",
+        round(champ.inertial(corps, r, { x: 0, y: 0, z: 0 })[0], 6), 0.625);
 }
 
 report();

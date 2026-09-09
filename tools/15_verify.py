@@ -347,8 +347,97 @@ def run(url, heavy):
         rs = page.evaluate("() => ({ couleur: window.__fog.fog.color,"
                            " mode: window.__fog.fog.mode })")
         rep.eq("mode de brouillard lu dans la scene", rs["mode"], "exp2")
+        # Le gris moyen attendu ici etait la couleur RECOPIEE, celle que la
+        # mesure a dementie (docs/29-brouillards.md, docs/36-audit.md) : les
+        # RenderSettings de level0 donnent un vert-gris tres sombre. Ce
+        # controle gardait donc la valeur fausse.
         rep.eq("couleur de brouillard lue dans la scene",
-               [round(c, 2) for c in rs["couleur"]], [0.5, 0.5, 0.5])
+               [round(c, 3) for c in rs["couleur"]], [0.146, 0.157, 0.14])
+
+        # --- marche, saut et sac dorsal -----------------------------------------
+        #
+        # docs/36-audit.md §2.1. Ce qui ne se verifie qu'ici : que le joueur
+        # ATTEINT sa vitesse de marche sur le terrain reel, sous Havok, et
+        # qu'il ne brule pas de carburant en marchant. Le modele lui-meme est
+        # eprouve sans le jeu par tests/09-jeu.mjs.
+        pc = page.evaluate("() => window.__player ? window.__player.c : null")
+        if pc:
+            rep.eq("vitesse de marche du build", pc.get("groundSpeed"), 7)
+            rep.eq("vitesse de pas de cote", pc.get("strafeSpeed"), 5)
+            rep.eq("vitesse de saut", pc.get("jumpSpeed"), 6)
+            rep.eq("poussee verticale de surface", pc.get("surfaceVerticalThrust"), 12)
+            rep.eq("poussee laterale de surface", pc.get("surfaceLateralThrust"), 5)
+            rep.eq("poussee du sac dorsal loin de tout",
+                   pc.get("maxTranslationalThrust"), 7)
+
+        # On attend d'etre pose, puis on marche une seconde. Le joueur apparait
+        # en l'air : sans appui, il n'y a pas de marche a mesurer, et le
+        # controle le dit plutot que d'echouer sur un temps d'attente.
+        pose = True
+        try:
+            page.wait_for_function("window.__player && window.__player.grounded",
+                                   timeout=30000)
+        except Exception:
+            pose = False
+        rep.eq("le joueur finit par se poser", pose, True)
+        carburant0 = page.evaluate("() => window.__resources.fuel")
+        if pose:
+            page.keyboard.down("w")
+            page.wait_for_timeout(1000)
+            marche = page.evaluate("""() => {
+              const p = window.__player, f = p.field;
+              if (!f) return null;
+              const u = [-f.dir.x, -f.dir.y, -f.dir.z];
+              const vn = p.vel.x * u[0] + p.vel.y * u[1] + p.vel.z * u[2];
+              return { tangentielle: Math.hypot(p.vel.x - vn * u[0],
+                                                p.vel.y - vn * u[1],
+                                                p.vel.z - vn * u[2]),
+                       sacDorsal: p.jetpack, ausol: p.grounded };
+            }""")
+            page.keyboard.up("w")
+            if marche:
+                rep.eq("on marche au sol, pas a la poussee", marche["ausol"], True)
+                rep.near("vitesse de marche atteinte", marche["tangentielle"],
+                         (pc or {}).get("groundSpeed", 7), 1.5)
+                rep.eq("le sac dorsal ne s'allume pas en marchant",
+                       marche["sacDorsal"], False)
+            # Il peut RECHARGER (zone d'oxygene, vaisseau) : ce qu'on interdit,
+            # c'est qu'il baisse. `thrusting` valait vrai des qu'une touche de
+            # deplacement etait tenue (docs/36-audit.md §1.1).
+            fuel1 = page.evaluate("() => window.__resources.fuel")
+            rep.check("marcher ne brule pas de carburant",
+                      fuel1 >= carburant0 - 0.01, round(fuel1, 3),
+                      f">= {round(carburant0, 3)}")
+
+            # Saut : la touche « haut » saute au sol, elle pousse en l'air.
+            page.keyboard.press("Space")
+            page.wait_for_timeout(120)
+            rep.eq("le saut quitte le sol",
+                   page.evaluate("() => window.__player.grounded"), False)
+
+        # --- inertie de rotation du vaisseau ------------------------------------
+        #
+        # `_usePhysicsToRotate` vaut vrai : le vaisseau porte son quaternion et
+        # la camera le suit, au lieu de lui coller (docs/36-audit.md §2.2).
+        rot = page.evaluate("""() => {
+          const s = window.__shipRef;
+          return s ? { physique: s.usePhysicsToRotate, couple: s.rotationalThrust,
+                       trainee: s.angularDrag, quat: s.quat.length } : null;
+        }""")
+        if rot:
+            rep.eq("le vaisseau tourne par la physique", rot["physique"], True)
+            rep.eq("poussee rotationnelle du build", rot["couple"], 2)
+            rep.eq("trainee angulaire du build", rot["trainee"], 0.92)
+            rep.eq("il porte son propre quaternion", rot["quat"], 4)
+
+        # --- colliders par groupe de niveau de detail ---------------------------
+        #
+        # A8 requalifiee : ce ne sont pas les LODGroup mais les 21
+        # `ChildColliderLOD` qui font tomber les colliders (§2.8).
+        col = page.evaluate("() => window.__world.colliderLOD || null")
+        if col:
+            rep.at_least("groupes de colliders lus", col["groupes"], 0)
+            rep.at_most("groupes eveilles", col["eveilles"], col["groupes"])
 
         # --- camera embarquee de la sonde ---------------------------------------
         page.keyboard.press("KeyF")

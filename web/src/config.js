@@ -49,14 +49,45 @@ export async function loadGameplay() {
   }
 }
 
-/** Constantes de vol/deplacement, avec valeurs de repli. */
-export function playerConstants(data) {
+/**
+ * Constantes de deplacement du joueur.
+ *
+ * Elles viennent de DEUX composants : `PlayerCharacterController` pour la
+ * marche (dans `solar_system.json`) et `JetpackThrusterModel` pour le sac
+ * dorsal (dans `gameplay.json`). Le portage n'en lisait que cinq, et le
+ * controleur les rangeait sans jamais s'en servir (docs/36-audit.md §2.1).
+ *
+ * Ce qui manque ici n'est PAS remplace : `Player` complete avec
+ * `PLAYER_FALLBACK`, et c'est le seul endroit ou une valeur est ecrite en dur.
+ */
+export function playerConstants(data, gameplay = {}) {
   const c = (data.constants && data.constants.PlayerCharacterController) || {};
-  return {
-    groundSpeed: c._groundSpeed ?? 7,
-    strafeSpeed: c._strafeSpeed ?? 5,
-    jumpSpeed: c._jumpSpeed ?? 6,
-    acceleration: c._groundAcceleration ?? 0.5,
-    turnRate: c._turnRate ?? 160,
+  // `JetpackThrusterModel` et rien d'autre : `ThrusterModel` est la classe de
+  // base, dont derive aussi `ShipThrusterModel` (poussee 50). S'en servir comme
+  // repli donnerait au joueur la poussee du vaisseau — sept fois trop. Faute du
+  // composant, c'est `PLAYER_FALLBACK` qui complete, explicitement.
+  const j = ((gameplay.singletons || {}).JetpackThrusterModel || {}).fields || {};
+  const out = {
+    groundSpeed: c._groundSpeed,
+    strafeSpeed: c._strafeSpeed,
+    jumpSpeed: c._jumpSpeed,
+    acceleration: c._groundAcceleration,
+    suitGroundSpeed: c._suitGroundSpeed,
+    turnRate: c._turnRate,
+    telescopeTurnScalar: c._telescopeTurnScalar,
+    suitTurnScalar: c._suitTurnScalar,
+    maxAngleToBeGrounded: c._maxAngleToBeGrounded,
+    maxAngleBetweenSlopes: c._maxAngleBetweenSlopes,
+    sphereCastRadius: c._sphereCastRadius,
+    sphereCastLength: c._sphereCastLength,
+    tumbleThreshold: c._tumbleThreshold,
+    tumbleDuration: c._tumbleDuration,
+    maxTranslationalThrust: j._maxTranslationalThrust,
+    surfaceVerticalThrust: j._surfaceVerticalThrust,
+    surfaceLateralThrust: j._surfaceLateralThrust,
   };
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v !== "number" || !isFinite(v)) delete out[k];
+  }
+  return out;
 }

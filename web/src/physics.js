@@ -30,12 +30,29 @@ export async function initPhysics(BABYLON, scene) {
  * Les maillages minuscules sont ignores : ils coutent un collider chacun pour
  * un apport nul sur les appuis du joueur.
  */
+/**
+ * Un maillage descend-il d'un noeud endormi ?
+ *
+ * Les 21 `ChildColliderLOD` du build disent quels sous-arbres n'ont pas a
+ * exister en collision quand personne n'est a portee. C'est la ou tombent les
+ * 441 colliders de Timber Hearth (docs/36-audit.md §2.8).
+ */
+export function underAsleep(mesh, asleep) {
+  if (!asleep || !asleep.size) return false;
+  for (let n = mesh; n; n = n.parent) {
+    if (n.name && asleep.has(n.name)) return true;
+  }
+  return false;
+}
+
 export function buildColliders(BABYLON, scene, meshes, opts = {}) {
-  const { maxCount = 1200, minVertices = 12 } = opts;
+  const { maxCount = 1200, minVertices = 12, asleep = null } = opts;
   const aggregates = [];
   let skipped = 0;
+  let dormants = 0;
   for (const m of meshes) {
     if (aggregates.length >= maxCount) break;
+    if (underAsleep(m, asleep)) { dormants++; continue; }
     if (m.getTotalVertices() < minVertices) { skipped++; continue; }
     try {
       m.computeWorldMatrix(true);
@@ -45,7 +62,7 @@ export function buildColliders(BABYLON, scene, meshes, opts = {}) {
       skipped++;
     }
   }
-  return { aggregates, skipped };
+  return { aggregates, skipped, dormants };
 }
 
 export function disposeColliders(set) {

@@ -11,7 +11,7 @@
 // Les 47 autres TextAsset sont les textes bruts des objets lisibles.
 
 import { parseXML } from "./xml.js";
-import { round } from "./context.js";
+import { round, refKey } from "./context.js";
 
 const textOf = (el) => el.text.split(/\s+/).filter(Boolean).join(" ") || null;
 
@@ -69,7 +69,9 @@ export function extractDialogue(ctx) {
     const xml = new TextDecoder("utf-8").decode(v.m_Script);
     const t = parseDialogueTree(xml);
     if (t && Object.keys(t.branches).length) {
-      trees[o.pathId] = { name: v.m_Name, ...t };
+      // Indexe par `fichier:path_id` : un path_id nu se repete d'un fichier a
+      // l'autre, et deux arbres homonymes se seraient ecrases (§2.7).
+      trees[refKey(o)] = { name: v.m_Name, ...t };
       stats.arbres++;
       for (const b of Object.values(t.branches)) {
         stats.branches++;
@@ -86,7 +88,9 @@ export function extractDialogue(ctx) {
     const f = ctx.scriptFields(obj);
     if (!f) continue;
     const gid = ctx.ownerId(obj);
-    const ref = f._activeDialogueTree ? f._activeDialogueTree.pathId : null;
+    // Le pointeur suit son `fileId` : sans cela il visait l'objet de meme
+    // path_id dans le fichier de la scene, ce qui n'est pas un arbre.
+    const ref = f._activeDialogueTree ? ctx.refOf(f._activeDialogueTree) : null;
     conversations.push({
       name: ctx.name(gid),
       character: f._characterName || null,

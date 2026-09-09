@@ -290,38 +290,56 @@ cette série est coché.
 
 ### Haute priorité — cœur du gameplay
 
-- [ ] **Modèle de marche et saut** (§2.1). Le plus gros écart du portage, et
-      toutes ses constantes sont déjà chargées et ignorées.
-- [ ] **Inertie de rotation du vaisseau et roulis** (§2.2). `_usePhysicsToRotate`
-      vaut vrai ; le vaisseau du portage tourne comme une caméra.
-- [ ] **Report des vitesses au changement de référentiel** (§2.4). Sans lui, le
-      vol interplanétaire n'a pas de difficulté.
-- [ ] **Courants de fluide : tornades et rayon tracteur** (§2.3). C'est le
-      contenu jouable de Giant's Deep.
+- [x] **Modèle de marche et saut** (§2.1). Fait : deux régimes séparés, saut sur
+      front de touche, pente praticable à 45°, sonde d'appui sphérique. Le
+      « boost » inventé est supprimé et le carburant ne brûle plus en marchant.
+      `_groundAcceleration` est une fraction par **pas fixe** et non par
+      seconde — voir [`37`](37-corrections.md) §1.
+- [x] **Inertie de rotation du vaisseau et roulis** (§2.2). Fait : quaternion
+      propre, `_angularDrag` employée, roulis au clavier et à la manette, et la
+      poussée suit le nez et non le regard.
+- [x] **Report des vitesses au changement de référentiel** (§2.4). Fait :
+      `frameVelocity()` dans `orbits.js`, appliqué au joueur, au vaisseau et aux
+      sondes. La quatrième phase de l'`Autopilot` a enfin du travail.
+- [x] **Courants de fluide : tornades et rayon tracteur** (§2.3). Fait : la
+      traînée s'applique à `v − v_milieu`, les volumes en capsule sont mesurés
+      comme tels, et `_flowSpeed` / `_angularSpeed` éjectent pour de bon.
 - [x] **Intensité des champs directionnels** — lisait `_forceScaleFactor` (1) au
       lieu de `_fieldMagnitude` (10) : gravités locales dix fois trop faibles,
       donc écrasées par le champ radial. Corrigé, avec la direction `{x,y,z}` et
       l'arbitrage par `_overridePriority`.
-- [ ] **Traînée et densité des fluides depuis les détecteurs et les volumes**
-      (§2.3), et dédoublonnage de l'océan.
-- [ ] **Collision réelle du vaisseau** : il se pose aujourd'hui sur une sphère
-      de rayon `upperSurfaceRadius`, donc au-dessus du terrain.
+- [x] **Traînée et densité des fluides depuis les détecteurs et les volumes**
+      (§2.3), et dédoublonnage de l'océan. Fait, poussée `a = −g(ρ − 1)` et
+      `_deepDensity` comprises.
+- [x] **Collision réelle du vaisseau** : fait quand Havok et la géométrie réelle
+      sont là — un rayon vers le bas local donne le contact du terrain. La
+      sphère analytique reste le repli, et le filet de sécurité.
 
 ### Moyenne priorité — sensation et retour
 
-- [ ] **Pente praticable et sonde d'appui sphérique** (`_maxAngleToBeGrounded 45`,
-      `_sphereCastRadius 0,46`).
-- [ ] **Déséquilibre à l'atterrissage** (`_tumbleDuration 1,5`).
-- [ ] **Courbes d'atténuation audio** (§2.6) — 83 sources sur 97 sont concernées.
+- [x] **Pente praticable et sonde d'appui sphérique** (`_maxAngleToBeGrounded 45`,
+      `_sphereCastRadius 0,46`). Havok n'expose pas le lancer de sphère : elle est
+      échantillonnée par cinq rayons parallèles, ce qui en donne la tolérance
+      latérale sans quitter l'API publique.
+- [x] **Déséquilibre à l'atterrissage** (`_tumbleDuration 1,5`). Le seuil, lui,
+      n'a pas été relevé sur le build : `PLAYER_FALLBACK.tumbleThreshold` est un
+      repli assumé, à remplacer par la mesure.
+- [x] **Courbes d'atténuation audio** (§2.6) — les deux niveaux : `custom` est
+      rendu en `inverse`, et `rolloffCustomCurve` est échantillonnée à
+      l'extraction puis appliquée au volume, le modèle de distance étant neutralisé.
 - [x] **Couleur de brouillard de repli** corrigée d'après les `RenderSettings`.
-- [ ] **Sensibilité de visée du build** (`_turnRate 160`) et ralenti à la lunette
-      (`_telescopeTurnScalar 0,5`).
-- [ ] **Carburant : ne plus en consommer en marchant.**
-- [ ] **Frottements ramenés à `dt`** (§2.5) — un bug franc, mais peu visible.
-- [ ] **`PolarForceField` et `_affectsAlignment`** (§2.9).
-- [ ] **Forces d'inertie du repère tournant** (Coriolis, centrifuge) : à 0,05 rad/s
-      et 250 u, le sol devrait défiler à 12,5 u/s sous un joueur en vol
-      stationnaire.
+- [x] **Sensibilité de visée du build** (`_turnRate 160`) et ralenti à la lunette
+      (`_telescopeTurnScalar 0,5`). La sensibilité est rapportée à la largeur de
+      l'écran, donc indépendante de la définition.
+- [x] **Carburant : ne plus en consommer en marchant.** Seul le sac dorsal brûle.
+- [x] **Frottements ramenés à `dt`** (§2.5). Celui du joueur au sol a disparu
+      plutôt que d'être converti : il faisait double emploi avec l'approche vers
+      la vitesse visée, et l'annulait.
+- [x] **`PolarForceField` et `_affectsAlignment`** (§2.9). Le champ polaire se
+      compare aux directionnels sur le même pied ; `dominantField` rend une
+      `alignDir` distincte de la direction de la force.
+- [x] **Forces d'inertie du repère tournant** (Coriolis, centrifuge) : fait, et
+      les 12,5 u/s sont l'invariant gardé dans `tests/09-jeu.mjs`.
 - [ ] **Équilibrage à l'oreille et à l'œil**, et **une partie jouée** : inchangé,
       et toujours hors de portée d'une machine.
 
@@ -331,13 +349,15 @@ cette série est coché.
       comptait 0 animation sur un build qui en porte 34.
 - [x] **`tests/05` gardait les portées audio sur une liste vide** : l'invariant
       A2 ne vérifiait rien.
-- [ ] **Déréférencement des arbres de dialogue** (§2.7) — à confirmer avant de
-      corriger.
-- [ ] **Requalifier A8** (§2.8) : `LODGroup` ne vaut pas la régénération
-      annoncée ; viser `ChildColliderLOD`.
+- [x] **Déréférencement des arbres de dialogue** (§2.7) — **confirmé**, et le
+      point est `ExtractContext.plain()`, qui écrivait `{ $ref: v.pathId }` en
+      jetant le `fileId`. Tout ce qui désigne un objet passe désormais par une
+      clé `fichier:path_id`.
+- [x] **Requalifier A8** (§2.8) : fait. Les 21 `ChildColliderLOD` endorment leur
+      sous-arbre, et les colliders d'un groupe endormi ne sont pas construits.
 - [ ] **Impostures de planète** à la `LODCameraSnapshot`, si le budget de rendu
       le demande.
-- [ ] **`OxygenDetector`** et son volume, plutôt qu'un test ponctuel.
+- [x] **`OxygenDetector`** et son volume, plutôt qu'un test ponctuel.
 - [ ] **Babylon, 11,1 Mo** : choix de projet, inchangé ([`34`](34-actions.md) A17).
 - [ ] **Gain réel de l'encodage Opus**, toujours non mesuré.
 
@@ -354,6 +374,9 @@ cette série est coché.
   du build, 11 valeurs distinctes), **A6 ne tenait qu'à moitié** (les champs
   étaient lus, leur intensité non), **A7 ne tenait qu'en partie** (traînée oui,
   densité et courant non), **A8 était surestimée**.
+
+Ce que la mise en œuvre a donné, et les deux décisions qu'elle a demandées, sont
+dans [`37-corrections.md`](37-corrections.md).
 
 La leçon de [`34`](34-actions.md) — « avant de conclure qu'une chose manque au
 build, vérifier qu'on la lit » — se prolonge d'une seconde : **avant de conclure
