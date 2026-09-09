@@ -103,6 +103,11 @@ pas.
 - **Les images du flashback**, qui ne sont pas dans le build.
 - **Le rendu de l'explosion** reste une couronne additive et une coque en fil de
   fer. Les shaders de la supernova ne sont pas portés.
-- **`PlayerDeathHandler` du jeu** fait plus que ce qui est ici : il joue un son
-  par cause et pilote la caméra pendant la séquence. Les commandes, elles, sont
-  bien coupées — un mort ne marche plus pendant son propre flashback.
+- ~~**`PlayerDeathHandler` du jeu** fait plus que ce qui est ici**~~ — les deux
+  manques sont comblés. Un **son par cause** : la piste `Death` existe dans le
+  build, le lien entre une cause et un clip n'y est pas, alors on cherche dans
+  cette piste un clip dont le nom parle de la cause et l'on retombe sur
+  n'importe lequel — mourir en silence est le seul résultat qu'on ne veuille
+  pas. Un **mouvement de caméra** : la vue s'affaisse, roule et recule pendant
+  les deux secondes d'attente, puis se fige, les images prenant l'écran ensuite.
+  Les amplitudes sont un choix de ce portage, le build ne les porte pas.

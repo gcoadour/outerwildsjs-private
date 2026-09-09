@@ -60,12 +60,19 @@ Son invite est la **seule du jeu posée au-dessus** du centre de l'écran
 
 ## Ce qui reste de ces systèmes
 
-- **`RemoteFlightConsole`** et **`SatelliteSnapshotController`** supposent une
-  caméra déportée — piloter le vaisseau depuis l'observatoire, regarder par le
-  satellite. Leurs invites sont au catalogue, la caméra ne l'est pas.
+- ~~**`RemoteFlightConsole`** et **`SatelliteSnapshotController`**~~ — **portés**
+  depuis que la sonde a apporté une caméra embarquée : c'est le même besoin, une
+  vue seconde dans un coin de l'écran. `ProbeCamera` prend maintenant un point
+  de vue plutôt qu'une sonde — laquelle n'en est qu'un cas particulier, qui
+  regarde dans le sens de son vol. Le cadrage, lui, est un choix : la console de
+  vol regarde le vaisseau de haut, le satellite regarde le corps qu'il survole.
 - **`ZeroGTrainingManager`** : l'entraînement en apesanteur. Son invite
   « Training » puis « Training Complete: All Systems Online » est extraite, mais
   le parcours qu'elle accompagne — une série de cibles à atteindre — n'a pas de
   données dans la scène au-delà du gestionnaire lui-même.
-- La **chaleur du feu de camp** n'est pas simulée : la guimauve grille sur
-  commande, pas par proximité d'un `HeatSource`.
+- ~~La **chaleur du feu de camp**~~ — **portée** : les `HeatSource` de la scène
+  sortent avec le collider qui leur sert de portée, et c'est la proximité qui
+  cuit la guimauve. On ne tend pas une guimauve au vide. La chaleur d'une source
+  qui n'annonce pas la sienne vaut 100, valeur pour laquelle la formule du jeu
+  donne exactement les cinq secondes de `_cookTime` : elle est déduite du temps
+  de cuisson, pas choisie.

@@ -151,7 +151,10 @@ fois, plutôt que de lancer six rayons par image dans une scène de plusieurs
 centaines de maillages. Le fondu, lui, reste continu.
 
 ## Ce qui reste
-- **`DerelictCloaker`** (2) et les événements `EnterDerelictZone` /
-  `ExitDerelictZone`, qui suspendent la mise à jour du brouillard.
+- ~~**`DerelictCloaker`** (2) et les événements `EnterDerelictZone` /
+  `ExitDerelictZone`~~ — **portés** : entrer dans la zone **suspend** la mise à
+  jour du brouillard, qui garde sa dernière densité au lieu de retomber à zéro.
+  C'est ce qui laisse le brouillard sur l'écran alors qu'on vient d'entrer dans
+  une poche dégagée. Le rayon vient du collider de la zone.
 - La coque quantique est une sphère unie ; le jeu utilise un matériau à
   `_TintColor` dont la texture n'est pas reprise.

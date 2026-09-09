@@ -268,10 +268,14 @@ Elles sont désormais chargées et appliquées par rôle. C'est le changement le
 plus visible de cette passe, et il ne coûte que quatre `@font-face`.
 
 ## Ce qui reste
-- Les **icônes de manette** (`XboxInput.GetButtonTexture`) ne sont pas
-  reprises : le catalogue conserve le bouton de chaque invite, mais le portage
-  se joue au clavier et n'affiche que le texte.
-- Le **secteur majeur** n'est pas modélisé : la minicarte s'allume à proximité
-  d'un corps plutôt que sur le drapeau `GetUseMinimap` d'un secteur.
+- ~~Les **icônes de manette**~~ — reprises, et la manette avec : la Gamepad API
+  produit les mêmes axes et les mêmes codes que le doigt et le clavier, si bien
+  que rien en aval ne sait d'où vient l'ordre (voir
+  [`34-actions.md`](34-actions.md) A10).
+- ~~Le **secteur majeur** n'est pas modélisé~~ — c'est désormais le drapeau
+  `_useMinimap` du secteur majeur actif qui allume la minicarte, et non la
+  proximité d'un corps. La distance n'entre plus en jeu : elle faisait
+  apparaître la minicarte en plein vol au-dessus d'un secteur qui ne la demande
+  pas, et disparaître au fond d'un secteur qui la demande.
 - Les **traces de la minicarte** sont des points, là où le jeu emploie deux
   systèmes de particules.

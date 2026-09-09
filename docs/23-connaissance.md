@@ -82,5 +82,9 @@ sur le terrain. Porté à 40.
   ont une source. Il n'y a ni entraînement, ni télescope, ni sonde.
 - **`RocketKidConvoController`** et ses compteurs d'atterrissages ne sont pas
   portés.
-- **La sélection d'arbre reste approximative** : elle repose sur le nom du
-  personnage et celui des arbres, là où le jeu tient des références directes.
+- ~~**La sélection d'arbre reste approximative**~~ — **corrigée** : la
+  `Conversation` désigne ses arbres, un champ par situation, et l'extracteur
+  sort maintenant tous ces pointeurs et non le seul arbre actif. C'est la
+  référence qui fait foi ; le choix par nom d'arbre ne reste qu'en repli, pour
+  une conversation dont les pointeurs ne se lisent pas. Deviner un fichier par
+  une bribe de son nom marche jusqu'au jour où l'on renomme un fichier.

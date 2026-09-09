@@ -58,6 +58,17 @@ portage.
 | caméra de sonde | vue embarquée dans un coin de l'écran |
 | commandes tactiles | manche analogique, regard, 18 boutons, carte au pincement |
 | jeu en paysage | HUD, dialogue et réglages bornés pour un écran de 800 × 370 |
+| rotation propre des corps | repère ancré tournant : le ciel défile, le sol ne bouge pas |
+| portées audio | `MinDistance` / `MaxDistance` / `rolloffMode` lus par source |
+| lumières placées | extracteur `lights`, instanciation dans un budget de 8 |
+| `RenderSettings` | couleur et mode de brouillard, ambiance, lus du build |
+| champs directionnels | 34 volumes, prioritaires sur le champ radial chez eux |
+| fluides | océan de Giant's Deep : traînée et poussée d'Archimède |
+| niveaux de détail | seuils des `LODGroup`, colliders sur le seul niveau fin |
+| manette | Gamepad API, mêmes axes et mêmes codes que le doigt |
+| zones d'oxygène | cherchées par motif dans la scène, avec leur collider |
+| consoles déportées | `RemoteFlightConsole` et le satellite, via la caméra de sonde |
+| clips en Opus | réencodés par WebCodecs au moment de l'extraction |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -89,10 +100,10 @@ dans l'alpha.
 
 Tout est vérifié au chiffre, rien ne l'est au rendu.
 
-- **L'équilibrage des volumes audio** — les portées sont aujourd'hui choisies
-  par piste. Ce n'est plus une fatalité : le champ existe en 4.1 sous le nom
-  `MinDistance`, sans préfixe, et le pipeline navigateur le lit dans le type
-  tree. À corriger avant de juger à l'oreille, voir [`34-actions.md`](34-actions.md) A2.
+- **L'équilibrage des volumes audio** — les portées viennent maintenant de la
+  source elle-même (`MinDistance` / `MaxDistance` / `rolloffMode`), si bien que
+  l'oreille juge enfin des valeurs du jeu et non d'une valeur choisie par piste.
+  Reste à les écouter.
 - **L'équilibrage visuel des particules** — les tailles vont jusqu'à 140 unités.
 - **Le rendu général** : atmosphères, surface stellaire, brouillards et
   explosion sont des implémentations originales visant un résultat comparable,
@@ -104,42 +115,31 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 - **La distorsion** reste une approximation délibérée : capturer le fond
   demanderait un second rendu complet de la scène — doubler les 6,1 ms — pour
   **deux matériaux dans tout le jeu**.
-- **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
-  en enchaîne plusieurs sur des maillages simplifiés — qui sont dans le build,
-  et donc à exporter plutôt qu'à générer ([`34-actions.md`](34-actions.md) A8).
-- **Les 21 `ChildColliderLOD`** : les colliders sont posés d'un bloc sur le
-  corps ancré.
-- **15 Mo de WAV non compressés** et **11,1 Mo de Babylon** sur les 66 du
-  démarrage (voir [`27-poids.md`](27-poids.md)).
-- **Le son comme signal** pour les prédateurs : le bruit est déduit des
-  commandes du joueur, pas des sources sonores réelles.
-- **`_checkDepth = 100`** de la lune quantique : le test d'occlusion est
-  binaire, là où le jeu lance une sphère sur une profondeur.
-- **`AlignQuantumMoon`**, **`CorruptionAnimator`**, **`_vanishEffectPrefab`**.
+- **11,1 Mo de Babylon** sur les 66 du démarrage (voir
+  [`27-poids.md`](27-poids.md)) : une compilation sur mesure les réduirait, au
+  prix d'une étape de construction que le dépôt n'a pas. Le poids est désormais
+  mesuré en deux parts — moteur et données extraites — et `web/fetch-deps.sh`
+  affiche le poids compressé à côté du poids brut, puisque c'est celui-là qui
+  passe sur le réseau.
+- **`_vanishEffectPrefab`** n'est pas résolu.
 - **Les pièces du vaisseau n'ont pas de géométrie propre** : une pièce morte se
   lit dans son état, elle ne se voit pas sur la coque.
-- **La manette n'est pas lue**, alors que le build en décrit une entière
-  (`XboxInput`) — les commandes tactiles ajoutées passent par les mêmes codes
-  clavier que le reste (voir [`33-mobile.md`](33-mobile.md)), et le portrait n'a
-  pas d'interface propre.
+- **Le portrait n'a pas d'interface propre** (voir
+  [`33-mobile.md`](33-mobile.md)).
+- **La collision analytique de repli** reste une sphère par corps : sans Havok,
+  le relief n'existe pas.
 
-### 4. Ce que la comparaison extracteurs / moteur a fait apparaître
+### 4. Ce que la comparaison extracteurs / moteur avait fait apparaître
 
-Des données du build **déjà extraites, et que rien ne lit** — ou des composants
-que les extracteurs ne regardent pas. Le détail et la marche à suivre sont dans
-[`34-actions.md`](34-actions.md) ; en résumé :
+Des données du build **déjà extraites, et que rien ne lisait** — ou des
+composants que les extracteurs ne regardaient pas. Les onze écarts sont fermés ;
+[`34-actions.md`](34-actions.md) garde le détail de chacun, action par action,
+avec ce qui vient du build et ce qui a été choisi faute de mesure.
 
-| écart | où |
-|---|---|
-| **rotation propre des corps** : `spin` et `spinSpeed` extraits, jamais appliqués — pas de cycle jour/nuit | A1 |
-| **portées audio** inventées par piste, et rayon en pixels d'un émetteur pris pour des unités de monde | A2 |
-| **aucune lumière du build** n'est extraite : une directionnelle et une hémisphérique pour tout le système | A3 |
-| `RenderSettings` recopiés à la main au lieu d'être lus | A4 |
-| `CHECK_RADIUS` et `CHECK_DEPTH` exportés et inutilisés | A5 |
-| **34 `DirectionalForceField`** ignorés, contre 10 `GravityWell` portés | A6 |
-| **fluides** : `SphereOceanFluidVolume` listé par l'extracteur mais jamais émis — Giant's Deep n'a pas d'océan | A7 |
-| **`mainData`** chargé par le worker mais jamais extrait : 989 objets hors périmètre | A9 |
-| **zones d'oxygène** : seul le vaisseau recharge, sans qu'on ait cherché ce que la scène propose | A11 |
+La leçon vaut d'être retenue : le plus gros gisement n'était ni dans le build ni
+dans les extracteurs, mais **entre les deux et le moteur**. Une valeur extraite
+que personne ne lit coûte exactement autant qu'une valeur absente, et se
+remarque moins.
 
 ## Où lire le détail
 
@@ -155,6 +155,7 @@ que les extracteurs ne regardent pas. Le détail et la marche à suivre sont dan
 | mort par prédateur | [`16-bramble.md`](16-bramble.md) |
 | caméra embarquée de la sonde | [`25-interface.md`](25-interface.md) |
 | commandes tactiles et jeu en paysage | [`33-mobile.md`](33-mobile.md) |
+| les onze écarts extracteurs / moteur | [`34-actions.md`](34-actions.md) |
 
 ## Estimation honnête
 

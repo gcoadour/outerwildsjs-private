@@ -23,7 +23,9 @@ est un réglage délibéré : c'est le seul endroit où le vaisseau garde sa ple
 puissance.
 
 La scène contient aussi une hiérarchie de LOD (`LODGroup`, `LODLayer`,
-`ChildColliderLOD` ×21, `CreateLODGroup` ×5, `LODBiasManager`), non portée.
+`ChildColliderLOD` ×21, `CreateLODGroup` ×5, `LODBiasManager`). Les seuils des
+`LODGroup` et l'effet des `ChildColliderLOD` sont portés depuis (voir « Ce qui
+manque », plus bas).
 
 ## Le principe retenu
 
@@ -89,8 +91,15 @@ pointent vers des nœuds de ce lot.
 
 ## Ce qui manque
 
-- **Le LOD ne fait que deux niveaux**, présent ou absent, là où un `LODGroup`
-  en enchaîne plusieurs sur des maillages simplifiés. Simplifier un maillage à
-  la volée coûterait plus que ce qu'il rapporte ici.
-- **Les 21 `ChildColliderLOD`** ne sont pas portés : les colliders sont posés
-  d'un bloc sur le corps ancré.
+- ~~**Le LOD ne fait que deux niveaux**~~ — **porté**, et le raisonnement était
+  faux : un `LODGroup` ne simplifie rien à la volée, il désigne des maillages
+  **déjà simplifiés, présents dans le build**. Il n'y avait donc rien à
+  générer. `LODGroup` a été ajouté aux classes moteur lues, et l'export glTF
+  pose sur chaque nœud le niveau auquel il appartient et les deux bornes entre
+  lesquelles il est visible : un seul niveau affiché à la fois, et sous le
+  dernier seuil le groupe entier disparaît. Le seuil unique de `lod.js` ne sert
+  plus qu'aux maillages qui n'appartiennent à aucun groupe.
+- ~~**Les 21 `ChildColliderLOD`**~~ — **portés dans leur effet** : les colliders
+  ne sont plus posés que sur le niveau le plus fin. Les niveaux grossiers
+  portent la même forme en moins détaillé ; leur poser un collider double le
+  travail de Havok sans rien ajouter à la collision.

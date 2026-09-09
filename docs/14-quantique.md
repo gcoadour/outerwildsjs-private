@@ -70,6 +70,12 @@ mais quatre orbites dans le même plan, cela se voit.
 - **Le brouillard quantique est porté depuis** (voir
   [`29-brouillards.md`](29-brouillards.md)) : coque opaque de 100 à 110 unités,
   fondue sur 30, dont la sortie force l'effondrement.
-- **`_checkDepth = 100` n'est pas utilisé comme tel** : le test d'occlusion est
-  binaire, là où le jeu lance une sphère de 150 sur une profondeur de 100.
-- `AlignQuantumMoon`, qui oriente la lune vers le joueur, n'est pas porté.
+- ~~**`_checkDepth = 100` n'est pas utilisé comme tel**~~ — **porté** : le
+  segment d'occlusion est épaissi de `_sphereCheckRadius` et borné de
+  `_checkDepth` du côté de la lune, ce qui reste analytique. Avec ces
+  valeurs-là, la sphère (150) est plus large que la profondeur (100), donc sa
+  calotte recouvre la troncature : le bornage ne change quelque chose que pour
+  un obstacle plus petit que le rayon de balayage. C'est ce que disent les
+  valeurs mesurées, pas un choix du portage.
+- ~~`AlignQuantumMoon`~~ — **porté** : la lune se tourne vers le joueur, ce qui
+  fait qu'on lui voit toujours la même face.

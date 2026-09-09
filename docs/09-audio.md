@@ -46,15 +46,29 @@ La bonne API en 9.25 est **AudioEngineV2** : `CreateAudioEngineAsync`,
 
 ## Portées d'atténuation
 
-UnityPy n'expose ni `m_MinDistance` ni `m_MaxDistance` sur Unity 4. Les portées
-sont donc **choisies par piste**, faute de mieux :
+### Correction : les portées étaient dans le type tree depuis le début
 
-| piste | portée |
-|---|---|
-| Signal | 300 u |
-| Ambience | 150 u |
-| Default / Undefined | 60 u |
-| Music, EndTimes, Death | non spatialisé |
+J'avais écrit ici qu'« UnityPy n'expose ni `m_MinDistance` ni `m_MaxDistance`
+sur Unity 4 », et le portage choisissait donc une portée **par piste** — 300 u
+pour Signal, 150 pour Ambience, 60 sinon.
+
+C'était vrai **du pipeline Python**, et pour une raison précise : en 4.1 ces
+champs ne portent pas le préfixe `m_`. Ils s'appellent `MinDistance` et
+`MaxDistance`, et ils sont dans le type tree d'`unity41-types.json`, que le
+pipeline navigateur lit directement. L'obstacle avait disparu avec UnityPy, la
+note ne l'avait pas suivi.
+
+Chaque source porte donc maintenant **sa** portée, son `MinDistance` et son
+`rolloffMode` — le logarithmique d'Unity étant le modèle « inverse » de WebAudio,
+où le son garde sa pleine intensité jusqu'à `MinDistance` avant de décroître.
+Les portées par piste ne servent plus que de repli pour une source illisible, et
+`tests/05-extract.mjs` vérifie qu'aucune n'a servi.
+
+`Pan2D` est le nom sérialisé de `panLevel` : 0 rend la source plate, 1 la rend
+pleinement spatiale. La lecture inverse existe ; pour qu'une erreur de ce genre
+ne fasse pas perdre l'audio spatial d'un coup, l'extracteur retombe sur la piste
+**si aucune source ne ressort spatiale**, et l'inscrit dans ses statistiques
+plutôt que de le laisser passer pour une mesure.
 
 ### Correction : les émetteurs ne sont pas des sources spatiales
 

@@ -82,5 +82,6 @@ d'empiler les marqueurs sur le point visé.
   masquer, un nom absent coûtant plus qu'un nom déplacé.
 
 - **Pas de sonde** (`Probe`), ce système n'étant pas porté.
-- **`_maxDisplayDistance`** n'est pas appliqué : tous les corps restent
-  visibles quelle que soit la distance.
+- ~~**`_maxDisplayDistance`**~~ — **appliqué**, et marqueur par marqueur : la
+  scène en porte un par corps, avec SA distance. La table par type de marqueur,
+  qui généralisait, ne sert plus que de repli pour un corps sans `MapMarker`.

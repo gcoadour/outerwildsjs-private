@@ -139,18 +139,27 @@ la supernova se déclenche — et le démarrage tombe de **79,3 à 66,1 Mo**.
 
 ## Ce qui reste
 
-- **15 Mo de WAV non compressés** (15 fichiers, 48 kHz 16 bits) : ce sont les
-  échantillons qu'Unity stockait déjà décodés. Les réencoder demanderait un
-  encodeur Vorbis, absent de la chaîne d'outils ; les rééchantillonner à
-  24 kHz les diviserait par deux, au prix d'une perte que je ne peux pas juger
-  à l'oreille ici.
-- **Les textures partagées se retéléchargent.** 27 URL sont demandées jusqu'à
-  cinq fois, faute d'en-têtes de cache sur le serveur de développement
-  (`python3 -m http.server` n'en envoie aucun). Un hébergement réel les
-  mettrait en cache ; la mesure ci-dessus est donc le pire cas.
-- **Aucun LOD par maillage.** Un corps est chargé entier ou pas du tout ; le
-  jeu, lui, a des `LODGroup` par objet.
+- ~~**15 Mo de WAV non compressés**~~ — **réencodés en Opus**. La chaîne
+  d'outils n'a pas d'encodeur Vorbis, mais le navigateur en a un : `AudioEncoder`
+  (WebCodecs) encode dans le worker, **au moment de l'extraction**, une fois pour
+  toutes, avec repli sur le WAV là où l'API manque. C'est le pipeline navigateur
+  qui rend cette piste possible ; le pipeline Python ne pouvait pas la prendre.
+  L'encodeur sort des paquets nus, que `pipeline/opus.js` emballe en Ogg —
+  vérifié contre les RFC 3533 et 7845, le CRC d'Ogg n'étant pas celui de zip.
+- ~~**Les textures partagées se retéléchargent.**~~ — le Service Worker pose un
+  `Cache-Control` et garde un cache mémoire. Une réponse fabriquée par un
+  Service Worker n'entre jamais dans le cache HTTP du navigateur, mais le cache
+  **mémoire** du moteur de rendu honore l'en-tête, et `no-store` lui interdisait
+  justement de dédupliquer.
+- ~~**Aucun LOD par maillage.**~~ — porté, et sur les seuils du build : un
+  `LODGroup` ne simplifie rien à la volée, il désigne des maillages déjà
+  simplifiés (voir [`17-secteurs.md`](17-secteurs.md)).
 - **Babylon pèse 11,1 Mo** des 60, soit près d'un cinquième. Une compilation sur
-  mesure ne garderait que les modules utilisés.
+  mesure ne garderait que les modules utilisés — au prix d'une étape de
+  construction que le dépôt n'a pas. Le poids réseau se mesure désormais en deux
+  parts, moteur et données extraites, et `web/fetch-deps.sh` affiche le poids
+  compressé à côté du poids brut : c'est celui-là qui passe sur le réseau, et
+  peser une étape de construction contre un chiffre qui n'est celui de personne
+  ne mène nulle part.
 - **La géométrie n'est jamais déchargée.** Traverser tout le système finit par
   tout charger ; il n'y a pas d'éviction.
