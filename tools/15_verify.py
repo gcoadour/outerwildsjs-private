@@ -90,15 +90,25 @@ def run(url, heavy):
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        weight = {"total": 0}
+        # Le poids se lit en deux parts : le MOTEUR (Babylon, ses chargeurs,
+        # Havok) et les DONNEES extraites. Les deux se reduisent par des moyens
+        # sans rapport — une compilation sur mesure d'un cote, l'encodage et le
+        # niveau de detail de l'autre — et les melanger empeche de savoir
+        # laquelle a bouge.
+        weight = {"total": 0, "moteur": 0, "donnees": 0}
 
         def on_response(r):
             if not r.url.startswith("http"):
                 return          # blob: et data: ne passent pas par le reseau
             try:
-                weight["total"] += int(r.headers.get("content-length") or 0)
+                n = int(r.headers.get("content-length") or 0)
             except (TypeError, ValueError):
-                pass
+                return
+            weight["total"] += n
+            if "/vendor/" in r.url:
+                weight["moteur"] += n
+            elif "/data/" in r.url:
+                weight["donnees"] += n
 
         page.on("response", on_response)
         page.goto(url, wait_until="load", timeout=90000)
@@ -107,6 +117,9 @@ def run(url, heavy):
 
         rep.eq("erreurs console au demarrage", errors[:3], [])
         rep.at_most("poids reseau (Mo)", round(weight["total"] / 1e6, 1), 70)
+        rep.at_most("dont le moteur (Mo)", round(weight["moteur"] / 1e6, 1), 15)
+        rep.at_most("dont les donnees extraites (Mo)",
+                    round(weight["donnees"] / 1e6, 1), 60)
 
         # --- geometrie a la demande -----------------------------------------
         files = page.evaluate("() => window.__geo.entries.map(e => e.file).sort()")

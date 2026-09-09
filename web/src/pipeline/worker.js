@@ -25,6 +25,7 @@ import { extractParticles } from "./extract/particles.js";
 import { extractInterface } from "./extract/interface.js";
 import { exportSubtree, findRoots } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
+import { opusAvailable, wavToOpus } from "./opus.js";
 
 const ROOT = "outerwilds";
 
@@ -236,10 +237,38 @@ async function run(blob, options) {
   phase("audio", "Clips et sources audio…");
   const audioFiles = [];
   const audio = extractAudio(ctx, (name, bytes) => audioFiles.push({ name, bytes }));
-  for (const { name, bytes } of audioFiles) await writeFile(`data/audio/${name}`, bytes);
+
+  // Les quinze WAV du build pesent 15 Mo sur les 66 du demarrage. Le navigateur
+  // sait encoder en Opus (WebCodecs) : on le fait ICI, une fois pour toutes,
+  // plutot qu'a chaque chargement de page. Sans l'API, le WAV part tel quel.
+  const canOpus = await opusAvailable();
+  let opusDone = 0, opusBefore = 0, opusAfter = 0;
+  for (const f of audioFiles) {
+    let name = f.name, bytes = f.bytes;
+    if (canOpus && /\.wav$/i.test(name)) {
+      const ogg = await wavToOpus(bytes);
+      if (ogg && ogg.length < bytes.length) {
+        opusBefore += bytes.length;
+        opusAfter += ogg.length;
+        opusDone++;
+        name = name.replace(/\.wav$/i, ".opus.ogg");
+        bytes = ogg;
+        // la carte des sources doit pointer sur le fichier reellement ecrit
+        for (const s of audio.sources) if (s.file === f.name) s.file = name;
+      }
+    }
+    await writeFile(`data/audio/${name}`, bytes);
+  }
   await writeFile("data/audio/sources.json", JSON.stringify(audio));
   summary["clips audio"] = audioFiles.length;
   summary["sources audio"] = audio.sources.length;
+  if (opusDone) {
+    summary["clips reencodes en Opus"] =
+      `${opusDone} (${Math.round(opusBefore / 1e6 * 10) / 10} Mo -> ` +
+      `${Math.round(opusAfter / 1e6 * 10) / 10} Mo)`;
+  } else if (!canOpus) {
+    summary["clips reencodes en Opus"] = "WebCodecs absent : WAV conserves";
+  }
 
   phase("lumieres", "Lumieres placees et reglages de rendu…");
   const lights = extractLights(ctx);
