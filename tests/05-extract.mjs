@@ -8,6 +8,7 @@ import { extractScene } from "../web/src/pipeline/extract/scene.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
+import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { extractAudio } from "../web/src/pipeline/extract/audio.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
@@ -59,6 +60,32 @@ const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
 check("objets lisibles", n("ReadableObject"), 34);
 check("points d'apparition", n("SpawnPoint"), 16);
+
+// Le point d'apparition ne dit pas seulement OU l'on nait, mais dans quelle
+// direction on regarde : son axe Z. Seule la position etait extraite, et le
+// portage tournait donc la tete au hasard (docs/38-depart.md).
+{
+  const spawns = gp.placed.SpawnPoint || [];
+  const tournes = spawns.filter((p) => Array.isArray(p.rotation) && p.rotation.length === 4);
+  check("chaque point d'apparition porte sa rotation", tournes.length, spawns.length);
+  check("et ce sont des quaternions unitaires",
+        tournes.every((p) => Math.abs(Math.hypot(...p.rotation) - 1) < 1e-3), true);
+  const joueur = spawnPoints(gp, { ship: false });
+  const vaisseau = spawnPoints(gp, { ship: true });
+  check("ils se partagent entre joueur et vaisseau",
+        joueur.length + vaisseau.length, spawns.length);
+  const hb = solar.bodies.find((b) => /home|planet|timber/i.test(b.name));
+  const home0 = hb ? (hb.bodyPosition || hb.position) : [0, 0, 0];
+  const pose = startPose(gp, { position0: home0 });
+  const marche = walkToShip(gp, { position0: home0 });
+  console.log(`     depart: ${joueur.length} points de joueur, ${vaisseau.length} de vaisseau` +
+    (pose ? ` | ${pose.name} a ${pose.radius.toFixed(0)} u du centre` : "") +
+    (marche != null ? ` | vaisseau a ${marche.toFixed(0)} u` : ""));
+  // 471 u sur le build : on demarre au village et on marche jusqu'au vaisseau.
+  // Un depart qui se retrouverait a portee du vaisseau serait le raccourci
+  // d'avant, revenu par la porte de derriere.
+  check("on ne demarre pas au pied du vaisseau", marche > 100, true);
+}
 const withText = (gp.placed.ReadableObject || []).filter((x) => x.text).length;
 console.log("     lisibles avec texte:", withText, "| systemes uniques:", Object.keys(gp.singletons).length);
 

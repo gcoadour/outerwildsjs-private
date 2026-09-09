@@ -22,6 +22,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`17-secteurs.md`](17-secteurs.md) — secteurs, niveau de détail par maillage et éviction
 - [`18-vaisseau.md`](18-vaisseau.md) — pilote automatique et dégâts
 - [`23-connaissance.md`](23-connaissance.md) — la connaissance débloque le jeu
+- [`38-depart.md`](38-depart.md) — **le départ de la partie : point d'apparition, regard, hauteur des yeux**
 
 ## Les lieux
 

@@ -380,6 +380,43 @@ def run(url, heavy):
         except Exception:
             pose = False
         rep.eq("le joueur finit par se poser", pose, True)
+
+        # --- le depart de la partie (docs/38-depart.md) -------------------------
+        #
+        # Ce qui ne se verifie qu'ici : que le joueur se pose LA OU le build le
+        # fait apparaitre — le pose lui-meme est eprouve sans le jeu par
+        # tests/09-jeu.mjs — et que ses yeux sont bien au-dessus de lui, sur la
+        # verticale LOCALE. Le decalage etait applique sur Y du repere de
+        # travail : ailleurs qu'au pole, il portait la camera de cote.
+        depart = page.evaluate("""() => {
+          const s = window.__start;
+          if (!s || !s.pose) return null;
+          const p = window.__player, f = p.field;
+          const u = f ? [-f.dir.x, -f.dir.y, -f.dir.z] : [0, 1, 0];
+          const e = s.eye();
+          const haut = e.x * u[0] + e.y * u[1] + e.z * u[2];
+          return {
+            derive: Math.hypot(p.pos.x - s.pose.position[0],
+                               p.pos.y - s.pose.position[1],
+                               p.pos.z - s.pose.position[2]),
+            haut,
+            cote: Math.hypot(e.x - haut * u[0], e.y - haut * u[1],
+                             e.z - haut * u[2]),
+            marche: s.walk, oriente: s.pose.oriented, rayon: s.pose.radius,
+          };
+        }""")
+        if depart:
+            rep.eq("le regard de depart vient du build", depart["oriente"], True)
+            rep.near("les yeux sont a 1,2 u au-dessus du joueur",
+                     round(depart["haut"], 3), 1.2, 0.05)
+            rep.at_most("... et exactement au-dessus, pas de cote",
+                        round(depart["cote"], 3), 0.01)
+            # On tombe d'une garde d'un demi-metre, pas de quarante unites.
+            rep.at_most("on se pose au point d'apparition",
+                        round(depart["derive"], 2), 10)
+            # 471 u sur Timber Hearth : on demarre au village, pas au vaisseau.
+            rep.at_least("le vaisseau est a distance de marche",
+                         round(depart["marche"] or 0, 0), 100)
         carburant0 = page.evaluate("() => window.__resources.fuel")
         if pose:
             page.keyboard.down("w")

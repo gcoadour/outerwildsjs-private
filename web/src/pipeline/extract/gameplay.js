@@ -37,6 +37,15 @@ const PLACED_PATTERNS = [
 /** Volumes qu'on veut mesurer : leur collider dit leur portee. */
 const WANT_VOLUME = /forcefield|fluid|ocean|oxygen|heatsource|zone|volume/i;
 
+/**
+ * Composants dont l'ORIENTATION compte autant que la position.
+ *
+ * Un `SpawnPoint` ne dit pas seulement ou l'on apparait : son axe Z dit dans
+ * quelle direction on regarde au premier instant. La position seule etait
+ * extraite, et le portage tournait donc la tete au hasard (docs/38-depart.md).
+ */
+const WANT_ROTATION = /spawnpoint/i;
+
 export function extractGameplay(ctx) {
   // OWRigidbody -> nom du GameObject, pour resoudre les references entre
   // composants (_attachedBody d'une orbite quantique, par exemple).
@@ -71,6 +80,8 @@ export function extractGameplay(ctx) {
     if (WANT_VOLUME.test(cls)) {
       const vol = ctx.volumeOf(gid);
       if (vol) entry.volume = vol;
+    }
+    if (WANT_VOLUME.test(cls) || WANT_ROTATION.test(cls)) {
       const [, rot] = ctx.world(gid);
       entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
     }

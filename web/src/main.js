@@ -33,6 +33,7 @@ import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
 import { Ship, shipSpawn } from "./ship.js";
+import { startPose, walkToShip, horizonBasis, EYE_HEIGHT } from "./start.js";
 import { loadAudioMap, AudioField, AudioMixer, signalStrength } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
@@ -133,7 +134,7 @@ async function boot() {
     return ap;
   }
 
-  // Depart : sur la face eclairee du corps habitable.
+  // Depart : au point d'apparition du joueur, celui que le build pose.
   //
   // L'ordre compte. On se place D'ABORD dans le repere du corps, sinon la
   // position d'apparition serait calculee en coordonnees monde et le joueur se
@@ -142,46 +143,49 @@ async function boot() {
   anchorBody = home;
   reframe(anchorBody);   // a partir d'ici, home.position vaut (0, 0, 0)
 
-  const hr = (home.gravity.upperSurfaceRadius || 100) + 40;
   const star0 = bodies.find((b) => (b.gravity.surfaceAcceleration || 0) >= 50);
 
-  // On apparait a cote du vaisseau, comme dans le jeu. Sans point
-  // d'apparition de vaisseau, on retombe sur la face eclairee.
-  const shipWorld = shipSpawn(gameplay, home.position0);
-  let up0 = null;
-  if (shipWorld) {
-    const rel = [shipWorld[0] - home.position0[0],
-                 shipWorld[1] - home.position0[1],
-                 shipWorld[2] - home.position0[2]];
-    const L = Math.hypot(...rel);
-    if (L > 1) up0 = rel.map((v) => v / L);
+  // Le jeu fait apparaitre le joueur au village et le vaisseau sur son aire,
+  // 471 u plus loin (docs/38-depart.md). Le portage apparaissait CONTRE le
+  // vaisseau, 40 u trop haut et face a une direction quelconque : trois ecarts
+  // que `startPose` ferme, en lisant le `SpawnPoint` du joueur, sa hauteur et
+  // sa rotation.
+  const pose = startPose(gameplay, home);
+  const walk = walkToShip(gameplay, home);
+  let startPos = null, yaw0 = 0;
+  if (pose) {
+    startPos = pose.position;
+    yaw0 = pose.yaw;
+    console.log(`depart : ${pose.name} a ${pose.radius.toFixed(0)} u du centre` +
+      (pose.oriented ? `, regard ${(yaw0 * 180 / Math.PI).toFixed(0)} degres` :
+                       ", sans orientation extraite") +
+      (walk != null ? `, vaisseau a ${walk.toFixed(0)} u` : ""));
+  } else {
+    // Repli, sans le build : la face eclairee du corps habitable. Ce n'est plus
+    // le depart du jeu, mais la page doit rester ouvrable sans lui.
+    let up0 = [0, 1, 0];
+    if (star0) {
+      const d = star0.position;           // deja relatif au corps ancre
+      const L = Math.hypot(...d) || 1;
+      const s0 = d.map((v) => v / L);
+      // 45 degres a cote du point subsolaire : a la verticale exacte l'eclairage
+      // est plat et sature, en biais le relief se lit.
+      const ref = Math.abs(s0[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+      let t = [s0[1] * ref[2] - s0[2] * ref[1],
+               s0[2] * ref[0] - s0[0] * ref[2],
+               s0[0] * ref[1] - s0[1] * ref[0]];
+      const tl0 = Math.hypot(...t) || 1;
+      t = t.map((v) => v / tl0);
+      const k = Math.SQRT1_2;
+      up0 = s0.map((v, i) => v * k + t[i] * k);
+    }
+    console.warn("depart : aucun SpawnPoint de joueur, repli sur la face eclairee");
+    // Faute de sol connu, on part de haut et on tombe : c'est ce que faisait le
+    // moteur partout avant, et cela ne vaut plus que pour ce repli.
+    const hr = (home.gravity.upperSurfaceRadius || 100) + 40;
+    startPos = [up0[0] * hr, up0[1] * hr, up0[2] * hr];
   }
-  if (!up0) up0 = [0, 1, 0];
-  const litSide = !shipWorld;
-  if (star0 && litSide) {
-    const d = star0.position;           // deja relatif au corps ancre
-    const L = Math.hypot(...d) || 1;
-    const s0 = d.map((v) => v / L);
-    // 45 degres a cote du point subsolaire : a la verticale exacte l'eclairage
-    // est plat et sature, en biais le relief se lit.
-    const ref = Math.abs(s0[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
-    let t = [s0[1] * ref[2] - s0[2] * ref[1],
-             s0[2] * ref[0] - s0[0] * ref[2],
-             s0[0] * ref[1] - s0[1] * ref[0]];
-    const tl = Math.hypot(...t) || 1;
-    t = t.map((v) => v / tl);
-    const k = Math.SQRT1_2;
-    up0 = s0.map((v, i) => v * k + t[i] * k);
-  }
-  // leger decalage lateral pour ne pas apparaitre dans le vaisseau
-  const side = Math.abs(up0[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
-  let tang = [up0[1] * side[2] - up0[2] * side[1],
-              up0[2] * side[0] - up0[0] * side[2],
-              up0[0] * side[1] - up0[1] * side[0]];
-  const tl = Math.hypot(...tang) || 1;
-  tang = tang.map((v) => (v / tl) * 9);
-  const player = new Player(playerConstants(data, gameplay),
-    [up0[0] * hr + tang[0], up0[1] * hr + tang[1], up0[2] * hr + tang[2]]);
+  const player = new Player(playerConstants(data, gameplay), startPos);
 
   // le conteneur amene le contenu du glTF dans le repere du corps ancre :
   // decalage constant, egal a la position INITIALE de ce corps
@@ -690,6 +694,9 @@ async function boot() {
     resources.dead = false;
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
     player.vel.x = player.vel.y = player.vel.z = 0;
+    // Une boucle qui recommence remet TOUT a l'etat de depart, le regard
+    // compris : sinon on rouvre les yeux dans la direction ou l'on est mort.
+    yaw = yaw0; pitch = 0;
     if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
     if (ship) {
       ship.boarded = false;
@@ -705,8 +712,10 @@ async function boot() {
   window.__dialogue = dialogue;
   window.__respawn = respawn;
 
-  // portee d'embarquement : le joueur se stabilise a une trentaine d'unites du
-  // vaisseau apres sa chute, un rayon plus serre le rendrait inatteignable
+  // Portee d'embarquement, mesuree depuis le CENTRE du vaisseau, dont la coque
+  // s'etend sur une dizaine d'unites. Le sas n'a pas d'interactif extrait : ce
+  // rayon large est un repli assume, pas une valeur du build. Il ne raccourcit
+  // plus le depart, qui se fait desormais au village, 471 u plus loin.
   const SHIP_REACH = 40;
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   const telescope = new Telescope();
@@ -771,9 +780,18 @@ async function boot() {
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal
+  // Sonde de verification du depart : le pose lu dans le build, la marche
+  // jusqu'au vaisseau, et l'ecart des yeux au joueur — qui ne se mesure qu'une
+  // fois la camera placee, donc dans le navigateur (docs/38-depart.md).
+  window.__start = { pose, walk, eye: () => ({
+    x: camera.position.x - player.pos.x,
+    y: camera.position.y - player.pos.y,
+    z: camera.position.z - player.pos.z }) };
 
   // --- entrees ---
-  let yaw = 0, pitch = 0;
+  // Le lacet part de l'orientation du point d'apparition : c'est elle qui
+  // decide de la premiere image du jeu.
+  let yaw = yaw0, pitch = 0;
   const keys = Object.create(null);
   addEventListener("keydown", (e) => { keys[e.code] = true; });
   addEventListener("keyup", (e) => { keys[e.code] = false; });
@@ -937,10 +955,12 @@ async function boot() {
     const ad = f ? (f.alignDir || f.dir) : null;
     const up = ad ? new BABYLON.Vector3(-ad.x, -ad.y, -ad.z)
                   : new BABYLON.Vector3(0, 1, 0);
-    const ref = Math.abs(up.y) > 0.95 ? new BABYLON.Vector3(1, 0, 0)
-                                      : new BABYLON.Vector3(0, 1, 0);
-    const east = BABYLON.Vector3.Cross(up, ref).normalize();
-    const north = BABYLON.Vector3.Cross(east, up).normalize();
+    // Le repere d'horizon vit dans start.js : le lacet lu sur le SpawnPoint et
+    // le lacet de la camera doivent se mesurer dans le MEME repere, sinon
+    // l'orientation du build arrive juste et la tete est tournee de travers.
+    const hb = horizonBasis([up.x, up.y, up.z]);
+    const east = new BABYLON.Vector3(hb.east[0], hb.east[1], hb.east[2]);
+    const north = new BABYLON.Vector3(hb.north[0], hb.north[1], hb.north[2]);
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
@@ -1078,7 +1098,13 @@ async function boot() {
       }
     }
 
-    camera.position.set(player.pos.x, player.pos.y + 1.2, player.pos.z); // yeux
+    // Les yeux sont au-dessus du joueur, et « au-dessus » est la verticale
+    // LOCALE : le decalage etait applique sur Y du repere de travail, ce qui
+    // ne vaut qu'au pole nord du corps ancre. Ailleurs il portait la camera
+    // de cote, et sous l'equateur sud, sous les pieds du joueur.
+    camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
+                        player.pos.y + up.y * EYE_HEIGHT,
+                        player.pos.z + up.z * EYE_HEIGHT);
     camera.upVector = up;
     camera.setTarget(camera.position.add(fwd));
 

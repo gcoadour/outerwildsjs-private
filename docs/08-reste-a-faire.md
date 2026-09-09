@@ -71,6 +71,7 @@ portage.
 | référentiels | positions **et vitesses** reportées au changement d'ancre |
 | repère tournant | Coriolis et force centrifuge : le sol défile sous un stationnaire |
 | colliders par portée | les 21 `ChildColliderLOD` endorment leur sous-arbre |
+| départ de la partie | **au point d'apparition du build, à sa hauteur et dans son regard** |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -115,6 +116,12 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 - **Le rendu général** : atmosphères, surface stellaire, brouillards et
   explosion sont des implémentations originales visant un résultat comparable,
   pas des transpositions de shaders.
+- **La première image du jeu** — le pose de départ vient désormais du build
+  ([`38-depart.md`](38-depart.md)) : point d'apparition du joueur, sa hauteur,
+  sa rotation. Le **rendu** de cette image, lui, n'est pas mesuré — ciel de
+  nuit, nuages de Timber Hearth, lumière de la lune. Les nuages, en
+  particulier, n'ont aucun lecteur dans le portage, et personne n'a encore
+  demandé au build ce qu'ils sont.
 - **Une partie jouée**, tout simplement.
 
 ### 3. Ce qui reste techniquement ouvert

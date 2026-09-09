@@ -58,6 +58,9 @@ import { deathCamera, DEATH_FALL, DEATH_SOUNDS } from "../web/src/death.js";
 import { convoControllers, treeFromController, PlayerData,
          selectTree } from "../web/src/playerdata.js";
 import { parseWav, oggCrc, oggPage, muxOggOpus, interleave } from "../web/src/pipeline/audioenc.js";
+import { startPose, walkToShip, spawnPoints, isShipSpawn, nearestTo,
+         quatForward, horizonBasis, yawFor, PLAYER_RADIUS,
+         SPAWN_CLEARANCE } from "../web/src/start.js";
 
 const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
@@ -1550,6 +1553,69 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("elle n'a pas de composante hors du plan", round(a[1], 9), 0);
   check("un corps immobile dans le repere tournant ne subit que le centrifuge",
         round(champ.inertial(corps, r, { x: 0, y: 0, z: 0 })[0], 6), 0.625);
+}
+
+// --- le depart de la partie ----------------------------------------------
+//
+// Trois ecarts fermes d'un coup (docs/38-depart.md) : on apparaissait a cote du
+// vaisseau plutot qu'au village, 40 u au-dessus de la surface plutot qu'au sol,
+// et face a une direction que rien ne fondait.
+{
+  const home = { position0: [0, 0, -8593] };
+  // Un jeu de points d'apparition en miniature : deux sur le corps habitable,
+  // deux sur une autre planete, pour que le choix du plus proche compte.
+  const gameplay = { placed: { SpawnPoint: [
+    { name: "SpawnPoint_Player", position: [0, 168, -8593], rotation: [0, 0, 0, 1] },
+    { name: "SpawnPoint_Ship", position: [0, 168, -9064] },
+    { name: "SpawnPoint_Player", position: [11691, 200, 0] },
+    { name: "SpawnPoint_Ship", position: [11691, 180, 0] },
+  ] } };
+
+  check("le point du vaisseau se reconnait a son nom",
+        isShipSpawn({ name: "SpawnPoint_Ship" }), true);
+  check("celui du joueur aussi", isShipSpawn({ name: "SpawnPoint_Player" }), false);
+  check("le champ du composant prime sur le nom",
+        isShipSpawn({ name: "SpawnPoint_Player", fields: { _isShipSpawn: 1 } }), true);
+  check("deux points de joueur dans la scene",
+        spawnPoints(gameplay, { ship: false }).length, 2);
+  check("le plus proche du corps habitable est le sien",
+        nearestTo(spawnPoints(gameplay, { ship: false }), home.position0).position[1], 168);
+
+  const pose = startPose(gameplay, home);
+  check("on apparait sur la verticale du point d'apparition",
+        pose.up.map((v) => round(v, 6)).join(","), "0,1,0");
+  // Le corps du joueur est une sphere : son CENTRE est un rayon plus une garde
+  // au-dessus du sol, sinon Havok l'ejecte de la geometrie ou il nait.
+  check("a la hauteur du point, plus le rayon du corps et sa garde",
+        round(Math.hypot(...pose.position), 3),
+        round(168 + PLAYER_RADIUS + SPAWN_CLEARANCE, 3));
+  // 471 u separent les deux points sur le vrai build (docs/07-gameplay.md) ;
+  // la mesure porte ici sur le calcul, pas sur le chiffre.
+  check("la marche jusqu'au vaisseau se mesure d'un point a l'autre",
+        round(walkToShip(gameplay, home), 0), 471);
+
+  // Le regard : l'axe Z du point d'apparition, ramene au lacet de la camera.
+  check("un quaternion identite regarde son axe Z",
+        quatForward([0, 0, 0, 1]).join(","), "0,0,1");
+  check("l'orientation est bien lue", pose.oriented, true);
+  const b = horizonBasis(pose.up);
+  const fwd = b.north.map((n, i) => n * Math.cos(pose.yaw) + b.east[i] * Math.sin(pose.yaw));
+  check("et le lacet de depart y ramene exactement",
+        fwd.map((v) => round(v, 6)).join(","), "0,0,1");
+  check("une direction verticale n'a pas de lacet",
+        yawFor([0, 1, 0], [0, 1, 0]), null);
+
+  // Sans rotation extraite — une extraction anterieure — on le DIT plutot que
+  // de faire passer un zero pour une mesure.
+  const nu = startPose({ placed: { SpawnPoint: [
+    { name: "SpawnPoint_Player", position: [0, 168, -8593] }] } }, home);
+  check("sans rotation, aucune orientation n'est affirmee", nu.oriented, false);
+  check("... et le lacet vaut zero", nu.yaw, 0);
+
+  // Repli : sans le build, il n'y a pas de point d'apparition, et la page doit
+  // rester ouvrable.
+  check("aucun point d'apparition : le moteur garde son repli",
+        startPose({ placed: {} }, home), null);
 }
 
 report();

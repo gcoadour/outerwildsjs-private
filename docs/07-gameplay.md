@@ -72,9 +72,12 @@ Hearth, sous la surface. Ce n'est pas une erreur d'extraction : le jeu place
 vaisseau et joueur **à l'exécution**, via des composants `SpawnPoint`
 (16 instances, un jeu par planète). C'est `SpawnPoint_Ship` qui fait foi.
 
-Le prototype fait apparaître le joueur à 9 unités du vaisseau. Dans le jeu on
-démarre au village et on marche jusqu'au vaisseau — ici c'est un raccourci
-assumé, les deux points d'apparition étant distants de 471 u.
+Le prototype faisait apparaître le joueur à 9 unités du vaisseau, alors que le
+jeu démarre au village : les deux points d'apparition sont distants de 471 u.
+Ce raccourci est **levé** ([`38-depart.md`](38-depart.md)) — il posait le joueur
+devant une porte fermée, puisque les codes de lancement s'apprennent au village.
+Le joueur naît désormais sur `SpawnPoint_Player`, à sa hauteur et dans la
+direction que porte sa rotation.
 
 ### Colliders
 
