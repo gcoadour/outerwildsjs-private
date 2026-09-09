@@ -5,11 +5,21 @@
 // `LODGroup` (plus 21 `ChildColliderLOD` et 5 `CreateLODGroup`) qui reduisent
 // le detail maillage par maillage.
 //
-// Ce module fait la meme chose avec ce que le portage a sous la main. Un
-// LODGroup d'Unity se declenche sur la HAUTEUR RELATIVE A L'ECRAN de l'objet :
-// c'est exactement le rapport entre le rayon de sa sphere englobante et sa
-// distance a la camera. On n'a donc rien a inventer — seulement a mesurer ce
-// rapport et a eteindre ce qui tombe sous le seuil.
+// Un LODGroup d'Unity se declenche sur la HAUTEUR RELATIVE A L'ECRAN de
+// l'objet : c'est exactement le rapport entre le rayon de sa sphere englobante
+// et sa distance a la camera. On n'a donc rien a inventer — seulement a mesurer
+// ce rapport et a le comparer aux seuils.
+//
+// Ces seuils viennent maintenant du BUILD. Un LODGroup ne simplifie rien a la
+// volee : il designe des maillages deja simplifies, que l'export glTF sort
+// comme les autres ; l'exporteur pose sur chaque noeud le niveau auquel il
+// appartient et les deux bornes entre lesquelles il est visible
+// (web/src/pipeline/extract/gltf.js). Un maillage qui en porte suit donc
+// exactement la regle du jeu : un seul niveau affiche a la fois.
+//
+// Le seuil unique ci-dessous reste pour tout le reste — l'immense majorite des
+// maillages n'appartient a aucun groupe — et pour la geometrie exportee avant
+// que les groupes ne soient lus.
 //
 // Deux precautions comptent plus que le seuil lui-meme :
 //
@@ -32,6 +42,7 @@ export class MeshLOD {
     this.cursor = new Map();     // fichier -> position du parcours tournant
     this.hidden = 0;
     this.tested = 0;
+    this.grouped = 0;            // maillages regis par un LODGroup du build
   }
 
   /**
@@ -42,6 +53,7 @@ export class MeshLOD {
    */
   update(entries, camera, active = null) {
     let tested = 0;
+    this.grouped = 0;   // compte de la tranche courante, comme `tested`
     for (const e of entries) {
       if (active && !active(e.file)) continue;
       const list = e.meshes;
@@ -59,7 +71,14 @@ export class MeshLOD {
     return tested;
   }
 
-  /** Eteint un maillage trop petit a l'ecran, rallume-le des qu'il grandit. */
+  /**
+   * Eteint un maillage trop petit a l'ecran, rallume-le des qu'il grandit.
+   *
+   * Un maillage appartenant a un LODGroup suit les bornes du build : il est
+   * visible tant que la hauteur relative reste entre SON seuil et celui du
+   * niveau precedent. Deux niveaux du meme groupe ne peuvent donc jamais etre
+   * allumes ensemble, et sous le dernier seuil le groupe entier disparait.
+   */
   apply(mesh, camera) {
     if (!mesh.getBoundingInfo || mesh.__lodPinned) return;
     const bs = mesh.getBoundingInfo().boundingSphere;
@@ -67,7 +86,11 @@ export class MeshLOD {
     if (!(r > 0)) return;
     const d = Math.hypot(c.x - camera.x, c.y - camera.y, c.z - camera.z);
     const ratio = d > 1e-6 ? r / d : Infinity;
-    const on = ratio >= this.ratio;
+    const lod = mesh.__lod;
+    const on = lod
+      ? (ratio >= lod.height && (lod.upper == null || ratio < lod.upper))
+      : ratio >= this.ratio;
+    if (lod) this.grouped++;
     // isVisible plutot que setEnabled : le maillage garde sa place dans la
     // hierarchie et ses enfants, on ne fait que cesser de le dessiner.
     if (mesh.isVisible !== on) {

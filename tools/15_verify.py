@@ -342,6 +342,40 @@ def run(url, heavy):
                      page.evaluate("() => window.__audioMix.transmitters"
                                    ".reduce((a, t) => a + t.sources.length, 0)"), 1)
 
+        # --- manette -----------------------------------------------------------
+        #
+        # Aucune manette n'est branchee sur la machine de verification, et le
+        # navigateur n'en simule pas. On remplace donc `navigator.getGamepads`
+        # le temps du controle : ce qui est verifie est bien la couche du
+        # portage — qu'un bouton enfonce produise la touche que le jeu attend,
+        # et que le manche produise le meme axe que le clavier.
+        manette = page.evaluate("""() => {
+          const pad = window.__pad;
+          const m = {connected: true, mapping: 'standard', id: 'faux',
+                     axes: [0, -1, 0, 0],
+                     buttons: Array.from({length: 16},
+                                         () => ({pressed: false, value: 0}))};
+          const vrai = navigator.getGamepads;
+          navigator.getGamepads = () => [m];
+          m.buttons[0].pressed = true;    // A
+          m.buttons[7].value = 1;         // gachette droite
+          pad.update(0.05);
+          const out = {branchee: pad.connected, avant: +pad.axes.forward.toFixed(2),
+                       monte: pad.axes.up};
+          m.buttons[0].pressed = false;
+          pad.update(0.05);
+          navigator.getGamepads = vrai;
+          pad.update(0.05);
+          out.debranchee = !pad.connected;
+          out.repos = pad.axes.forward;
+          return out;
+        }""")
+        rep.eq("manette reconnue", manette["branchee"], True)
+        rep.eq("manche gauche a fond : axe sature", manette["avant"], 1)
+        rep.eq("la gachette droite monte", manette["monte"], True)
+        rep.eq("manette debranchee : la main revient", manette["debranchee"], True)
+        rep.eq("... et les axes retombent", manette["repos"], 0)
+
         # --- commandes tactiles ------------------------------------------------
         #
         # Le navigateur de verification n'est pas tactile : on installe la
@@ -475,6 +509,25 @@ def run(url, heavy):
                          page.evaluate("() => window.__lod.meshLOD.hidden"), 1)
             rep.at_least("maillages examines par image",
                          page.evaluate("() => window.__lod.meshLOD.tested"), 1)
+            # Les seuils du build : un maillage regi par un LODGroup suit les
+            # bornes de son niveau, et deux niveaux du meme groupe ne peuvent
+            # jamais etre allumes ensemble.
+            lod = page.evaluate("""() => {
+              const e = window.__geo.entries.find(
+                x => x.file === 'brittlehollow_pivot.gltf');
+              const m = (e ? e.meshes : []).filter(x => x.__lod);
+              const parGroupe = new Map();
+              for (const x of m) {
+                const k = x.parent ? x.parent.uniqueId : 'x';
+                parGroupe.set(k, (parGroupe.get(k) || 0) + (x.isVisible ? 1 : 0));
+              }
+              return {regis: m.length, niveaux: new Set(m.map(x => x.__lod.level)).size,
+                      trop: [...parGroupe.values()].filter(v => v > 1).length};
+            }""")
+            if lod["regis"]:
+                rep.at_least("maillages regis par un LODGroup", lod["regis"], 1)
+                rep.at_least("niveaux distincts", lod["niveaux"], 2)
+                rep.eq("jamais deux niveaux allumes ensemble", lod["trop"], 0)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()

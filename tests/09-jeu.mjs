@@ -32,6 +32,8 @@ import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/au
 import { envelope } from "../web/src/pipeline/extract/particles.js";
 import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
          LOOK_DEAD_ZONE, SPRINT_AT } from "../web/src/touch.js";
+import { GamepadControls, moveAxes, lookDelta, buttonFor,
+         BUTTONS, TRIGGER_UP, TRIGGER_BOOST } from "../web/src/gamepad.js";
 
 const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
@@ -429,6 +431,36 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("rallume en approchant", revenu.isVisible, true);
   check("seuil de hauteur relative a l'ecran", LOD_RATIO, 0.0022);
 
+  // Les seuils du build : un maillage qui appartient a un LODGroup ne suit plus
+  // le seuil unique mais les deux bornes de SON niveau. Un seul niveau du groupe
+  // peut etre allume a la fois.
+  {
+    const niveau = (level, height, upper) => {
+      const m = mesh(1, 100);       // rapport 0,01
+      m.__lod = { level, height, upper };
+      return m;
+    };
+    const l = new MeshLOD();
+    const fin = niveau(0, 0.05, null);      // 0,01 < 0,05 : trop loin pour le fin
+    const moyen = niveau(1, 0.005, 0.05);   // 0,005 <= 0,01 < 0,05 : c'est lui
+    const grossier = niveau(2, 0.001, 0.005);
+    for (const m of [fin, moyen, grossier]) l.apply(m, cam);
+    check("le niveau fin s'efface a distance", fin.isVisible, false);
+    check("le niveau qui encadre le rapport est allume", moyen.isVisible, true);
+    check("les autres niveaux du groupe sont eteints", grossier.isVisible, false);
+    check("maillages regis par un LODGroup", l.grouped, 3);
+
+    // Sous le dernier seuil, le groupe entier disparait.
+    const loin = { x: 0, y: 0, z: 0 };
+    const tout = [niveau(0, 0.05, null), niveau(1, 0.005, 0.05),
+                  niveau(2, 0.02, 0.05)];
+    for (const m of tout) m.getBoundingInfo = () => ({ boundingSphere: {
+      centerWorld: { x: 100000, y: 0, z: 0 }, radiusWorld: 1 } });
+    for (const m of tout) l.apply(m, loin);
+    check("au-dela du dernier seuil, plus rien du groupe",
+          tout.filter((m) => m.isVisible).length, 0);
+  }
+
   // parcours tournant : une tranche par image, pas 12 000 maillages
   const petit = new MeshLOD(LOD_RATIO, 2);
   const entry = { file: "x.gltf", meshes: [mesh(1, 5), mesh(1, 6), mesh(1, 7)] };
@@ -570,6 +602,69 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a fond en arriere : pas de course", sprinting(v(0, R)), false);
   check("pas tout a fait a fond : pas de course",
         sprinting(v(0, -R * (SPRINT_AT * 0.9))), false);
+}
+
+// --- la manette ----------------------------------------------------------
+//
+// Elle ne cree aucune commande : elle produit les MEMES axes et les MEMES
+// codes que le doigt et le clavier. C'est cela qu'on verifie ici — le reste,
+// la lecture d'une vraie manette, demande un navigateur.
+{
+  check("manche gauche a fond : axe sature", round(moveAxes([0, -1]).forward, 3), 1);
+  check("dans la zone morte : rien", moveAxes([0.1, 0]).right, 0);
+  check("a fond devant : le cran de course prend", moveAxes([0, -1]).sprint, true);
+  check("a fond de cote : pas de course", moveAxes([1, 0]).sprint, false);
+
+  // Manche droit : une VITESSE, en pixels de souris par seconde, la meme
+  // courbe et la meme echelle qu'au pouce.
+  check("manche de regard lache : aucune rotation",
+        lookDelta([0, 0, 0, 0], 0.1).dx, 0);
+  check("manche de regard a fond : 900 px/s",
+        Math.round(lookDelta([0, 0, 1, 0], 0.05).dx / 0.05), 900);
+  check("le pas est borne comme celui du moteur",
+        Math.round(lookDelta([0, 0, 1, 0], 10).dx),
+        Math.round(lookDelta([0, 0, 1, 0], 0.05).dx));
+
+  check("le bouton du jeu porte la touche du portage", BUTTONS[0].xbox, "A");
+  check("... et se retrouve depuis la touche", buttonFor("KeyE"), "A");
+  check("les gachettes portent la poussee", buttonFor("Space"), "RightTrigger");
+
+  // Une manette fabriquee : ce qu'un bouton enfonce produit en aval.
+  const vus = [];
+  let tourne = 0;
+  const pad = new GamepadControls({ onKey: (c) => vus.push(c),
+                                    onLook: (dx) => { tourne += dx; } });
+  const manette = { connected: true, mapping: "standard",
+                    axes: [0, -1, 0, 0],
+                    buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })) };
+  pad.pad = () => manette;
+
+  manette.buttons[0].pressed = true;            // A
+  manette.buttons[TRIGGER_UP].value = 1;        // gachette droite
+  manette.buttons[TRIGGER_BOOST].value = 1;     // gachette gauche
+  pad.update(0.1);
+  check("manette reconnue", pad.connected, true);
+  check("le manche pousse fait avancer", round(pad.axes.forward, 3), 1);
+  check("la gachette droite monte", pad.axes.up, true);
+  check("la gachette gauche accelere", pad.axes.boost, true);
+  check("A donne la touche d'interaction", vus.join(), "KeyE");
+
+  // Front montant : un bouton TENU ne repete pas. Sans cela, un menu defilerait
+  // a la vitesse des images.
+  pad.update(0.1);
+  check("un bouton tenu ne se repete pas", vus.length, 1);
+  manette.buttons[0].pressed = false;
+  pad.update(0.1);
+  manette.buttons[0].pressed = true;
+  pad.update(0.1);
+  check("... mais relache puis represse, oui", vus.length, 2);
+
+  // Debranchee, elle rend la main : les axes retombent, et rien ne reste tenu.
+  pad.pad = () => null;
+  pad.update(0.1);
+  check("manette debranchee", pad.connected, false);
+  check("axes remis a zero", pad.axes.forward, 0);
+  check("plus rien de tenu", pad.axes.up, false);
 }
 
 report();

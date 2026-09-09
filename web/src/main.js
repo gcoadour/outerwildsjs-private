@@ -55,6 +55,7 @@ import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
+import { GamepadControls } from "./gamepad.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -766,6 +767,12 @@ async function boot() {
     document.getElementById("touch"), document.getElementById("touchui"),
     { onKey: command, onLook: (dx, dy) => look(dx, dy, 1) });
   if (touchAvailable()) touch.enable();
+  // La manette passe par les MEMES fonctions que le doigt : `command` pour les
+  // boutons, `look` pour le regard. Rien a installer, rien a activer — elle se
+  // lit a chaque image, et se tait quand il n'y en a pas.
+  const pad = new GamepadControls(
+    { onKey: command, onLook: (dx, dy) => look(dx, dy, 1) });
+  window.__pad = pad;   // sonde de verification
   // En paysage de telephone, le coin bas-droit revient aux boutons d'action :
   // la vue de sonde passe a gauche, sous les jauges.
   if (touch.enabled) probeCam.setViewport(0.02, 0.42, 0.26, 0.3);
@@ -818,13 +825,17 @@ async function boot() {
     //
     // Hors sequence, clavier et doigt s'additionnent : le manche virtuel est
     // analogique, la touche vaut 1, et la somme est bornee comme un axe l'est.
-    const ax = touch.axes;
+    // La manette se LIT : l'API du navigateur ne pousse aucun evenement. Son
+    // pas de lecture produit les memes axes et les memes codes que le doigt,
+    // et vient donc s'ajouter aux deux autres sources exactement pareil.
+    pad.update(dt);
+    const ax = touch.axes, gp = pad.axes;
     const axis = (v) => Math.max(-1, Math.min(1, v));
     const input = death.dead ? { forward: 0, right: 0, up: false, boost: false } : {
-      forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward),
-      right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right),
-      up: keys.Space || ax.up,
-      boost: keys.ShiftLeft || keys.ShiftRight || ax.boost,
+      forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward + gp.forward),
+      right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right + gp.right),
+      up: keys.Space || ax.up || gp.up,
+      boost: keys.ShiftLeft || keys.ShiftRight || ax.boost || gp.boost,
     };
     // 1. avance des orbites et des rotations propres, puis re-expression dans
     //    le repere du corps ancre
@@ -1071,12 +1082,14 @@ async function boot() {
         `secteurs ${sectorState.actifs}/${sectorState.total}` +
         (sectorState.secteur ? ` — ${sectorState.secteur.name}` : "") +
         (ship && ship.thrustLimit != null ? ` (poussee ≤ ${ship.thrustLimit})` : ""));
+      if (pad.connected) bits.push("manette branchee");
       if (directional.current) bits.push(`champ local : ${directional.current.name}`);
       if (fluids.inside.get("joueur")) bits.push(
         `dans ${fluids.inside.get("joueur").name}`);
       if (sceneLights.lights.length) bits.push(
         `lumieres ${sceneLights.count}/${sceneLights.lights.length}`);
-      if (meshLOD.hidden > 0) bits.push(`LOD ${meshLOD.hidden} maillages eteints`);
+      if (meshLOD.hidden > 0) bits.push(`LOD ${meshLOD.hidden} maillages eteints` +
+        (meshLOD.grouped ? ` (${meshLOD.grouped} par LODGroup)` : ""));
       if (evictor.evicted > 0) bits.push(`${evictor.evicted} corps libere(s)`);
       // la geometrie arrive en cours de partie : le dire plutot que de laisser
       // croire a une sphere de substitution definitive

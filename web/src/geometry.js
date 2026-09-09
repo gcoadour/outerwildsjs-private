@@ -73,6 +73,14 @@ async function loadFile(BABYLON, scene, file) {
     if (!g.name.startsWith("~")) g.play(true);
   }
   const meshes = res.meshes.filter((m) => m.getTotalVertices() > 0);
+  // Niveaux de detail du build : l'exporteur les a poses en `extras` sur le
+  // noeud, le chargeur glTF les rend dans `metadata.gltf.extras`. On les
+  // recopie sur le maillage lui-meme pour que `lod.js` n'ait pas a fouiller.
+  let lodMeshes = 0;
+  for (const m of meshes) {
+    const ex = m.metadata && m.metadata.gltf && m.metadata.gltf.extras;
+    if (ex && ex.lod) { m.__lod = ex.lod; lodMeshes++; }
+  }
   // index des noeuds par nom de GameObject : l'exporteur conserve les noms,
   // ce qui permet de retrouver un corps precis dans le sous-arbre
   const nodes = new Map();
@@ -85,7 +93,7 @@ async function loadFile(BABYLON, scene, file) {
   // Les groupes d'animation sont retenus pour pouvoir etre liberes : ils
   // survivent a la destruction de leurs cibles et continueraient a les animer.
   const groups = res.animationGroups || [];
-  return { file, container, meshes, nodes, all, groups, center: null };
+  return { file, container, meshes, nodes, all, groups, lodMeshes, center: null };
 }
 
 /**
@@ -243,7 +251,12 @@ export function meshesForBody(entry, bodyName, excludeRoots = []) {
     if (n && n.getChildMeshes) for (const m of n.getChildMeshes(false)) excluded.add(m);
     if (n) excluded.add(n);
   }
-  const list = sub.filter((m) => m.getTotalVertices() > 0 && !excluded.has(m));
+  // Les niveaux de detail secondaires portent la MEME forme, en plus grossier :
+  // leur poser un collider double le travail de Havok et n'ajoute rien a la
+  // collision. C'est ce que font les 21 `ChildColliderLOD` du jeu, qui
+  // n'attachent de collider qu'au niveau le plus fin.
+  const list = sub.filter((m) => m.getTotalVertices() > 0 && !excluded.has(m) &&
+                                 !(m.__lod && m.__lod.level > 0));
   return list.length ? list : (entry ? entry.meshes : []);
 }
 

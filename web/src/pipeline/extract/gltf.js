@@ -243,7 +243,8 @@ export function exportSubtree(ctx, rootGid, label, {
   const stats = { nodes: 0, meshes: 0, skipped: 0, skins: 0, incompleteSkins: 0,
                   animations: 0, channels: 0, cubic: 0, linear: 0,
                   mecanimClips: 0, emptyMecanimClips: 0, unresolvedBones: 0,
-                  unresolvedPaths: 0, compressedClips: 0 };
+                  unresolvedPaths: 0, compressedClips: 0,
+                  lodGroups: 0, lodRenderers: 0 };
 
   // --- index par GameObject : maillage, materiau, squelette ---
   const meshOf = new Map(), matOf = new Map(), skinOf = new Map();
@@ -261,6 +262,37 @@ export function exportSubtree(ctx, rootGid, label, {
         skinOf.set(gid, v);
         if (v.m_Mesh) meshOf.set(gid, v.m_Mesh);
       }
+    }
+  }
+
+  // --- niveaux de detail ---
+  //
+  // Un `LODGroup` ne simplifie RIEN a la volee : il designe des maillages deja
+  // simplifies, presents dans le build, et dit a partir de quelle hauteur
+  // relative a l'ecran chacun prend le relais. Il n'y a donc rien a generer —
+  // seulement a dire, pour chaque rendu, a quel niveau il appartient.
+  //
+  // Un niveau est actif tant que la hauteur relative reste entre SON seuil et
+  // celui du niveau precedent ; sous le dernier seuil, le groupe disparait. On
+  // pose les deux bornes sur le noeud, le moteur n'a plus qu'a comparer.
+  const lodOf = new Map();
+  for (const o of env.objects({ type: "LODGroup", file: ctx.sceneFile })) {
+    const grp = ctx.readEngine(o);
+    const levels = (grp && grp.m_LODs) || [];
+    if (!levels.length) continue;
+    stats.lodGroups++;
+    let upper = Infinity;
+    for (let i = 0; i < levels.length; i++) {
+      const h = levels[i].screenRelativeHeight ?? 0;
+      for (const lr of levels[i].renderers || []) {
+        const target = lr.renderer && env.deref(lr.renderer, sceneFile);
+        const rv = target && ctx.readEngine(target);
+        if (!rv || !rv.m_GameObject) continue;
+        lodOf.set(rv.m_GameObject.pathId,
+                  { level: i, height: h, upper: i === 0 ? null : upper });
+        stats.lodRenderers++;
+      }
+      upper = h;
     }
   }
 
@@ -491,6 +523,10 @@ export function exportSubtree(ctx, rootGid, label, {
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);
       }
     }
+    // `extras` est le seul endroit du format glTF ou l'on puisse faire passer
+    // une donnee qui n'est pas du rendu ; le chargeur de Babylon la remet dans
+    // `metadata.gltf.extras`.
+    if (lodOf.has(gid)) node.extras = { lod: lodOf.get(gid) };
     if (animOf.has(gid)) animatedRoots.push([tid, gid]);
     const kids = (childrenOf.get(tid) || [])
       .map((c) => emitNode(c, depth + 1)).filter((k) => k !== null);

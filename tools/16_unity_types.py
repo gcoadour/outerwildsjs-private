@@ -32,7 +32,8 @@ CLASSES = {
     111: "Animation", 114: "MonoBehaviour", 115: "MonoScript", 119: "Projector",
     120: "LineRenderer", 128: "Font", 135: "SphereCollider",
     136: "CapsuleCollider", 137: "SkinnedMeshRenderer", 198: "ParticleSystem",
-    199: "ParticleSystemRenderer", 212: "SpriteRenderer", 213: "Sprite",
+    199: "ParticleSystemRenderer", 205: "LODGroup",
+    212: "SpriteRenderer", 213: "Sprite",
 }
 
 
