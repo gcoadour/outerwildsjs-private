@@ -28,6 +28,7 @@
 import { dominantField } from "./gravity.js";
 import { ShipDamage } from "./shipdamage.js";
 import { frameFriction } from "./player.js";
+import { spawnPoints, nearestTo } from "./start.js";
 
 /** Multiplication de quaternions [x, y, z, w]. */
 export function quatMul(a, b) {
@@ -346,17 +347,14 @@ export class Ship {
   get speed() { return Math.hypot(this.vel.x, this.vel.y, this.vel.z); }
 }
 
-/** Point d'apparition du vaisseau le plus proche d'une position monde. */
+/**
+ * Point d'apparition du vaisseau le plus proche d'une position monde.
+ *
+ * Le tri des points entre joueur et vaisseau vit dans `start.js`, avec celui du
+ * depart : deux filtres separes finissaient par diverger, et c'est la meme
+ * question posee deux fois.
+ */
 export function shipSpawn(gameplay, nearWorld) {
-  const pts = ((gameplay && gameplay.placed && gameplay.placed.SpawnPoint) || [])
-    .filter((p) => /ship/i.test(p.name || ""));
-  if (!pts.length) return null;
-  let best = pts[0], bestD = Infinity;
-  for (const p of pts) {
-    const d = Math.hypot(p.position[0] - nearWorld[0],
-                         p.position[1] - nearWorld[1],
-                         p.position[2] - nearWorld[2]);
-    if (d < bestD) { bestD = d; best = p; }
-  }
-  return best.position;
+  const p = nearestTo(spawnPoints(gameplay, { ship: true }), nearWorld);
+  return p ? p.position : null;
 }
