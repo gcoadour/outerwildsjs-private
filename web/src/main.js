@@ -22,14 +22,15 @@ import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
 import { buildOrbits, advance, currentPosition, period } from "./orbits.js";
 import { SpinField, dayLength } from "./spin.js";
 import { loadGameplay } from "./config.js";
-import { Resources } from "./resources.js";
+import { Resources, oxygenVolumes, inOxygen } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { Settings, SettingsUI } from "./settings.js";
-import { shipRecords, ShipComputer, Flashlight, Marshmallow } from "./consoles.js";
+import { shipRecords, ShipComputer, Flashlight, Marshmallow,
+         heatSources, heatAt, remoteConsoles, RemoteView } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
-         fogLights, FogLightIcons } from "./fog.js";
+         fogLights, FogLightIcons, derelictZones, inDerelict } from "./fog.js";
 import { loadSceneLights, placedLights, SceneLights } from "./scenelights.js";
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
@@ -39,15 +40,16 @@ import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
 import { TimeLoop } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
-import { PlayerDeathHandler, FlashbackOverlay } from "./death.js";
+import { PlayerDeathHandler, FlashbackOverlay, deathCamera,
+         DEATH_SOUNDS } from "./death.js";
 import { MeshLOD, Evictor } from "./lod.js";
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
 import { QuantumMoon, quantumHosts, bodyOccluder } from "./quantum.js";
 import { BlackHole, DebrisField } from "./blackhole.js";
-import { Anglerfish, Thorns } from "./bramble.js";
+import { Anglerfish, Thorns, Corruption, corruptionAnimators } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
-import { SolarMap } from "./map.js";
+import { SolarMap, markerDistances } from "./map.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
@@ -73,6 +75,10 @@ async function boot() {
   const resources = new Resources(
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
+  // Zones d'oxygene : ce que la scene en dit, quel que soit le nom de la classe
+  // qui les porte. Une liste vide signifie que l'alpha n'en a pas, et le
+  // vaisseau reste alors la seule source.
+  const oxygenZones = oxygenVolumes(gameplay);
   const bodies = data.bodies;
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
@@ -341,6 +347,8 @@ async function boot() {
   const quantum = qHosts.length && qBody ? new QuantumMoon(qHosts, bodies) : null;
   // Occlusion : tout corps du systeme sauf la lune elle-meme peut la masquer.
   const qOccluder = bodyOccluder(bodies, qBody);
+  // AlignQuantumMoon, dans la scene : la lune s'oriente vers le joueur.
+  const alignMoon = (((gameplay.placed || {}).AlignQuantumMoon) || []).length > 0;
   window.__quantum = quantum;
 
   // --- interface de jeu : jauges et invites ---
@@ -371,6 +379,8 @@ async function boot() {
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   const flashlight = new Flashlight(BABYLON, scene);
   const marshmallow = new Marshmallow();
+  const fires = heatSources(gameplay);
+  const remoteView = new RemoteView(remoteConsoles(gameplay));
   const computerEl = document.getElementById("computer");
   // --- mixage par piste et emetteurs de signal ---
   const mixer = new AudioMixer();
@@ -386,7 +396,7 @@ async function boot() {
   let mixedEndTimes = false, mixedDeath = false;
   window.__audioMix = { mixer, transmitters };
 
-  window.__consoles = { computer, flashlight, marshmallow };
+  window.__consoles = { computer, flashlight, marshmallow, fires, remoteView };
 
   window.__gui = { guiMode, readout, minimap, settings, applySettings };
 
@@ -476,7 +486,8 @@ async function boot() {
   });
   const lights = uiRoot
     ? new FogLightIcons(BABYLON, scene, uiRoot, fogLights(gameplay)) : null;
-  window.__fog = { fog, qFog, cloaks, lights };
+  const derelicts = derelictZones(gameplay);
+  window.__fog = { fog, qFog, cloaks, lights, derelicts };
 
   // --- trou noir de Brittle Hollow ---
   const bhBody = bodies.find((b) => /brittlehollow/i.test(b.name));
@@ -580,7 +591,15 @@ async function boot() {
   const fish = ((gameplay.placed || {}).AnglerfishController || [])
     .map((f) => new Anglerfish(f.position));
   const thorns = new Thorns(((gameplay.placed || {}).BrambleManager || []).length || 10);
-  window.__bramble = { fish, thorns };
+  // Corruption : le seuil de decoupe des ronces suit la fraction de boucle. Les
+  // noeuds ne se resolvent qu'une fois Dark Bramble charge — comme les masques
+  // de brouillard, qui empruntent le meme chemin.
+  const corruption = new Corruption(corruptionAnimators(gameplay), (name) => {
+    const e = geo.find((x) => x.file === "darkbramble_pivot.gltf");
+    if (!e || !e.all) return null;
+    return e.all.filter((n) => n.name === name);
+  });
+  window.__bramble = { fish, thorns, corruption };
 
   // --- boucle temporelle ---
   const loop = new TimeLoop();
@@ -591,6 +610,7 @@ async function boot() {
 
   // Mort et flashback : une seule porte d'entree pour toutes les causes.
   const death = new PlayerDeathHandler();
+  let deathCued = false;
   const flashOverlay = uiRoot ? new FlashbackOverlay(uiRoot) : null;
   window.__death = death;
 
@@ -666,7 +686,7 @@ async function boot() {
   }
   const autopilot = ship ? new Autopilot(ship) : null;
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
-                                pdata, SECTOR_OF);
+                                pdata, SECTOR_OF, markerDistances(gameplay));
   window.__map = solarMap;
   window.__autopilot = autopilot;
   window.__ship = !!ship;
@@ -901,6 +921,15 @@ async function boot() {
 
     camera.position.set(player.pos.x, player.pos.y + 1.2, player.pos.z); // yeux
     camera.upVector = up;
+    // Mort : la vue s'affaisse, roule et recule pendant l'attente. Elle bouge
+    // AVANT que les images ne prennent l'ecran ; ensuite elle se fige.
+    if (death.dead) {
+      const dc = deathCamera(death.state);
+      camera.position.addInPlace(fwd.scale(-dc.back)).addInPlace(up.scale(-dc.drop));
+      // le roulis tourne la verticale de la camera autour de l'axe du regard
+      const q = BABYLON.Quaternion.RotationAxis(fwd, dc.roll);
+      camera.upVector = up.applyRotationQuaternion(q);
+    }
     camera.setTarget(camera.position.add(fwd));
 
     // le soleil eclaire depuis sa position monde, geometrie visible ou non
@@ -960,8 +989,11 @@ async function boot() {
     if (!ship || !ship.boarded) {
       focus = interactables.focus(player.pos, anchorPos, fwd);
     }
+    // Le vaisseau n'est plus la seule source d'oxygene : les zones posees dans
+    // la scene rechargent aussi.
+    const o2 = inOxygen(oxygenZones, player.pos, anchorPos);
     resources.update(dt, {
-      inSupply: !!(ship && ship.boarded),
+      inSupply: !!(ship && ship.boarded) || !!o2,
       thrusting: !!(input.up || input.forward || input.right),
     });
     interactPressed = false;
@@ -997,15 +1029,15 @@ async function boot() {
     // --- minicarte : hors du vaisseau, dans un secteur qui la porte ---
     if (minimap) {
       // Minimap.AttemptActivation : hors du vaisseau, et seulement si le
-      // secteur majeur actif declare l'utiliser. Les sept secteurs du build ont
-      // tous _useMinimap a vrai, mais c'est bien le drapeau qui decide.
+      // SECTEUR MAJEUR ACTIF declare l'utiliser. C'est le drapeau qui decide,
+      // pas la distance : la minicarte s'allumait par proximite du corps, ce
+      // qui la faisait apparaitre en plein vol au-dessus d'un secteur qui ne
+      // la demande pas, et disparaitre au fond d'un secteur qui la demande.
       const body = player.field && player.field.body;
       const sec = sectorState.secteur;
-      const near = body && player.field.distance <
-        (body.gravity.upperSurfaceRadius || 200) * 2;
-      minimap.setEnabled(!!near && !!(sec ? sec.useMinimap : true) &&
+      minimap.setEnabled(!!sec && !!sec.useMinimap &&
                          !(ship && ship.boarded) && !guiMode.hidden);
-      if (minimap.on) {
+      if (minimap.on && body) {
         minimap.update(body.position, player.pos, {
           ship: ship && !ship.boarded ? [ship.pos.x, ship.pos.y, ship.pos.z] : null,
           probe: probes.probes.length ? probes.probes[probes.probes.length - 1].pos : null,
@@ -1035,6 +1067,12 @@ async function boot() {
                   P("ShipPromptController._ignitionPrompt"),
                   P("ShipPromptController._mapPrompt"),
                   P("ShipPromptController._autopilotPrompt"));
+      } else if (remoteView.current) {
+        // A portee d'une console deportee : son invite est deja au catalogue,
+        // designee par sa classe — le nom du champ qui la porte n'a jamais ete
+        // releve, et le proprietaire suffit.
+        const p = prompts.ofOwner(remoteView.current.cls);
+        if (p) left.push({ text: p.text, priority: p.priority, button: p.button });
       } else {
         left.push(P("JetpackPromptController._upThrustPrompt"),
                   P("JetpackPromptController._horizontalThrustPrompt"));
@@ -1083,6 +1121,10 @@ async function boot() {
         (sectorState.secteur ? ` — ${sectorState.secteur.name}` : "") +
         (ship && ship.thrustLimit != null ? ` (poussee ≤ ${ship.thrustLimit})` : ""));
       if (pad.connected) bits.push("manette branchee");
+      if (o2) bits.push(`oxygene : ${o2.name || o2.cls}`);
+      if (marshmallow.held) bits.push(
+        `guimauve ${(marshmallow.toast * 100).toFixed(0)} %` +
+        (marshmallow.burnt ? " (brulee)" : marshmallow.edible ? " (prete)" : ""));
       if (directional.current) bits.push(`champ local : ${directional.current.name}`);
       if (fluids.inside.get("joueur")) bits.push(
         `dans ${fluids.inside.get("joueur").name}`);
@@ -1155,12 +1197,19 @@ async function boot() {
     // leur passe donc sa position monde. Sans cette conversion, la distance
     // etait fausse du decalage du repere — plusieurs milliers d'unites — et
     // aucun predateur ne se reveillait jamais.
-    const noisy = !!(input.forward || input.right || input.up || player.grounded === false);
+    // Le bruit n'est plus seulement celui qu'on FAIT : le champ audio publie
+    // ce qui joue reellement autour du joueur, et les predateurs l'entendent.
+    // Le seuil est bas — une source a moins de la moitie de sa portee suffit.
+    const NOISE_FLOOR = 0.5;
+    const noisy = !!(input.forward || input.right || input.up ||
+                     player.grounded === false) || audio.noiseLevel > NOISE_FLOOR;
     const playerWorld = { x: player.pos.x + anchorPos[0],
                           y: player.pos.y + anchorPos[1],
                           z: player.pos.z + anchorPos[2] };
     for (const f of fish) f.update(dt, playerWorld, noisy);
     thorns.update(loop.fraction);
+    if (!corruption.resolved) corruption.resolve();
+    corruption.update(loop.fraction);
 
     // --- trou noir : capture puis ejection au trou blanc ---
     if (blackHole) {
@@ -1242,7 +1291,15 @@ async function boot() {
       }
     }
     syncProbes();
-    probeCam.update(guiMode.hidden ? null : probes.last);
+    // La vue deportee sert deux choses : la sonde en vol, et les consoles qui
+    // supposent une camera ailleurs que sur le joueur. La sonde passe devant —
+    // c'est elle qu'on vient de lancer.
+    const remote = remoteView.update(player.pos, anchorPos, {
+      ship: ship ? [ship.pos.x, ship.pos.y, ship.pos.z] : null,
+      body: player.field ? player.field.body.position : null,
+      up: { x: up.x, y: up.y, z: up.z },
+    });
+    probeCam.update(guiMode.hidden ? null : (probes.last || remote));
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {
@@ -1303,6 +1360,13 @@ async function boot() {
     //
     // La lampe s'eteint d'elle-meme dans le vaisseau, la carte ou une
     // conversation : le jeu appelle TurnOff sur chacun de ces evenements.
+    // La guimauve cuit par PROXIMITE d'une source de chaleur, pas sur commande :
+    // au feu de camp on la tend, ailleurs on la range.
+    {
+      const heat = heatAt(fires, player.pos, anchorPos);
+      marshmallow.held = heat > 0;
+      marshmallow.update(dt, heat);
+    }
     if (ship && ship.boarded) flashlight.forceOff();
     if (solarMap.open || dialogue.active) flashlight.forceOff();
     flashlight.update(camera, fwd,
@@ -1337,7 +1401,10 @@ async function boot() {
     // anchorPos, pas origin.offset : le decalage du floating origin est fige sur
     // la position INITIALE du corps ancre, alors que les volumes de brouillard
     // sont fixes dans le monde et que le corps ancre, lui, orbite.
-    fog.update(camera.position, anchorPos, now);
+    // Une zone derelicte SUSPEND la mise a jour du brouillard : c'est ce que
+    // font EnterDerelictZone et ExitDerelictZone.
+    const derelict = inDerelict(derelicts, camera.position, anchorPos);
+    fog.update(camera.position, anchorPos, now, !!derelict);
     fog.apply(BABYLON, scene, camera);
     // --- lumieres du build a portee de la camera ---
     sceneLights.update(camera.position, anchorPos);
@@ -1368,8 +1435,18 @@ async function boot() {
         if (st.exited && quantum.relocate) quantum.relocate();
       }
       const qnode = qgeo && findBodyNode(qgeo, qBody.bodyName);
-      if (qnode) qnode.setAbsolutePosition(
-        new BABYLON.Vector3(...qBody.position));
+      if (qnode) {
+        qnode.setAbsolutePosition(new BABYLON.Vector3(...qBody.position));
+        // AlignQuantumMoon : la lune se tourne vers le joueur. C'est ce qui
+        // fait qu'on lui voit toujours la meme face — et qu'on ne s'apercoit
+        // pas qu'elle n'en a qu'une.
+        if (alignMoon) {
+          try {
+            qnode.lookAt(new BABYLON.Vector3(player.pos.x, player.pos.y, player.pos.z),
+                         0, 0, 0, BABYLON.Space.WORLD);
+          } catch (e) { /* noeud sans lookAt : la lune garde son orientation */ }
+        }
+      }
     }
 
     // --- boucle temporelle ---
@@ -1412,8 +1489,16 @@ async function boot() {
 
     if (death.dead) {
       if (!loop.dead) loop.kill(death.cause);
+      // Un son par cause : le jeu en joue un, le portage mourait en silence.
+      // Il n'est demande qu'une fois, a l'entree dans la sequence.
+      if (!deathCued) {
+        audio.cueDeath(DEATH_SOUNDS[death.cause] || null);
+        deathCued = true;
+      }
       // la sequence de flashback tient l'ecran, puis la boucle repart
       if (death.update(dt)) respawn();
+    } else if (deathCued) {
+      deathCued = false;
     }
     if (flashOverlay) flashOverlay.update(death.state);
 

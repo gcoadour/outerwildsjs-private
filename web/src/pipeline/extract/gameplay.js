@@ -16,9 +16,21 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "SphereOceanFluidVolume", "SimpleFluidDetector",
                 // Habitants du brouillard et de la lune quantique.
                 "CorruptionAnimator", "DerelictCloaker", "AlignQuantumMoon",
+                // Consoles a camera deportee : elles supposent une camera
+                // ailleurs que sur le joueur, ce que la sonde a apporte.
+                "RemoteFlightConsole", "SatelliteSnapshotController",
                 // Petites regles restees de cote : marqueurs de carte, source
                 // de chaleur de la guimauve.
                 "MapMarker", "HeatSource"];
+
+// Classes cherchees par MOTIF et non par nom.
+//
+// Le nom du composant qui fournit l'oxygene n'est pas connu du depot : la
+// question « arbres ou volumes ? » ne se tranche pas sans le build. Plutot que
+// de parier sur un nom, on prend toutes les classes de la scene dont le nom
+// parle d'oxygene ; s'il n'y en a aucune, le manque est celui de l'alpha, et
+// l'inventaire ci-dessous le dira.
+const PLACED_PATTERNS = [/oxygen/i];
 
 // Classes dont la portee vient d'un collider et non de leurs champs, et celles
 // dont l'orientation compte (un champ directionnel pousse dans SON axe).
@@ -49,13 +61,14 @@ export function extractGameplay(ctx) {
 
   for (const { obj, cls } of ctx.behaviours(null)) {
     inventory[cls] = (inventory[cls] || 0) + 1;
-    if (!wanted.has(cls)) continue;
+    const byPattern = PLACED_PATTERNS.some((r) => r.test(cls));
+    if (!wanted.has(cls) && !byPattern) continue;
     const fields = ctx.scriptFields(obj);
     if (!fields) continue;
     const plain = ctx.plain(fields);
     const gid = ctx.ownerId(obj);
     const entry = { name: ctx.name(gid), position: ctx.worldPosition(gid), fields: plain };
-    if (WITH_VOLUME.has(cls)) {
+    if (WITH_VOLUME.has(cls) || byPattern) {
       const vol = ctx.volumeOf(gid);
       if (vol) entry.volume = vol;
     }
@@ -64,7 +77,7 @@ export function extractGameplay(ctx) {
     }
 
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;
-    if (!PLACED.includes(cls)) continue;
+    if (!PLACED.includes(cls) && !byPattern) continue;
 
     // Reference vers un corps : on remplace le pointeur par son nom.
     for (const [k, v] of Object.entries(plain)) {

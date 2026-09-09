@@ -138,14 +138,23 @@ export class ProbeCamera {
     st.height = `${h * 100}%`;
   }
 
-  /** @param probe sonde a suivre, ou null */
-  update(probe) {
-    const want = !!probe;
+  /**
+   * @param src point de vue a montrer, ou null pour rendre l'ecran.
+   *
+   * Une SONDE porte `pos` et `vel` : elle regarde dans le sens de son vol. Une
+   * console deportee porte `pos` et `dir` — c'est le meme besoin, une vue
+   * seconde dans un coin de l'ecran, et c'est ce qui permet a
+   * `RemoteFlightConsole` et `SatelliteSnapshotController` de s'en servir sans
+   * qu'on ecrive une deuxieme camera.
+   */
+  update(src) {
+    const want = !!src;
     if (want) {
-      this.cam.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
-      const v = probe.vel, L = Math.hypot(v[0], v[1], v[2]) || 1;
+      const d = src.dir || src.vel || [0, 0, 1];
+      const L = Math.hypot(d[0], d[1], d[2]) || 1;
+      this.cam.position.set(src.pos[0], src.pos[1], src.pos[2]);
       this.cam.setTarget(new this.B.Vector3(
-        probe.pos[0] + v[0] / L, probe.pos[1] + v[1] / L, probe.pos[2] + v[2] / L));
+        src.pos[0] + d[0] / L, src.pos[1] + d[1] / L, src.pos[2] + d[2] / L));
     }
     if (want === this.on) return this.on;
     this.on = want;

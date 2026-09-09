@@ -15,12 +15,29 @@ export const MARKER_LINE = 1;
 export const BRACKET_RATIO = 0.25;
 export const MARKER_FONT = 14;
 export const MARKER_MIN_SCREEN = 10;
-// _maxDisplayDistance par type de marqueur : le soleil est toujours visible,
-// une lune ne s'affiche qu'a 5 000 unites
+// _maxDisplayDistance PAR TYPE de marqueur : le soleil est toujours visible,
+// une lune ne s'affiche qu'a 5 000 unites. Ce sont des valeurs de repli, pour
+// un corps dont la scene ne porte pas de MapMarker.
 export const MARKER_MAX_DISTANCE = {
   Default: 5000, Planet: 50000, Moon: 5000, Sun: 1e10,
   Player: Infinity, Probe: 50000, Ship: 50000,
 };
+
+/**
+ * Distances d'affichage relevees marqueur par marqueur.
+ *
+ * Chaque `MapMarker` de la scene porte SA distance ; une table par type est une
+ * generalisation, pas une mesure. On indexe par nom de GameObject, qui est
+ * aussi celui que porte le corps.
+ */
+export function markerDistances(gameplay) {
+  const out = new Map();
+  for (const m of ((gameplay || {}).placed || {}).MapMarker || []) {
+    const d = (m.fields || {})._maxDisplayDistance;
+    if (m.name && Number.isFinite(d) && d > 0) out.set(m.name, d);
+  }
+  return out;
+}
 
 // MapMarker n'emploie que deux couleurs : le blanc par defaut, et le VERT pour
 // ce qui appartient au joueur — lui-meme, son vaisseau, sa sonde. La palette
@@ -38,11 +55,12 @@ function markerType(body) {
 }
 
 export class SolarMap {
-  constructor(canvas, bodies, playerData = null, sectorOf = {}) {
+  constructor(canvas, bodies, playerData = null, sectorOf = {}, markers = null) {
     this.canvas = canvas;
     this.bodies = bodies;
     this.playerData = playerData;
     this.sectorOf = sectorOf;
+    this.markers = markers || new Map();
     this.zoom = ZOOM_DEFAULT;
     // MapController : le « pan » n'est pas une rotation mais un DECALAGE du
     // point vise, en x et z, a la vitesse de la distance de zoom par seconde.
@@ -137,13 +155,15 @@ export class SolarMap {
       // un corps jamais approche reste en creux : la carte se remplit a mesure
       const sec = this.sectorOf[b.name];
       const known = !this.playerData || !sec || this.playerData.hasExplored(sec);
-      // _maxDisplayDistance : une lune ne s'affiche qu'a 5 000 unites, une
-      // planete a 50 000, le soleil toujours
+      // _maxDisplayDistance : celle du marqueur de CE corps quand la scene en
+      // porte un, la valeur par type sinon.
       if (this.player) {
         const dd = Math.hypot(b.position[0] - this.player.x,
                               b.position[1] - this.player.y,
                               b.position[2] - this.player.z);
-        if (dd > (MARKER_MAX_DISTANCE[t] ?? 5000)) continue;
+        const max = this.markers.get(b.bodyName) ?? this.markers.get(b.name)
+          ?? MARKER_MAX_DISTANCE[t] ?? 5000;
+        if (dd > max) continue;
       }
       const color = COLORS[t] || COLORS.Default;
       ctx.globalAlpha = known ? 1 : 0.28;

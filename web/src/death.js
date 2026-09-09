@@ -39,6 +39,45 @@ export const DEATHS = {
 };
 
 /**
+ * De quoi reconnaitre, dans les clips de la piste `Death`, celui qui va avec la
+ * cause. Le build ne relie pas les deux : les causes sont nommees dans
+ * l'assembly, les clips le sont en anglais dans les assets. Ce sont donc des
+ * MOTIFS de nom, pas une correspondance mesuree — a defaut, la piste de mort
+ * joue quand meme, ce qui reste plus juste que le silence actuel.
+ */
+export const DEATH_SOUNDS = {
+  asphyxie: /suffocat|asphyx|oxygen|breath/i,
+  impact: /impact|crash|crush/i,
+  supernova: /supernova|explos|nova/i,
+  digestion: /angler|fish|eaten|digest|chomp/i,
+  incineration: /burn|fire|sun|incine/i,
+  ecrasement: /crush|impact/i,
+};
+
+/**
+ * Mouvement de camera pendant la sequence.
+ *
+ * `PlayerDeathHandler` du jeu pilote la camera pendant qu'on meurt ; le portage
+ * la laissait rigoureusement immobile, ce qui donnait une mort ou l'on regarde
+ * droit devant soi comme si de rien n'etait. La vue s'affaisse, roule sur le
+ * cote et recule pendant les deux secondes d'attente, puis se fige : c'est
+ * pendant l'attente qu'il se passe quelque chose a voir, les images ensuite
+ * prennent l'ecran.
+ *
+ * Amplitudes choisies pour ce portage : le build ne les porte pas.
+ */
+export const DEATH_CAM = { roll: 0.45, drop: 1.1, back: 2.2 };
+
+export function deathCamera(state, cfg = FLASHBACK) {
+  if (!state || state.phase === "fini") return { roll: 0, drop: 0, back: 0 };
+  const u = Math.min(1, Math.max(0, (state.t ?? cfg.delay) / cfg.delay));
+  // depart franc puis ralentissement : on tombe, on ne descend pas
+  const k = 1 - (1 - u) * (1 - u);
+  return { roll: DEATH_CAM.roll * k, drop: DEATH_CAM.drop * k,
+           back: DEATH_CAM.back * k };
+}
+
+/**
  * Enchainement d'images de plus en plus breves, puis fondu au blanc.
  *
  * Le nombre d'images n'est pas une constante du build : il decoule des trois
@@ -82,13 +121,13 @@ export class Flashback {
    *   alpha  opacite du voile blanc, 0 a 1
    */
   update(dt) {
-    if (!this.running) return { phase: "fini", frame: -1, alpha: 0, fini: true };
+    if (!this.running) return { phase: "fini", frame: -1, alpha: 0, t: this.t, fini: true };
     this.t += dt;
     const c = this.cfg;
 
     if (this.t < c.delay) {
       this.frame = -1;
-      return { phase: "attente", frame: -1, alpha: 0, fini: false };
+      return { phase: "attente", frame: -1, alpha: 0, t: this.t, fini: false };
     }
 
     let u = this.t - c.delay;
@@ -98,7 +137,7 @@ export class Flashback {
         // chaque image s'allume puis s'eteint : c'est ce battement, de plus en
         // plus rapide, qui donne l'impression d'un temps qui se rembobine
         const k = u / this.frames[i];
-        return { phase: "images", frame: i,
+        return { phase: "images", frame: i, t: this.t,
                  alpha: 0.35 * Math.sin(Math.PI * k), fini: false };
       }
       u -= this.frames[i];
@@ -107,9 +146,9 @@ export class Flashback {
     const a = Math.min(1, u / c.fade);
     if (u >= c.fade) {
       this.running = false;
-      return { phase: "fini", frame: -1, alpha: 1, fini: true };
+      return { phase: "fini", frame: -1, alpha: 1, t: this.t, fini: true };
     }
-    return { phase: "fondu", frame: -1, alpha: a, fini: false };
+    return { phase: "fondu", frame: -1, alpha: a, t: this.t, fini: false };
   }
 }
 
@@ -126,7 +165,7 @@ export class PlayerDeathHandler {
   constructor(flashback = new Flashback()) {
     this.flashback = flashback;
     this.cause = null;
-    this.state = { phase: "fini", frame: -1, alpha: 0, fini: true };
+    this.state = { phase: "fini", frame: -1, alpha: 0, t: 0, fini: true };
     this.deaths = 0;
     this.byCause = {};
   }
@@ -153,7 +192,7 @@ export class PlayerDeathHandler {
   revive() {
     this.cause = null;
     this.flashback.reset();
-    this.state = { phase: "fini", frame: -1, alpha: 0, fini: true };
+    this.state = { phase: "fini", frame: -1, alpha: 0, t: 0, fini: true };
   }
 
   get label() {

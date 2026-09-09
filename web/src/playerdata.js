@@ -97,10 +97,22 @@ export class PlayerData {
 
 /**
  * Choix d'un arbre de dialogue selon les connaissances, comme le font les
- * controleurs du jeu. Les noms d'arbres viennent des TextAsset.
+ * controleurs du jeu.
+ *
+ * La conversation DESIGNE ses arbres : un champ par situation, chacun pointant
+ * vers son TextAsset (`trees` dans dialogue.json). C'est cette reference qui
+ * fait foi. Le choix par NOM d'arbre, qui servait a tout, ne reste qu'en repli
+ * pour une conversation dont on n'a pas su lire les pointeurs — deviner un
+ * fichier par une bribe de son nom est le genre de raccourci qui marche jusqu'a
+ * ce qu'un fichier soit renomme.
  */
 export function selectTree(data, convo, trees) {
   const named = (frag) => {
+    // d'abord le champ de la conversation dont le NOM contient la bribe : c'est
+    // la reference directe, pas une ressemblance de fichier
+    for (const [field, id] of Object.entries(convo.trees || {})) {
+      if (field.toLowerCase().includes(frag) && trees[id]) return id;
+    }
     for (const [id, t] of Object.entries(trees)) {
       if (t.name && t.name.toLowerCase().includes(frag)) return id;
     }

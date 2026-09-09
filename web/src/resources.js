@@ -3,6 +3,43 @@
 //   oxygene 400 s, carburant 15, recharge 0,75/s, sante 100, combinaison 100,
 //   degats d'impact entre 20 et 40 u/s.
 
+/**
+ * Zones d'oxygene posees dans la scene.
+ *
+ * Le portage ne rechargeait QUE dans le vaisseau (`inSupply: ship.boarded`) :
+ * les arbres de Timber Hearth, sous lesquels on se refait une reserve, ne
+ * comptaient pas. L'extracteur ramasse toute classe de la scene dont le nom
+ * parle d'oxygene, avec le collider qui lui sert de volume ; on prend ce qui
+ * en sort, quel que soit son nom.
+ *
+ * Si rien n'en sort, ce n'est pas un manque du portage mais de l'alpha, et le
+ * vaisseau reste la seule source — ce que le compte ci-dessous permet de dire.
+ */
+export function oxygenVolumes(gameplay) {
+  const out = [];
+  for (const [cls, list] of Object.entries((gameplay || {}).placed || {})) {
+    if (!/oxygen/i.test(cls)) continue;
+    for (const e of list) {
+      const f = e.fields || {};
+      const r = f._radius ?? f._oxygenRadius ?? (e.volume && e.volume.radius) ?? 0;
+      if (r > 0) out.push({ name: e.name, cls, position: e.position, radius: r });
+    }
+  }
+  return out;
+}
+
+/** Est-on dans une zone d'oxygene ? Position dans le repere courant. */
+export function inOxygen(volumes, pos, frameOffset) {
+  const o = frameOffset || [0, 0, 0];
+  for (const v of volumes) {
+    const d = Math.hypot(v.position[0] - o[0] - pos.x,
+                         v.position[1] - o[1] - pos.y,
+                         v.position[2] - o[2] - pos.z);
+    if (d < v.radius) return v;
+  }
+  return null;
+}
+
 export class Resources {
   constructor(c = {}) {
     this.maxOxygen = c._maxOxygen ?? 400;

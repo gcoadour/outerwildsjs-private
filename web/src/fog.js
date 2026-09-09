@@ -92,8 +92,14 @@ export class FogField {
   /**
    * @param pos position de la camera dans le repere courant
    * @param framePos position monde de l'origine du repere courant
+   * @param suspendu `EnterDerelictZone` a ete franchi : le jeu SUSPEND la mise
+   *        a jour du brouillard tant qu'on est dans la zone, et la reprend a
+   *        `ExitDerelictZone`. La densite garde donc sa derniere valeur au lieu
+   *        de retomber a zero — c'est ce qui laisse le brouillard sur l'ecran
+   *        alors qu'on vient d'entrer dans une poche degagee.
    */
-  update(pos, framePos, now) {
+  update(pos, framePos, now, suspendu = false) {
+    if (suspendu) return this.density;
     const o = framePos || [0, 0, 0];
     let net = 0;
     let bramble = false;
@@ -219,6 +225,38 @@ export const CLOAK_NEAR_OUTSIDE = 300;
 export function fogCloaks(gameplay) {
   return ((gameplay.placed || {}).FogCloak || [])
     .map((c) => ({ name: c.name, position: c.position }));
+}
+
+/**
+ * Zones derelictes : les deux `DerelictCloaker` de la scene, et les evenements
+ * `EnterDerelictZone` / `ExitDerelictZone` qui vont avec. Y entrer suspend la
+ * mise a jour du brouillard (voir `FogField.update`).
+ *
+ * Le rayon vient du collider de la zone, comme pour tout volume declencheur.
+ */
+export const DERELICT_RADIUS = 500;
+
+export function derelictZones(gameplay) {
+  return ((gameplay.placed || {}).DerelictCloaker || []).map((z) => ({
+    name: z.name,
+    position: z.position,
+    radius: (z.fields || {})._radius ?? (z.volume && z.volume.radius) ?? DERELICT_RADIUS,
+  }));
+}
+
+/**
+ * Est-on dans une zone derelicte ? Retourne la zone, ou null.
+ * @param pos position dans le repere courant
+ */
+export function inDerelict(zones, pos, framePos) {
+  const o = framePos || [0, 0, 0];
+  for (const z of zones) {
+    const d = Math.hypot(z.position[0] - o[0] - pos.x,
+                         z.position[1] - o[1] - pos.y,
+                         z.position[2] - o[2] - pos.z);
+    if (d < z.radius) return z;
+  }
+  return null;
 }
 
 export class FogCloaks {

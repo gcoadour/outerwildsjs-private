@@ -19,7 +19,15 @@ import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS } from "../web/src/shi
 import { Ship } from "../web/src/ship.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
-import { Anglerfish, FISH } from "../web/src/bramble.js";
+import { Anglerfish, FISH, Corruption, corruptionAnimators,
+         corruptionCutoff } from "../web/src/bramble.js";
+import { oxygenVolumes, inOxygen } from "../web/src/resources.js";
+import { heatSources, heatAt, Marshmallow, MIN_TOAST, DEFAULT_HEAT,
+         remoteConsoles, RemoteView } from "../web/src/consoles.js";
+import { derelictZones, inDerelict, FogField } from "../web/src/fog.js";
+import { markerDistances } from "../web/src/map.js";
+import { selectTree } from "../web/src/playerdata.js";
+import { deathCamera, DEATH_CAM, DEATH_SOUNDS } from "../web/src/death.js";
 import { SpinField, spinOf, dayLength } from "../web/src/spin.js";
 import { dominantField, directionalFields, insideVolume,
          DirectionalFields } from "../web/src/gravity.js";
@@ -602,6 +610,115 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a fond en arriere : pas de course", sprinting(v(0, R)), false);
   check("pas tout a fait a fond : pas de course",
         sprinting(v(0, -R * (SPRINT_AT * 0.9))), false);
+}
+
+// --- les petites regles restees de cote -----------------------------------
+//
+// Chacune tient en quelques lignes, et chacune remplace une regle du portage
+// par ce que la scene dit.
+{
+  // Zones d'oxygene : le vaisseau n'est plus la seule source. La classe est
+  // trouvee par MOTIF, parce que son nom exact n'est pas connu du depot.
+  const gp = { placed: {
+    OxygenVolume: [{ name: "Arbre", position: [0, 0, 0],
+                     volume: { shape: "sphere", radius: 12 }, fields: {} }],
+    HeatSource: [{ name: "FeuDeCamp", position: [100, 0, 0],
+                   volume: { shape: "sphere", radius: 8 }, fields: {} }],
+    MapMarker: [{ name: "TimberHearth", position: [0, 0, 0],
+                  fields: { _maxDisplayDistance: 12345 } }],
+    DerelictCloaker: [{ name: "Derelicte", position: [0, -10000, 0],
+                        volume: { shape: "sphere", radius: 400 }, fields: {} }],
+    RemoteFlightConsole: [{ name: "Console", position: [0, 0, 0], fields: {} }],
+    CorruptionAnimator: [{ name: "Ronce", position: [0, 0, 0],
+                           fields: { _startCutoff: 0.2, _endCutoff: 0.8 } }],
+  } };
+
+  const o2 = oxygenVolumes(gp);
+  check("zone d'oxygene trouvee par motif", o2.length, 1);
+  check("son rayon vient du collider", o2[0].radius, 12);
+  check("dedans, on recharge", !!inOxygen(o2, { x: 5, y: 0, z: 0 }, [0, 0, 0]), true);
+  check("dehors, non", inOxygen(o2, { x: 50, y: 0, z: 0 }, [0, 0, 0]), null);
+
+  // Guimauve : c'est la PROXIMITE d'une source de chaleur qui la cuit.
+  const feux = heatSources(gp);
+  check("source de chaleur lue", feux.length, 1);
+  check("chaleur deduite du temps de cuisson", feux[0].heat, DEFAULT_HEAT);
+  check("loin du feu, aucune chaleur", heatAt(feux, { x: 0, y: 0, z: 0 }, [0, 0, 0]), 0);
+  const chaud = heatAt(feux, { x: 100, y: 0, z: 0 }, [0, 0, 0]);
+  check("au feu, la chaleur pleine", chaud, DEFAULT_HEAT);
+  const gui = new Marshmallow();
+  gui.held = true;
+  for (let i = 0; i < 30; i++) gui.update(0.1, chaud);
+  check("grillee en trois secondes", round(gui.toast, 2), 0.6);
+  check("... et mangeable a partir de la", gui.edible, true);
+  check("MIN_TOAST du build", MIN_TOAST, 0.6);
+
+  // Marqueurs de carte : la distance d'affichage de CE marqueur.
+  const md = markerDistances(gp);
+  check("distance d'affichage lue sur le marqueur",
+        md.get("TimberHearth"), 12345);
+
+  // Zone derelicte : y entrer suspend la mise a jour du brouillard.
+  const zones = derelictZones(gp);
+  check("zone derelicte lue", zones.length, 1);
+  const brouillard = new FogField([{ name: "V", position: [0, 0, 0],
+    innerRadius: 100, outerRadius: 200, innerDensity: 0.01, outerDensity: 0 }]);
+  brouillard.update({ x: 0, y: 0, z: 0 }, [0, 0, 0], 0);
+  const dense = brouillard.density;
+  check("dans le volume, le brouillard monte", dense > 0, true);
+  brouillard.update({ x: 0, y: 0, z: 100000 }, [0, 0, 0], 0, true);
+  check("suspendue, la densite ne bouge plus", brouillard.density, dense);
+  brouillard.update({ x: 0, y: 0, z: 100000 }, [0, 0, 0], 0, false);
+  check("reprise, elle retombe", brouillard.density, 0);
+  check("dedans", !!inDerelict(zones, { x: 0, y: -10000, z: 0 }, [0, 0, 0]), true);
+
+  // Consoles a camera deportee : la vue de la sonde leur sert.
+  const consoles = remoteConsoles(gp);
+  check("console deportee lue", consoles.length, 1);
+  const vue = new RemoteView(consoles).update({ x: 0, y: 0, z: 0 }, [0, 0, 0],
+    { ship: [0, 0, 500], up: { x: 0, y: 1, z: 0 } });
+  check("elle ouvre une vue sur le vaisseau", !!vue, true);
+  check("de haut", vue.pos[1] > 0, true);
+  check("et tournee vers lui", vue.dir.map((v) => round(v)).join(), "0,-1,0");
+  check("hors de portee, aucune vue",
+        new RemoteView(consoles).update({ x: 0, y: 0, z: 900 }, [0, 0, 0], {}), null);
+
+  // Corruption : le seuil de decoupe suit la fraction de boucle.
+  const anim = corruptionAnimators(gp);
+  check("animateur de corruption lu", anim.length, 1);
+  check("bornes lues dans les champs", `${anim[0].from},${anim[0].to}`, "0.2,0.8");
+  check("au debut de la boucle", corruptionCutoff(anim[0], 0), 0.2);
+  check("a la fin", corruptionCutoff(anim[0], 1), 0.8);
+  check("a mi-boucle", round(corruptionCutoff(anim[0], 0.5), 3), 0.5);
+
+  // Le seuil est pose sur les materiaux une fois la geometrie resolue.
+  const mat = { alphaCutOff: 0 };
+  const corr = new Corruption(anim, () => [{ material: mat }]);
+  check("resolution", corr.resolve(), true);
+  corr.update(1);
+  check("le materiau porte le seuil", mat.alphaCutOff, 0.8);
+
+  // Arbre de dialogue : la REFERENCE de la conversation avant le nom du fichier.
+  const trees = { 11: { name: "Coach_WithCodes" }, 22: { name: "autre_chose" } };
+  const convo = { character: "Coach", tree: 22,
+                  trees: { _dialogueTreeWithCodes: 22 } };
+  check("la reference directe l'emporte sur le nom",
+        selectTree({ hasCompletedTraining: true, knowsLaunchCodes: true, loopCount: 0 },
+                   convo, trees), 22);
+  check("sans reference, le nom sert encore",
+        selectTree({ hasCompletedTraining: true, knowsLaunchCodes: true, loopCount: 0 },
+                   { character: "Coach", tree: 22 }, trees), "11");
+
+  // Mort : un mouvement de camera pendant l'attente, puis plus rien.
+  check("au premier instant, la camera n'a pas bouge",
+        round(deathCamera({ phase: "attente", t: 0 }).drop, 3), 0);
+  check("apres l'attente, elle a fini sa course",
+        round(deathCamera({ phase: "images", t: 2 }).back, 3), DEATH_CAM.back);
+  check("elle ne bouge plus une fois la sequence finie",
+        deathCamera({ phase: "fini", t: 9 }).roll, 0);
+  check("un motif de son par cause", Object.keys(DEATH_SOUNDS).length, 6);
+  check("le motif de l'asphyxie reconnait son clip",
+        DEATH_SOUNDS.asphyxie.test("PlayerSuffocate"), true);
 }
 
 // --- la manette ----------------------------------------------------------

@@ -185,6 +185,20 @@ export class Prompts {
   get(key) { return this.catalogue.get(key) || null; }
 
   /**
+   * Premiere invite d'une CLASSE, quel que soit le champ qui la porte.
+   *
+   * Le nom du champ n'est pas toujours connu du portage — celui des consoles
+   * deportees, par exemple, n'a jamais ete releve. Le proprietaire, lui, suffit
+   * a designer l'invite, et une classe n'en porte qu'une ou deux.
+   */
+  ofOwner(owner) {
+    for (const [key, p] of this.catalogue) {
+      if (key.startsWith(owner + ".")) return p;
+    }
+    return null;
+  }
+
+  /**
    * Remplace le contenu d'une zone.
    * @param items  [{ text, priority }] ; seules les priorites maximales restent
    */

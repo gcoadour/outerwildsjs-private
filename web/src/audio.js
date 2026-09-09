@@ -140,6 +140,7 @@ export class AudioField {
     this.pending = new Set();  // creations en cours, pour eviter les doublons
     this.unlocked = false;
     this.failed = 0;
+    this.noise = 0;            // niveau de bruit du champ, 0 a 1
     this.filters = new Map();  // index -> BiquadFilterNode insere
     this.filterState = null;   // "ok" | "absent", decide au premier essai
   }
@@ -182,6 +183,8 @@ export class AudioField {
    */
   update(listener, toFrame, mixer = null) {
     if (!this.engine) return;
+    // Niveau de bruit du champ, recalcule a chaque passe (voir `noise`).
+    let noise = 0;
     if (this.engine.listener) {
       try {
         this.engine.listener.position =
@@ -224,8 +227,26 @@ export class AudioField {
           catch (e) { /* certaines versions n'exposent pas le setter */ }
         }
       }
+      // Ce qui joue VRAIMENT, et a quelle distance : c'est le bruit que la
+      // zone fait, et que les predateurs de Dark Bramble devraient entendre.
+      if (wanted && this.live.has(i) && s.spatial) {
+        const range = s.range || 60;
+        if (d < range) noise = Math.max(noise, (s.volume ?? 1) * (1 - d / range));
+      }
     }
+    this.noise = noise;
   }
+
+  /**
+   * Niveau de bruit du champ, de 0 a 1.
+   *
+   * Le `NoiseSensor` du jeu ecoute le monde ; le portage le nourrissait des
+   * COMMANDES du joueur — avancer, pousser les reacteurs — c'est-a-dire de son
+   * intention, pas du son. Le champ audio, lui, sait exactement quelles sources
+   * vivent et a quelle distance. Le jour ou l'on peut se trahir en laissant
+   * tourner un poste de radio, la zone change de nature.
+   */
+  get noiseLevel() { return this.noise || 0; }
 
   /**
    * Demande une piste declenchee par evenement — musique, fin des temps.
@@ -237,6 +258,33 @@ export class AudioField {
       if (this.sources[i].track === track) { this.asked.add(i); n += 1; }
     }
     return n;
+  }
+
+  /**
+   * Demande le son de mort correspondant a une cause.
+   *
+   * La piste `Death` du mixeur existe dans le build ; ce qui n'y est pas, c'est
+   * le lien entre une cause et un clip. On cherche donc d'abord un clip de
+   * cette piste dont le NOM parle de la cause, et l'on retombe sur n'importe
+   * quel clip de la piste — mourir en silence est le seul resultat qu'on ne
+   * veuille pas.
+   *
+   * @param pattern expression a chercher dans le nom, ou null
+   * @returns l'indice demande, ou -1
+   */
+  cueDeath(pattern = null) {
+    let fallback = -1;
+    for (let i = 0; i < this.sources.length; i++) {
+      const s = this.sources[i];
+      if (s.track !== "Death") continue;
+      if (pattern && pattern.test(s.name || s.file || "")) {
+        this.asked.add(i);
+        return i;
+      }
+      if (fallback < 0) fallback = i;
+    }
+    if (fallback >= 0) this.asked.add(fallback);
+    return fallback;
   }
 
   _spawn(i, s, p) {

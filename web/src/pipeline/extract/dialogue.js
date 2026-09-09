@@ -87,12 +87,24 @@ export function extractDialogue(ctx) {
     if (!f) continue;
     const gid = ctx.ownerId(obj);
     const ref = f._activeDialogueTree ? f._activeDialogueTree.pathId : null;
+    // TOUS les arbres que la conversation designe, pas seulement celui qui est
+    // actif. Un personnage en porte plusieurs — avant l'entrainement, avec les
+    // codes, les adieux — et le champ qui pointe vers chacun dit lequel est
+    // lequel. Sans eux, le portage devait choisir l'arbre par son NOM, ce qui
+    // revient a deviner ce que la scene ecrit noir sur blanc.
+    const refs = {};
+    for (const [k, v] of Object.entries(f)) {
+      if (v && typeof v === "object" && "pathId" in v && trees[v.pathId]) {
+        refs[k] = v.pathId;
+      }
+    }
     conversations.push({
       name: ctx.name(gid),
       character: f._characterName || null,
       isMuseumSign: !!f._isMuseumSign,
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
       tree: ref !== null && trees[ref] ? ref : null,
+      trees: refs,
     });
   }
   stats.conversations = conversations.length;
