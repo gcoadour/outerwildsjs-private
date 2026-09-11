@@ -48,8 +48,22 @@ function applyCutout(BABYLON, mat) {
 }
 
 /**
- * Emissif transparent : AlphaTest Greater, Cull Off, ZWrite Off, et une fusion
- * additive ou alpha selon la passe. On retient l'additive, dominante ici.
+ * Emissif transparent : `Self-Illumin/Transparent` et sa variante d'interface.
+ *
+ * MESURE, et non plus supposition. Le ShaderLab du build dit, pour les QUATRE
+ * shaders transparents de cette famille :
+ *
+ *   ZWrite Off · Cull Off · AlphaTest Greater 0
+ *   Blend SrcAlpha OneMinusSrcAlpha
+ *   LIGHTMODE = ForwardBase
+ *
+ * Pas un seul n'est additif. Le portage retenait l'additive « dominante ici »,
+ * ce qui n'etait fonde sur rien, et le resultat se voyait a l'ecran : les 28
+ * nuages de Timber Hearth s'AJOUTAIENT les uns aux autres sur un ciel noir et
+ * le repeignaient en plein jour (docs/41-ciel.md).
+ *
+ * L'emissif reste ici, parce que `Self-Illumin` tire bien une illumination de
+ * son alpha. Ce qui change, c'est la fusion.
  */
 function applySelfIllum(BABYLON, mat) {
   mat.backFaceCulling = false;
@@ -64,6 +78,93 @@ function applySelfIllum(BABYLON, mat) {
   }
   if ("disableLighting" in mat) mat.disableLighting = true;
   if ("unlit" in mat) mat.unlit = true;
+  mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
+  if ("transparencyMode" in mat) {
+    mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATESTANDBLEND;
+  }
+  return mat;
+}
+
+/**
+ * `Custom/SelfIlluminAlpha` : les nuages, et 28 maillages sur Timber Hearth.
+ *
+ * Son nom trompe. Sa propriete est `_MainTex ("Base (RGB) Trans (A)")` : l'alpha
+ * y est la TRANSPARENCE, pas une carte d'illumination — il n'y a pas de canal
+ * d'emission a lire. Et sa passe est `ForwardBase`, avec `lightStrength`
+ * (defaut 2) : ces maillages sont ECLAIRES.
+ *
+ * Les rendre non eclaires et emissifs en blanc, c'etait les allumer a fond
+ * quelle que soit l'heure. Sur une scene de depart dont le soleil est a 77
+ * degres SOUS l'horizon, les nuages brillaient donc comme en plein midi.
+ */
+function applyLitAlpha(BABYLON, mat) {
+  mat.backFaceCulling = false;
+  mat.twoSidedLighting = true;
+  mat.disableDepthWrite = true;
+  const tex = mat.albedoTexture || mat.diffuseTexture;
+  if (tex) tex.hasAlpha = true;
+  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+  if ("disableLighting" in mat) mat.disableLighting = false;
+  if ("unlit" in mat) mat.unlit = false;
+  mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
+  if ("transparencyMode" in mat) {
+    mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATESTANDBLEND;
+  }
+  return mat;
+}
+
+/**
+ * `Custom/Atmosphere` : la voute celeste, et rien d'autre ne s'en approche.
+ *
+ * Le ShaderLab du build ne laisse aucune place au doute :
+ *
+ *   Tags { "QUEUE"="Transparent" "RenderType"="Transparent" }
+ *   ZWrite Off
+ *   Blend SrcAlpha OneMinusSrcAlpha
+ *   SetTexture [_MainTex] { combine texture }
+ *
+ * Non eclaire, fondu par l'alpha de SA texture, sans ecriture de profondeur.
+ * Le portage le rendait opaque et eclaire : `SkyShell`, sphere de rayon 250,7
+ * autour de Timber Hearth, bouchait donc le ciel d'un lavis uni, et il ne
+ * restait ni nuit, ni etoiles, ni lune (docs/41-ciel.md). La texture
+ * `atmosphere_blue` est en DXT5 et son alpha va de 0 a 255 : il y avait bien
+ * un degrade a montrer, personne ne le regardait.
+ */
+function applyAlphaBlend(BABYLON, mat, { cullOff = false } = {}) {
+  const tex = mat.albedoTexture || mat.diffuseTexture;
+  if (tex) {
+    tex.hasAlpha = true;
+    if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
+  }
+  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+  if ("disableLighting" in mat) mat.disableLighting = true;
+  if ("unlit" in mat) mat.unlit = true;
+  if (cullOff) mat.backFaceCulling = false;
+  mat.disableDepthWrite = true;                    // ZWrite Off
+  mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;    // SrcAlpha OneMinusSrcAlpha
+  if ("transparencyMode" in mat) {
+    mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+  }
+  return mat;
+}
+
+/**
+ * Les additifs de particules : `Blend SrcAlpha One`, `ZWrite Off`, `Cull Off`.
+ *
+ * `Particles/Additive`, `MyShaders/ParticleAdditive_minus1` et leurs voisins.
+ * `~Additive-Multiply` melange en `DstColor One`, que Babylon n'expose pas tel
+ * quel ; il est rendu en additif, ce qui est proche et ne concerne qu'un seul
+ * maillage de la scene.
+ */
+function applyParticleAdditive(BABYLON, mat) {
+  const tex = mat.albedoTexture || mat.diffuseTexture;
+  if (tex) tex.hasAlpha = true;
+  if ("emissiveTexture" in mat && tex) mat.emissiveTexture = tex;
+  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+  if ("disableLighting" in mat) mat.disableLighting = true;
+  if ("unlit" in mat) mat.unlit = true;
+  mat.backFaceCulling = false;
+  mat.disableDepthWrite = true;
   mat.alphaMode = BABYLON.Engine.ALPHA_ADD;
   return mat;
 }
@@ -97,8 +198,17 @@ export function applyGameShaders(BABYLON, scene, meshes) {
     } else if (/DoubleSidedCutout|AlphaCutoff/.test(name)) {
       applyCutout(BABYLON, mat);
       bump(name);
+    } else if (name === "SelfIlluminAlpha") {
+      applyLitAlpha(BABYLON, mat);
+      bump(name);
     } else if (/SelfIllumin/.test(name)) {
       applySelfIllum(BABYLON, mat);
+      bump(name);
+    } else if (name === "Atmosphere") {
+      applyAlphaBlend(BABYLON, mat);
+      bump(name);
+    } else if (/^Particle ?Add|ParticleAdditive/.test(name)) {
+      applyParticleAdditive(BABYLON, mat);
       bump(name);
     } else if (name === "RimShader") {
       if (!cache.has(name)) {

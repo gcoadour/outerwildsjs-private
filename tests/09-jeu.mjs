@@ -27,6 +27,7 @@ import { rolloffModel, curveGain } from "../web/src/audio.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
+import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky } from "../web/src/sky.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
@@ -1596,6 +1597,44 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         noCollide({ name: "Rocher" }), false);
   check("un maillage sans extras non plus",
         noCollide({ name: "Rocher", metadata: { gltf: {} } }), false);
+}
+
+// --- la voute celeste ------------------------------------------------------
+//
+// `SkyBehavior` fait deux choses par image, et le portage n'en faisait aucune :
+// il tourne la voute vers l'etoile — c'est de la que viennent le jour et la
+// nuit — et il l'efface quand on s'en eloigne (docs/41-ciel.md).
+{
+  // La courbe relevee sur le build : pleine jusqu'aux trois quarts, puis elle
+  // tombe a zero.
+  const courbe = [1, 1, 1, 1, 1, 1, 1, 0.8221, 0];
+  check("le rayon de ciel par defaut est celui du constructeur", SKY_RADIUS, 320);
+  check("au centre, la voute est pleine", skyAlpha(courbe, 0, 320), 1);
+  check("au village, elle l'est encore", skyAlpha(courbe, 132, 320), 1);
+  // Le build divise par `_skyRadius` (320) et NON par le rayon du collider
+  // (250,7) : a la surface de la voute, on la voit donc encore.
+  check("a la surface de la voute, elle tient presque entierement",
+        round(skyAlpha(courbe, 250.749, 320), 3), 0.952);
+  check("au rayon de ciel, elle a disparu", skyAlpha(courbe, 320, 320), 0);
+  check("au-dela, elle reste disparue", skyAlpha(courbe, 900, 320), 0);
+  check("entre les deux, elle decroit",
+        round(skyAlpha(courbe, 300, 320), 3), 0.411);
+  check("sans rayon, on ne divise pas par zero", skyAlpha(courbe, 10, 0), 1);
+  check("sans courbe, la voute reste pleine", skyAlpha(null, 10, 320), 1);
+  check("une courbe s'interpole", skyCurveAt([0, 1], 0.5), 0.5);
+
+  // Sans donnees de ciel, le module ne fabrique rien : il n'y a pas de voute
+  // inventee, seulement celle du build.
+  const vide = new Sky(null);
+  check("sans donnees, aucune voute", vide.ready, false);
+  check("... et rattacher ne trouve rien", vide.attach([{ name: "SkyShell" }]), 0);
+  const ciel = new Sky({ shell: { name: "SkyShell", alphaCurve: courbe, skyRadius: 320 },
+                         clouds: new Array(24).fill({ texture: "cloud_01" }) });
+  check("la voute se retrouve par son nom",
+        ciel.attach([{ name: "Sol" }, { name: "SkyShell" }]), 1);
+  check("... et le ciel est alors pret", ciel.ready, true);
+  check("les nuages du build sont comptes", ciel.cloudCount, 24);
+  check("sans donnees, aucun nuage", vide.cloudCount, 0);
 }
 
 // --- detecteur d'oxygene ---------------------------------------------------

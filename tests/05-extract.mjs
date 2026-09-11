@@ -12,6 +12,7 @@ import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio } from "../web/src/pipeline/extract/audio.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
+import { extractSky } from "../web/src/pipeline/extract/sky.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -226,6 +227,31 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 // §2.7 : l'objet vise par un controleur de dialogue est un ARBRE, jamais un
 // Transform. Le `fileId` etait perdu au dereferencement, et les pointeurs se
 // resolvaient en os de squelette (`anglerfish_rig:UpTail4`).
+// Le ciel de Timber Hearth : une voute, 24 nuages, un champ d'etoiles. Aucune
+// des trois classes n'etait lue, et la premiere image du jeu montrait donc un
+// plein jour uni la ou le build decrit une nuit (docs/41-ciel.md).
+{
+  const sky = extractSky(ctx);
+  console.log("     ciel:", JSON.stringify(sky.stats),
+              "| textures:", sky.textures.join(" "));
+  check("la voute est extraite", !!sky.shell, true);
+  check("son rayon de collider", sky.shell && sky.shell.radius, 250.749);
+  // `_skyRadius` n'est pas serialise : c'est le 320 du constructeur, et c'est
+  // par LUI que le build divise, pas par le rayon du collider.
+  check("son rayon de ciel vient du constructeur", sky.shell && sky.shell.skyRadius, 320);
+  check("sa courbe d'alpha est echantillonnee",
+        sky.shell && sky.shell.alphaCurve && sky.shell.alphaCurve.length, 9);
+  check("elle part pleine", sky.shell.alphaCurve[0], 1);
+  check("... et finit a zero", sky.shell.alphaCurve[8], 0);
+  check("les nuages sont extraits", sky.clouds.length, 24);
+  // Les 24 partagent le materiau `CloudMat`, dont la texture serialisee est
+  // `cloud_01`. Sans ce composant, ils portent tous le meme visage.
+  check("... et ils portent dix textures distinctes", sky.textures.length, 10);
+  check("chaque nuage nomme la sienne",
+        sky.clouds.filter((c) => c.texture).length, 24);
+  check("le champ d'etoiles est la", sky.stars.length, 1);
+}
+
 // Ce qui est SOLIDE se lit dans le build, et le portage le supposait : il
 // fabriquait un collider trimesh pour chaque maillage rendu. Un tiers d'entre
 // eux n'en portent aucun (docs/40-solide.md) — dont la voute `SkyShell`, une

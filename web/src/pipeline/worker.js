@@ -23,6 +23,7 @@ import { extractShaders } from "./extract/shaders.js";
 import { extractParticles } from "./extract/particles.js";
 import { extractInterface } from "./extract/interface.js";
 import { extractLighting } from "./extract/lighting.js";
+import { extractSky } from "./extract/sky.js";
 import { exportSubtree, findRoots } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
@@ -272,6 +273,12 @@ async function run(blob, options) {
   const lighting = extractLighting(ctx);
   await writeFile("data/lighting.json", JSON.stringify(lighting));
   summary.lumieres = lighting.lights.length;
+
+  // Le ciel : la voute qui tourne vers l'etoile, les 24 nuages et leurs dix
+  // textures, le champ d'etoiles. Voir docs/41-ciel.md.
+  const sky = extractSky(ctx);
+  await writeFile("data/sky.json", JSON.stringify(sky));
+  summary.nuages = sky.clouds.length;
 
   phase("shaders", "Sources ShaderLab…");
   const shaderFiles = [];
