@@ -1760,6 +1760,11 @@ async function boot() {
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
     // lieu d'eclairage pour un systeme solaire entier.
     placedLights.update(player.pos, anchorPos);
+    // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
+    // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne
+    // vacille pas se remarque (docs/42-lumieres.md).
+    placedLights.setNight(night, performance.now() / 1000);
+    placedLights.animate(performance.now() / 1000);
     // le champ dominant du joueur tient lieu de `Physics.gravity` pour le
     // `gravityModifier` des systemes de particules
     if (particleMap.length) particles.update(player.pos, anchorPos, player.field);

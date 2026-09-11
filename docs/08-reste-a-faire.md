@@ -75,6 +75,7 @@ portage.
 | fluides | **quatre lois du build** : aspiration des bases de tornade, rayon tracteur, répulsion de l'océan |
 | ce qui est solide | **1 691 obstacles sur 2 219 maillages** : le décor se traverse, la voûte aussi |
 | ciel | voûte, 24 nuages et leurs 10 textures, champ d'étoiles, extraits ; fusions corrigées |
+| lumières vivantes | 15 `NightLight`, 15 `PulsingLight`, 9 `LightFlicker` |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -156,6 +157,11 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   même nom.
 - **Le champ d'étoiles** (`DistantStarController`) est extrait, son système de
   particules ne l'est pas.
+- **170 des 275 classes posées dans `level0` ne sont nommées nulle part** dans le
+  portage ([`42-lumieres.md`](42-lumieres.md)). Les trois familles les plus
+  lourdes : les référentiels (84 instances), les textures animées (44), les
+  décalcomanies (98). Ce compte est une borne haute — certaines classes sont
+  lues par motif — et c'est désormais la carte de ce qui reste.
 - **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
   restent ouvertes : le jeu affiche un système entier parce que les planètes
   lointaines sont des textures rafraîchies une fois par seconde. Le portage a
@@ -215,6 +221,7 @@ autre chose qu'un texte.
 | les quatre lois de fluide, lues dans l'IL | [`39-fluides.md`](39-fluides.md) |
 | ce qui est solide, et ce qu'on traversait | [`40-solide.md`](40-solide.md) |
 | la première image, regardée | [`41-ciel.md`](41-ciel.md) |
+| le recensement, et les lumières vivantes | [`42-lumieres.md`](42-lumieres.md) |
 
 ## Estimation honnête
 

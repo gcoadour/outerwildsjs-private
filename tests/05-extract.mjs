@@ -128,6 +128,26 @@ console.timeEnd("lumieres");
 // RenderSettings recopies a la main.
 check("des lumieres sont posees dans la scene", lighting.lights.length > 0, true);
 check("les RenderSettings de la scene sont lus", !!lighting.settings, true);
+// Ce qui fait VIVRE ces lumieres : trois comportements que le portage ne lisait
+// pas (docs/42-lumieres.md). Une lumiere sans eux garde l'intensite serialisee.
+check("les lumieres qui s'allument la nuit",
+      lighting.stats.comportements.NightLight, 15);
+check("celles qui battent", lighting.stats.comportements.PulsingLight, 15);
+check("celles qui vacillent", lighting.stats.comportements.LightFlicker, 9);
+// L'intensite serialisee d'une `NightLight` est celle de la NUIT : il faut
+// donc qu'elle soit non nulle, sinon il n'y a rien a faire fondre.
+{
+  const nuit = lighting.lights.filter(
+    (l) => (l.behaviours || []).some((b) => b.kind === "NightLight"));
+  check("chacune porte une intensite de nuit",
+        nuit.filter((l) => l.intensity > 0).length, 15);
+  const batt = lighting.lights.filter(
+    (l) => (l.behaviours || []).some((b) => b.kind === "PulsingLight"));
+  check("chaque battement porte un rythme",
+        batt.filter((l) => (l.behaviours.find((b) => b.kind === "PulsingLight")
+                            .fields._pulseRate ?? 0) !== 0).length, 15);
+}
+console.log("     comportements:", JSON.stringify(lighting.stats.comportements));
 console.log("     lumieres:", JSON.stringify(lighting.stats.types),
             "| brouillard:", lighting.settings && lighting.settings.fogMode,
             JSON.stringify(lighting.settings && lighting.settings.fogColor));

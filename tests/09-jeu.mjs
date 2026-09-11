@@ -47,7 +47,8 @@ import { directionalFields, insideVolume, strongestDirectional,
 import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
          applyDrag, terminalSpeed, densityAt, mediumVelocity, lawOf, curveAt,
          FluidField } from "../web/src/fluids.js";
-import { pickLights, LIGHT_BUDGET } from "../web/src/lights.js";
+import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
+         NIGHT_FADE } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
          Marshmallow } from "../web/src/consoles.js";
@@ -1597,6 +1598,59 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         noCollide({ name: "Rocher" }), false);
   check("un maillage sans extras non plus",
         noCollide({ name: "Rocher", metadata: { gltf: {} } }), false);
+}
+
+// --- ce qui fait vivre une lumiere -----------------------------------------
+//
+// Trois `Update` du build, transcrits (docs/42-lumieres.md). Le portage posait
+// l'intensite serialisee et n'en bougeait plus.
+{
+  // `PulsingLight` : sinusoide ADDITIVE, pas un facteur.
+  const f = { _pulseRate: 2, _timeOffset: 0, _intensityFluctuation: 0.3,
+              _rangeFluctuation: 5 };
+  const base = { intensity: 1, range: 20 };
+  check("au temps zero, la sinusoide ne decale rien",
+        round(pulse(base, f, 0).intensity, 6), 1);
+  // sin(pi/2) = 1 : le maximum est atteint quand (t x rate) vaut pi/2.
+  const haut = pulse(base, f, Math.PI / 4);
+  check("au sommet, on ajoute toute la fluctuation",
+        round(haut.intensity, 6), 1.3);
+  check("... et la portee suit la sienne", round(haut.range, 6), 25);
+  const bas = pulse(base, f, 3 * Math.PI / 4);
+  check("au creux, on la retranche", round(bas.intensity, 6), 0.7);
+  check("une fluctuation nulle laisse tout en place",
+        round(pulse(base, { _pulseRate: 2 }, 1).intensity, 6), 1);
+  // Le decalage de phase existe pour que deux lampes voisines ne battent pas
+  // ensemble.
+  check("le decalage de phase change la valeur",
+        round(pulse(base, { ...f, _timeOffset: Math.PI / 4 }, 0).intensity, 6), 1.3);
+
+  // `LightFlicker` : on tire une cible, on s'en approche par un Lerp.
+  const etat = { intensity: 1, target: 1 };
+  // alea = 1 -> cible = (1 x 2 - 1) x range + base = base + range
+  const apres = flicker(etat, 1, { range: 0.1, rate: 0.2 }, () => 1);
+  check("une cible atteinte en fait tirer une autre", round(etat.target, 6), 1.1);
+  check("on s'en approche du taux donne", round(apres, 6), 1.02);
+  // Tant qu'on n'est pas arrive, la cible ne change pas.
+  const cible0 = etat.target;
+  flicker(etat, 1, { range: 0.1, rate: 0.2 }, () => 0);
+  check("en chemin, la cible tient", round(etat.target, 6), round(cible0, 6));
+  check("les valeurs par defaut sont celles du build",
+        round(flicker({ intensity: 5, target: 5 }, 5, {}, () => 1), 4), 5.02);
+
+  // `NightLight` : l'intensite serialisee est celle de la NUIT.
+  const nf = { _dayIntensityMultiplier: 0.5 };
+  check("le fondu dure cinq secondes", NIGHT_FADE, 5);
+  check("de nuit, fondu acheve, on est a l'intensite du build",
+        round(nightIntensity(2, nf, true, 5), 6), 2);
+  check("de jour, fondu acheve, on est a la moitie",
+        round(nightIntensity(2, nf, false, 5), 6), 1);
+  check("a mi-fondu vers la nuit, on est entre les deux",
+        round(nightIntensity(2, nf, true, 2.5), 6), 1.5);
+  check("au-dela de la duree, on ne depasse pas",
+        round(nightIntensity(2, nf, false, 100), 6), 1);
+  check("sans multiplicateur, c'est la moitie du build",
+        round(nightIntensity(2, {}, false, 5), 6), 1);
 }
 
 // --- la voute celeste ------------------------------------------------------
