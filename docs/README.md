@@ -24,6 +24,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`23-connaissance.md`](23-connaissance.md) — la connaissance débloque le jeu
 - [`38-depart.md`](38-depart.md) — **le départ de la partie : point d'apparition, regard, hauteur des yeux**
 - [`39-fluides.md`](39-fluides.md) — **les quatre lois de fluide, lues dans l'IL du build : l'océan repousse**
+- [`40-solide.md`](40-solide.md) — **ce qui est solide : un tiers des maillages ne l'est pas, et on se posait sur le ciel**
 
 ## Les lieux
 

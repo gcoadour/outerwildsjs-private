@@ -243,13 +243,44 @@ export function exportSubtree(ctx, rootGid, label, {
   const stats = { nodes: 0, meshes: 0, skipped: 0, skins: 0, incompleteSkins: 0,
                   animations: 0, channels: 0, cubic: 0, linear: 0,
                   mecanimClips: 0, emptyMecanimClips: 0, unresolvedBones: 0,
-                  unresolvedPaths: 0, compressedClips: 0 };
+                  unresolvedPaths: 0, compressedClips: 0, noCollide: 0 };
 
   // --- index par GameObject : maillage, materiau, squelette ---
   const meshOf = new Map(), matOf = new Map(), skinOf = new Map();
   for (const o of env.objects({ type: "MeshFilter", file: ctx.sceneFile })) {
     const v = ctx.readEngine(o);
     if (v && v.m_GameObject && v.m_Mesh) meshOf.set(v.m_GameObject.pathId, v.m_Mesh);
+  }
+
+  // --- ce qui se heurte, et ce qui ne se heurte pas ---
+  //
+  // Le portage fabriquait un collider trimesh pour CHAQUE maillage rendu. Le
+  // build, lui, dit lesquels en ont un : 1 885 objets portent un collider pour
+  // 2 219 qui portent un maillage. Les 725 autres — 79 branches, 40 symboles
+  // flottants, 39 cristaux, 30 decalcomanies, les 24 nuages, la voute celeste
+  // — n'en ont AUCUN, et les traverser fait partie du jeu.
+  //
+  // C'etait deux defauts pour le prix d'un. On se heurtait a un decor qui n'est
+  // pas solide : la voute `SkyShell` est une sphere de rayon 250,7 autour de
+  // Timber Hearth, et le joueur qui tombait de 40 unites se posait dessus — ce
+  // « il se stabilise a 249 u » que docs/07-gameplay.md notait sans l'expliquer.
+  // Et le budget de 1 200 colliders se remplissait d'un tiers de decor, qui
+  // pouvait en evincer du vrai terrain.
+  //
+  // Un collider DECLENCHEUR ne rend rien solide : il signale qu'on entre, et
+  // c'est tout. `m_IsTrigger` est serialise, et 194 des 1 885 colliders de
+  // `level0` le portent — la voute celeste, les volumes de fluide, les zones
+  // d'oxygene. Les compter comme solides, c'etait rendre une atmosphere
+  // infranchissable.
+  const colliderGids = new Set();
+  for (const type of ["MeshCollider", "SphereCollider", "BoxCollider",
+                      "CapsuleCollider", "WheelCollider"]) {
+    for (const o of env.objects({ type, file: ctx.sceneFile })) {
+      const v = ctx.readEngine(o);
+      if (!v || !v.m_GameObject) continue;
+      if (v.m_IsTrigger === 1 || v.m_IsTrigger === true) continue;
+      colliderGids.add(v.m_GameObject.pathId);
+    }
   }
   for (const type of ["MeshRenderer", "SkinnedMeshRenderer"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
@@ -489,6 +520,11 @@ export function exportSubtree(ctx, rootGid, label, {
       if (mi !== null) {
         node.mesh = mi;
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);
+        // Ce que le build ne rend pas solide ne doit pas le devenir ici.
+        if (!colliderGids.has(gid)) {
+          node.extras = { ...(node.extras || {}), noCollide: true };
+          stats.noCollide++;
+        }
       }
     }
     if (animOf.has(gid)) animatedRoots.push([tid, gid]);

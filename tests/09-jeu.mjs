@@ -26,7 +26,7 @@ import { polarFields, polarDirection, strongestPolar,
 import { rolloffModel, curveGain } from "../web/src/audio.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep } from "../web/src/physics.js";
+import { underAsleep, noCollide } from "../web/src/physics.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
@@ -1583,6 +1583,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         underAsleep({ name: "Sol", parent: null }, new Set(["Observatoire"])), false);
   check("sans groupe endormi, rien n'est ecarte",
         underAsleep(enfant, new Set()), false);
+
+  // Ce que le build ne rend pas solide ne doit pas le devenir : 725 des 2 219
+  // objets porteurs de maillage n'ont AUCUN collider (docs/40-solide.md).
+  // L'exportateur les marque, et la physique les laisse passer.
+  const nuage = { name: "PieceOfRing",
+                  metadata: { gltf: { extras: { noCollide: true } } } };
+  const sol = { name: "Terrain", metadata: { gltf: { extras: {} } } };
+  check("un noeud marque traversable l'est", noCollide(nuage), true);
+  check("... et le terrain ne l'est pas", noCollide(sol), false);
+  check("un maillage sans metadonnees reste solide",
+        noCollide({ name: "Rocher" }), false);
+  check("un maillage sans extras non plus",
+        noCollide({ name: "Rocher", metadata: { gltf: {} } }), false);
 }
 
 // --- detecteur d'oxygene ---------------------------------------------------

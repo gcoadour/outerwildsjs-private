@@ -45,13 +45,34 @@ export function underAsleep(mesh, asleep) {
   return false;
 }
 
+/**
+ * Le build dit ce qui est solide, et le portage le prenait pour acquis.
+ *
+ * Un maillage rendu n'est pas un maillage de collision : sur 2 219 objets qui
+ * portent un maillage dans `level0`, **1 885 seulement portent un collider**.
+ * Les 725 autres — branches, cristaux, decalcomanies, symboles flottants, les
+ * 24 nuages de Timber Hearth et la voute `SkyShell` — se traversent, et c'est
+ * voulu. L'exportateur glTF marque donc chaque noeud concerne
+ * (`extras.noCollide`), et ils n'entrent plus en collision.
+ *
+ * Deux consequences : on ne se pose plus sur un nuage ni sur l'interieur de la
+ * voute celeste, et le budget de colliders cesse d'etre mange par du decor.
+ */
+export function noCollide(mesh) {
+  const m = mesh && mesh.metadata;
+  const e = m && m.gltf && m.gltf.extras;
+  return !!(e && e.noCollide);
+}
+
 export function buildColliders(BABYLON, scene, meshes, opts = {}) {
   const { maxCount = 1200, minVertices = 12, asleep = null } = opts;
   const aggregates = [];
   let skipped = 0;
   let dormants = 0;
+  let traversables = 0;
   for (const m of meshes) {
     if (aggregates.length >= maxCount) break;
+    if (noCollide(m)) { traversables++; continue; }
     if (underAsleep(m, asleep)) { dormants++; continue; }
     if (m.getTotalVertices() < minVertices) { skipped++; continue; }
     try {
@@ -62,7 +83,7 @@ export function buildColliders(BABYLON, scene, meshes, opts = {}) {
       skipped++;
     }
   }
-  return { aggregates, skipped, dormants };
+  return { aggregates, skipped, dormants, traversables };
 }
 
 export function disposeColliders(set) {

@@ -53,9 +53,15 @@ et, quand le composant le porte, par son champ `_isShipSpawn`.
 conséquence était mesurée depuis longtemps sans être nommée : *« le joueur se
 stabilise à 249 u du centre alors que les points d'apparition sont à
 131–168 »* ([`07-gameplay.md`](07-gameplay.md)). Il ne se posait donc pas sur le
-sol du village mais sur **ce qui dépasse** — les `PieceOfRing` sont à 218–238 —
-et la portée d'embarquement du vaisseau avait été élargie à 40 u pour rattraper
-les trente unités de dérive de cette chute.
+sol du village mais sur **ce qui dépasse**, et la portée d'embarquement du
+vaisseau avait été élargie à 40 u pour rattraper les trente unités de dérive de
+cette chute.
+
+> **Ce qui dépassait a été identifié depuis** ([`40-solide.md`](40-solide.md)),
+> et ce n'étaient pas les `PieceOfRing` nommés ici : ceux-là sont les **nuages**
+> de Timber Hearth, et le build ne leur donne aucun collider. Le joueur se
+> posait sur `SkyShell`, la voûte céleste — un déclencheur de rayon 250,749 que
+> le portage rendait solide. Les 249 u s'expliquent enfin au chiffre près.
 
 Le corps du joueur est une sphère de rayon 0,6 : son centre se pose donc au
 point d'apparition plus ce rayon, plus une garde d'un demi-mètre — une sphère

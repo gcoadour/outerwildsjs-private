@@ -327,8 +327,14 @@ async function boot() {
       meshesForBody(entry, body.bodyName, ["Ship_Body"]),
       { asleep: colLOD.asleep() });
     colliderFile = key;
+    // sonde de verification : ce qui est solide, et ce que le build laisse
+    // traverser (docs/40-solide.md)
+    window.__colliders = { poses: colliders.aggregates.length,
+                           ignores: colliders.skipped, endormis: colliders.dormants,
+                           traversables: colliders.traversables, fichier: key };
     console.log(`colliders : ${colliders.aggregates.length} sur ${key} ` +
-      `(${colliders.skipped} ignores, ${colliders.dormants} endormis) en ` +
+      `(${colliders.skipped} ignores, ${colliders.dormants} endormis, ` +
+      `${colliders.traversables} traversables) en ` +
       `${(performance.now() - t0).toFixed(0)} ms`);
   }
 

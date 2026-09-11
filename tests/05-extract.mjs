@@ -226,6 +226,49 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 // §2.7 : l'objet vise par un controleur de dialogue est un ARBRE, jamais un
 // Transform. Le `fileId` etait perdu au dereferencement, et les pointeurs se
 // resolvaient en os de squelette (`anglerfish_rig:UpTail4`).
+// Ce qui est SOLIDE se lit dans le build, et le portage le supposait : il
+// fabriquait un collider trimesh pour chaque maillage rendu. Un tiers d'entre
+// eux n'en portent aucun (docs/40-solide.md) — dont la voute `SkyShell`, une
+// sphere de rayon 250,7 autour de Timber Hearth sur laquelle le joueur se
+// posait.
+{
+  const COL = ["MeshCollider", "SphereCollider", "BoxCollider",
+               "CapsuleCollider", "WheelCollider"];
+  const avecCollider = new Set();
+  let declencheurs = 0;
+  for (const t of COL) {
+    for (const o of ctx.env.objects({ type: t, file: "level0" })) {
+      const v = ctx.readEngine(o);
+      if (!v || !v.m_GameObject) continue;
+      // Un declencheur signale qu'on entre ; il ne rend rien solide.
+      if (v.m_IsTrigger === 1 || v.m_IsTrigger === true) { declencheurs++; continue; }
+      avecCollider.add(v.m_GameObject.pathId);
+    }
+  }
+  check("le build distingue les declencheurs des obstacles", declencheurs, 194);
+  const avecMaillage = new Set();
+  for (const o of ctx.env.objects({ type: "MeshFilter", file: "level0" })) {
+    const v = ctx.readEngine(o);
+    if (v && v.m_GameObject) avecMaillage.add(v.m_GameObject.pathId);
+  }
+  const traversables = [...avecMaillage].filter((g) => !avecCollider.has(g));
+  console.log("     maillages:", avecMaillage.size, "| colliders:", avecCollider.size,
+              "| traversables:", traversables.length);
+  check("le build pose des obstacles", avecCollider.size, 1691);
+  check("... et des maillages", avecMaillage.size, 2219);
+  check("un tiers des maillages se traverse", traversables.length, 747);
+
+  // Les 24 nuages de Timber Hearth et la voute celeste en font partie : ce
+  // sont eux qu'on heurtait.
+  const ciel = new Set();
+  for (const { obj, cls } of ctx.behaviours((c) => /cloudtexture|skybehavior/i.test(c))) {
+    ciel.add(ctx.ownerId(obj));
+  }
+  check("le ciel de Timber Hearth est pose", ciel.size, 25);
+  check("... et rien de ce ciel n'est solide",
+        [...ciel].filter((g) => avecCollider.has(g)).length, 0);
+}
+
 // Le build EN A UN, et il est legitime : `_rocketScientistConversation` vise
 // le composant `Conversation` de la zone du scientifique, pas un arbre. Ce
 // qu'on garde, c'est donc la LISTE exacte : elle nomme le champ, et grossirait
