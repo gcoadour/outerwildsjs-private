@@ -24,6 +24,7 @@ import { extractParticles } from "./extract/particles.js";
 import { extractInterface } from "./extract/interface.js";
 import { extractLighting } from "./extract/lighting.js";
 import { extractSky } from "./extract/sky.js";
+import { extractTextureAnimators } from "./extract/texanim.js";
 import { exportSubtree, findRoots } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
@@ -279,6 +280,11 @@ async function run(blob, options) {
   const sky = extractSky(ctx);
   await writeFile("data/sky.json", JSON.stringify(sky));
   summary.nuages = sky.clouds.length;
+
+  // Textures qui defilent : le sable des jumelles, les cascades, les ecrans.
+  const texanim = extractTextureAnimators(ctx);
+  await writeFile("data/texanim.json", JSON.stringify(texanim));
+  summary["textures qui defilent"] = texanim.scrollers.length;
 
   phase("shaders", "Sources ShaderLab…");
   const shaderFiles = [];

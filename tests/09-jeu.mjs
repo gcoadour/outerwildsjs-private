@@ -28,6 +28,7 @@ import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky } from "../web/src/sky.js";
+import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
@@ -1598,6 +1599,51 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         noCollide({ name: "Rocher" }), false);
   check("un maillage sans extras non plus",
         noCollide({ name: "Rocher", metadata: { gltf: {} } }), false);
+}
+
+// --- textures qui defilent -------------------------------------------------
+//
+// Une seule loi pour les quatre classes du build, 44 instances
+// (docs/42-lumieres.md) : offset += rate x echelle x dt, replie dans [0, 1].
+{
+  check("un pas avance l'offset", round(scrollOffset(0, 0.05, 1, 1), 6), 0.05);
+  check("l'echelle de la texture multiplie le pas",
+        round(scrollOffset(0, 0.05, 4, 1), 6), 0.2);
+  // Le build teste STRICTEMENT au-dela de 1 : on repart de zero, on ne module
+  // pas. Un pas qui deborde perd donc son reste, et c'est ce que fait le jeu.
+  check("au-dela de un, on repart de zero", scrollOffset(0.99, 0.05, 1, 1), 0);
+  check("exactement a un, on ne repart pas encore",
+        round(scrollOffset(0.95, 0.05, 1, 1), 6), 1);
+  check("un rythme negatif remonte", round(scrollOffset(0.5, -0.05, 1, 1), 6), 0.45);
+  check("... et sous zero, on repart de un", scrollOffset(0.01, -0.05, 1, 1), 1);
+  check("une echelle absente vaut un", round(scrollOffset(0, 0.05, 0, 1), 6), 0.05);
+
+  // Le rattachement se fait par NOM : la position extraite est statique, et
+  // les corps orbitent — un appariement geometrique echoue des la premiere
+  // seconde, ce qu'un premier essai a montre a zero surface sur quarante-quatre.
+  const d = { scrollers: [
+    { name: "Sable", position: [10, 0, 0], channels: { main: { direction: [0, 1], rate: 0.05 } } },
+    { name: "Sable", position: [50, 0, 0], channels: { main: { direction: [0, 1], rate: 0.07 } } },
+  ] };
+  const mk = (nom) => ({ name: nom, material: null });
+  const sc = new TextureScrollers(d);
+  check("deux surfaces decrites", sc.total, 2);
+  check("les deux se retrouvent par leur nom",
+        sc.attach([mk("Sable"), mk("Sable"), mk("Roche")]), 2);
+  check("... et aucune autre", sc.count, 2);
+  check("chaque description prend un maillage distinct",
+        new Set(sc.live.map((x) => x.mesh)).size, 2);
+  // Moins de maillages que de descriptions : on n'en invente pas.
+  const court = new TextureScrollers(d);
+  check("une seule surface pour deux descriptions", court.attach([mk("Sable")]), 1);
+  // Un nom qui n'est pas la ne rattache rien.
+  check("un nom absent ne rattache rien",
+        new TextureScrollers(d).attach([mk("Roche")]), 0);
+  // Sans donnees, rien ne se rattache et rien ne casse.
+  const vide = new TextureScrollers(null);
+  check("sans donnees, aucune surface", vide.total, 0);
+  check("... et rattacher ne trouve rien", vide.attach([mk("Sable")]), 0);
+  check("... et avancer ne fait rien", vide.update(0.016), 0);
 }
 
 // --- ce qui fait vivre une lumiere -----------------------------------------

@@ -13,6 +13,7 @@ import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio } from "../web/src/pipeline/extract/audio.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { extractSky } from "../web/src/pipeline/extract/sky.js";
+import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -270,6 +271,25 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   check("chaque nuage nomme la sienne",
         sky.clouds.filter((c) => c.texture).length, 24);
   check("le champ d'etoiles est la", sky.stars.length, 1);
+}
+
+// Les surfaces qui defilent : le sable des jumelles, les cascades, les ecrans.
+// Quatre classes, une seule loi, et rien ne les lisait (docs/42-lumieres.md).
+{
+  const ta = extractTextureAnimators(ctx);
+  console.log("     textures defilantes:", JSON.stringify(ta.stats));
+  check("les surfaces defilantes sont extraites", ta.scrollers.length, 44);
+  check("dont le defilement principal", ta.stats.TextureAnimator, 27);
+  check("... sa variante multi-materiaux", ta.stats.TextureAnimatorMultipleMats, 10);
+  check("... et celle qui anime aussi la normale", ta.stats.NormalTexAnimator, 4);
+  // Aucune ne doit sortir sans rythme : un defilement a zero ne defile pas, et
+  // l'extracteur les ecarte plutot que de les emettre inertes.
+  check("chacune porte un rythme",
+        ta.scrollers.filter((s) => Object.values(s.channels)
+          .every((c) => c.rate !== 0)).length, 44);
+  check("chacune porte une direction",
+        ta.scrollers.filter((s) => Object.values(s.channels)
+          .every((c) => Array.isArray(c.direction) && c.direction.length === 2)).length, 44);
 }
 
 // Ce qui est SOLIDE se lit dans le build, et le portage le supposait : il

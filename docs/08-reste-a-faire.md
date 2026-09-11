@@ -76,6 +76,7 @@ portage.
 | ce qui est solide | **1 691 obstacles sur 2 219 maillages** : le décor se traverse, la voûte aussi |
 | ciel | voûte, 24 nuages et leurs 10 textures, champ d'étoiles, extraits ; fusions corrigées |
 | lumières vivantes | 15 `NightLight`, 15 `PulsingLight`, 9 `LightFlicker` |
+| textures qui défilent | 44 extraites, 27 rattachées et 23 en mouvement |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -221,7 +222,7 @@ autre chose qu'un texte.
 | les quatre lois de fluide, lues dans l'IL | [`39-fluides.md`](39-fluides.md) |
 | ce qui est solide, et ce qu'on traversait | [`40-solide.md`](40-solide.md) |
 | la première image, regardée | [`41-ciel.md`](41-ciel.md) |
-| le recensement, et les lumières vivantes | [`42-lumieres.md`](42-lumieres.md) |
+| le recensement, lumières vivantes et textures défilantes | [`42-lumieres.md`](42-lumieres.md) |
 
 ## Estimation honnête
 

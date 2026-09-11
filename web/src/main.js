@@ -63,6 +63,7 @@ import { directionalFields, polarFields } from "./gravity.js";
 import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky } from "./sky.js";
+import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -231,6 +232,9 @@ async function boot() {
   // fait le jour et la nuit (docs/41-ciel.md).
   const sky = new Sky(await loadSky());
   window.__sky = sky;
+  // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
+  const scrollers = new TextureScrollers(await loadTextureAnimators());
+  window.__texanim = scrollers;
   const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
   // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
@@ -271,6 +275,8 @@ async function boot() {
     }
     syncGeometry([entry], origin);
     if (sky.attach(entry.meshes)) console.log(`ciel : voute rattachee`);
+    const nScroll = scrollers.attach(entry.meshes);
+    if (nScroll) console.log(`textures defilantes : ${nScroll} rattachees`);
     window.__shaders = shaderCounts;
     console.log(`geometrie chargee : ${entry.file} (${entry.meshes.length} maillages)`);
   });
@@ -1753,6 +1759,7 @@ async function boot() {
     // Le ciel du build : ce qu'il calcule, on le calcule. Ce qu'il n'applique
     // pas, on ne l'applique pas non plus (docs/41-ciel.md).
     if (sky.ready) sky.update(player.pos);
+    if (scrollers.count) scrollers.update(dt);
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
