@@ -9,6 +9,7 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
+import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio } from "../web/src/pipeline/extract/audio.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
@@ -168,8 +169,35 @@ console.log("     fluides:", milieux.length, "| avec courant:", courants.length,
             "| densites:", JSON.stringify([...new Set(milieux
               .map(({ e }) => (e.fields || {})._density))].sort((a, b) => a - b)));
 check("des volumes portent un courant", courants.length > 0, true);
-check("... et ce sont des capsules, pas des spheres",
-      courants.every(({ e }) => !e.volume || e.volume.shape === "capsule"), true);
+// Les huit colonnes de tornade sont des capsules ; leurs six BASES sont des
+// spheres de 65 a 80. L'invariant precedent affirmait « toutes des capsules »
+// et echouait sur le build : la mesure a tranche contre lui.
+const formes = {};
+for (const { e } of courants) {
+  const s = (e.volume && e.volume.shape) || "aucune";
+  formes[s] = (formes[s] || 0) + 1;
+}
+console.log("     formes des volumes a courant:", JSON.stringify(formes));
+check("les colonnes de tornade sont des capsules", formes.capsule, 11);
+check("... et leurs bases des spheres", formes.sphere, 6);
+
+// Le vrai invariant : AUCUN volume portant un `_flowSpeed` ne doit rester
+// immobile. Trois lois sur quatre calculent leur direction depuis le point et
+// ne serialisent donc pas de `_localLinearFlow` — c'est ce qui laissait les six
+// bases, le rayon tracteur et l'ocean sans mouvement (docs/39-fluides.md).
+const vols = fluidVolumes(gp, solar);
+const muets = vols.filter((v) => v.flowSpeed > 0 &&
+                                 mediumVelocity(v, [v.position[0] + (v.radius || 1) / 2,
+                                                    v.position[1],
+                                                    v.position[2]]) === null);
+check("aucun volume a flux ne reste immobile", muets.map((v) => v.name).join(",") || null, null);
+const ocean = vols.find((v) => v.law === "ocean");
+check("l'ocean porte sa courbe de repulsion", !!(ocean && ocean.repelCurve), true);
+check("... et sa vitesse de repulsion maximale", ocean && ocean.maxRepelSpeed, 250);
+check("... son rayon interne", ocean && ocean.innerRadius, 440);
+check("... et son courant de surface", ocean && ocean.currentSpeed, 10);
+console.log("     lois de fluide:", JSON.stringify(
+  vols.reduce((a, v) => ((a[v.law] = (a[v.law] || 0) + 1), a), {})));
 
 // §2.3 : la trainee est portee par le DETECTEUR, pas par le volume.
 const detecteurs = Object.entries(gp.placed)
@@ -198,8 +226,14 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 // §2.7 : l'objet vise par un controleur de dialogue est un ARBRE, jamais un
 // Transform. Le `fileId` etait perdu au dereferencement, et les pointeurs se
 // resolvaient en os de squelette (`anglerfish_rig:UpTail4`).
-check("aucun pointeur de controleur ne vise autre chose qu'un texte",
-      gp.stats["references non textuelles"] ?? null, null);
+// Le build EN A UN, et il est legitime : `_rocketScientistConversation` vise
+// le composant `Conversation` de la zone du scientifique, pas un arbre. Ce
+// qu'on garde, c'est donc la LISTE exacte : elle nomme le champ, et grossirait
+// aussitot si le `fileId` se reperdait et que des os de squelette revenaient
+// se faire passer pour des arbres.
+check("les pointeurs non textuels sont exactement ceux du build",
+      (gp.stats["references non textuelles"] ?? []).join(","),
+      "SecondLoopConvoTrigger._rocketScientistConversation");
 const ctrls = Object.entries(gp.placed)
   .filter(([cls]) => /convocontroller|convotrigger/i.test(cls))
   .flatMap(([cls, l]) => l.map((e) => ({ cls, e })));

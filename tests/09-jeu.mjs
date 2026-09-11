@@ -44,7 +44,7 @@ import { bodySpin, spinPeriod, rotateAbout, SpinField,
 import { directionalFields, insideVolume, strongestDirectional,
          dominantField } from "../web/src/gravity.js";
 import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
-         applyDrag, terminalSpeed, densityAt, mediumVelocity,
+         applyDrag, terminalSpeed, densityAt, mediumVelocity, lawOf, curveAt,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
@@ -738,6 +738,89 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     cyclone.apply([0, 0, 0], vc, 0.01, { magnitude: 12, dir: { x: 0, y: -1, z: 0 } });
   }
   check("la tornade ejecte vers le haut", vc.y > 250, true);
+
+  // Les QUATRE lois de vitesse du build (docs/39-fluides.md). Trois d'entre
+  // elles calculent leur direction a partir du point : elles ne serialisent
+  // donc AUCUN `_localLinearFlow`, et le portage, qui n'attendait que celui-la,
+  // rendait immobiles six bases de tornade, un rayon tracteur et un ocean.
+  check("la loi se lit dans la classe", lawOf("TornadoBaseFluidVolume"), "tornadoBase");
+  check("... celle du rayon tracteur aussi", lawOf("TractorBeamFluid"), "tractor");
+  check("... celle de l'ocean aussi", lawOf("SphereOceanFluidVolume"), "ocean");
+  check("une classe inconnue suit la loi lineaire", lawOf("SimpleFluidVolume"), "simple");
+
+  // Base de tornade : elle aspire vers l'AXE, pas vers le centre. Cinq bases
+  // du build aspirent (`_flowType` 0), une repousse (1), toutes a 100 u/s.
+  const bse = fluidVolumes({ placed: { TornadoBaseFluidVolume: [{
+    name: "Base", position: [0, 0, 0], rotation: null,
+    volume: { shape: "sphere", radius: 80, center: [0, 0, 0] },
+    fields: { _density: 2, _flowSpeed: 100, _flowType: 0, _priority: 1 },
+  }] } }, {})[0];
+  check("la base garde son flux sans direction serialisee", bse.flowSpeed, 100);
+  const vb = mediumVelocity(bse, [40, 0, 0]);
+  check("elle aspire vers l'axe", round(vb[0], 3), -100);
+  check("... a pleine vitesse", round(Math.hypot(vb[0], vb[1], vb[2]), 3), 100);
+  const vh = mediumVelocity(bse, [30, 50, 0]);
+  check("l'aspiration est horizontale, quelle que soit la hauteur",
+        round(vh[1], 6), 0);
+  check("... et vaut toujours 100", round(Math.hypot(vh[0], vh[1], vh[2]), 3), 100);
+  check("sur l'axe meme, aucune direction n'est definie",
+        mediumVelocity(bse, [0, 50, 0]), null);
+  const rep = mediumVelocity({ ...bse, flowType: 1 }, [40, 0, 0]);
+  check("`_flowType` 1 repousse au lieu d'aspirer", round(rep[0], 3), 100);
+
+  // Rayon tracteur : `up * _flowSpeed`, plus un rappel lateral vers l'axe.
+  const beam = fluidVolumes({ placed: { TractorBeamFluid: [{
+    name: "Faisceau", position: [0, 0, 0], rotation: null,
+    volume: { shape: "capsule", radius: 1, height: 10, axis: 1, center: [0, 0, 0] },
+    fields: { _density: 500, _flowSpeed: 10, _priority: 100 },
+  }] } }, {})[0];
+  const vt = mediumVelocity(beam, [0, 0, 0]);
+  check("le faisceau souleve le long de son axe", round(vt[1], 3), 10);
+  const vl = mediumVelocity(beam, [2, 0, 0]);
+  check("... et ramene vers l'axe, a cinq fois l'ecart", round(vl[0], 3), -10);
+  check("le soulevement ne depend pas de l'ecart", round(vl[1], 3), 10);
+
+  // L'ocean de Giant's Deep : il REPOUSSE. Entre `_outerRadius` 500 et
+  // `_innerRadius` 440, une courbe donne la part de `_maxRepelSpeed` 250 qui
+  // pousse vers le haut ; sous le rayon interne, plus rien, et la densite
+  // saute d'un coup a 100. C'est ce qui rend le coeur inatteignable en
+  // nageant, et donne sa raison d'etre a la tornade inversee.
+  const mer = fluidVolumes({ placed: { SphereOceanFluidVolume: [{
+    name: "Mer", position: [0, 0, 0], rotation: null,
+    volume: { shape: "sphere", radius: 498, center: [0, 0, 0] },
+    fields: { _density: 10, _deepDensity: 100, _innerRadius: 440,
+              _outerRadius: 500, _maxRepelSpeed: 250, _currentSpeed: 10,
+              _priority: 1, _repelCurve: { m_Curve: [{ time: 0, value: 0 },
+                                                     { time: 1, value: 1 }] } },
+  }] } }, {})[0];
+  check("la courbe de repulsion est echantillonnee", mer.repelCurve.length, 9);
+  check("elle part de zero", curveAt(mer.repelCurve, 0), 0);
+  check("et arrive a un", curveAt(mer.repelCurve, 1), 1);
+  const surf = mediumVelocity(mer, [0, 0, 500]);
+  check("en surface, rien ne repousse", round(surf[2], 6), 0);
+  check("... mais le courant porte a pleine vitesse", round(surf[0], 3), -10);
+  const mi = mediumVelocity(mer, [0, 0, 470]);
+  check("a mi-chemin, la repulsion vaut la moitie du maximum",
+        round(mi[2], 3), 125);
+  check("... et le courant s'est eteint de moitie", round(mi[0], 3), -5);
+  check("au rayon interne, la repulsion est maximale",
+        round(mediumVelocity(mer, [0, 0, 440])[2], 3), 250);
+  check("sous le rayon interne, plus rien ne pousse",
+        mediumVelocity(mer, [0, 0, 430]), null);
+  // Le palier de densite, et non la rampe : le build bascule d'un coup.
+  check("au-dessus du rayon interne, la densite de surface",
+        densityAt(mer, depthIn(mer, [0, 0, 450])), 10);
+  check("en dessous, la densite profonde d'un coup",
+        densityAt(mer, depthIn(mer, [0, 0, 430])), 100);
+
+  // `_flowType` 1 et 2 d'un volume simple : radial rentrant et sortant. Aucun
+  // volume du build ne s'en sert, mais la loi est la et ne coute rien.
+  const radial = { law: "simple", position: [0, 0, 0], rotation: null,
+                   radius: 100, flowSpeed: 20, flowType: 2 };
+  check("`_flowType` 2 pousse vers l'exterieur",
+        round(mediumVelocity(radial, [10, 0, 0])[0], 3), 20);
+  check("`_flowType` 1 attire vers le centre",
+        round(mediumVelocity({ ...radial, flowType: 1 }, [10, 0, 0])[0], 3), -20);
 
   // `_priority` tranche avant la profondeur : l'interieur du vaisseau est a
   // 100, le centre d'une tornade a 5, l'ocean a 1.

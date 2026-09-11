@@ -23,6 +23,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`18-vaisseau.md`](18-vaisseau.md) — pilote automatique et dégâts
 - [`23-connaissance.md`](23-connaissance.md) — la connaissance débloque le jeu
 - [`38-depart.md`](38-depart.md) — **le départ de la partie : point d'apparition, regard, hauteur des yeux**
+- [`39-fluides.md`](39-fluides.md) — **les quatre lois de fluide, lues dans l'IL du build : l'océan repousse**
 
 ## Les lieux
 
