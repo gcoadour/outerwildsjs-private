@@ -1355,6 +1355,58 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   t.update(1 / 60, corps, { forward: 1, right: 0, up: false }, vertical, null);
   check("... et coupe les commandes le temps de se relever",
         round(Math.hypot(t.vel.x - avant.x, t.vel.z - avant.z), 6), 0);
+
+  // --- LE PAS DE PHYSIQUE, celui que le repli ne prend jamais ------------
+  //
+  // Tout ce qui precede passe par `stepAnalytic` : sans Havok, le joueur tombe
+  // dans le moteur de repli. C'est la moitie du code qu'aucun test sous Node
+  // n'atteignait, et une variable libre y a vecu le temps d'un commit — une
+  // ReferenceError levee a chaque image, donc uniquement chez qui a fourni son
+  // build, puisque le systeme de substitution n'a pas de colliders.
+  //
+  // Havok ne tourne pas sous Node, mais `stepPhysics` ne lui demande presque
+  // rien : un Vector3, un corps qui rend et recoit sa vitesse, et un moteur de
+  // physique. Sans lanceur de rayon, `probeGround` declare simplement qu'on ne
+  // touche pas le sol — c'est le cas en vol, et il suffit a EXECUTER le pas.
+  class V3 {
+    constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; }
+    addInPlace(v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; }
+    scale(k) { return new V3(this.x * k, this.y * k, this.z * k); }
+    add(v) { return new V3(this.x + v.x, this.y + v.y, this.z + v.z); }
+  }
+  const havokFeint = (joueur) => {
+    const forces = [];
+    const node = { position: new V3(0, 300, 0), absolutePosition: new V3(0, 300, 0) };
+    joueur.usePhysics({ Vector3: V3 }, { getPhysicsEngine: () => null },
+                      { transformNode: node,
+                        body: { getLinearVelocity: () => new V3(0, 0, 0),
+                                setLinearVelocity: () => {},
+                                applyForce: (f) => forces.push(f) } });
+    return forces;
+  };
+
+  const pesant = new Player({}, [0, 300, 0]);
+  const forcesPesant = havokFeint(pesant);
+  pesant.update(1 / 60, corps, rien, vertical, null, { framePos: [0, 0, 0] });
+  check("le pas de physique s'execute", forcesPesant.length, 1);
+  // 250 u de rayon, 300 u du centre, et un falloff LINEAIRE (`falloffType` 0,
+  // celui de la plupart des corps du build) : la pesanteur y vaut
+  // 12 x 250/300, et la force est cette acceleration fois la masse (70).
+  const g300 = 12 * (250 / 300);
+  check("... et il applique le champ radial", round(forcesPesant[0].y, 3),
+        round(-g300 * 70, 3));
+
+  // L'APESANTEUR DECLAREE coupe ce champ-la, et rien d'autre : le champ reste
+  // LU — c'est lui qui tient la verticale de la camera — mais il ne tire plus.
+  const flottant = new Player({}, [0, 300, 0]);
+  const forcesFlottant = havokFeint(flottant);
+  const monde = { framePos: [0, 0, 0],
+                  zeroG: { name: "ZeroGVolume", body: "BrokenSatellite_Body" } };
+  flottant.update(1 / 60, corps, rien, vertical, null, monde);
+  check("dans un ZeroGField, plus rien ne tire vers le bas",
+        round(Math.hypot(forcesFlottant[0].x, forcesFlottant[0].y,
+                         forcesFlottant[0].z), 6), 0);
+  check("... mais le champ est toujours lu", !!flottant.field, true);
 }
 
 // --- frottements ramenes a dt --------------------------------------------
