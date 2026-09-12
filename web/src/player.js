@@ -273,7 +273,12 @@ export class Player {
     // la camera, et `_alignmentPriority` vaut zero, l'apesanteur ne retourne
     // donc personne.
     const f = this.field;
-    const apesanteur = !!(world && world.zeroG);
+    // `world` est porte par l'instance : `update` l'y depose, et
+    // `stepPhysics` ne le recoit pas en parametre. L'avoir lu comme une
+    // variable libre levait une ReferenceError A CHAQUE IMAGE des que Havok
+    // menait la danse — donc sur le build, et jamais sur le systeme de
+    // substitution, qui tombe dans le moteur analytique.
+    const apesanteur = !!(this.world && this.world.zeroG);
     const force = new B.Vector3(0, 0, 0);
     if (f && !apesanteur) {
       force.addInPlace(new B.Vector3(f.dir.x, f.dir.y, f.dir.z).scale(f.magnitude * this.mass));
