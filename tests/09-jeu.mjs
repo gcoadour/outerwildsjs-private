@@ -23,7 +23,10 @@ import { playerConstants } from "../web/src/config.js";
 import { buildOrbits, advance, frameVelocity } from "../web/src/orbits.js";
 import { polarFields, polarDirection, strongestPolar,
          distanceToAxis } from "../web/src/gravity.js";
-import { rolloffModel, curveGain } from "../web/src/audio.js";
+import { rolloffModel, curveGain, AudioField } from "../web/src/audio.js";
+import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
+import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
+import { DialogueSystem } from "../web/src/dialogue.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
@@ -59,7 +62,7 @@ import { segmentDepthInSphere, occludes, lookRotation, alignToObserver,
 import { NoiseField, corruptionRange, corruptionThreshold } from "../web/src/bramble.js";
 import { deathCamera, DEATH_FALL, DEATH_SOUNDS } from "../web/src/death.js";
 import { convoControllers, treeFromController, PlayerData,
-         selectTree } from "../web/src/playerdata.js";
+         selectTree, CONVO_RULES } from "../web/src/playerdata.js";
 import { parseWav, oggCrc, oggPage, muxOggOpus, interleave } from "../web/src/pipeline/audioenc.js";
 import { startPose, walkToShip, spawnPoints, isShipSpawn, nearestTo,
          quatForward, horizonBasis, yawFor, PLAYER_RADIUS,
@@ -1074,10 +1077,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 //
 // Les 20 attributs eventbased du build valent tous "false" : l'echange se fait
 // au niveau des ARBRES, et le controleur les porte en reference directe.
+//
+// Les noms de champs sont ceux du build, releves dans l'IL de
+// `CoachConvoController.OnStartConversation`. Ce banc en portait d'inventes
+// (`_withCodesTree`, `_withoutCodesTree`) qui n'existent nulle part : ils
+// passaient tant que la selection se faisait par expression reguliere sur le
+// nom du champ, et c'est precisement cette selection qui se trompait de
+// personnage sur le vrai build.
 {
   const gameplay = { placed: { CoachConvoController: [
     { name: "Coach", position: [0, 0, 0],
-      trees: { _beforeTrainingTree: 11, _withCodesTree: 12, _withoutCodesTree: 13 } },
+      trees: { _beforeTraining: 11, _afterTrainingWithCodes: 12,
+               _afterTrainingWithoutCodes: 13 } },
   ] } };
   const ctrls = convoControllers(gameplay);
   check("controleur retenu avec ses arbres", ctrls.length, 1);
@@ -1851,6 +1862,167 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // rester ouvrable.
   check("aucun point d'apparition : le moteur garde son repli",
         startPose({ placed: {} }, home), null);
+}
+
+// --- Audio : un clip doit etre NOMME comme il est fait -----------------------
+//
+// Le portage deduisait l'extension de `m_Format`, qui ne dit rien du
+// conteneur : vingt clips sur trente-six partaient en `.ogg` en etant du RIFF
+// ou de l'AIFF. Les octets de tete, eux, ne mentent pas.
+{
+  const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+  const ogg = new Uint8Array([...ascii("OggS"), ...new Array(16).fill(0)]);
+  const wav = new Uint8Array([...ascii("RIFF"), 0, 0, 0, 0, ...ascii("WAVEfmt ")]);
+  const aif = new Uint8Array([...ascii("FORM"), 0, 0, 0, 0, ...ascii("AIFFCOMM")]);
+  check("un OggS se reconnait", sniffContainer(ogg), "ogg");
+  check("un RIFF/WAVE aussi", sniffContainer(wav), "wav");
+  check("un FORM/AIFF aussi", sniffContainer(aif), "aiff");
+  check("quatre octets ne suffisent pas a se tromper", sniffContainer(new Uint8Array(4)), null);
+
+  // m_Type est l'AudioType d'Unity : 2 = AIFF, 14 = Ogg, 20 = WAV. m_Format,
+  // lui, vaut 2 pour les trois — c'est la profondeur des echantillons.
+  check("sans octets lisibles, m_Type tranche", clipContainer({ m_Type: 20 }, null), "wav");
+  check("... et il connait l'Ogg", clipContainer({ m_Type: 14 }, null), "ogg");
+  check("... et l'AIFF", clipContainer({ m_Type: 2 }, null), "aiff");
+  // Les octets priment sur l'enumeration : c'est tout l'objet de la correction.
+  check("les octets priment sur m_Type", clipContainer({ m_Type: 14 }, wav), "wav");
+}
+
+// --- Audio : l'AIFF du build, converti sans perte ---------------------------
+{
+  // Le taux d'echantillonnage d'un AIFF est un flottant etendu sur 80 bits.
+  // 44 100 Hz s'y ecrit exposant 16398, mantisse 0xAC440000_00000000.
+  const rate44100 = new Uint8Array([0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]);
+  check("le flottant etendu se lit", Math.round(extended80(rate44100, 0)), 44100);
+
+  // AIFF fabrique : 1 canal, 16 bits, 4 trames, gros-boutiste.
+  const samples = [1000, -1000, 32767, -32768];
+  const be = [];
+  for (const v of samples) { const u = v & 0xffff; be.push(u >> 8, u & 0xff); }
+  const put = (arr, s) => { for (const c of s) arr.push(c.charCodeAt(0)); };
+  const u32 = (arr, n) => arr.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+  const body = [];
+  put(body, "AIFF");
+  put(body, "COMM"); u32(body, 18);
+  body.push(0, 1);                       // canaux
+  u32(body, samples.length);             // trames
+  body.push(0, 16);                      // bits
+  body.push(...rate44100);
+  put(body, "SSND"); u32(body, 8 + be.length);
+  u32(body, 0); u32(body, 0);            // offset, blockSize
+  body.push(...be);
+  const aiff = [];
+  put(aiff, "FORM"); u32(aiff, body.length); aiff.push(...body);
+
+  const out = aiffToWav(new Uint8Array(aiff));
+  check("un AIFF non compresse se convertit", out !== null, true);
+  const w = parseWav(out);
+  check("le WAV obtenu se relit", !!w, true);
+  check("il garde son taux", w.rate, 44100);
+  check("il garde ses canaux", w.channels, 1);
+  check("il garde ses trames", w.frames, samples.length);
+  // La conversion ne fait que retourner les octets : les echantillons doivent
+  // revenir a l'identique. Un ordre inverse donnerait n'importe quoi.
+  check("et ses echantillons, a l'identique",
+        [...w.data[0]].map((v) => Math.round(v * 32768)).join(","),
+        samples.join(","));
+  check("un Ogg n'est pas un AIFF", aiffToWav(new Uint8Array([79, 103, 103, 83, 0, 0, 0, 0, 0, 0, 0, 0])), null);
+}
+
+// --- Audio : ce qui doit jouer au deverrouillage ----------------------------
+//
+// Le navigateur bloque le son avant le premier geste. Une source creee avant
+// ce geste doit repartir apres — et la condition du deverrouillage etait plus
+// etroite que celle de la creation, ce qui laissait la musique muette pour de
+// bon : les cinq sources de musique du build sont a `playOnAwake` faux.
+{
+  const champ = new AudioField({}, []);
+  check("une ambiance qui joue d'elle-meme repart",
+        champ._shouldPlay({ playOnAwake: true, track: "Ambience" }), true);
+  check("une musique en boucle repart aussi",
+        champ._shouldPlay({ playOnAwake: false, track: "Music" }), true);
+  check("un signal en boucle egalement",
+        champ._shouldPlay({ playOnAwake: false, track: "Signal" }), true);
+  check("un effet ponctuel, non",
+        champ._shouldPlay({ playOnAwake: false, track: "Default" }), false);
+}
+
+// --- PNJ : l'arbre vient du controleur, choisi par sa CLASSE ----------------
+//
+// Regles transcrites de l'IL du build. Le Conservateur n'a PAS d'arbre dans la
+// scene : c'est son controleur qui le pose au demarrage de la conversation.
+{
+  const data = new PlayerData();
+  data.wipe();
+  const curator = { index: 0, character: "Curator", position: [0, 0, 0],
+                    tree: null,
+                    controller: { kind: "CuratorConvoController",
+                                  trees: { _preFlightObservations: "A", _goodLuck: "B" } } };
+  check("avant de lui avoir parle : ses observations",
+        treeFromController(data, curator, [], { ended: 0 }), "A");
+  check("une fois la conversation finie : bonne route",
+        treeFromController(data, curator, [], { ended: 1 }), "B");
+
+  const coach = { index: 1, character: "Zero-G Coach", position: [0, 0, 0],
+                  controller: { kind: "CoachConvoController",
+                                trees: { _beforeTraining: "T", _afterTrainingWithCodes: "C",
+                                         _afterTrainingWithoutCodes: "N" } } };
+  check("le formateur, avant l'entrainement",
+        treeFromController(data, coach, [], { ended: 0 }), "T");
+  data.learn("hasCompletedTraining");
+  check("apres l'entrainement, sans les codes",
+        treeFromController(data, coach, [], { ended: 0 }), "N");
+  data.learn("knowsLaunchCodes");
+  check("apres l'entrainement, avec les codes",
+        treeFromController(data, coach, [], { ended: 0 }), "C");
+
+  // Le nom ne distingue rien : les quatorze zones du build s'appellent toutes
+  // `ConversationZone`. C'est la classe du controleur qui decide.
+  check("deux zones homonymes ne se confondent plus",
+        treeFromController(data, { ...curator, name: "ConversationZone" }, [], { ended: 0 }), "A");
+
+  check("le scientifique, au premier echange",
+        CONVO_RULES.RocketScientistConvoController(data, { ended: 0 }), "_bigDay");
+  check("... puis au second", CONVO_RULES.RocketScientistConvoController(data, { ended: 1 }),
+        "_secondConvo");
+  // OnTriggerEnter sort si GetLoopCount() < 2.
+  check("les adieux n'arrivent pas a la premiere boucle",
+        CONVO_RULES.SecondLoopConvoTrigger({ loopCount: 1 }, { ended: 0 }), null);
+  check("mais bien a la deuxieme",
+        CONVO_RULES.SecondLoopConvoTrigger({ loopCount: 2 }, { ended: 0 }), "_2ndLoop");
+}
+
+// --- PNJ : une conversation sans arbre reste joignable ----------------------
+{
+  const sys = new DialogueSystem({
+    trees: { A: { start: "s", branches: { s: { talk: ["..."], options: [] } } } },
+    conversations: [
+      { name: "ConversationZone", character: "Curator", position: [0, 0, 0],
+        tree: null,
+        controller: { kind: "CuratorConvoController", trees: { _preFlightObservations: "A" } } },
+      { name: "ConversationZone", character: "Muet", position: [1, 0, 0], tree: null,
+        controller: null },
+    ],
+  });
+  const ici = { x: 0, y: 0, z: 0 };
+  const vu = sys.nearest(ici, [0, 0, 0]);
+  check("le Conservateur est vu malgre son arbre nul", vu && vu.character, "Curator");
+  check("une conversation sans arbre NI controleur reste ecartee",
+        sys.nearest({ x: 1, y: 0, z: 0 }, [0, 0, 0]) === null ||
+        sys.nearest({ x: 1, y: 0, z: 0 }, [0, 0, 0]).character === "Curator", true);
+
+  // La fin de la conversation est un evenement : c'est la que le build accorde
+  // les codes de lancement, pas a l'ouverture.
+  let finies = 0, ouverture = null;
+  sys.onEnd = (c) => { finies++; ouverture = c.character; };
+  sys.open({ ...vu, tree: "A" });
+  check("a l'ouverture, rien n'est encore accorde", finies, 0);
+  sys.advance();
+  check("a la fin, l'evenement part une fois", finies, 1);
+  check("... et il porte la bonne conversation", ouverture, "Curator");
+  check("la boucle retient qu'on lui a parle", sys.stateOf(vu).ended, 1);
+  sys.resetLoop();
+  check("une nouvelle boucle remet le compteur a zero", sys.stateOf(vu).ended, 0);
 }
 
 report();

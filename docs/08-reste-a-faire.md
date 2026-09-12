@@ -29,6 +29,9 @@ portage.
 | atmosphères et soleil | shaders maison, 122 shaders classés |
 | boucle temporelle | 20 min, supernova, onde de choc, mort, redémarrage |
 | dialogues et mémoire | 26 arbres, 72 branches, connaissance persistante |
+| contrôleurs de conversation | 5 règles lues dans l'IL, **14 conversations sur 14 joignables** |
+| codes de lancement | accordés **à la fin** de la conversation du Conservateur |
+| conteneurs audio | lus dans les octets : 16 Ogg, 20 WAV, **aucun AIFF muet** |
 | lune quantique | 4 orbites hôtes, effondrement à la perte de vue |
 | trou noir / trou blanc | capture, éjection en cône, effondrement de croûte |
 | Dark Bramble | prédateurs sensibles au bruit, croissance des ronces |
@@ -78,6 +81,14 @@ portage.
 | lumières vivantes | 15 `NightLight`, 15 `PulsingLight`, 9 `LightFlicker` |
 | textures qui défilent | 44 extraites, 27 rattachées et 23 en mouvement |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
+
+> **Corrigé par le jeu** ([`43-pnj-son-decollage.md`](43-pnj-son-decollage.md)).
+> Trois lignes de ce tableau — dialogues, audio spatial, vaisseau — étaient
+> vertes alors que rien ne fonctionnait : le Conservateur était inaccessible
+> (donc les codes de lancement, donc le décollage), 20 clips sur 36 portaient
+> une extension qui mentait sur leur contenu, et la musique ne repartait jamais
+> après le premier clic. **Un système qui passe ses tests n'est pas un système
+> qu'on a joué.**
 
 ## Ce qui manque, par famille
 
@@ -172,8 +183,11 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   ([`27-poids.md`](27-poids.md)) : les réduire demande une étape de
   construction, que le dépôt n'a pas. C'est un choix de projet, pas une
   optimisation à faire en passant.
-- **Les 15 Mo de WAV** sont réencodés en Opus à l'extraction (WebCodecs, repli
-  WAV) — le gain réel n'a pas encore été mesuré sur un build.
+- **Les 15 Mo de WAV** : le réencodage Opus est écrit depuis longtemps et
+  **ne s'était jamais exécuté** — il filtre sur `/\.wav$/` et l'extracteur ne
+  nommait aucun fichier `.wav`, parce que l'extension venait de `m_Format`, qui
+  ne dit rien du conteneur ([`43`](43-pnj-son-decollage.md) §3.1). Corrigé :
+  16 Ogg, 20 WAV. Le gain, lui, reste à mesurer dans un navigateur.
 - **`_vanishEffectPrefab`**, et **les pièces du vaisseau sans géométrie
   propre** : une pièce morte se lit dans son état, elle ne se voit pas sur la
   coque.
@@ -222,6 +236,7 @@ autre chose qu'un texte.
 | les quatre lois de fluide, lues dans l'IL | [`39-fluides.md`](39-fluides.md) |
 | ce qui est solide, et ce qu'on traversait | [`40-solide.md`](40-solide.md) |
 | la première image, regardée | [`41-ciel.md`](41-ciel.md) |
+| parler, entendre, décoller | [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) |
 | le recensement, lumières vivantes et textures défilantes | [`42-lumieres.md`](42-lumieres.md) |
 
 ## Estimation honnête

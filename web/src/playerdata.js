@@ -116,29 +116,70 @@ export function convoControllers(gameplay = {}) {
 }
 
 /**
- * Regles d'echange d'arbre, dans l'ordre ou le jeu les teste.
+ * Regles d'echange d'arbre, LUES DANS L'IL des controleurs du build.
  *
- * Le motif designe le CHAMP du controleur, pas le nom de l'arbre : c'est la
- * difference entre lire la reference et chercher un titre qui lui ressemble.
+ * L'ancienne version cherchait un CHAMP par expression reguliere
+ * (`/withcodes|hascodes/`) apres avoir retrouve le controleur PAR SON NOM. Les
+ * deux moities etaient fausses :
+ *
+ *   - les quatorze zones de conversation du build s'appellent toutes
+ *     `ConversationZone`, donc `find(c => c.name === convo.name)` ramenait
+ *     toujours la premiere — le Conservateur heritait des arbres du formateur ;
+ *   - le nom du champ n'a pas a etre devine : le controleur porte ses arbres en
+ *     reference directe, et sa CLASSE dit laquelle choisir.
+ *
+ * Chaque regle ci-dessous est la transcription d'une methode reelle. Ce qui
+ * n'est pas dans le build n'est pas invente : `_crashCount` et `_landCount`
+ * comptent les essais du vaisseau miniature, qui n'est pas porte, et restent
+ * donc a zero — la regle est ecrite quand meme, pour qu'elle soit juste le jour
+ * ou il le sera.
+ *
+ * `state` est l'etat de la BOUCLE courante, pas une connaissance : le jeu
+ * remet `_hasGivenLaunchCodes` et `_triggerSecondConvo` a faux a chaque
+ * redemarrage, la ou `PlayerData` survit.
  */
-const TREE_RULES = [
-  { when: (d) => !d.hasCompletedTraining, field: /training|untrained/i,
-    who: /coach/i },
-  { when: (d) => d.knowsLaunchCodes, field: /withcodes|hascodes/i, who: /coach/i },
-  { when: () => true, field: /withoutcodes|nocodes/i, who: /coach/i },
-  { when: (d) => d.knowsLaunchCodes, field: /goodluck|after|post|launch/i,
-    who: /curator/i },
-  { when: () => true, field: /preflight|before|initial/i, who: /curator/i },
-  { when: (d) => d.loopCount >= 2, field: /farewell|second|loop/i, who: /./ },
-];
+export const CONVO_RULES = {
+  // OnStartConversation : HasCompletedTraining ? (KnowsLaunchCodes ? ... ) : ...
+  CoachConvoController: (d) =>
+    !d.hasCompletedTraining ? "_beforeTraining"
+      : d.knowsLaunchCodes ? "_afterTrainingWithCodes" : "_afterTrainingWithoutCodes",
 
-/** Arbre porte par le controleur d'une conversation, ou null. */
-export function treeFromController(data, convo, controllers = []) {
-  if (!controllers.length) return null;
-  const who = convo.character || convo.name || "";
-  let ctrl = controllers.find((c) => c.name && c.name === convo.name);
-  if (!ctrl && convo.position) {
-    // meme personnage, autre GameObject : on prend le controleur pose sur lui
+  // OnStartConversation : _hasGivenLaunchCodes ? _goodLuck : _preFlightObservations
+  // et OnEndConversation accorde les codes. Une fois qu'on lui a parle, il
+  // souhaite bonne route ; la boucle suivante, il recommence ses observations.
+  CuratorConvoController: (d, s) => (s.ended ? "_goodLuck" : "_preFlightObservations"),
+
+  // OnStartOfTimeLoop pose _bigDay ; OnEndConversation bascule sur _secondConvo.
+  RocketScientistConvoController: (d, s) => (s.ended ? "_secondConvo" : "_bigDay"),
+
+  // _crashCount >= 5 -> _tooManyCrashes (et le compteur repart a zero) ;
+  // _landCount > 0 -> _successfulLanding ; sinon _introduction.
+  RocketKidConvoController: (d, s) =>
+    (s.crashes || 0) >= 5 ? "_tooManyCrashes"
+      : (s.landings || 0) > 0 ? "_successfulLanding" : "_introduction",
+
+  // OnTriggerEnter : sort si GetLoopCount() < 2 ; sinon la conversation demarre
+  // sur _2ndLoop et l'arbre SUIVANT devient _farewell.
+  SecondLoopConvoTrigger: (d, s) =>
+    d.loopCount < 2 ? null : (s.ended ? "_farewell" : "_2ndLoop"),
+};
+
+/** Etat de boucle vide, pour une conversation qu'on n'a pas encore tenue. */
+export const NO_CONVO_STATE = { ended: 0, crashes: 0, landings: 0 };
+
+/**
+ * Arbre porte par le controleur d'une conversation, ou null.
+ *
+ * Le lien conversation -> controleur est desormais pose par l'extracteur, par
+ * GameObject : `Awake` fait `GetComponent<Conversation>()`, les deux sont donc
+ * sur le meme objet et il n'y a plus rien a rapprocher a l'execution. La
+ * recherche par position ne reste que pour une extraction ancienne, qui ne
+ * porterait pas encore `convo.controller`.
+ */
+export function treeFromController(data, convo, controllers = [],
+                                   state = NO_CONVO_STATE) {
+  let ctrl = convo && convo.controller;
+  if (!ctrl && convo && convo.position && controllers.length) {
     let bestD = 12;
     for (const c of controllers) {
       if (!c.position) continue;
@@ -148,14 +189,15 @@ export function treeFromController(data, convo, controllers = []) {
       if (d < bestD) { bestD = d; ctrl = c; }
     }
   }
-  if (!ctrl) return null;
-  for (const rule of TREE_RULES) {
-    if (!rule.who.test(who) && !rule.who.test(ctrl.kind)) continue;
-    if (!rule.when(data)) continue;
-    const hit = Object.entries(ctrl.trees).find(([k]) => rule.field.test(k));
-    if (hit) return String(hit[1]);
-  }
-  return null;
+  if (!ctrl || !ctrl.trees) return null;
+  const rule = CONVO_RULES[ctrl.kind];
+  const field = rule ? rule(data, state) : null;
+  if (field && ctrl.trees[field]) return String(ctrl.trees[field]);
+  // Classe inconnue, ou arbre absent de ce controleur : plutot qu'un silence,
+  // le premier arbre qu'il porte. Un personnage qui dit la mauvaise chose reste
+  // preferable a un personnage muet.
+  const first = Object.values(ctrl.trees)[0];
+  return first != null ? String(first) : null;
 }
 
 /**
@@ -165,8 +207,9 @@ export function treeFromController(data, convo, controllers = []) {
  * La reference directe prime ; la recherche par nom d'arbre ne reste que
  * comme repli, pour un build ou le controleur ne porterait pas ses arbres.
  */
-export function selectTree(data, convo, trees, controllers = []) {
-  const direct = treeFromController(data, convo, controllers);
+export function selectTree(data, convo, trees, controllers = [],
+                           state = NO_CONVO_STATE) {
+  const direct = treeFromController(data, convo, controllers, state);
   if (direct && trees[direct]) return direct;
   const named = (frag) => {
     for (const [id, t] of Object.entries(trees)) {

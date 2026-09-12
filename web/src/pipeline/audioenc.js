@@ -75,6 +75,109 @@ export function parseWav(bytes) {
   return { rate: fmt.rate, channels: ch, frames, data: out };
 }
 
+// --- AIFF ------------------------------------------------------------------
+
+/**
+ * Taux d'echantillonnage d'un AIFF : un flottant etendu IEEE 754 sur 80 bits.
+ *
+ * Personne n'ecrit ce format ailleurs, et aucune API du navigateur ne le lit.
+ * Il tient en trois champs : un signe, un exposant biaise de 16383, et une
+ * mantisse de 64 bits AVEC son bit de tete explicite — c'est ce dernier point
+ * qui le distingue d'un double, ou ce bit est implicite.
+ */
+export function extended80(bytes, at) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const head = dv.getUint16(at, false);
+  const sign = head & 0x8000 ? -1 : 1;
+  const exponent = head & 0x7fff;
+  const hi = dv.getUint32(at + 2, false);
+  const lo = dv.getUint32(at + 6, false);
+  if (exponent === 0 && hi === 0 && lo === 0) return 0;
+  // 2^(e - 16383) x mantisse, la mantisse etant ramenee dans [1, 2[.
+  return sign * (hi * 2 ** 32 + lo) * 2 ** (exponent - 16383 - 63);
+}
+
+/**
+ * AIFF -> WAV, sans reencodage : on ne fait que retourner les octets.
+ *
+ * Pourquoi c'est necessaire. Un clip du build est un AIFF, et AUCUN navigateur
+ * ne sait le decoder : `decodeAudioData` le refuse la ou il accepte le WAV et
+ * l'Ogg. Le clip partait donc en `data/audio/`, sous une extension `.ogg` qui
+ * ne lui allait pas, et restait definitivement muet.
+ *
+ * Pourquoi c'est sans perte. L'AIFF du build est du PCM entier non compresse :
+ * seul l'ORDRE DES OCTETS le separe du WAV — gros-boutiste d'un cote,
+ * petit-boutiste de l'autre. On recopie donc les echantillons en les
+ * retournant, et rien d'autre n'est touche.
+ *
+ * Ce qu'on refuse plutot que de mal le lire : un AIFC compresse. `sowt` est la
+ * seule compression acceptee, parce qu'elle veut dire « PCM deja en
+ * petit-boutiste », donc aucune conversion a faire.
+ */
+export function aiffToWav(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  const tag = (o) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
+  if (tag(0) !== "FORM") return null;
+  const form = tag(8);
+  if (form !== "AIFF" && form !== "AIFC") return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  let comm = null, ssnd = null;
+  // Les morceaux ne sont pas ordonnes : le build met un COMT de 450 octets
+  // AVANT le COMM. On parcourt donc la liste au lieu de lire a un offset fixe.
+  let p = 12;
+  while (p + 8 <= bytes.length) {
+    const id = tag(p);
+    const size = dv.getUint32(p + 4, false);
+    const body = p + 8;
+    if (id === "COMM" && size >= 18) {
+      comm = { channels: dv.getUint16(body, false),
+               frames: dv.getUint32(body + 2, false),
+               bits: dv.getUint16(body + 6, false),
+               rate: Math.round(extended80(bytes, body + 8)),
+               compression: size >= 22 ? tag(body + 18) : "NONE" };
+    } else if (id === "SSND" && size >= 8) {
+      // `offset` est un bourrage avant les echantillons, pas une position dans
+      // le fichier : il s'ajoute au debut du corps.
+      const skip = dv.getUint32(body, false);
+      ssnd = { offset: body + 8 + skip, size: Math.max(0, size - 8 - skip) };
+    }
+    p = body + size + (size & 1);          // les morceaux sont alignes sur 2
+  }
+  if (!comm || !ssnd || !comm.channels || !comm.rate) return null;
+  const bps = comm.bits >> 3;
+  if (bps !== 1 && bps !== 2 && bps !== 3 && bps !== 4) return null;
+  const little = comm.compression === "sowt";
+  if (comm.compression !== "NONE" && !little) return null;
+
+  const frames = Math.min(comm.frames, Math.floor(ssnd.size / (bps * comm.channels)));
+  const bodySize = frames * comm.channels * bps;
+  const out = new Uint8Array(44 + bodySize);
+  const ov = new DataView(out.buffer);
+  const ascii = (o, s) => { for (let i = 0; i < s.length; i++) out[o + i] = s.charCodeAt(i); };
+  ascii(0, "RIFF");
+  ov.setUint32(4, 36 + bodySize, true);
+  ascii(8, "WAVEfmt ");
+  ov.setUint32(16, 16, true);
+  ov.setUint16(20, 1, true);                       // PCM entier
+  ov.setUint16(22, comm.channels, true);
+  ov.setUint32(24, comm.rate, true);
+  ov.setUint32(28, comm.rate * comm.channels * bps, true);
+  ov.setUint16(32, comm.channels * bps, true);
+  ov.setUint16(34, comm.bits, true);
+  ascii(36, "data");
+  ov.setUint32(40, bodySize, true);
+
+  if (little) {
+    out.set(bytes.subarray(ssnd.offset, ssnd.offset + bodySize), 44);
+  } else {
+    for (let i = 0; i < bodySize; i += bps) {
+      for (let b = 0; b < bps; b++) out[44 + i + b] = bytes[ssnd.offset + i + bps - 1 - b];
+    }
+  }
+  return out;
+}
+
 /** Canaux separes -> flux entrelace, la disposition que WebCodecs attend. */
 export function interleave(channels, frames) {
   const ch = channels.length;

@@ -187,13 +187,30 @@ export class AudioField {
     }
   }
 
+  /**
+   * Une source creee doit-elle jouer ?
+   *
+   * Une seule reponse, posee ici, parce que la poser a deux endroits est
+   * exactement ce qui a rendu la musique muette : `_spawn` lancait
+   * `playOnAwake || LOOPED.has(track)`, et `unlock` ne relancait que
+   * `playOnAwake`. Une source creee AVANT le premier clic — et tout ce qui est
+   * a portee au demarrage l'est — restait donc silencieuse pour de bon.
+   *
+   * Ce sont les cinq sources de musique du build qui en faisaient les frais :
+   * toutes a `playOnAwake` faux, toutes en boucle, toutes a portee du village
+   * des la premiere image.
+   */
+  _shouldPlay(s) {
+    return !!(s && (s.playOnAwake || LOOPED.has(s.track)));
+  }
+
   /** Le navigateur exige un geste utilisateur avant toute lecture. */
   async unlock() {
     if (!this.engine || this.unlocked) return;
     try { await this.engine.unlockAsync(); } catch (e) { /* deja debloque */ }
     this.unlocked = true;
     for (const [i, snd] of this.live) {
-      if (snd && this.sources[i].playOnAwake) this._play(snd);
+      if (snd && this._shouldPlay(this.sources[i])) this._play(snd);
     }
   }
 
@@ -339,7 +356,7 @@ export class AudioField {
           snd.spatial.position = new this.B.Vector3(p[0], p[1], p[2]);
         }
         this.live.set(i, snd);
-        if (this.unlocked && (s.playOnAwake || LOOPED.has(s.track))) this._play(snd);
+        if (this.unlocked && this._shouldPlay(s)) this._play(snd);
       })
       .catch(() => { this.pending.delete(i); this.failed++; });
   }

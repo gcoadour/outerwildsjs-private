@@ -704,6 +704,11 @@ async function boot() {
 
   function respawn() {
     loop.restart();
+    // Les controleurs de conversation remettent leurs drapeaux a faux au
+    // debut d'une boucle (`OnStartOfTimeLoop`) : le Conservateur refait ses
+    // observations, le scientifique reparle de son grand jour. Ce que le
+    // joueur SAIT, lui, ne s'efface pas.
+    dialogue.resetLoop();
     death.revive();
     resources.oxygen = resources.maxOxygen;
     resources.fuel = resources.maxFuel;
@@ -728,6 +733,27 @@ async function boot() {
   }
   window.__loop = loop;
   window.__dialogue = dialogue;
+
+  // Les codes de lancement, au moment ou le build les donne.
+  //
+  // Deux corrections, et c'est ce qui debloque le decollage :
+  //
+  //   - LE MOMENT. `CuratorConvoController.OnEndConversation` accorde les
+  //     codes ; le portage les accordait a l'OUVERTURE, donc sans avoir
+  //     ecoute. Ils passent maintenant par `dialogue.onEnd`.
+  //   - QUI. Le portage testait le nom du personnage contre
+  //     `/curator|scientist/`, ce qui donnait aussi les codes en parlant au
+  //     scientifique — qui ne les donne pas. Seule la CLASSE du controleur
+  //     fait foi, et elle est desormais posee sur la conversation par
+  //     l'extracteur.
+  //
+  // Le `LaunchTerminal` du jeu ne fait qu'ecouter l'evenement pour se
+  // deverrouiller : la connaissance est bien ce qui ouvre le vaisseau.
+  dialogue.onEnd = (convo) => {
+    const kind = convo && convo.controller && convo.controller.kind;
+    if (kind !== "CuratorConvoController") return;
+    if (pdata.learn("knowsLaunchCodes")) console.log("codes de lancement appris");
+  };
   window.__respawn = respawn;
 
   // Portee d'embarquement, mesuree depuis le CENTRE du vaisseau, dont la coque
@@ -1169,14 +1195,12 @@ async function boot() {
     if (interactPressed) {
       if (dialogue.active) dialogue.advance();
       else if (convo) {
+        // L'arbre se choisit a l'ouverture, comme le fait
+        // `OnStartConversation` — et il depend de l'etat de la BOUCLE autant
+        // que des connaissances, d'ou `dialogue.stateOf`.
         dialogue.open({ ...convo,
-                        tree: selectTree(pdata, convo, dialogue.trees, controllers) });
-        // CuratorConvoController appelle LearnLaunchCodes : ce sont bien les
-        // conversations qui accordent les codes, le LaunchTerminal se contente
-        // d'ecouter l'evenement pour se deverrouiller.
-        if (/curator|scientist/i.test(convo.character || convo.name || "")) {
-          if (pdata.learn("knowsLaunchCodes")) console.log("codes de lancement appris");
-        }
+                        tree: selectTree(pdata, convo, dialogue.trees, controllers,
+                                         dialogue.stateOf(convo)) });
       }
     }
     if (dialogue.active && optionPressed > 0) dialogue.choose(optionPressed - 1);

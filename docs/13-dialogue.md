@@ -76,5 +76,18 @@ bonne branche, qui se termine faute d'option. Les liens `goto` fonctionnent.
 - **La connaissance n'ouvre rien.** Elle est enregistrée mais ne débloque aucune
   option ni aucun dialogue. C'est le pas suivant, et c'est lui qui donnerait son
   sens à la boucle.
-- **Les contrôleurs de conversation par personnage** (`CoachConvoController`,
-  `CuratorConvoController`, `RocketKidConvoController`…) ne sont pas portés.
+- ~~**Les contrôleurs de conversation par personnage**~~ — **portés**, et c'est
+  ce qui a rendu le Conservateur accessible. Voir
+  [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) : son
+  `_activeDialogueTree` est **nul dans la scène**, parce que
+  `CuratorConvoController` pose l'arbre à l'exécution. Le portage écartait toute
+  conversation sans arbre, et le Conservateur est le seul personnage qui accorde
+  les codes de lancement — un pointeur nul fermait donc aussi le décollage.
+
+  Le lien conversation → contrôleur se fait **par GameObject** (`Awake` appelle
+  `GetComponent<Conversation>()`), et non par nom : **13 des 14 zones du build
+  s'appellent toutes `ConversationZone`**, si bien que la recherche par nom
+  donnait au Conservateur les arbres du formateur. Les cinq règles d'échange
+  sont transcrites de l'IL, indexées par classe de contrôleur.
+
+  Mesuré : **14 conversations sur 14 sont joignables**, contre 13 avant.
