@@ -111,6 +111,20 @@ export function clipContainer(clip, bytes) {
 }
 
 /**
+ * Les scripts qui jouent un son PARCE QU'IL SE PASSE QUELQUE CHOSE.
+ *
+ * Seize classes, dix-huit instances : c'est la liste de `docs/44` §5, plus les
+ * trois qui portent un clip sans etre du son (`Elevator`, `HatchController`,
+ * `LandingPadSensor`) et les deux controleurs de musique que `docs/43` avait
+ * laisses ouverts.
+ */
+const EVENT_AUDIO = ["PlayerMovementAudio", "PlayerSubmergeAudio", "ThrusterAudio",
+                     "TurbulenceAudio", "SpacesuitAudioController", "PlayerAudioEffects",
+                     "UIAudioController", "RepairAudioController",
+                     "FlashbackAudioController", "AncientTeleporter", "Elevator",
+                     "HatchController", "LandingPadSensor", "ZeroGTrainingManager"];
+
+/**
  * @param {ExtractContext} ctx
  * @param {(path: string, bytes: Uint8Array) => void} emit  ecrit un fichier
  */
@@ -292,5 +306,43 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
     bump("volumes d'ambiance");
   }
 
-  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, sources, volumes, stats };
+  // --- les sons d'EVENEMENT ---
+  //
+  // Le portage jouait des sources PLACEES : un son est quelque part, on
+  // l'entend en s'en approchant. Le build joue en plus des sons declenches par
+  // ce que le joueur FAIT — un pas, un reacteur, une combinaison qu'on enfile —
+  // et c'etait une couche entiere sans lecteur (docs/44-reste-a-migrer.md §5).
+  //
+  // Ces clips-la ne sont pas sur une `AudioSource` : ils sont des champs du
+  // script, joues en `PlayOneShot` au moment voulu. On les exporte donc par
+  // le script qui les porte, en suivant CHAQUE pointeur qui vise un `AudioClip`
+  // — six pas de marche, six de course, trois de saut, quatre de propulseur
+  // sans qu'aucune liste ne les nomme ici.
+  const events = [];
+  for (const { obj, cls } of ctx.behaviours(EVENT_AUDIO)) {
+    const f = ctx.scriptFields(obj);
+    if (!f) continue;
+    const gid = ctx.ownerId(obj);
+    const clips = {};
+    for (const [k, v] of Object.entries(f)) {
+      if (!v || typeof v !== "object" || !("pathId" in v) || !v.pathId) continue;
+      const target = ctx.env.deref(v, obj.file);
+      if (!target || target.type !== "AudioClip") continue;
+      const file = exportClip(v, obj.file);
+      if (file) clips[k] = file;
+      else bump("clip d'evenement illisible");
+    }
+    if (!Object.keys(clips).length) continue;
+    // Les champs NUMERIQUES du meme script sont la loi qui va avec les clips
+    // (seuils de pas, limites de vitesse, volume des propulseurs) : les separer
+    // du son obligerait a lire deux fichiers pour jouer un bruit.
+    const params = {};
+    for (const [k, v] of Object.entries(f)) {
+      if (typeof v === "number" || typeof v === "boolean") params[k] = v;
+    }
+    events.push({ script: cls, name: ctx.name(gid), body: ctx.bodyOf(gid), clips, params });
+    bump("sons d'evenement");
+  }
+
+  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, sources, volumes, events, stats };
 }

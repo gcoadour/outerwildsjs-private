@@ -90,8 +90,25 @@ portage.
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
 | ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit |
+| référentiels déclarés | 14 volumes : le build dit l'ancre, la gravité complète |
+| distances du pilote auto | 1 000 / 2 500 et l'alignement, lus dans le build |
+| décor vivant | 15 panneaux, 8 visages, 10 buses, 6 passages anciens |
+| décalcomanies | 30 maillages posés **sur** la paroi, et non contre |
+| son d'événement | pas, vent de course, propulseurs, voyage, fin des temps |
+| équipement | combinaison, sonde et minicarte **se ramassent** |
+| entraînement en apesanteur | les 3 nœuds du satellite cassé, et leur annonce |
+| volumes de jeu | ce qui blesse, l'apesanteur déclarée, les fenêtres de vue |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
+> **Corrigé par le navigateur** ([`46-migration-lots.md`](46-migration-lots.md)).
+> Une ligne de ce tableau — les volumes de destruction, vertes depuis
+> [`45`](45-recensement-mesure.md) — cachait une partie injouable : la boucle
+> interrogeait ces volumes avec une position exprimée dans le repère ancré, et
+> celui du soleil est une sphère de 2 000 unités centrée sur l'origine du monde.
+> **Le joueur mourait incinéré à la première image, à chaque démarrage.** Les
+> tests passaient tous ; c'est `tools/15_verify.py`, lancé sur un profil rempli,
+> qui l'a vu.
+>
 > **Corrigé par le jeu** ([`43-pnj-son-decollage.md`](43-pnj-son-decollage.md)).
 > Trois lignes de ce tableau — dialogues, audio spatial, vaisseau — étaient
 > vertes alors que rien ne fonctionnait : le Conservateur était inaccessible
@@ -186,11 +203,13 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   même nom.
 - **Le champ d'étoiles** (`DistantStarController`) est extrait, son système de
   particules ne l'est pas.
-- **170 des 275 classes posées dans `level0` ne sont nommées nulle part** dans le
-  portage ([`42-lumieres.md`](42-lumieres.md)). Les trois familles les plus
-  lourdes : les référentiels (84 instances), les textures animées (44), les
-  décalcomanies (98). Ce compte est une borne haute — certaines classes sont
-  lues par motif — et c'est désormais la carte de ce qui reste.
+- **59 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+  compris — c'était 170 en [`42`](42-lumieres.md), 109 avant les six lots de
+  [`46`](46-migration-lots.md). Ce qui reste n'est plus une famille mais une
+  queue : la moitié des entrées est à une seule instance, et les plus lourdes
+  sont `InertiaTensorCalibrator` (14), les invites de la guimauve (8) et le
+  pivot des tornades (6). Le compte tient compte des motifs, et c'est la carte
+  de ce qui reste.
 - **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
   restent ouvertes : le jeu affiche un système entier parce que les planètes
   lointaines sont des textures rafraîchies une fois par seconde. Le portage a

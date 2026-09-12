@@ -392,6 +392,76 @@ export class AudioField {
     }
   }
 
+  /**
+   * Joue un clip d'EVENEMENT : un fichier, une fois, maintenant.
+   *
+   * Les sons d'evenement ne sont pas des sources placees — ils n'ont ni
+   * position ni portee, ils accompagnent un geste (docs/46, lot 5). On garde un
+   * objet par fichier : relancer `play()` sur le meme son le reprend au debut,
+   * ce qui est exactement ce que fait `PlayOneShot`.
+   *
+   * Rien de tout cela n'echoue bruyamment : sans moteur audio, sans fichier ou
+   * avant le premier clic, la methode ne fait rien et le jeu continue.
+   */
+  playOneShot(file, { volume = 1, pitch = 1 } = {}) {
+    if (!file || !this.engine || !this.unlocked) return false;
+    if (!this.oneShots) { this.oneShots = new Map(); this.oneShotPending = new Set(); }
+    const snd = this.oneShots.get(file);
+    if (snd) {
+      try {
+        if ("volume" in snd) snd.volume = volume;
+        if ("pitch" in snd) snd.pitch = pitch;
+        snd.stop();
+        snd.play();
+      } catch (e) { this.failed++; }
+      return true;
+    }
+    if (this.oneShotPending.has(file)) return false;
+    this.oneShotPending.add(file);
+    this.B.CreateSoundAsync(file, `data/audio/${file}`,
+                            { volume, spatialEnabled: false })
+      .then((s) => {
+        this.oneShotPending.delete(file);
+        this.oneShots.set(file, s);
+        this._play(s);
+      })
+      .catch(() => { this.oneShotPending.delete(file); this.failed++; });
+    return true;
+  }
+
+  /**
+   * Une boucle d'evenement dont on ne pilote que le VOLUME : le vent de course,
+   * les propulseurs, la musique de voyage. A volume nul, elle s'arrete.
+   */
+  loopAt(file, volume) {
+    if (!file || !this.engine || !this.unlocked) return false;
+    if (!this.loops) { this.loops = new Map(); this.loopPending = new Set(); }
+    const snd = this.loops.get(file);
+    if (snd) {
+      try {
+        snd.volume = volume;
+        // Une boucle se lance UNE fois. Rappeler `play()` a chaque image la
+        // reprendrait au debut soixante fois par seconde, ce qui ne s'entend
+        // pas comme un vent de course mais comme un bourdonnement.
+        if (volume <= 0.001 && snd.__running) { snd.__running = false; snd.stop(); }
+        else if (volume > 0.001 && !snd.__running) { snd.__running = true; this._play(snd); }
+      } catch (e) { this.failed++; }
+      return true;
+    }
+    if (volume <= 0.001 || this.loopPending.has(file)) return false;
+    this.loopPending.add(file);
+    this.B.CreateSoundAsync(file, `data/audio/${file}`,
+                            { loop: true, volume, spatialEnabled: false })
+      .then((s) => {
+        this.loopPending.delete(file);
+        s.__running = true;
+        this.loops.set(file, s);
+        this._play(s);
+      })
+      .catch(() => { this.loopPending.delete(file); this.failed++; });
+    return true;
+  }
+
   _spawn(i, s, p) {
     this.pending.add(i);
     // Le modele d'attenuation vient de la source : `rolloffMode` vaut

@@ -265,9 +265,17 @@ export class Player {
     this.probeGround(basis.up);
 
     // gravite : le moteur en est depourvu, on applique le champ dominant
+    //
+    // Sauf en APESANTEUR DECLAREE : les quatre `ZeroGField` du build portent
+    // une priorite d'ecrasement, et dans leur volume plus rien ne tire vers le
+    // bas — pas meme le champ radial du corps, qui pourtant ne s'arrete pas la
+    // (docs/46, lot 4). Le champ reste LU : c'est lui qui tient la verticale de
+    // la camera, et `_alignmentPriority` vaut zero, l'apesanteur ne retourne
+    // donc personne.
     const f = this.field;
+    const apesanteur = !!(world && world.zeroG);
     const force = new B.Vector3(0, 0, 0);
-    if (f) {
+    if (f && !apesanteur) {
       force.addInPlace(new B.Vector3(f.dir.x, f.dir.y, f.dir.z).scale(f.magnitude * this.mass));
     }
     const inert = this.world && this.world.inertial

@@ -100,6 +100,50 @@ export class ParticleField {
     ps.gravity = new this.B.Vector3(field.dir.x * g, field.dir.y * g, field.dir.z * g);
   }
 
+  /**
+   * Ouvre ou ferme des systemes NOMMES, sans toucher a leur budget.
+   *
+   * Les dix buses du vaisseau sont des systemes places comme les autres — ils
+   * naissent et meurent avec la proximite — mais ils ne doivent emettre que
+   * quand la poussee le dit (`ThrusterParticlesBehavior`, docs/46 lot 3). Le
+   * reste du champ de particules garde son comportement : ce qui n'est pas
+   * nomme ici n'est pas touche.
+   *
+   * @param etats Map nom -> booleen
+   */
+  gate(etats) {
+    if (!etats || !etats.size) return 0;
+    let n = 0;
+    for (const [i, ps] of this.live) {
+      if (!ps) continue;
+      const veut = etats.get((this.systems[i] || {}).name);
+      if (veut === undefined) continue;
+      try {
+        const tourne = ps.isStarted ? ps.isStarted() : true;
+        if (veut && !tourne) { ps.start(); n++; }
+        else if (!veut && tourne) { ps.stop(); n++; }
+      } catch (e) { /* un systeme dispose : rien a piloter */ }
+    }
+    return n;
+  }
+
+  /**
+   * Relance des systemes NOMMES sans jamais les arreter.
+   *
+   * C'est ce que fait `RandomParticleBursts` : une bouffee part, et le systeme
+   * va au bout de sa vie tout seul. `gate` couperait la bouffee a l'image
+   * suivante.
+   */
+  pulse(noms) {
+    if (!noms || !noms.size) return 0;
+    let n = 0;
+    for (const [i, ps] of this.live) {
+      if (!ps || !noms.has((this.systems[i] || {}).name)) continue;
+      try { ps.start(); n++; } catch (e) { /* un systeme dispose */ }
+    }
+    return n;
+  }
+
   spawn(i, s, p) {
     const B = this.B;
     try {

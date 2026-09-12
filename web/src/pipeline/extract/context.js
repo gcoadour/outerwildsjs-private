@@ -233,6 +233,65 @@ export class ExtractContext {
   }
 
   /**
+   * Noms des ancetres d'un GameObject, du plus haut au plus proche.
+   *
+   * Le nom seul ne suffit pas a designer un objet : la scene pose NEUF
+   * GameObject nommes « RFVolume » et trente nommes « Decals Mesh Renderer ».
+   * C'est la chaine qui dit lequel — et surtout a quel corps il appartient.
+   */
+  ancestors(gid, depth = 0) {
+    const t = this.transformOf.get(gid);
+    if (!t || depth > 64) return [];
+    const parent = t.m_Father ? this.env.deref(t.m_Father, this.sceneObj) : null;
+    const pt = parent ? this.env.read(parent) : null;
+    if (!pt || !pt.m_GameObject) return [];
+    const pid = pt.m_GameObject.pathId;
+    return [...this.ancestors(pid, depth + 1), this.name(pid)];
+  }
+
+  /**
+   * Corps porteur d'un objet : le premier ancetre — lui-meme compris — dont le
+   * nom finit par `_Body`.
+   *
+   * C'est la convention du build, et elle est tenue : un `OWRigidbody` est pose
+   * sur `Ship_Body`, `TimberHearth_Body`, `Twin01_Body`… Un volume de
+   * referentiel ne dit pas de QUEL corps il est le referentiel autrement.
+   */
+  bodyOf(gid) {
+    const self = this.name(gid);
+    if (self && self.endsWith("_Body")) return self;
+    const chain = this.ancestors(gid);
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (chain[i] && chain[i].endsWith("_Body")) return chain[i];
+    }
+    return null;
+  }
+
+  /**
+   * Objet porteur du COMPOSANT vise par un PPtr : nom, position monde, corps.
+   *
+   * `plain()` sait deja nommer un pointeur qui vise un GameObject, mais un
+   * pointeur qui vise un composant — `AncientTeleporter._receiver`, par
+   * exemple — rendait un identifiant nu. Or c'est le cas general : les
+   * references d'un script visent des scripts.
+   */
+  ownerInfo(ptr, file = null) {
+    const target = this.env.deref(ptr, file || this.sceneObj);
+    if (!target) return null;
+    if (fileKey(target.file.name) !== fileKey(this.sceneFile)) return null;
+    // Un pointeur de la scene ne vise pas forcement un composant : il peut
+    // viser un asset (`_teleportSound`) ou un objet dont l'entete n'est pas
+    // lisible. Lire l'entete d'un MonoBehaviour qui n'en est pas un leve, donc
+    // on garde : ce qui ne resout pas n'a simplement pas de porteur.
+    let gid = 0;
+    if (this.gameObjects.has(target.pathId)) gid = target.pathId;
+    else { try { gid = this.ownerId(target); } catch { return null; } }
+    if (!gid || !this.gameObjects.has(gid)) return null;
+    return { name: this.name(gid), position: this.worldPosition(gid),
+             body: this.bodyOf(gid) };
+  }
+
+  /**
    * Transformation monde d'un GameObject : position, rotation, echelle.
    *
    * Sommer les translations locales ne suffit pas — il faut composer rotations

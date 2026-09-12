@@ -236,6 +236,59 @@ export function applyGameShaders(BABYLON, scene, meshes) {
   return counts;
 }
 
+/**
+ * Les decalcomanies : un materiau, pas une mecanique.
+ *
+ * Trois classes, 98 instances (`DS_DecalProjector` x38, `DS_Decals` x30,
+ * `DS_DecalsMeshRenderer` x30) — un systeme tiers dont la geometrie est DEJA
+ * exportee : ce sont les trente « Decals Mesh Renderer » que docs/40-solide.md
+ * a rendus traversables. Elles etaient donc dans la scene depuis le debut,
+ * plaquees comme des maillages ordinaires, sans le decalage de profondeur ni le
+ * melange que le systeme prevoit — ce qui se voit en rasant une paroi : la
+ * fresque clignote contre le mur, et son fond noir la cache.
+ *
+ * Deux reglages suffisent, et c'est tout ce que le lot coute :
+ *
+ *   zOffset    -2, le decalage de profondeur des decalcomanies de Babylon : la
+ *              decalcomanie gagne le depart contre la paroi qu'elle epouse
+ *   alpha      melange plutot qu'opaque, avec la couche alpha de la texture ;
+ *              `_meshOffset` vaut 0 sur les 38 projecteurs, le build ne decale
+ *              donc RIEN geometriquement — tout se joue au rendu.
+ */
+export const DECAL_ZOFFSET = -2;
+
+/** Un maillage est-il une decalcomanie ? Par son nom, ou celui d'un parent. */
+export function isDecalMesh(mesh, names) {
+  for (let n = mesh; n; n = n.parent) {
+    if (n.name && names.has(n.name)) return true;
+  }
+  return false;
+}
+
+export function applyDecals(BABYLON, meshes, names) {
+  const want = names instanceof Set ? names : new Set(names || []);
+  if (!want.size) return 0;
+  let n = 0;
+  for (const mesh of meshes) {
+    const mat = mesh.material;
+    if (!mat || !isDecalMesh(mesh, want)) continue;
+    mat.zOffset = DECAL_ZOFFSET;
+    const tex = mat.albedoTexture || mat.diffuseTexture || null;
+    if (tex) tex.hasAlpha = true;
+    if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
+    if ("transparencyMode" in mat && BABYLON.Material) {
+      mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+    }
+    // Une decalcomanie n'ecrit pas dans le tampon de profondeur : elle est SUR
+    // la paroi, pas devant elle. Sans cela, deux decalcomanies qui se
+    // chevauchent — les cinq fresques du musee — se decoupent l'une l'autre au
+    // lieu de se melanger.
+    mat.disableDepthWrite = true;
+    n++;
+  }
+  return n;
+}
+
 /** Uniformes dependant de la camera pour les materiaux maison. */
 export function updateGameShaders(BABYLON, scene, cameraPos, timeSec, sunDir = null) {
   for (const m of scene.materials) {
