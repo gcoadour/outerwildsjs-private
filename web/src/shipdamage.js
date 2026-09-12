@@ -115,6 +115,36 @@ export class ShipDamage {
     return p && p.dead ? 0 : 1;
   }
 
+  /**
+   * Rend une piece a son integrite.
+   *
+   * Dans le build, chaque `RepairVolume` est pose SUR la piece qu'il repare et
+   * ne repare que celle-la. Le portage n'a pas encore la correspondance volume
+   * -> piece (elle passe par `EngineComponent`, qui n'est pas lu) : sans
+   * position donnee, on rend donc la piece morte la plus abimee, ce qui revient
+   * au meme tant qu'on repare une piece a la fois.
+   *
+   * @returns {string|null} la position reparee, ou null s'il n'y avait rien a
+   *   reparer.
+   */
+  repair(location = null) {
+    const cible = location && this.parts[location]
+      ? location
+      : Object.entries(this.parts)
+          .filter(([, p]) => p.dead || p.integrity < this.total)
+          .sort((a, b) => a[1].integrity - b[1].integrity)
+          .map(([k]) => k)[0];
+    if (!cible) return null;
+    const p = this.parts[cible];
+    p.integrity = this.total;
+    p.dead = false;
+    // L'integrite de coque est la moyenne des pieces : elle remonte d'autant.
+    const parts = Object.values(this.parts);
+    this.integrity = parts.reduce((s, x) => s + x.integrity, 0) / parts.length;
+    if (this.integrity > 0) this.destroyed = false;
+    return cible;
+  }
+
   /** Pieces mortes, dans l'ordre des positions. */
   get deadParts() {
     return Object.entries(this.parts).filter(([, p]) => p.dead).map(([k]) => k);

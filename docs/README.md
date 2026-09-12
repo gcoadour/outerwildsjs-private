@@ -63,3 +63,5 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`36-audit.md`](36-audit.md) — l'audit mesuré sur le build : matrice des écarts, actions, backlog
 - [`37-corrections.md`](37-corrections.md) — **l'audit mis en œuvre : marche, inertie de rotation, courants, référentiels**
 - [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) — **parler, entendre, décoller : trois systèmes qui passaient leurs tests sans fonctionner**
+- [`44-reste-a-migrer.md`](44-reste-a-migrer.md) — **ce qui reste à migrer de l'alpha d'origine : neuf familles, 413 composants sans lecteur, par ordre**
+- [`45-recensement-mesure.md`](45-recensement-mesure.md) — **le recensement refait sur le build : le sable des jumelles, la mort là où le jeu la met, l'ambiance par couches**

@@ -8,6 +8,8 @@ import { extractScene } from "../web/src/pipeline/extract/scene.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
+import { sandColumns, sandFunnels, funnelActive } from "../web/src/sand.js";
+import { destructionVolumes, repairVolumes, destroyedBy } from "../web/src/volumes.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
@@ -167,6 +169,68 @@ const volumes = (gp.placed.DirectionalForceField || []).filter((e) => e.volume).
 console.log("     champs avec volume mesure:", volumes,
             "/", n("DirectionalForceField"));
 
+// --- le sable des jumelles ---
+//
+// Trois composants, quatre nombres chacun, aucun lecteur jusqu'ici. Ce sont ces
+// valeurs-la, et non celles du constructeur (150 -> 33), qui menent le lieu :
+// l'invariant garde donc les deux instances NOMMEES, pas seulement leur compte.
+{
+  const cols = sandColumns(gp);
+  const par = Object.fromEntries(cols.map((c) => [c.name, c]));
+  check("deux colonnes de sable posees", cols.length, 2);
+  check("la jumelle qui se remplit va de 60 a 290",
+        par.RisingSand && `${par.RisingSand.initScale}->${par.RisingSand.finalScale}`, "60->290");
+  check("celle qui se vide va de 300 a 66",
+        par.DrainingSand && `${par.DrainingSand.initScale}->${par.DrainingSand.finalScale}`,
+        "300->66");
+  check("les deux suivent la meme fenetre de boucle",
+        cols.every((c) => c.startMinutes === 2 && c.endMinutes === 17), true);
+  // Aucune colonne ne doit garder les valeurs du constructeur : si l'extraction
+  // cesse de lire les champs, c'est ce repli-la qui reapparaitrait.
+  check("aucune ne retombe sur le repli du constructeur",
+        cols.some((c) => c.initScale === 150 && c.finalScale === 33), false);
+
+  const funnels = sandFunnels(gp);
+  check("un entonnoir pose", funnels.length, 1);
+  check("il pousse a la 2e minute et se retire a la 17e",
+        funnels[0] && `${funnels[0].growAfterMinutes}/${funnels[0].shrinkAfterMinutes}`, "2/17");
+  check("l'entonnoir est ouvert au milieu de la boucle",
+        funnelActive(10 * 60, funnels[0]), true);
+}
+
+// --- ou l'on meurt, et comment on repare ---
+{
+  const dv = destructionVolumes(gp);
+  check("six volumes de destruction poses", dv.length, 6);
+  check("quatre machoires ne mordent que le joueur et le vaisseau",
+        dv.filter((v) => v.onlyPlayerAndShip).length, 4);
+  check("les deux autres n'epargnent rien",
+        dv.filter((v) => !v.onlyPlayerAndShip).length, 2);
+  // Les causes sont celles du build, pas celles du portage : 0 (Default) pour
+  // les machoires, 3 (Energy) pour les deux volumes ouverts.
+  check("les causes de mort posees sont 0 et 3",
+        [...new Set(dv.map((v) => v.deathType))].sort().join(","), "0,3");
+  check("chaque volume de destruction a une forme mesuree",
+        dv.every((v) => v.volume && (v.volume.radius > 0 || v.volume.size)), true);
+  // Un volume sans forme ne tuerait personne : c'est exactement le defaut que
+  // l'invariant precedent garde, et celui-ci le verifie de l'autre cote.
+  check("un point tres loin de tout ne meurt d'aucun volume",
+        destroyedBy(dv, [1e9, 1e9, 1e9], "player"), null);
+
+  const rv = repairVolumes(gp);
+  check("dix-huit volumes de reparation", rv.length, 18);
+  check("tous reparent en trois secondes",
+        rv.every((v) => v.seconds === 3), true);
+  check("quinze sont a portee 3, trois a portee 5",
+        `${rv.filter((v) => v.distance === 3).length}/${rv.filter((v) => v.distance === 5).length}`,
+        "15/3");
+  // `_secondsToRepair` n'est serialise sur AUCUNE instance : les trois secondes
+  // viennent du constructeur. L'invariant garde donc le repli lui-meme — s'il
+  // changeait, dix-huit volumes changeraient de rythme en silence.
+  check("aucune instance ne porte sa propre duree",
+        rv.every((v) => v.seconds === 3), true);
+}
+
 // --- ce que l'audit a mesure, garde en invariant ---
 //
 // docs/36-audit.md. Chaque ligne ci-dessous chiffre une affirmation du portage
@@ -249,7 +313,7 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 // Un clip doit etre NOMME comme il est fait.
 //
 // L'extension venait de `m_Format`, qui ne dit rien du conteneur : mesure sur
-// le build, 20 des 36 clips exportes partaient en `.ogg` en etant du RIFF ou
+// le build, 20 des 36 clips d'alors partaient en `.ogg` en etant du RIFF ou
 // de l'AIFF. Consequences : un `Content-Type` faux au Service Worker, et le
 // reencodage Opus du worker — qui filtre sur `/\.wav$/` — sans aucun fichier a
 // se mettre sous la dent. Voir docs/09-audio.md.
@@ -265,9 +329,14 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   console.log("     clips par conteneur:", JSON.stringify(parExt),
               "| stats:", JSON.stringify(audio.stats));
   check("aucune extension ne ment sur son contenu", mentent, 0);
-  check("clips en Ogg Vorbis", parExt.ogg ?? 0, 16);
-  // 19 RIFF d'origine, plus l'AIFF converti.
-  check("clips en WAV", parExt.wav ?? 0, 20);
+  // Le compte est passe de 36 a 48 le jour ou les volumes d'ambiance ont eu un
+  // lecteur : leur clip est vise par `_clip` et n'appartient a AUCUNE source
+  // placee, il n'etait donc pas exporte. Douze clips de plus, et c'est le son
+  // des zones — grottes, musee, village, profondeurs.
+  check("clips exportes en tout", audioFiles.length, 48);
+  check("clips en Ogg Vorbis", parExt.ogg ?? 0, 23);
+  // 24 RIFF, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 25);
   check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
   check("l'unique AIFF du build a ete converti",
         audio.stats["AIFF convertis en WAV"] ?? 0, 1);

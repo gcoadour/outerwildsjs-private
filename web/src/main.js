@@ -64,6 +64,10 @@ import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
+import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
+import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
+         Repair } from "./volumes.js";
+import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -218,6 +222,10 @@ async function boot() {
   const audioMap = await loadAudioMap();
   const audio = new AudioField(BABYLON, audioMap);
   if (audioMap.length) await audio.init();
+  // Dix-sept zones d'ambiance : ce ne sont pas des sources de plus, ce sont des
+  // couches qui s'arbitrent par priorite (web/src/ambience.js).
+  const ambience = new AmbienceMixer(ambienceZones({ volumes: await loadAmbience() }));
+  window.__ambience = ambience;
 
   const particleMap = await loadParticleMap();
   const particles = new ParticleField(BABYLON, scene, particleMap);
@@ -235,6 +243,16 @@ async function boot() {
   // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
   const scrollers = new TextureScrollers(await loadTextureAnimators());
   window.__texanim = scrollers;
+  // Le sable des jumelles : deux spheres qu'on met a l'echelle et un entonnoir,
+  // menes par la minute de boucle. Rien de tout cela n'etait lu
+  // (docs/45-recensement-mesure.md).
+  const sand = new SandLevels(sandColumns(gameplay), sandFunnels(gameplay));
+  window.__sand = sand;
+  // Six volumes de destruction et dix-huit de reparation, poses dans la scene
+  // et jamais lus : c'est le jeu qui dit ou l'on meurt, pas un seuil du portage.
+  const destructions = destructionVolumes(gameplay);
+  const repairs = repairVolumes(gameplay).map((v) => new Repair(v));
+  window.__volumes = { destructions, repairs };
   const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
   // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
@@ -277,6 +295,8 @@ async function boot() {
     if (sky.attach(entry.meshes)) console.log(`ciel : voute rattachee`);
     const nScroll = scrollers.attach(entry.meshes);
     if (nScroll) console.log(`textures defilantes : ${nScroll} rattachees`);
+    const nSand = sand.attach(entry.meshes);
+    if (nSand) console.log(`sable : ${nSand} colonnes rattachees sur ${sand.total}`);
     window.__shaders = shaderCounts;
     console.log(`geometrie chargee : ${entry.file} (${entry.meshes.length} maillages)`);
   });
@@ -840,6 +860,8 @@ async function boot() {
   addEventListener("keydown", (e) => { keys[e.code] = true; });
   addEventListener("keyup", (e) => { keys[e.code] = false; });
   let interactPressed = false, optionPressed = 0, probeFired = false;
+  // Avancement de la reparation en cours, pour l'invite a l'ecran.
+  let repairFraction = 0;
 
   /**
    * Une commande, designee par son code clavier.
@@ -1177,6 +1199,28 @@ async function boot() {
         player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
+      // --- reparation ---
+      //
+      // Les dix-huit `RepairVolume` du build sont poses DANS le vaisseau, sur
+      // la piece que chacun repare, et s'atteignent en marchant dans la coque.
+      // Ce portage n'a pas d'interieur : les volumes se ramenent donc a « on
+      // repare depuis le poste de pilotage », une piece a la fois, au rythme du
+      // build (trois secondes par piece). Leur position extraite, elle, ne
+      // vaudrait rien — le vaisseau bouge.
+      if (ship.boarded && repairs.length && ship.damage) {
+        const avarie = ship.damage;
+        const abimee = avarie.deadParts.length || avarie.integrity < avarie.total;
+        const en_cours = repairs.find((r) => !r.done) || null;
+        if (abimee && en_cours) {
+          if (keys.KeyH) en_cours.press(); else en_cours.release();
+          if (en_cours.update(dt)) {
+            const piece = avarie.repair();
+            if (piece) console.log(`reparation : ${piece} remise en etat`);
+            en_cours.reset();
+          }
+          repairFraction = en_cours.fraction;
+        } else repairFraction = 0;
+      } else repairFraction = 0;
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
@@ -1340,6 +1384,13 @@ async function boot() {
       if (ship && !ship.boarded && !pdata.knowsLaunchCodes &&
           ship.distanceTo(player.pos) < SHIP_REACH) {
         bits.push("vaisseau verrouillé — parler au conservateur");
+      }
+      // La reparation : ce qui est en cours, et l'invite quand il y a a faire.
+      if (ship && ship.boarded && ship.damage &&
+          (ship.damage.deadParts.length || ship.damage.integrity < ship.damage.total)) {
+        bits.push(repairFraction > 0
+          ? `réparation ${(repairFraction * 100).toFixed(0)} %`
+          : "H pour réparer");
       }
       if (telescope.active) bits.push(`télescope ×${telescope.magnification.toFixed(0)}`);
       if (probes.active) bits.push(`${probes.active} sonde(s)`);
@@ -1703,6 +1754,14 @@ async function boot() {
     if (loop.dead) death.kill(loop.deathCause || "supernova");
     // Devore : un predateur de Dark Bramble qui atteint sa proie.
     if (fish.some((f) => f.caught)) death.kill("digestion");
+    // Les volumes de destruction du build, d'abord : la cause de mort est un
+    // champ du volume (`_deathType`), et les quatre machoires ne mordent que le
+    // joueur et le vaisseau. Le seuil analytique ci-dessous reste le filet.
+    if (destructions.length) {
+      const mortel = destroyedBy(destructions, [player.pos.x, player.pos.y, player.pos.z],
+                                 ship && ship.boarded ? "ship" : "player");
+      if (mortel) death.kill(deathCause(mortel.deathType));
+    }
     // Incineration : entrer dans l'etoile. Le corps est la, son rayon aussi ;
     // rien n'empechait d'y voler jusqu'ici.
     if (starBody && sunDist != null &&
@@ -1784,9 +1843,20 @@ async function boot() {
     // pas, on ne l'applique pas non plus (docs/41-ciel.md).
     if (sky.ready) sky.update(player.pos);
     if (scrollers.count) scrollers.update(dt);
+    // Le sable suit la boucle et rien d'autre : il repart de son niveau initial
+    // a chaque redemarrage, comme dans le jeu.
+    if (sand.count) sand.update(loop.elapsed);
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
+    // Les ambiances suivent la position MONDE de l'auditeur, dans la meme
+    // convention que les sources placees : position dans le repere ancre, plus
+    // la position monde de l'ancre.
+    if (ambience.count) {
+      audio.setLayers(ambience.update(dt,
+        [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+         player.pos.z + anchorPos[2]], { night }), mixer);
+    }
     // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
     // lieu d'eclairage pour un systeme solaire entier.

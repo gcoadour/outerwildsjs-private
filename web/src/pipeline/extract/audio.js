@@ -132,17 +132,23 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
   const stats = {};
   const bump = (k) => { stats[k] = (stats[k] || 0) + 1; };
 
-  for (const o of ctx.env.objects({ type: "AudioSource", file: ctx.sceneFile })) {
-    const src = ctx.readEngine(o);
-    if (!src) { bump("source illisible"); continue; }
-    const ptr = src.m_audioClip;
-    if (!ptr || !ptr.pathId) { bump("sans clip"); continue; }
-
+  /**
+   * Exporte le clip vise par un pointeur, une seule fois, et rend son nom de
+   * fichier.
+   *
+   * Extrait de la boucle des sources pour servir aussi aux volumes
+   * d'ambiance : le clip d'un `AudioVolume` n'est PAS sur l'`AudioSource` de
+   * son objet — celle-ci est serialisee sans clip, et c'est le volume qui le
+   * lui pose a l'execution. Apparier les deux par GameObject rendait donc
+   * dix-sept volumes muets, ce qui s'est vu a la premiere mesure.
+   */
+  function exportClip(ptr, file) {
+    if (!ptr || !ptr.pathId) return null;
     const pid = ptr.pathId;
     if (!clipFiles.has(pid)) {
       clipFiles.set(pid, null);
       if (clipFiles.size <= maxClips) {
-        const target = ctx.env.deref(ptr, o.file);
+        const target = ctx.env.deref(ptr, file);
         if (target) {
           try {
             const clip = readAudioClip(target.file.reader(target), target.file);
@@ -173,7 +179,16 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
         }
       }
     }
-    const file = clipFiles.get(pid);
+    return clipFiles.get(pid);
+  }
+
+  for (const o of ctx.env.objects({ type: "AudioSource", file: ctx.sceneFile })) {
+    const src = ctx.readEngine(o);
+    if (!src) { bump("source illisible"); continue; }
+    const ptr = src.m_audioClip;
+    if (!ptr || !ptr.pathId) { bump("sans clip"); continue; }
+
+    const file = exportClip(ptr, o.file);
     if (!file) continue;
 
     const gid = src.m_GameObject ? src.m_GameObject.pathId : 0;
@@ -211,5 +226,71 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
     bump("sources placees");
   }
 
-  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, sources, stats };
+  // --- ambiances par zone ---
+  //
+  // Quatorze `AudioVolume` et trois `DayNightAudioVolume`, jamais lus. Ce ne
+  // sont pas des sources de plus : ce sont des zones qui ARBITRENT. Chaque
+  // volume porte une couche (`_layer`) et une priorite (`_priority`), et dans
+  // une couche donnee c'est la priorite la plus forte parmi les zones ou l'on
+  // se trouve qui joue — le reste se tait, en fondu de `_fadeSeconds`.
+  //
+  // Deux choses mesurees ici, et toutes deux prises a l'envers au premier
+  // essai :
+  //
+  //   - le clip est vise par `_clip`, et l'`AudioSource` de l'objet est
+  //     serialisee SANS clip. Chercher le fichier par GameObject rendait les
+  //     dix-sept volumes muets ;
+  //   - la forme n'est pas sur l'objet du volume mais sur ses ENFANTS, qui
+  //     portent les `EntrywayTrigger` auxquels il s'abonne. Six volumes sur
+  //     dix-sept n'avaient donc aucune portee.
+  const volumes = [];
+  const scene = ctx.env.get(ctx.sceneFile);
+
+  /** Formes des declencheurs poses sous un objet, la premiere qui en a une. */
+  function volumeSousEnfants(gid) {
+    const t = ctx.transformOf.get(gid);
+    if (!t || !t.m_Children) return null;
+    for (const ptr of t.m_Children) {
+      const o = ctx.env.deref(ptr, scene);
+      if (!o) continue;
+      const child = ctx.readEngine(o);
+      const cgid = child && child.m_GameObject ? child.m_GameObject.pathId : 0;
+      if (!cgid) continue;
+      const v = ctx.volumeOf(cgid);
+      if (v) return v;
+    }
+    return null;
+  }
+
+  for (const { obj, cls } of ctx.behaviours(["AudioVolume", "DayNightAudioVolume"])) {
+    const f = ctx.scriptFields(obj);
+    if (!f) continue;
+    const gid = ctx.ownerId(obj);
+    const [pos, rot] = ctx.world(gid);
+    const e = {
+      name: ctx.name(gid),
+      kind: cls,
+      position: pos.map((v) => round(v, 3)),
+      rotation: rot.map((v) => Math.round(v * 1e6) / 1e6),
+      file: exportClip(f._clip, obj.file),
+      layer: f._layer ?? 0,
+      priority: f._priority ?? 0,
+      fade: f._fadeSeconds ?? 2,
+      randomize: !!f._randomizePlayhead,
+      pauseOnFadeOut: !!f._pauseOnFadeOut,
+    };
+    const vol = ctx.volumeOf(gid) || volumeSousEnfants(gid);
+    if (vol) e.volume = vol;
+    else bump("volume d'ambiance sans forme");
+    if (cls === "DayNightAudioVolume") {
+      e.dayWindow = f._dayWindow ?? 200;
+      e.usePlayerPosition = !!f._usePlayerPosition;
+      e.nightFile = exportClip(f._nightClip, obj.file);
+    }
+    if (!e.file) bump("volume d'ambiance sans clip");
+    volumes.push(e);
+    bump("volumes d'ambiance");
+  }
+
+  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, sources, volumes, stats };
 }

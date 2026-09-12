@@ -11,6 +11,12 @@
 // peut se verifier sans le jeu se verifie sans lui.
 
 import { check, report } from "./run.mjs";
+import { sandScale, sandProgress, funnelScale, funnelActive,
+         sandColumns, sandFunnels } from "../web/src/sand.js";
+import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
+         repairVolumes, Repair } from "../web/src/volumes.js";
+import { ambienceZones, activeZones, winnersByLayer, clipOf,
+         AmbienceMixer } from "../web/src/ambience.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
@@ -2023,6 +2029,186 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la boucle retient qu'on lui a parle", sys.stateOf(vu).ended, 1);
   sys.resetLoop();
   check("une nouvelle boucle remet le compteur a zero", sys.stateOf(vu).ended, 0);
+}
+
+// --- le sable des jumelles ---------------------------------------------
+//
+// Les quatre nombres sont ceux des deux instances posees dans le build ; la loi
+// est une interpolation lineaire bornee, sans adoucissement.
+{
+  const monte = { initScale: 60, finalScale: 290, startMinutes: 2, endMinutes: 17 };
+  const baisse = { initScale: 300, finalScale: 66, startMinutes: 2, endMinutes: 17 };
+
+  check("avant la 2e minute, rien n'a bouge", sandScale(0, monte), 60);
+  check("... y compris a la minute pile", sandScale(2, monte), 60);
+  check("a mi-course, la moitie du chemin", sandScale(9.5, monte), 175);
+  check("a la 17e minute, tout est fini", sandScale(17, monte), 290);
+  check("et cela ne bouge plus apres", sandScale(19.9, monte), 290);
+  check("la jumelle qui se vide part de 300", sandScale(0, baisse), 300);
+  check("... et finit a 66", sandScale(17, baisse), 66);
+  check("... en passant par 183 a mi-course", sandScale(9.5, baisse), 183);
+
+  // Le sable ne se deplace pas : ce qu'une jumelle gagne en rayon, l'autre ne
+  // le perd pas a l'identique. Les deux echelles sont independantes, et c'est
+  // bien ce que disent les quatre nombres.
+  check("les deux colonnes ne sont pas symetriques",
+        Math.round((290 - 60) - (300 - 66)), -4);
+
+  check("la fraction est bornee en bas", sandProgress(-5, 2, 17), 0);
+  check("la fraction est bornee en haut", sandProgress(99, 2, 17), 1);
+  check("une fenetre nulle ne divise pas par zero", sandProgress(5, 3, 3), 1);
+
+  const f = { growAfterMinutes: 2, shrinkAfterMinutes: 17 };
+  check("l'entonnoir est ferme au depart", funnelScale(0, f), 0);
+  check("il est a moitie ouvert cinq secondes apres la pousse",
+        funnelScale(2 * 60 + 5, f), 0.5);
+  check("ouvert dix secondes apres", funnelScale(2 * 60 + 10, f), 1);
+  check("toujours ouvert a la 16e minute", funnelScale(16 * 60, f), 1);
+  check("a moitie referme cinq secondes apres le retrait",
+        funnelScale(17 * 60 + 5, f), 0.5);
+  check("ferme dix secondes apres", funnelScale(17 * 60 + 10, f), 0);
+  check("il n'existe pas avant sa pousse", funnelActive(60, f), false);
+  check("il existe entre les deux", funnelActive(10 * 60, f), true);
+  check("il n'existe plus apres son retrait", funnelActive(18 * 60, f), false);
+
+  // Sans donnees, aucune colonne et aucune plantee.
+  check("sans build, aucune colonne", sandColumns({}).length, 0);
+  check("sans build, aucun entonnoir", sandFunnels({}).length, 0);
+  const lu = sandColumns({ placed: { SandLevelController: [
+    { name: "RisingSand", position: [0, 0, 0],
+      fields: { _initScale: 60, _finalScale: 290, _startAfterMinutes: 2, _endAfterMinutes: 17 } }] } });
+  check("une colonne lue garde ses quatre nombres",
+        `${lu[0].initScale}/${lu[0].finalScale}/${lu[0].startMinutes}/${lu[0].endMinutes}`,
+        "60/290/2/17");
+}
+
+// --- ou l'on meurt, et comment on repare ------------------------------
+{
+  check("l'enumeration DeathType du build fait cinq valeurs", DEATH_TYPES.length, 5);
+  check("la valeur 2 est l'asphyxie", deathCause(2), "asphyxie");
+  check("la 3 est l'energie", deathCause(3), "incineration");
+  check("la 4 est la supernova", deathCause(4), "supernova");
+  check("la 0 est la mort par defaut", deathCause(0), "ecrasement");
+
+  const gp = { placed: { DestructionVolume: [
+    { name: "JawsOfDestruction", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 10, center: [0, 0, 0] },
+      fields: { _deathType: 0, _onlyAffectsPlayerAndShip: true } },
+    { name: "DestructionVolume", position: [100, 0, 0],
+      volume: { shape: "sphere", radius: 5, center: [0, 0, 0] },
+      fields: { _deathType: 3, _onlyAffectsPlayerAndShip: false } },
+  ] } };
+  const vols = destructionVolumes(gp);
+  check("deux volumes lus", vols.length, 2);
+  check("un joueur au centre des machoires meurt",
+        destroyedBy(vols, [0, 0, 0], "player").deathType, 0);
+  check("... et une sonde les traverse",
+        destroyedBy(vols, [0, 0, 0], "probe"), null);
+  check("le volume ouvert n'epargne pas la sonde",
+        destroyedBy(vols, [100, 0, 0], "probe").deathType, 3);
+  check("hors de tout volume, on survit", destroyedBy(vols, [50, 50, 50], "player"), null);
+  check("un volume sans collider ne tue personne",
+        destroyedBy(destructionVolumes({ placed: { DestructionVolume:
+          [{ name: "x", position: [0, 0, 0], fields: {} }] } }), [0, 0, 0]), null);
+
+  const rv = repairVolumes({ placed: { RepairVolume: [
+    { name: "RepairVolume", position: [0, 0, 0], fields: { _repairDistance: 5 } }] } });
+  check("la duree de reparation retombe sur les trois secondes du build",
+        rv[0].seconds, 3);
+  const r = new Repair(rv[0]);
+  check("a portee", r.inRange([0, 4, 0]), true);
+  check("hors de portee", r.inRange([0, 6, 0]), false);
+  check("sans maintien, rien n'avance", r.update(1) || r.fraction, 0);
+  r.press();
+  r.update(1);
+  check("un tiers du chemin apres une seconde", Number(r.fraction.toFixed(3)), 0.333);
+  r.release();
+  r.update(5);
+  check("relacher garde l'avancement", Number(r.fraction.toFixed(3)), 0.333);
+  r.press();
+  check("la reparation s'acheve", r.update(2), true);
+  check("... et ne s'acheve qu'une fois", r.update(2), false);
+  check("... la fraction est pleine", r.fraction, 1);
+  r.reset();
+  check("le redemarrage de boucle la remet a zero", r.fraction, 0);
+}
+
+// --- les zones d'ambiance ----------------------------------------------
+//
+// Le point de la mecanique n'est pas la proximite mais l'ARBITRAGE : une seule
+// zone par couche, la plus prioritaire, et les couches jouent ensemble.
+{
+  const zone = (name, layer, priority, radius, file, extra = {}) => ({
+    name, layer, priority, file, fade: 2,
+    position: [0, 0, 0],
+    volume: { shape: "sphere", radius, center: [0, 0, 0] }, ...extra,
+  });
+  const zones = [
+    zone("Atmosphere", 1, 0, 250, "atmo.ogg"),
+    zone("CaveVolume", 1, 1, 10, "cave.ogg"),
+    zone("MusicVolume", 2, 0, 100, "musique.ogg"),
+    zone("Hatch", 0, 100, 0.5, "sas.ogg"),
+  ];
+
+  check("une zone sans forme ni clip est ecartee",
+        ambienceZones({ volumes: [...zones, { name: "vide", layer: 0 }] }).length, 4);
+  check("au centre, les quatre zones contiennent l'auditeur",
+        activeZones(zones, [0, 0, 0]).length, 4);
+  // A 100 unites on est encore SUR le bord de MusicVolume : la borne est
+  // inclusive, et c'est ce que le test garde.
+  check("a 100 unites, l'atmosphere et le bord de la musique",
+        activeZones(zones, [100, 0, 0]).map((z) => z.name).sort().join(","),
+        "Atmosphere,MusicVolume");
+  check("a 101, la musique est sortie", activeZones(zones, [101, 0, 0]).length, 1);
+
+  const g = winnersByLayer(zones, [0, 0, 0]);
+  check("trois couches gagnees", g.size, 3);
+  check("dans la couche 1, la grotte couvre l'atmosphere", g.get(1).name, "CaveVolume");
+  check("la couche 0 revient au sas", g.get(0).name, "Hatch");
+  check("hors de la grotte, l'atmosphere reprend la couche 1",
+        winnersByLayer(zones, [50, 0, 0]).get(1).name, "Atmosphere");
+
+  // A priorite egale, la plus petite zone gagne : une piece est plus precise
+  // qu'une atmosphere, et c'est la seule regle qui donne un resultat stable.
+  const exaequo = [zone("grande", 1, 0, 250, "a.ogg"), zone("petite", 1, 0, 20, "b.ogg")];
+  check("a egalite, la plus petite l'emporte",
+        winnersByLayer(exaequo, [0, 0, 0]).get(1).name, "petite");
+
+  const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg", { nightFile: "nuit.ogg" });
+  check("de jour, le clip du jour", clipOf(nuit, false), "jour.ogg");
+  check("de nuit, celui de la nuit", clipOf(nuit, true), "nuit.ogg");
+  check("sans clip de nuit, on garde celui du jour",
+        clipOf(zone("x", 1, 0, 10, "jour.ogg"), true), "jour.ogg");
+
+  // Les fondus : deux secondes de montee, deux de descente.
+  const mix = new AmbienceMixer(zones);
+  mix.update(1, [0, 0, 0]);
+  const c1 = mix.playing.find((l) => l.layer === 1);
+  check("a mi-fondu, la couche 1 est a la moitie", Number(c1.gain.toFixed(3)), 0.5);
+  mix.update(1, [0, 0, 0]);
+  check("deux secondes plus tard, elle est pleine",
+        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 1);
+  check("et les trois couches sonnent ensemble", mix.playing.length, 3);
+
+  // Sortir de tout : chaque couche redescend a son rythme, puis se tait.
+  mix.update(1, [1000, 0, 0]);
+  check("en sortant, la couche 1 redescend",
+        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 0.5);
+  mix.update(2, [1000, 0, 0]);
+  check("puis se tait tout a fait", mix.playing.length, 0);
+
+  // Changer de zone dans une couche : on libere la place avant de la prendre.
+  const m2 = new AmbienceMixer(zones);
+  m2.update(5, [50, 0, 0]);
+  check("l'atmosphere tient la couche 1",
+        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
+  m2.update(1, [0, 0, 0]);
+  check("entrer dans la grotte fait d'abord baisser l'atmosphere",
+        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
+  m2.update(1.1, [0, 0, 0]);
+  m2.update(0.1, [0, 0, 0]);
+  check("puis la grotte prend la couche",
+        m2.playing.find((l) => l.layer === 1).name, "CaveVolume");
 }
 
 report();

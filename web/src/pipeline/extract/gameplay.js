@@ -14,7 +14,14 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "SimpleFluidVolume", "SphereOceanFluidVolume", "SimpleFluidDetector",
                 "AlignQuantumMoon", "CorruptionAnimator", "DerelictCloaker",
                 "NoiseSensor", "RemoteFlightConsole", "SatelliteSnapshotController",
-                "ChildColliderLOD", "CreateLODGroup", "LODLayer", "LODBiasManager"];
+                "ChildColliderLOD", "CreateLODGroup", "LODLayer", "LODBiasManager",
+                // Le sable des jumelles : deux niveaux et un entonnoir, quatre
+                // nombres chacun. C'est la mecanique propre du lieu, et le
+                // recensement des classes posees l'a trouvee sans lecteur.
+                "SandLevelController", "SandFunnelController",
+                // Ou l'on meurt, et comment on repare : deux familles de
+                // volumes que le portage decidait a sa place (web/src/volumes.js).
+                "DestructionVolume", "RepairVolume"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
