@@ -8,6 +8,7 @@ import { extractScene } from "../web/src/pipeline/extract/scene.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
+import { sandColumns, sandFunnels, funnelActive } from "../web/src/sand.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
@@ -166,6 +167,35 @@ console.log("     champs directionnels:", n("DirectionalForceField"),
 const volumes = (gp.placed.DirectionalForceField || []).filter((e) => e.volume).length;
 console.log("     champs avec volume mesure:", volumes,
             "/", n("DirectionalForceField"));
+
+// --- le sable des jumelles ---
+//
+// Trois composants, quatre nombres chacun, aucun lecteur jusqu'ici. Ce sont ces
+// valeurs-la, et non celles du constructeur (150 -> 33), qui menent le lieu :
+// l'invariant garde donc les deux instances NOMMEES, pas seulement leur compte.
+{
+  const cols = sandColumns(gp);
+  const par = Object.fromEntries(cols.map((c) => [c.name, c]));
+  check("deux colonnes de sable posees", cols.length, 2);
+  check("la jumelle qui se remplit va de 60 a 290",
+        par.RisingSand && `${par.RisingSand.initScale}->${par.RisingSand.finalScale}`, "60->290");
+  check("celle qui se vide va de 300 a 66",
+        par.DrainingSand && `${par.DrainingSand.initScale}->${par.DrainingSand.finalScale}`,
+        "300->66");
+  check("les deux suivent la meme fenetre de boucle",
+        cols.every((c) => c.startMinutes === 2 && c.endMinutes === 17), true);
+  // Aucune colonne ne doit garder les valeurs du constructeur : si l'extraction
+  // cesse de lire les champs, c'est ce repli-la qui reapparaitrait.
+  check("aucune ne retombe sur le repli du constructeur",
+        cols.some((c) => c.initScale === 150 && c.finalScale === 33), false);
+
+  const funnels = sandFunnels(gp);
+  check("un entonnoir pose", funnels.length, 1);
+  check("il pousse a la 2e minute et se retire a la 17e",
+        funnels[0] && `${funnels[0].growAfterMinutes}/${funnels[0].shrinkAfterMinutes}`, "2/17");
+  check("l'entonnoir est ouvert au milieu de la boucle",
+        funnelActive(10 * 60, funnels[0]), true);
+}
 
 // --- ce que l'audit a mesure, garde en invariant ---
 //

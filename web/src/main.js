@@ -64,6 +64,7 @@ import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
+import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -235,6 +236,11 @@ async function boot() {
   // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
   const scrollers = new TextureScrollers(await loadTextureAnimators());
   window.__texanim = scrollers;
+  // Le sable des jumelles : deux spheres qu'on met a l'echelle et un entonnoir,
+  // menes par la minute de boucle. Rien de tout cela n'etait lu
+  // (docs/45-recensement-mesure.md).
+  const sand = new SandLevels(sandColumns(gameplay), sandFunnels(gameplay));
+  window.__sand = sand;
   const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
   // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
@@ -277,6 +283,8 @@ async function boot() {
     if (sky.attach(entry.meshes)) console.log(`ciel : voute rattachee`);
     const nScroll = scrollers.attach(entry.meshes);
     if (nScroll) console.log(`textures defilantes : ${nScroll} rattachees`);
+    const nSand = sand.attach(entry.meshes);
+    if (nSand) console.log(`sable : ${nSand} colonnes rattachees sur ${sand.total}`);
     window.__shaders = shaderCounts;
     console.log(`geometrie chargee : ${entry.file} (${entry.meshes.length} maillages)`);
   });
@@ -1784,6 +1792,9 @@ async function boot() {
     // pas, on ne l'applique pas non plus (docs/41-ciel.md).
     if (sky.ready) sky.update(player.pos);
     if (scrollers.count) scrollers.update(dt);
+    // Le sable suit la boucle et rien d'autre : il repart de son niveau initial
+    // a chaque redemarrage, comme dans le jeu.
+    if (sand.count) sand.update(loop.elapsed);
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);

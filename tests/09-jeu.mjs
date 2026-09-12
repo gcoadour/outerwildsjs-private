@@ -11,6 +11,8 @@
 // peut se verifier sans le jeu se verifie sans lui.
 
 import { check, report } from "./run.mjs";
+import { sandScale, sandProgress, funnelScale, funnelActive,
+         sandColumns, sandFunnels } from "../web/src/sand.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
@@ -2023,6 +2025,57 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la boucle retient qu'on lui a parle", sys.stateOf(vu).ended, 1);
   sys.resetLoop();
   check("une nouvelle boucle remet le compteur a zero", sys.stateOf(vu).ended, 0);
+}
+
+// --- le sable des jumelles ---------------------------------------------
+//
+// Les quatre nombres sont ceux des deux instances posees dans le build ; la loi
+// est une interpolation lineaire bornee, sans adoucissement.
+{
+  const monte = { initScale: 60, finalScale: 290, startMinutes: 2, endMinutes: 17 };
+  const baisse = { initScale: 300, finalScale: 66, startMinutes: 2, endMinutes: 17 };
+
+  check("avant la 2e minute, rien n'a bouge", sandScale(0, monte), 60);
+  check("... y compris a la minute pile", sandScale(2, monte), 60);
+  check("a mi-course, la moitie du chemin", sandScale(9.5, monte), 175);
+  check("a la 17e minute, tout est fini", sandScale(17, monte), 290);
+  check("et cela ne bouge plus apres", sandScale(19.9, monte), 290);
+  check("la jumelle qui se vide part de 300", sandScale(0, baisse), 300);
+  check("... et finit a 66", sandScale(17, baisse), 66);
+  check("... en passant par 183 a mi-course", sandScale(9.5, baisse), 183);
+
+  // Le sable ne se deplace pas : ce qu'une jumelle gagne en rayon, l'autre ne
+  // le perd pas a l'identique. Les deux echelles sont independantes, et c'est
+  // bien ce que disent les quatre nombres.
+  check("les deux colonnes ne sont pas symetriques",
+        Math.round((290 - 60) - (300 - 66)), -4);
+
+  check("la fraction est bornee en bas", sandProgress(-5, 2, 17), 0);
+  check("la fraction est bornee en haut", sandProgress(99, 2, 17), 1);
+  check("une fenetre nulle ne divise pas par zero", sandProgress(5, 3, 3), 1);
+
+  const f = { growAfterMinutes: 2, shrinkAfterMinutes: 17 };
+  check("l'entonnoir est ferme au depart", funnelScale(0, f), 0);
+  check("il est a moitie ouvert cinq secondes apres la pousse",
+        funnelScale(2 * 60 + 5, f), 0.5);
+  check("ouvert dix secondes apres", funnelScale(2 * 60 + 10, f), 1);
+  check("toujours ouvert a la 16e minute", funnelScale(16 * 60, f), 1);
+  check("a moitie referme cinq secondes apres le retrait",
+        funnelScale(17 * 60 + 5, f), 0.5);
+  check("ferme dix secondes apres", funnelScale(17 * 60 + 10, f), 0);
+  check("il n'existe pas avant sa pousse", funnelActive(60, f), false);
+  check("il existe entre les deux", funnelActive(10 * 60, f), true);
+  check("il n'existe plus apres son retrait", funnelActive(18 * 60, f), false);
+
+  // Sans donnees, aucune colonne et aucune plantee.
+  check("sans build, aucune colonne", sandColumns({}).length, 0);
+  check("sans build, aucun entonnoir", sandFunnels({}).length, 0);
+  const lu = sandColumns({ placed: { SandLevelController: [
+    { name: "RisingSand", position: [0, 0, 0],
+      fields: { _initScale: 60, _finalScale: 290, _startAfterMinutes: 2, _endAfterMinutes: 17 } }] } });
+  check("une colonne lue garde ses quatre nombres",
+        `${lu[0].initScale}/${lu[0].finalScale}/${lu[0].startMinutes}/${lu[0].endMinutes}`,
+        "60/290/2/17");
 }
 
 report();
