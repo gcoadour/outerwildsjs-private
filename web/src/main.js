@@ -67,6 +67,7 @@ import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          Repair } from "./volumes.js";
+import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -221,6 +222,10 @@ async function boot() {
   const audioMap = await loadAudioMap();
   const audio = new AudioField(BABYLON, audioMap);
   if (audioMap.length) await audio.init();
+  // Dix-sept zones d'ambiance : ce ne sont pas des sources de plus, ce sont des
+  // couches qui s'arbitrent par priorite (web/src/ambience.js).
+  const ambience = new AmbienceMixer(ambienceZones({ volumes: await loadAmbience() }));
+  window.__ambience = ambience;
 
   const particleMap = await loadParticleMap();
   const particles = new ParticleField(BABYLON, scene, particleMap);
@@ -1844,6 +1849,14 @@ async function boot() {
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
+    // Les ambiances suivent la position MONDE de l'auditeur, dans la meme
+    // convention que les sources placees : position dans le repere ancre, plus
+    // la position monde de l'ancre.
+    if (ambience.count) {
+      audio.setLayers(ambience.update(dt,
+        [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+         player.pos.z + anchorPos[2]], { night }), mixer);
+    }
     // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
     // lieu d'eclairage pour un systeme solaire entier.

@@ -15,6 +15,8 @@ import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels } from "../web/src/sand.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
+import { ambienceZones, activeZones, winnersByLayer, clipOf,
+         AmbienceMixer } from "../web/src/ambience.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
@@ -2129,6 +2131,84 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("... la fraction est pleine", r.fraction, 1);
   r.reset();
   check("le redemarrage de boucle la remet a zero", r.fraction, 0);
+}
+
+// --- les zones d'ambiance ----------------------------------------------
+//
+// Le point de la mecanique n'est pas la proximite mais l'ARBITRAGE : une seule
+// zone par couche, la plus prioritaire, et les couches jouent ensemble.
+{
+  const zone = (name, layer, priority, radius, file, extra = {}) => ({
+    name, layer, priority, file, fade: 2,
+    position: [0, 0, 0],
+    volume: { shape: "sphere", radius, center: [0, 0, 0] }, ...extra,
+  });
+  const zones = [
+    zone("Atmosphere", 1, 0, 250, "atmo.ogg"),
+    zone("CaveVolume", 1, 1, 10, "cave.ogg"),
+    zone("MusicVolume", 2, 0, 100, "musique.ogg"),
+    zone("Hatch", 0, 100, 0.5, "sas.ogg"),
+  ];
+
+  check("une zone sans forme ni clip est ecartee",
+        ambienceZones({ volumes: [...zones, { name: "vide", layer: 0 }] }).length, 4);
+  check("au centre, les quatre zones contiennent l'auditeur",
+        activeZones(zones, [0, 0, 0]).length, 4);
+  // A 100 unites on est encore SUR le bord de MusicVolume : la borne est
+  // inclusive, et c'est ce que le test garde.
+  check("a 100 unites, l'atmosphere et le bord de la musique",
+        activeZones(zones, [100, 0, 0]).map((z) => z.name).sort().join(","),
+        "Atmosphere,MusicVolume");
+  check("a 101, la musique est sortie", activeZones(zones, [101, 0, 0]).length, 1);
+
+  const g = winnersByLayer(zones, [0, 0, 0]);
+  check("trois couches gagnees", g.size, 3);
+  check("dans la couche 1, la grotte couvre l'atmosphere", g.get(1).name, "CaveVolume");
+  check("la couche 0 revient au sas", g.get(0).name, "Hatch");
+  check("hors de la grotte, l'atmosphere reprend la couche 1",
+        winnersByLayer(zones, [50, 0, 0]).get(1).name, "Atmosphere");
+
+  // A priorite egale, la plus petite zone gagne : une piece est plus precise
+  // qu'une atmosphere, et c'est la seule regle qui donne un resultat stable.
+  const exaequo = [zone("grande", 1, 0, 250, "a.ogg"), zone("petite", 1, 0, 20, "b.ogg")];
+  check("a egalite, la plus petite l'emporte",
+        winnersByLayer(exaequo, [0, 0, 0]).get(1).name, "petite");
+
+  const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg", { nightFile: "nuit.ogg" });
+  check("de jour, le clip du jour", clipOf(nuit, false), "jour.ogg");
+  check("de nuit, celui de la nuit", clipOf(nuit, true), "nuit.ogg");
+  check("sans clip de nuit, on garde celui du jour",
+        clipOf(zone("x", 1, 0, 10, "jour.ogg"), true), "jour.ogg");
+
+  // Les fondus : deux secondes de montee, deux de descente.
+  const mix = new AmbienceMixer(zones);
+  mix.update(1, [0, 0, 0]);
+  const c1 = mix.playing.find((l) => l.layer === 1);
+  check("a mi-fondu, la couche 1 est a la moitie", Number(c1.gain.toFixed(3)), 0.5);
+  mix.update(1, [0, 0, 0]);
+  check("deux secondes plus tard, elle est pleine",
+        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 1);
+  check("et les trois couches sonnent ensemble", mix.playing.length, 3);
+
+  // Sortir de tout : chaque couche redescend a son rythme, puis se tait.
+  mix.update(1, [1000, 0, 0]);
+  check("en sortant, la couche 1 redescend",
+        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 0.5);
+  mix.update(2, [1000, 0, 0]);
+  check("puis se tait tout a fait", mix.playing.length, 0);
+
+  // Changer de zone dans une couche : on libere la place avant de la prendre.
+  const m2 = new AmbienceMixer(zones);
+  m2.update(5, [50, 0, 0]);
+  check("l'atmosphere tient la couche 1",
+        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
+  m2.update(1, [0, 0, 0]);
+  check("entrer dans la grotte fait d'abord baisser l'atmosphere",
+        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
+  m2.update(1.1, [0, 0, 0]);
+  m2.update(0.1, [0, 0, 0]);
+  check("puis la grotte prend la couche",
+        m2.playing.find((l) => l.layer === 1).name, "CaveVolume");
 }
 
 report();

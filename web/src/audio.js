@@ -212,6 +212,12 @@ export class AudioField {
     for (const [i, snd] of this.live) {
       if (snd && this._shouldPlay(this.sources[i])) this._play(snd);
     }
+    // Les ambiances de zone sont toutes en boucle et toutes creees avant le
+    // premier geste : sans cette reprise, elles resteraient muettes pour de
+    // bon — c'est exactement ce qui etait arrive a la musique.
+    for (const z of (this.zoneSounds || new Map()).values()) {
+      if (z.snd) this._play(z.snd);
+    }
   }
 
   _play(snd) {
@@ -328,6 +334,62 @@ export class AudioField {
       if (s.name && pattern.test(s.name)) { this.asked.add(i); n += 1; }
     }
     return n;
+  }
+
+  /**
+   * Ambiances par couche.
+   *
+   * Un son NON spatialise par couche : une ambiance de zone ne vient pas d'un
+   * point, elle remplit l'endroit. C'est la difference avec les 97 sources
+   * placees, et c'est pourquoi elle ne passe pas par `_spawn`.
+   *
+   * Le volume rendu est le gain du fondu, multiplie par celui de la piste : la
+   * supernova coupe donc les ambiances comme le reste.
+   *
+   * @param playing sortie d'`AmbienceMixer.update` : { layer, file, gain }
+   */
+  setLayers(playing, mixer = null) {
+    if (!this.engine) return;
+    if (!this.zoneSounds) { this.zoneSounds = new Map(); this.zonePending = new Set(); }
+    const veut = new Map(playing.map((l) => [l.layer, l]));
+
+    for (const [layer, z] of [...this.zoneSounds]) {
+      const l = veut.get(layer);
+      if (l && l.file === z.file) continue;
+      // Changer de clip dans une couche : on arrete l'ancien. Le fondu a deja
+      // ramene son gain a zero, la coupure ne s'entend donc pas.
+      try { if (z.snd) z.snd.stop(); } catch (e) { /* deja arrete */ }
+      this.zoneSounds.delete(layer);
+    }
+
+    for (const l of playing) {
+      // La couche 2 est celle de la musique de lieu ; les autres sont des
+      // ambiances. C'est ce que disent les trois volumes qui s'y trouvent.
+      const piste = l.layer === 2 ? "Music" : "Ambience";
+      const gain = l.gain * (mixer ? mixer.volume(piste) : 1);
+      const z = this.zoneSounds.get(l.layer);
+      if (z) {
+        if (z.snd) { try { z.snd.volume = gain; } catch (e) { /* pas de setter */ } }
+        continue;
+      }
+      const cle = `zone${l.layer}:${l.file}`;
+      if (this.zonePending.has(cle)) continue;
+      this.zonePending.add(cle);
+      this.zoneSounds.set(l.layer, { file: l.file, snd: null });
+      this.B.CreateSoundAsync(l.name || cle, `data/audio/${l.file}`,
+                              { loop: true, volume: gain, spatialEnabled: false })
+        .then((snd) => {
+          this.zonePending.delete(cle);
+          const cur = this.zoneSounds.get(l.layer);
+          if (!cur || cur.file !== l.file) {
+            try { snd.stop(); } catch (e) { /* jamais lance */ }
+            return;
+          }
+          cur.snd = snd;
+          if (this.unlocked) this._play(snd);
+        })
+        .catch(() => { this.zonePending.delete(cle); this.zoneSounds.delete(l.layer); this.failed++; });
+    }
   }
 
   _spawn(i, s, p) {

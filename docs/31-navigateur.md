@@ -149,7 +149,8 @@ croit lire des fichiers servis. C'est aussi ce qui impose une origine sûre —
 
 ## Écarts assumés avec le pipeline Python
 
-- **36 clips audio et 97 sources placées**, contre 31 et 92. Le lecteur
+- **48 clips audio et 97 sources placées**, contre 31 et 92 — 36 clips
+  jusqu'à ce que les zones d'ambiance en réclament douze de plus. Le lecteur
   d'`AudioClip` dédié récupère les clips que la lecture tolérante de UnityPy
   laissait tomber.
 - **`Resources/unity default resources` est chargé.** `level0` pointe vers lui ;

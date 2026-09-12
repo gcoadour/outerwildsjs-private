@@ -313,7 +313,7 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 // Un clip doit etre NOMME comme il est fait.
 //
 // L'extension venait de `m_Format`, qui ne dit rien du conteneur : mesure sur
-// le build, 20 des 36 clips exportes partaient en `.ogg` en etant du RIFF ou
+// le build, 20 des 36 clips d'alors partaient en `.ogg` en etant du RIFF ou
 // de l'AIFF. Consequences : un `Content-Type` faux au Service Worker, et le
 // reencodage Opus du worker — qui filtre sur `/\.wav$/` — sans aucun fichier a
 // se mettre sous la dent. Voir docs/09-audio.md.
@@ -329,9 +329,14 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   console.log("     clips par conteneur:", JSON.stringify(parExt),
               "| stats:", JSON.stringify(audio.stats));
   check("aucune extension ne ment sur son contenu", mentent, 0);
-  check("clips en Ogg Vorbis", parExt.ogg ?? 0, 16);
-  // 19 RIFF d'origine, plus l'AIFF converti.
-  check("clips en WAV", parExt.wav ?? 0, 20);
+  // Le compte est passe de 36 a 48 le jour ou les volumes d'ambiance ont eu un
+  // lecteur : leur clip est vise par `_clip` et n'appartient a AUCUNE source
+  // placee, il n'etait donc pas exporte. Douze clips de plus, et c'est le son
+  // des zones — grottes, musee, village, profondeurs.
+  check("clips exportes en tout", audioFiles.length, 48);
+  check("clips en Ogg Vorbis", parExt.ogg ?? 0, 23);
+  // 24 RIFF, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 25);
   check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
   check("l'unique AIFF du build a ete converti",
         audio.stats["AIFF convertis en WAV"] ?? 0, 1);

@@ -55,7 +55,7 @@ ouvert en `file://` n'en est pas une.
 | `data/solar_system.json` | 17 corps : positions, rayons, gravité, constantes de vol |
 | `data/gameplay.json` | vaisseau, ressources, 39 interactifs, 34 lisibles, 16 spawns |
 | `data/gltf/*.gltf` | 9 corps en glTF 2.0, hiérarchie, matériaux, squelettes, animations |
-| `data/audio/` | 36 clips et 97 sources placées avec leur piste de mixage |
+| `data/audio/` | 48 clips, 97 sources placées et 17 zones d'ambiance |
 | `data/particles/` | 135 systèmes de particules et leurs textures |
 | `data/shaders/` | 121 sources ShaderLab et leur classement |
 | `data/dialogue/` | 26 arbres de dialogue, 72 branches, 14 conversations |
@@ -113,7 +113,7 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | Maillages décodés | 1 569, 929 529 sommets, concordants avec UnityPy |
 | Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
-| Logique de jeu, sans le build | 270 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg |
+| Logique de jeu, sans le build | 580 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg |
 
 Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips
 d'animation s'éprouve sur un flux fabriqué, l'export glTF sur un monde de
