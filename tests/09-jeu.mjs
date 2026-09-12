@@ -13,6 +13,8 @@
 import { check, report } from "./run.mjs";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels } from "../web/src/sand.js";
+import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
+         repairVolumes, Repair } from "../web/src/volumes.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
@@ -2076,6 +2078,57 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("une colonne lue garde ses quatre nombres",
         `${lu[0].initScale}/${lu[0].finalScale}/${lu[0].startMinutes}/${lu[0].endMinutes}`,
         "60/290/2/17");
+}
+
+// --- ou l'on meurt, et comment on repare ------------------------------
+{
+  check("l'enumeration DeathType du build fait cinq valeurs", DEATH_TYPES.length, 5);
+  check("la valeur 2 est l'asphyxie", deathCause(2), "asphyxie");
+  check("la 3 est l'energie", deathCause(3), "incineration");
+  check("la 4 est la supernova", deathCause(4), "supernova");
+  check("la 0 est la mort par defaut", deathCause(0), "ecrasement");
+
+  const gp = { placed: { DestructionVolume: [
+    { name: "JawsOfDestruction", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 10, center: [0, 0, 0] },
+      fields: { _deathType: 0, _onlyAffectsPlayerAndShip: true } },
+    { name: "DestructionVolume", position: [100, 0, 0],
+      volume: { shape: "sphere", radius: 5, center: [0, 0, 0] },
+      fields: { _deathType: 3, _onlyAffectsPlayerAndShip: false } },
+  ] } };
+  const vols = destructionVolumes(gp);
+  check("deux volumes lus", vols.length, 2);
+  check("un joueur au centre des machoires meurt",
+        destroyedBy(vols, [0, 0, 0], "player").deathType, 0);
+  check("... et une sonde les traverse",
+        destroyedBy(vols, [0, 0, 0], "probe"), null);
+  check("le volume ouvert n'epargne pas la sonde",
+        destroyedBy(vols, [100, 0, 0], "probe").deathType, 3);
+  check("hors de tout volume, on survit", destroyedBy(vols, [50, 50, 50], "player"), null);
+  check("un volume sans collider ne tue personne",
+        destroyedBy(destructionVolumes({ placed: { DestructionVolume:
+          [{ name: "x", position: [0, 0, 0], fields: {} }] } }), [0, 0, 0]), null);
+
+  const rv = repairVolumes({ placed: { RepairVolume: [
+    { name: "RepairVolume", position: [0, 0, 0], fields: { _repairDistance: 5 } }] } });
+  check("la duree de reparation retombe sur les trois secondes du build",
+        rv[0].seconds, 3);
+  const r = new Repair(rv[0]);
+  check("a portee", r.inRange([0, 4, 0]), true);
+  check("hors de portee", r.inRange([0, 6, 0]), false);
+  check("sans maintien, rien n'avance", r.update(1) || r.fraction, 0);
+  r.press();
+  r.update(1);
+  check("un tiers du chemin apres une seconde", Number(r.fraction.toFixed(3)), 0.333);
+  r.release();
+  r.update(5);
+  check("relacher garde l'avancement", Number(r.fraction.toFixed(3)), 0.333);
+  r.press();
+  check("la reparation s'acheve", r.update(2), true);
+  check("... et ne s'acheve qu'une fois", r.update(2), false);
+  check("... la fraction est pleine", r.fraction, 1);
+  r.reset();
+  check("le redemarrage de boucle la remet a zero", r.fraction, 0);
 }
 
 report();

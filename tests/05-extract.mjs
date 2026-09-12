@@ -9,6 +9,7 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive } from "../web/src/sand.js";
+import { destructionVolumes, repairVolumes, destroyedBy } from "../web/src/volumes.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
@@ -195,6 +196,39 @@ console.log("     champs avec volume mesure:", volumes,
         funnels[0] && `${funnels[0].growAfterMinutes}/${funnels[0].shrinkAfterMinutes}`, "2/17");
   check("l'entonnoir est ouvert au milieu de la boucle",
         funnelActive(10 * 60, funnels[0]), true);
+}
+
+// --- ou l'on meurt, et comment on repare ---
+{
+  const dv = destructionVolumes(gp);
+  check("six volumes de destruction poses", dv.length, 6);
+  check("quatre machoires ne mordent que le joueur et le vaisseau",
+        dv.filter((v) => v.onlyPlayerAndShip).length, 4);
+  check("les deux autres n'epargnent rien",
+        dv.filter((v) => !v.onlyPlayerAndShip).length, 2);
+  // Les causes sont celles du build, pas celles du portage : 0 (Default) pour
+  // les machoires, 3 (Energy) pour les deux volumes ouverts.
+  check("les causes de mort posees sont 0 et 3",
+        [...new Set(dv.map((v) => v.deathType))].sort().join(","), "0,3");
+  check("chaque volume de destruction a une forme mesuree",
+        dv.every((v) => v.volume && (v.volume.radius > 0 || v.volume.size)), true);
+  // Un volume sans forme ne tuerait personne : c'est exactement le defaut que
+  // l'invariant precedent garde, et celui-ci le verifie de l'autre cote.
+  check("un point tres loin de tout ne meurt d'aucun volume",
+        destroyedBy(dv, [1e9, 1e9, 1e9], "player"), null);
+
+  const rv = repairVolumes(gp);
+  check("dix-huit volumes de reparation", rv.length, 18);
+  check("tous reparent en trois secondes",
+        rv.every((v) => v.seconds === 3), true);
+  check("quinze sont a portee 3, trois a portee 5",
+        `${rv.filter((v) => v.distance === 3).length}/${rv.filter((v) => v.distance === 5).length}`,
+        "15/3");
+  // `_secondsToRepair` n'est serialise sur AUCUNE instance : les trois secondes
+  // viennent du constructeur. L'invariant garde donc le repli lui-meme — s'il
+  // changeait, dix-huit volumes changeraient de rythme en silence.
+  check("aucune instance ne porte sa propre duree",
+        rv.every((v) => v.seconds === 3), true);
 }
 
 // --- ce que l'audit a mesure, garde en invariant ---
