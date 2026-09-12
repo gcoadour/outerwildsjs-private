@@ -17,6 +17,22 @@ import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, activeZones, winnersByLayer, clipOf,
          AmbienceMixer } from "../web/src/ambience.js";
+import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
+         gameSectorAt, probePrompts, radiationEmitters,
+         radiationAt } from "../web/src/volumes.js";
+import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
+         attachTarget, DeclaredFrames, restingPoint,
+         ARRIVAL_FALLBACK } from "../web/src/frames.js";
+import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
+         signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
+         THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
+         DecorField } from "../web/src/decor.js";
+import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
+         Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
+         EndOfTimeMusic, END_OF_TIME, eventAudio } from "../web/src/reactaudio.js";
+import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
+         zoneFaced, ZeroGTraining, CameraLock } from "../web/src/gear.js";
+import { Interactables } from "../web/src/interact.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
@@ -2209,6 +2225,454 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   m2.update(0.1, [0, 0, 0]);
   check("puis la grotte prend la couche",
         m2.playing.find((l) => l.layer === 1).name, "CaveVolume");
+}
+
+// --- ce que docs/44-reste-a-migrer.md demandait -----------------------------
+//
+// Les lois de ces six lots sont posees ici AVANT d'etre branchees, comme la
+// methode de docs/45 le demande. Aucune ne vient d'un raisonnement : toutes
+// sont lues dans l'IL du build.
+
+{
+  // §1 LES REFERENTIELS DECLARES. Le plus petit volume contenant le point
+  // gagne : le vaisseau (r=30) vit DANS Timber Hearth (r=600), et c'est
+  // justement le cas — un vaisseau pose dans un hangar — que la gravite
+  // dominante ne sait pas traiter.
+  const gp = { placed: {
+    MajorReferenceFrameVolume: [
+      { name: "RFVolume", body: "TimberHearth_Body", position: [0, 0, 0],
+        volume: { shape: "sphere", radius: 600, center: [0, 0, 0] },
+        fields: { _isPrimaryVolume: true, _autopilotArrivalDistance: 1000,
+                  _autoAlignmentDistance: 700 } },
+      { name: "RFVolume", body: "DarkBramble_Body", position: [10000, 0, 0],
+        volume: { shape: "sphere", radius: 1500, center: [0, 0, 0] },
+        fields: { _isPrimaryVolume: true, _autopilotArrivalDistance: 2500,
+                  _autoAlignmentDistance: 0 } },
+    ],
+    ReferenceFrameVolume: [
+      { name: "RFVolume", body: "Ship_Body", position: [100, 0, 0],
+        volume: { shape: "sphere", radius: 30, center: [0, 0, 0] },
+        fields: { _isPrimaryVolume: true } },
+    ],
+  } };
+  const frames = referenceFrames(gp);
+  check("trois volumes de referentiel", frames.length, 3);
+  check("les majeurs portent leurs distances",
+        frames.filter((f) => f.major && f.arrival !== null).length, 2);
+  check("loin de tout, aucun referentiel declare",
+        frameAt(frames, [0, 0, 5000]), null);
+  check("au centre de la planete, c'est elle",
+        frameAt(frames, [0, 0, 0]).body, "TimberHearth_Body");
+  check("dans le hangar, c'est le VAISSEAU qui l'emporte",
+        frameAt(frames, [95, 0, 0]).body, "Ship_Body");
+  check("un pas plus loin, la planete reprend la main",
+        frameAt(frames, [200, 0, 0]).body, "TimberHearth_Body");
+
+  check("la distance d'arrivee vient du build",
+        autopilotDistances(frames, "DarkBramble_Body").arrival, 2500);
+  check("et l'alignement de Dark Bramble vaut zero",
+        autopilotDistances(frames, "DarkBramble_Body").alignment, 0);
+  check("un corps sans volume majeur garde la regle d'avant",
+        autopilotDistances(frames, "WhiteHole_Body", 200).arrival,
+        200 * ARRIVAL_FALLBACK);
+  check("et se sait non declare",
+        autopilotDistances(frames, "WhiteHole_Body", 200).declared, false);
+
+  // Le suivi previent au changement, et n'ancre que ce qui est ancrable.
+  const suivi = new DeclaredFrames(frames);
+  suivi.update([0, 0, 5000]);
+  check("hors de tout volume, rien a ancrer", suivi.current, null);
+  suivi.update([95, 0, 0]);
+  check("entrer dans le hangar est un changement", suivi.changed, true);
+  const corps = [{ name: "GravityWell_HomePlanet", bodyName: "TimberHearth_Body" }];
+  check("mais le vaisseau n'est pas un corps ancrable",
+        suivi.anchorBody(corps), null);
+  suivi.update([200, 0, 0]);
+  check("la planete, elle, l'est",
+        suivi.anchorBody(corps).bodyName, "TimberHearth_Body");
+
+  // La scene est extraite AU REPOS, et les corps orbitent : comparer un point
+  // du moment a une position de repos derive de tout le chemin parcouru. C'est
+  // ce qu'un vrai Chromium a montre — le referentiel de Timber Hearth ne
+  // contenait plus sa propre planete au bout d'une douzaine de secondes.
+  const decale = (fr) => (fr.body === "TimberHearth_Body" ? [5000, 0, 0] : null);
+  check("sans correction, le corps a derive hors de son propre volume",
+        frameAt(frames, [5000, 0, 0]), null);
+  check("ramene au repos, il le contient a nouveau",
+        frameAt(frames, [5000, 0, 0], decale).body, "TimberHearth_Body");
+  check("et un point qui n'a pas suivi le corps reste dehors",
+        frameAt(frames, [0, 0, 0], decale), null);
+
+  // `MatchInitialMotion` : v = v_porteur + omega x r.
+  const porteur = { position: [0, 0, 0], velocity: [10, 0, 0],
+                    angularVelocity: [0, 2, 0] };
+  const v = matchInitialVelocity(porteur, [3, 0, 0]);
+  check("la vitesse du porteur est heritee", v[0], 10);
+  check("et la vitesse tangentielle s'y ajoute", v[2], -6);
+  check("les cinq instances qui ignorent la rotation n'en gardent rien",
+        matchInitialVelocity(porteur, [3, 0, 0], { ignoreAngular: true })[2], 0);
+
+  // `AttachOnAwake` : la sphere de controle, rayon 1 sur trente instances.
+  const sol = [{ name: "A", position: [0, 0, 0], radius: 100 },
+               { name: "B", position: [0, 0, 300], radius: 100 }];
+  check("pose sur la surface, on s'attache au corps sous soi",
+        attachTarget([0, 0, 100.5], 1, sol).name, "A");
+  check("a deux unites au-dessus, plus rien ne repond",
+        attachTarget([0, 0, 102], 1, sol), null);
+}
+
+{
+  // Le volume de destruction du soleil est une sphere de 2 000 unites CENTREE
+  // SUR L'ORIGINE DU MONDE. Le tester avec une position exprimee dans le
+  // repere ancre — quelques centaines d'unites — tuait le joueur des la
+  // premiere image, et c'est ce qu'un vrai Chromium a montre (docs/46).
+  {
+    const soleil = destructionVolumes({ placed: { DestructionVolume: [
+      { name: "DestructionVolume", body: "Sun_Body", position: [0, 0, 0],
+        volume: { shape: "sphere", radius: 2000, center: [0, 0, 0] },
+        fields: { _deathType: 3, _onlyAffectsPlayerAndShip: false } }] } });
+    check("pose sur une planete lointaine, on ne brule pas",
+          destroyedBy(soleil, [0, 0, -8593]), null);
+    check("mais une position prise dans le repere ancre, si",
+          destroyedBy(soleil, [0, 0, -129]) !== null, true);
+    check("dans l'etoile, on brule pour de bon",
+          destroyedBy(soleil, [0, 0, 1500]).deathType, 3);
+  }
+
+  // §3 LA VIE DU DECOR.
+  const q = fromToRotation([0, 0, 1], [1, 0, 0]);
+  const amene = qrot(q, [0, 0, 1]);
+  check("FromToRotation amene bien l'un sur l'autre",
+        amene.map((x) => Math.round(x * 1000) / 1000).join(","), "1,0,0");
+  check("dos a dos, la rotation existe encore (demi-tour)",
+        Math.round(qrot(fromToRotation([0, 0, 1], [0, 0, -1]), [0, 0, 1])[2]), -1);
+
+  // L'axe de rotation retire la composante verticale : un panneau tourne
+  // autour de son mat, il ne se couche pas.
+  check("sans axe, la direction reste entiere",
+        projectOut([1, 2, 3], [0, 0, 0]).join(","), "1,2,3");
+  check("avec un axe vertical, la composante verticale tombe",
+        projectOut([1, 2, 3], [0, 1, 0]).join(","), "1,0,3");
+
+  check("l'angle signe dit de quel cote tourner",
+        Math.round(signedAngleAround([0, 1, 0], [0, 0, 1], [1, 0, 0])), 90);
+  check("et de l'autre cote, il change de signe",
+        Math.round(signedAngleAround([0, 1, 0], [0, 0, 1], [-1, 0, 0])), -90);
+
+  const pas = facePlayerStep([0, 1, 0], [0, 0, 1], [1, 0, 0]);
+  check("le personnage ne tourne que d'un dixieme par image",
+        Math.round(pas.step), Math.round(90 * FACE_SLERP));
+  check("il n'a pas fini", pas.done, false);
+  check("sous un degre, il a fini",
+        facePlayerStep([0, 1, 0], [0, 0, 1], [0.005, 0, 1]).done, true);
+
+  check("LookRotation pose l'axe Z sur la cible",
+        qrot(decorLook([1, 0, 0]), [0, 0, 1])
+          .map((x) => Math.round(x * 1000) / 1000).join(","), "1,0,0");
+  check("et garde le haut du monde en haut",
+        Math.round(qrot(decorLook([1, 0, 0]), [0, 1, 0])[1]), 1);
+
+  // Les dix buses, et le seuil de 1 sur l'acceleration LOCALE.
+  check("dix buses", THRUSTER_NOZZLES.length, 10);
+  check("la buse basse s'allume en descendant", nozzleFires(0, [0, -2, 0]), true);
+  check("mais pas pour un souffle", nozzleFires(0, [0, -0.5, 0]), false);
+  check("la buse avant repond a l'axe Z", nozzleFires(2, [0, 0, 2]), true);
+  check("Left_Thruster part vers la GAUCHE, pas vers l'arriere",
+        nozzleFires(4, [-2, 0, 0]) && !nozzleFires(4, [0, 0, -2]), true);
+  check("et Backward_Left vers l'arriere",
+        nozzleFires(6, [0, 0, -2]) && !nozzleFires(6, [-2, 0, 0]), true);
+
+  // La minuterie tire un delai a chaque declenchement.
+  let tirage = 0;
+  const t = new RandomTimer(1, 3, () => [0, 1, 0.5][tirage++ % 3]);
+  check("le premier delai est le minimum", t.delay, 1);
+  check("a une seconde, la bouffee part", t.update(1), true);
+  check("et le delai suivant est le maximum", t.delay, 3);
+  check("deux secondes ne suffisent pas", t.update(2), false);
+  check("la troisieme oui", t.update(1), true);
+
+  // Le passage ancien : trois conditions, et il n'en manque jamais une.
+  const tel = { alignmentWindow: 5, occlusionWindow: 20 };
+  check("aligne, degage et repose : il part",
+        teleporterFires(tel, 1, 30, 6), true);
+  check("mal aligne : rien", teleporterFires(tel, 4, 30, 6), false);
+  check("soleil entre les deux : rien", teleporterFires(tel, 1, 5, 6), false);
+  check("moins de cinq secondes : rien",
+        teleporterFires(tel, 1, 30, TELEPORT_COOLDOWN - 1), false);
+}
+
+{
+  // §3 suite : le rattachement par nom, avec de faux noeuds — la classe ne
+  // connait pas Babylon, elle ne connait que des noeuds qui portent une
+  // rotation.
+  const noeud = (name) => ({
+    name, parent: null,
+    rotationQuaternion: { x: 0, y: 0, z: 0, w: 1,
+      set(x, y, z, w) { this.x = x; this.y = y; this.z = z; this.w = w; } },
+    getAbsolutePosition: () => ({ x: 0, y: 0, z: 0 }),
+    get absoluteRotationQuaternion() { return this.rotationQuaternion; },
+  });
+  const panneau = { name: "Billboard", facing: [0, 0, 1], axis: [0, 1, 0], lookAt: false };
+  const decor = new DecorField([panneau], [{ name: "Skeptic" }]);
+  const n = noeud("Billboard"), f = noeud("Skeptic");
+  check("rien tant que la geometrie n'est pas la", decor.count, 0);
+  check("deux noeuds rattaches", decor.attach([n, f]), 2);
+  decor.update([10, 5, 0], [0, 0, 0], null);
+  const vers = qrot([n.rotationQuaternion.x, n.rotationQuaternion.y,
+                     n.rotationQuaternion.z, n.rotationQuaternion.w], [0, 0, 1]);
+  check("le panneau s'est tourne vers la camera",
+        Math.round(vers[0] * 100) / 100, 1);
+  check("mais il ne s'est pas couche : l'axe Y le retient",
+        Math.round(vers[1] * 1000) / 1000, 0);
+
+  // Le personnage ne bouge que si on lui parle.
+  const avant = f.rotationQuaternion.y;
+  decor.update([0, 0, 0], [1, 0, 0], null);
+  check("on ne se retourne pas pour rien", f.rotationQuaternion.y, avant);
+  decor.update([0, 0, 0], [1, 0, 0], "Skeptic");
+  check("mais on se tourne vers qui nous parle",
+        f.rotationQuaternion.y !== avant, true);
+}
+
+{
+  // §5 LE SON REACTIF.
+  check("la marche commence a 0,5 u/s", FOOTSTEP.walkThreshold, 0.5);
+  check("la course a 4,5", FOOTSTEP.runThreshold, 4.5);
+  check("a la limite de la marche, un pas toutes les 1,5 s",
+        footstepInterval(1), FOOTSTEP.maxInterval);
+  check("a quatre unites par seconde, un pas toutes les demi-secondes",
+        footstepInterval(4), 0.5);
+  check("et jamais moins de 0,4 s", footstepInterval(100), FOOTSTEP.minInterval);
+
+  const pas = new Footsteps(() => 0.5);
+  check("immobile, aucun bruit", pas.update(1, 0), null);
+  check("en marchant, un pas", pas.update(0.1, 2).kind, "walk");
+  check("pas deux dans la meme foulee", pas.update(0.1, 2), null);
+  check("en courant, le pas est un pas de course",
+        pas.update(2, 6).kind, "run");
+  check("la hauteur est tiree autour de 1", pas.update(2, 6).pitch, 1);
+  check("en l'air, on ne fait pas de bruit de pas",
+        pas.update(2, 6, false), null);
+
+  check("sous vingt unites par seconde, pas de vent",
+        turbulenceTarget(10, 1), 0);
+  check("a mi-chemin des deux limites, la moitie du volume",
+        turbulenceTarget(30, 1), 0.5);
+  check("au-dela, plein volume", turbulenceTarget(100, 1), 1);
+  check("sous l'eau, rien", turbulenceTarget(100, 10), 0);
+
+  const turb = new Turbulence();
+  check("dans le liquide, le vent ne demarre meme pas",
+        turb.update(0.1, 100, TURBULENCE.maxDensity + 1), 0);
+  turb.update(0.1, 30, 1);
+  check("dans l'air et assez vite, il demarre a zero", turb.playing, true);
+  for (let i = 0; i < 200; i++) turb.update(1 / 60, 30, 1);
+  check("puis rejoint sa cible", Math.round(turb.volume * 100) / 100, 0.5);
+
+  const th = new ThrusterSound(() => 0);
+  th.update(THRUSTER_AUDIO.fadeIn, true, false);
+  check("la poussee monte en cinq centiemes", th.level, 1);
+  th.update(THRUSTER_AUDIO.fadeOut, false, false);
+  check("et redescend en un dixieme", th.level, 0);
+  check("un tir de rotation part", th.update(0.01, false, true).valueOf() >= 0
+        && th.fired === 0, true);
+  th.update(0.05, false, true);
+  check("mais pas deux en un vingtieme de seconde", th.fired, null);
+  th.update(THRUSTER_AUDIO.rotationalInterval, false, true);
+  check("un cinquieme de seconde plus tard, si", th.fired, 0);
+
+  const voyage = new TravelMusic();
+  voyage.update(1, true, false);
+  check("au poste de pilotage mais pas dans le vide : rien", voyage.volume, 0);
+  voyage.update(TRAVEL_FADE / 2, true, true);
+  check("dans le vide et aux commandes, la musique monte", voyage.volume, 0.5);
+  voyage.update(TRAVEL_FADE, false, true);
+  check("quitter le poste la fait redescendre", voyage.volume, 0);
+
+  const fin = new EndOfTimeMusic();
+  fin.update(1, END_OF_TIME.secondsRemaining + 10);
+  check("a plus de quatre-vingt-dix secondes, rien", fin.volume, 0);
+  fin.update(END_OF_TIME.fadeIn, 60);
+  check("sous quatre-vingt-dix, elle entre en deux secondes", fin.volume, 1);
+  fin.update(END_OF_TIME.fadeOut, 0, { exploded: true });
+  check("et sort en deux secondes a l'explosion", fin.volume, 0);
+  const empechee = new EndOfTimeMusic();
+  empechee.update(10, 10, { prevented: true });
+  check("supernova empechee : la musique ne part pas", empechee.volume, 0);
+
+  // L'index des clips d'evenement : les familles se lisent dans l'ordre des
+  // numeros du build, parce que le tirage se fait dessus.
+  const ev = eventAudio({ events: [
+    { script: "PlayerMovementAudio", name: "MovementAudio", body: "Player_Body",
+      clips: { _walk1: "a.wav", _walk2: "b.wav", _run1: "c.wav" }, params: {} },
+    { script: "ThrusterAudio", name: "ThrusterAudio", body: "Player_Body",
+      clips: { _translationalClip: "d.wav" }, params: {} },
+    { script: "ThrusterAudio", name: "ThrusterAudio", body: "ModelShip_Body",
+      clips: { _translationalClip: "e.wav" }, params: {} },
+  ] });
+  check("trois emetteurs d'evenement", ev.count, 3);
+  check("la famille des pas se lit dans l'ordre",
+        ev.family("PlayerMovementAudio", "_walk").join(","), "a.wav,b.wav");
+  check("un script pose deux fois se departage par son corps",
+        ev.of("ThrusterAudio", "ModelShip_Body").clips._translationalClip, "e.wav");
+}
+
+{
+  // §7 L'EQUIPEMENT SE RAMASSE.
+  const gp = { placed: { GearPickup: [
+    { name: "ExpeditionGear", body: "Ship_Body", position: [0, 0, 0],
+      fields: { _enableSuit: true, _enableProbe: true, _enableMinimap: true } },
+    { name: "SpaceSuit", body: "TimberHearth_Body", position: [100, 0, 0],
+      fields: { _enableSuit: true, _enableProbe: false, _enableMinimap: false } },
+  ] } };
+  const pickups = gearPickups(gp);
+  check("deux objets a ramasser", pickups.length, 2);
+  const eq = new Equipment();
+  check("on commence les mains vides", eq.suit || eq.probe || eq.minimap, false);
+  check("la combinaison de la grotte ne donne que la combinaison",
+        eq.pickUp(pickups[1]).join(","), "combinaison");
+  check("le paquetage du vaisseau donne le reste",
+        eq.pickUp(pickups[0]).join(","), "sonde,minicarte");
+  check("et ne se ramasse pas deux fois", eq.pickUp(pickups[0]).length, 0);
+
+  const volumes = suitVolumes({ placed: {
+    SuitRemovalVolume: [{ name: "SuitReturn", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 5, center: [0, 0, 0] } }],
+    SuitBarrier: [{ name: "SuitBarrier", position: [20, 0, 0],
+      volume: { shape: "sphere", radius: 5, center: [0, 0, 0] },
+      fields: { _invisibleWall: { name: "InvisibleWall" } } }],
+  } });
+  check("deux volumes de combinaison", volumes.length, 2);
+  check("le mur connait son mur invisible",
+        volumes.find((v) => v.kind === "barrier").wall, "InvisibleWall");
+  check("traverser le retour rend la combinaison",
+        suitVolumeStep(volumes, [0, 0, 0], eq), "removed");
+  check("sans combinaison, le retour n'existe pas",
+        suitVolumeStep(volumes, [0, 0, 0], eq), null);
+  check("et le mur redevient solide", eq.barrierSolid(), true);
+
+  // La fenetre de VUE des zones d'interaction.
+  const zones = interactZones({ placed: { InteractZone: [
+    { name: "HatchControls", position: [0, 0, 0],
+      fields: { _prompt: "Open Hatch", _viewingWindow: 60 } },
+    { name: "AttachPoint", position: [0, 0, 0],
+      fields: { _prompt: "Activate Lift", _viewingWindow: 360 } },
+  ] } });
+  check("l'invite vient du build", zones[0].prompt, "Open Hatch");
+  check("de face, la trappe s'annonce",
+        zoneFaced(zones[0], [0, 0, 1], [0, 0, 1]), true);
+  check("de biais, non", zoneFaced(zones[0], [1, 0, 0], [0, 0, 1]), false);
+  check("une zone a 360 degres s'annonce de partout",
+        zoneFaced(zones[1], [1, 0, 0], [0, 0, 1]), true);
+
+  // Les zones d'interaction entrent dans le meme catalogue que les
+  // interactifs, avec leur invite — et elles SUIVENT leur corps : un paquetage
+  // pose dans la cabine part avec le vaisseau.
+  {
+    const cat = new Interactables({ placed: { InteractZone: [
+      { name: "InteractVolume", body: "Ship_Body", position: [0, 0, 0],
+        rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 1 },
+        fields: { _prompt: "Gear Up", _viewingWindow: 90 } },
+    ] } });
+    // La zone regarde vers +Z : on l'aborde donc par devant, en venant de +Z.
+    const versLaZone = { x: 0, y: 0, z: -1 };
+    check("la zone porte l'invite du build",
+          cat.focus({ x: 0, y: 0, z: 2 }, [0, 0, 0], versLaZone).prompt, "Gear Up");
+    check("prise a revers, elle ne s'annonce pas : la fenetre est celle de la ZONE",
+          cat.focus({ x: 0, y: 0, z: -2 }, [0, 0, 0], { x: 0, y: 0, z: 1 }), null);
+    check("restee au sol quand le vaisseau est parti, elle ne s'annonce plus",
+          cat.focus({ x: 0, y: 0, z: 2 }, [0, 0, 0], versLaZone,
+                    () => [500, 0, 0]), null);
+    check("mais elle suit le vaisseau",
+          cat.focus({ x: 500, y: 0, z: 2 }, [0, 0, 0], versLaZone,
+                    () => [500, 0, 0]).prompt, "Gear Up");
+  }
+
+  // L'entrainement : trois noeuds du satellite casse, et eux seuls.
+  const reparations = [
+    { volume: { body: "BrokenSatellite_Body" }, done: false },
+    { volume: { body: "BrokenSatellite_Body" }, done: false },
+    { volume: { body: "BrokenSatellite_Body" }, done: false },
+    { volume: { body: "Ship_Body" }, done: false },
+  ];
+  const entrainement = new ZeroGTraining(reparations);
+  check("trois noeuds a reparer, pas quatre", entrainement.total, 3);
+  reparations[0].done = true; reparations[1].done = true;
+  check("deux sur trois ne suffisent pas", entrainement.update(), false);
+  reparations[2].done = true;
+  check("les trois, oui", entrainement.update(), true);
+  check("et on ne l'annonce qu'une fois", entrainement.update(), false);
+
+  const lock = new CameraLock();
+  lock.lockOn({ name: "Projector" }, 2);
+  check("le verrouillage progresse a son rythme", lock.update(0.25), 0.5);
+  lock.breakLock();
+  check("et se rompt", lock.update(1), 0);
+}
+
+{
+  // §4 LES VOLUMES DE JEU.
+  const haz = hazardVolumes({ placed: { HazardVolume: [
+    { name: "KillVolume", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 10, center: [0, 0, 0] },
+      fields: { _firstContactDamage: 4, _damagePerSecond: 20 } },
+  ] } });
+  const dangers = new Hazards(haz);
+  check("hors du volume, aucun degat", dangers.update(1, [100, 0, 0]), 0);
+  check("a l'entree, le premier contact et la seconde",
+        dangers.update(1, [0, 0, 0]), 24);
+  check("puis seulement la seconde", dangers.update(1, [0, 0, 0]), 20);
+  dangers.update(1, [100, 0, 0]);
+  check("ressortir puis rentrer redonne le premier contact",
+        dangers.update(1, [0, 0, 0]), 24);
+
+  const champs = zeroGFields({ placed: { ZeroGField: [
+    { name: "ZeroGVolume", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 600, center: [0, 0, 0] },
+      fields: { _forceScaleFactor: 1, _overridePriority: 1 } },
+    { name: "ZeroGChamber", position: [0, 0, 0], fields: { _useEntrywayTriggers: true } },
+  ] } });
+  check("quatre champs, dont un sans forme : ici deux et un", champs.length, 2);
+  check("celui qui vit de ses declencheurs n'a pas de volume",
+        champs[1].volume, null);
+  check("dans le volume, on flotte", zeroGAt(champs, [10, 0, 0]).name, "ZeroGVolume");
+  check("dehors, non", zeroGAt(champs, [1000, 0, 0]), null);
+
+  const secteurs = gameSectors({ placed: {
+    ZeroGSector: [{ name: "Sector_DB", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 1500, center: [0, 0, 0] },
+      fields: { _sectorName: 6, _thrustLimit: 20, _ambientLightRange: 1200 } }],
+    MajorSector: [{ name: "Sector_QuantumMoon", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 120, center: [0, 0, 0] },
+      fields: { _sectorName: 7, _thrustLimit: 20 } }],
+  } });
+  check("trois secteurs de jeu : ici deux", secteurs.length, 2);
+  check("la poussee y est limitee a 20", secteurs[0].thrustLimit, 20);
+  check("emboites, le plus petit gagne",
+        gameSectorAt(secteurs, [0, 0, 0]).name, "Sector_QuantumMoon");
+  check("plus loin, le grand reprend",
+        gameSectorAt(secteurs, [500, 0, 0]).name, "Sector_DB");
+
+  const invites = probePrompts({ placed: { ProbePromptTrigger: [
+    { name: "ProbePromptTrigger", position: [0, 0, 0],
+      volume: { shape: "box", size: [10, 10, 10], center: [0, 0, 0] },
+      fields: { _localGazeDirection: { x: 0, y: -1, z: 0 }, _minGazeAngle: 45 } },
+  ] } });
+  check("l'invite de sonde porte son regard", invites[0].gaze.join(","), "0,-1,0");
+  check("et son angle", invites[0].minAngle, 45);
+
+  // Les emetteurs : la courbe des feux de camp, 1 a dix unites, 0 a
+  // quarante-cinq.
+  const feux = radiationEmitters({ placed: { RadiationEmitter: [
+    { name: "RadiationEmitter", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 2.36, center: [0, 0, 0] },
+      fields: { falloffMode: 1, radiationType: 1, magnitude: 100,
+                CustomFalloff: { customFalloff: { m_Curve: [
+                  { time: 10, value: 1 }, { time: 45, value: 0 }] } } } },
+  ] } });
+  check("pres du feu, pleine intensite", radiationAt(feux[0], 5), 100);
+  check("a mi-courbe, la moitie", radiationAt(feux[0], 27.5), 50);
+  check("au-dela, plus rien", radiationAt(feux[0], 60), 0);
 }
 
 report();

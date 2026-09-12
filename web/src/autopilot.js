@@ -20,9 +20,20 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const len = (v) => Math.hypot(v[0], v[1], v[2]);
 const norm = (v) => { const l = len(v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 
+import { autopilotDistances, ARRIVAL_FALLBACK } from "./frames.js";
+
 export class Autopilot {
-  constructor(ship) {
+  /**
+   * @param frames volumes de referentiel declares (`frames.js`). Ce sont eux
+   *        qui portent les distances d'arrivee et d'alignement du build ; sans
+   *        eux, on retombe sur la regle d'avant, `rayon de surface x 1,5`.
+   */
+  constructor(ship, frames = []) {
     this.ship = ship;
+    this.frames = frames;
+    this.arrival = 0;
+    this.alignment = 0;
+    this.declared = false;
     this.target = null;        // corps vise
     this.phase = "repos";
     // AutopilotGUI distingue l'arrivee de l'abandon, et l'arrivee courte de
@@ -38,6 +49,15 @@ export class Autopilot {
     this.arrived = false;
     this.phase = "alignement";
     this.arrivalError = null;
+    // Les deux distances viennent du `MajorReferenceFrameVolume` du corps vise
+    // (docs/46, lot 1) : 1 000 partout, 2 500 pour Giant's Deep et Dark
+    // Bramble, et un alignement de 0 a 1 000 — zero pour Dark Bramble, ou l'on
+    // ne s'aligne sur rien.
+    const surface = (body.gravity && body.gravity.upperSurfaceRadius) || 100;
+    const d = autopilotDistances(this.frames, body.bodyName || body.name, surface);
+    this.arrival = d.arrival;
+    this.alignment = d.alignment;
+    this.declared = d.declared;
     return true;
   }
 
@@ -62,7 +82,7 @@ export class Autopilot {
     const dir = norm(toward);
     const speed = s.speed;
     const surface = (this.target.gravity && this.target.gravity.upperSurfaceRadius) || 100;
-    const arrival = surface * 1.5;
+    const arrival = this.arrival || surface * ARRIVAL_FALLBACK;
 
     if (d <= arrival) {
       // egalisation : on annule la vitesse relative au corps vise

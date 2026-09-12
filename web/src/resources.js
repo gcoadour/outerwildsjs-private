@@ -111,6 +111,20 @@ export class Resources {
     if (this.health <= 0) { this.health = 0; this.dead = true; }
   }
 
+  /**
+   * Degats continus, en points : ce que fait un `HazardVolume` du build.
+   *
+   * Separe de `applyImpact`, qui part d'une VITESSE : ici les points sont deja
+   * comptes par le volume (vingt par seconde pour la colonne de sable).
+   */
+  hurt(points) {
+    if (!(points > 0) || this.dead) return 0;
+    const before = this.health;
+    this.health = Math.max(0, this.health - points);
+    if (this.health <= 0) this.dead = true;
+    return before - this.health;
+  }
+
   /** Degats d'impact : nuls sous minImpact, mortels a maxImpact et au-dela. */
   applyImpact(speed) {
     if (speed < this.minImpact) return 0;

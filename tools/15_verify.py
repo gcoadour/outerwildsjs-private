@@ -521,7 +521,59 @@ def run(url, heavy, profil=None, zip_path=None):
             rep.at_least("groupes de colliders lus", col["groupes"], 0)
             rep.at_most("groupes eveilles", col["eveilles"], col["groupes"])
 
+        # --- les lots de docs/46 ------------------------------------------------
+        #
+        # Ce qui ne se verifie QUE dans un navigateur : les positions du moment.
+        # Les volumes extraits sont poses a la position de la scene au REPOS, et
+        # les corps orbitent ; c'est ici, profil rempli, que la derive se voit.
+        lots = page.evaluate("""() => {
+          const L = window.__lots;
+          if (!L) return null;
+          return {
+            referentiels: L.declared.count,
+            repere: L.declared.current && L.declared.current.body,
+            arrivee: L.declared.current && L.declared.current.arrival,
+            decors: L.decor.count, passages: L.passages.count,
+            dangers: L.hazards.count, ramassages: L.pickups.length,
+            evenements: L.events.count,
+            equipement: L.equipment.probe,
+            morts: Object.keys(window.__death.byCause).length,
+          };
+        }""")
+        if lots:
+            rep.eq("volumes de referentiel declares", lots["referentiels"], 14)
+            # Le controle central du lot 1 : le joueur est POSE sur Timber
+            # Hearth, donc dans le volume de referentiel de Timber Hearth. Sans
+            # la correction de derive, ce champ valait `null` passe une
+            # douzaine de secondes — la planete sortait de son propre volume.
+            rep.eq("le referentiel declare du joueur", lots["repere"], "TimberHearth_Body")
+            rep.eq("et sa distance d'arrivee vient du build", lots["arrivee"], 1000)
+            rep.at_least("decors vivants rattaches", lots["decors"], 1)
+            rep.eq("passages anciens suivis", lots["passages"], 6)
+            rep.eq("volumes qui blessent", lots["dangers"], 1)
+            rep.eq("objets a ramasser", lots["ramassages"], 2)
+            rep.eq("emetteurs de son d'evenement", lots["evenements"], 22)
+            # Le volume de destruction du soleil est une sphere de 2 000 unites
+            # centree sur l'origine du MONDE : teste avec une position du repere
+            # ancre, il tuait le joueur des la premiere image.
+            rep.eq("aucune mort en cours de parcours", lots["morts"], 0)
+            # L'equipement se ramasse : la sonde n'est pas donnee.
+            rep.eq("la sonde n'est pas donnee au depart", lots["equipement"], False)
+
         # --- camera embarquee de la sonde ---------------------------------------
+        #
+        # Elle ne s'allume qu'une fois la sonde RAMASSEE (docs/46, lot 7) : le
+        # portage la donnait d'emblee, le build la met dans la cabine.
+        page.keyboard.press("KeyF")
+        page.wait_for_timeout(300)
+        # Tant que la vue de sonde n'est pas ouverte, la scene n'a pas de liste
+        # de cameras actives : c'est `activeCamera` au singulier qui rend.
+        rep.eq("sans la sonde, la touche ne lance rien",
+               page.evaluate("() => (window.__scene || BABYLON.Engine.LastCreatedScene)"
+                             ".activeCameras.map(c => c.name)"),
+               [])
+        page.evaluate("() => window.__lots.equipment.pickUp(window.__lots.pickups"
+                      ".find(p => p.probe))")
         page.keyboard.press("KeyF")
         page.wait_for_timeout(600)
         rep.eq("la sonde allume sa camera",

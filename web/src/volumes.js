@@ -39,6 +39,7 @@
 // constructeur, et c'est le repli qui est garde.
 
 import { insideVolume } from "./gravity.js";
+import { restingPoint } from "./frames.js";
 
 /** Les cinq valeurs de `DeathType`, lues dans l'assembly. */
 export const DEATH_TYPES = ["Default", "Impact", "Asphyxiation", "Energy", "Supernova"];
@@ -60,6 +61,7 @@ export function destructionVolumes(gameplay) {
     const f = c.fields || {};
     return {
       name: c.name,
+      body: c.body || null,
       position: c.position,
       rotation: c.rotation,
       volume: c.volume || null,
@@ -74,12 +76,25 @@ export function destructionVolumes(gameplay) {
  *
  * `kind` dit ce qu'on y fait entrer : "player", "ship" ou "probe". Une sonde
  * traverse les volumes reserves au joueur et au vaisseau.
+ *
+ * LE POINT EST UN POINT MONDE, et c'est ce qui manquait : la boucle passait la
+ * position du joueur dans le REPERE ANCRE — une centaine d'unites de l'origine
+ * — contre des volumes poses en coordonnees monde. Le volume de destruction du
+ * soleil est une sphere de 2 000 unites centree sur l'origine du monde : tout
+ * joueur pose sur une planete etait donc « dans le soleil » des la premiere
+ * image, et mourait incinere avant d'avoir bouge. Mesure dans un vrai
+ * Chromium, profil rempli (docs/46).
+ *
+ * `shiftOf` ramene chaque volume la ou son corps est maintenant
+ * (`frames.js`, `restingPoint`) : sans lui, les quatre machoires de Dark
+ * Bramble derivent avec l'orbite de leur planete.
  */
-export function destroyedBy(volumes, worldPoint, kind = "player") {
+export function destroyedBy(volumes, worldPoint, kind = "player", shiftOf = null) {
   for (const v of volumes) {
     if (!v.volume) continue;
     if (v.onlyPlayerAndShip && kind === "probe") continue;
-    if (insideVolume(v, worldPoint)) return v;
+    const p = shiftOf ? restingPoint(worldPoint, shiftOf(v)) : worldPoint;
+    if (insideVolume(v, p)) return v;
   }
   return null;
 }
@@ -90,6 +105,10 @@ export function repairVolumes(gameplay) {
     const f = c.fields || {};
     return {
       name: c.name,
+      // Le corps porteur separe les deux familles de reparation : quinze
+      // avaries du vaisseau, trois noeuds du satellite casse. La portee — 3
+      // contre 5 — les separe aussi aujourd'hui, mais c'est une coincidence.
+      body: c.body || null,
       position: c.position,
       rotation: c.rotation,
       volume: c.volume || null,
@@ -142,4 +161,235 @@ export class Repair {
     this.holding = false;
     this.done = false;
   }
+}
+
+// --- les volumes de jeu : des regles la ou il n'y en avait pas -------------
+//
+// Dix-huit classes, 34 instances (docs/44-reste-a-migrer.md §4). Le portage
+// avait ses propres regles la ou le build en pose : un entonnoir de sable qui
+// ne blesse pas, une apesanteur decidee par la gravite plutot que declaree, une
+// limite de poussee que rien ne limitait.
+
+/**
+ * Les volumes qui blessent : `HazardVolume`.
+ *
+ * Un seul dans l'alpha, et c'est le bon — `SandFunnel_Body/KillVolume`, la
+ * colonne de sable entre les deux jumelles : 20 points par seconde, et zero au
+ * premier contact. Les deux nombres sont separes parce que le build les separe,
+ * et que l'un des deux vaut zero ici : entrer dans le sable ne tue pas, y
+ * rester tue.
+ */
+export function hazardVolumes(gameplay) {
+  return ((gameplay.placed || {}).HazardVolume || []).map((c) => {
+    const f = c.fields || {};
+    return {
+      name: c.name, body: c.body || null, position: c.position,
+      rotation: c.rotation || null, volume: c.volume || null,
+      firstContact: f._firstContactDamage ?? 0,
+      perSecond: f._damagePerSecond ?? 10,
+    };
+  });
+}
+
+/**
+ * Degats subis cette image, et degats d'entree.
+ *
+ * `inside` porte l'etat d'une image a l'autre : le premier contact n'est du
+ * qu'une fois par entree, et c'est ce que l'ensemble retient.
+ */
+export class Hazards {
+  constructor(volumes = []) {
+    this.volumes = volumes;
+    this.inside = new Set();
+  }
+
+  get count() { return this.volumes.length; }
+
+  /**
+   * @param shiftOf ramene un volume la ou son corps est MAINTENANT
+   *                (`frames.js`, `restingPoint`)
+   * @returns {number} points de degats a appliquer cette image.
+   */
+  update(dt, worldPoint, shiftOf = null) {
+    let damage = 0;
+    for (const v of this.volumes) {
+      const p = shiftOf ? restingPoint(worldPoint, shiftOf(v)) : worldPoint;
+      const now = !!v.volume && insideVolume(v, p);
+      const was = this.inside.has(v.name);
+      if (now && !was) damage += v.firstContact;
+      if (now) damage += v.perSecond * dt;
+      if (now) this.inside.add(v.name); else this.inside.delete(v.name);
+    }
+    return damage;
+  }
+}
+
+/**
+ * Les quatre champs d'apesanteur : `ZeroGField`.
+ *
+ * Le portage n'avait d'apesanteur que par absence de gravite. Le build la
+ * DECLARE, avec un facteur d'echelle de force (1 partout) et une priorite
+ * d'ecrasement de 1 : dans le volume, plus rien ne tire vers le bas — pas meme
+ * le champ radial du corps, qui pourtant ne s'arrete pas la.
+ *
+ * Un des quatre (`ZeroGZone/ZeroGChamber`) prend sa forme de ses declencheurs
+ * d'entree (`_useEntrywayTriggers`) et non d'un collider : il n'a donc pas de
+ * volume, et c'est vrai du build, pas un defaut d'extraction.
+ */
+export function zeroGFields(gameplay) {
+  return ((gameplay.placed || {}).ZeroGField || []).map((c) => {
+    const f = c.fields || {};
+    return {
+      name: c.name, body: c.body || null, position: c.position,
+      rotation: c.rotation || null, volume: c.volume || null,
+      scale: f._forceScaleFactor ?? 1,
+      entryways: !!f._useEntrywayTriggers,
+      alignmentPriority: f._alignmentPriority ?? 0,
+      overridePriority: f._overridePriority ?? 0,
+    };
+  });
+}
+
+/** Est-on en apesanteur declaree ? Rend le champ, ou null. */
+export function zeroGAt(fields, worldPoint, shiftOf = null) {
+  let best = null;
+  for (const f of fields) {
+    if (!f.volume) continue;
+    const p = shiftOf ? restingPoint(worldPoint, shiftOf(f)) : worldPoint;
+    if (!insideVolume(f, p)) continue;
+    if (!best || f.overridePriority > best.overridePriority) best = f;
+  }
+  return best;
+}
+
+/**
+ * Les secteurs de jeu : `ZeroGSector` x2 et `MajorSector` x1.
+ *
+ * Ce ne sont pas les `PlanetoidSector` que le portage lit deja pour son budget
+ * de rendu : ce sont des reglages de JEU attaches a un lieu. Dark Bramble
+ * limite la poussee a 20 et pose une lumiere ambiante jusqu'a 1 200 unites ; la
+ * dimension abandonnee limite en plus la portee des phares du vaisseau a 100.
+ * `_flashlightRangeLimit` est nul partout : la lampe du joueur garde sa portee.
+ */
+export function gameSectors(gameplay) {
+  const placed = gameplay.placed || {};
+  const map = (list, kind) => (list || []).map((c) => {
+    const f = c.fields || {};
+    return {
+      kind, name: c.name, body: c.body || null, position: c.position,
+      rotation: c.rotation || null, volume: c.volume || null,
+      sector: f._sectorName ?? null,
+      ambient: f._ambientLight ?? 0,
+      ambientRange: f._ambientLightRange ?? 0,
+      thrustLimit: f._thrustLimit ?? null,
+      flashlightLimit: f._flashlightRangeLimit ?? null,
+      shiplightLimit: f._shiplightRangeLimit ?? null,
+      probePrompt: !!f._triggersShipProbePrompt,
+    };
+  });
+  return [...map(placed.ZeroGSector, "zerog"), ...map(placed.MajorSector, "major")];
+}
+
+/** Le secteur de jeu ou l'on se trouve : le plus petit qui contient le point. */
+export function gameSectorAt(sectors, worldPoint, shiftOf = null) {
+  let best = null;
+  for (const s of sectors) {
+    if (!s.volume) continue;
+    const p = shiftOf ? restingPoint(worldPoint, shiftOf(s)) : worldPoint;
+    if (!insideVolume(s, p)) continue;
+    const r = s.volume.radius || Infinity;
+    if (!best || r < (best.volume.radius || Infinity)) best = s;
+  }
+  return best;
+}
+
+/**
+ * Les quatre invites de sonde, et leur regard.
+ *
+ * `_localGazeDirection` et `_minGazeAngle` (45 partout) disent que l'invite ne
+ * s'affiche pas parce qu'on est la, mais parce qu'on REGARDE quelque part :
+ * le fond du canyon, le camp vu d'en haut. Une invite qui apparait quand on
+ * regarde ailleurs est une invite qu'on n'a pas comprise.
+ */
+export function probePrompts(gameplay) {
+  const placed = gameplay.placed || {};
+  const out = ((placed.ProbePromptTrigger || []).map((c) => {
+    const f = c.fields || {};
+    const d = f._localGazeDirection || { x: 0, y: 0, z: 1 };
+    return {
+      kind: "probe", name: c.name, body: c.body || null, position: c.position,
+      rotation: c.rotation || null, volume: c.volume || null,
+      gaze: [d.x, d.y, d.z], minAngle: f._minGazeAngle ?? 45,
+    };
+  }));
+  for (const c of placed.TelescopePromptTrigger || []) {
+    out.push({ kind: "telescope", name: c.name, body: c.body || null,
+               position: c.position, rotation: c.rotation || null,
+               volume: c.volume || null, gaze: null, minAngle: 360 });
+  }
+  return out;
+}
+
+/** Les zones sans lumiere (`DarkZone`) et les brouilleurs (`InterferenceVolume`). */
+export function signalVolumes(gameplay) {
+  const placed = gameplay.placed || {};
+  const map = (list, kind) => (list || []).map((c) => ({
+    kind, name: c.name, body: c.body || null, position: c.position,
+    rotation: c.rotation || null, volume: c.volume || null,
+    strength: (c.fields || {})._interferenceStrength ?? 1,
+  }));
+  return [...map(placed.DarkZone, "dark"), ...map(placed.InterferenceVolume, "interference")];
+}
+
+/**
+ * Les neuf emetteurs de rayonnement : huit feux de camp et l'etoile.
+ *
+ * `magnitude` vaut 100 partout ; ce qui change est la portee et la courbe. Les
+ * feux de camp portent une courbe personnalisee (1 a dix unites, 0 a
+ * quarante-cinq) dans une sphere de 2,36 ; l'etoile a une decroissance simple
+ * dans une sphere de 30 000, et un plancher de 10 % en surface.
+ *
+ * Le portage chauffe deja sa guimauve par les `HeatSource` ramassees au motif ;
+ * ces emetteurs-la sont extraits, et leur loi posee, mais c'est la chaleur du
+ * portage qui reste branchee. Dit ici pour que le prochain sache que la
+ * duplication est connue.
+ */
+export function radiationEmitters(gameplay) {
+  return ((gameplay.placed || {}).RadiationEmitter || []).map((c) => {
+    const f = c.fields || {};
+    const curve = (((f.CustomFalloff || {}).customFalloff || {}).m_Curve) || [];
+    return {
+      name: c.name, body: c.body || null, position: c.position,
+      volume: c.volume || null,
+      falloffMode: f.falloffMode ?? 0,
+      type: f.radiationType ?? 0,
+      magnitude: f.magnitude ?? 0,
+      surfaceRatio: f.EmitterSurfaceDefaultRatio ?? 0,
+      curve: curve.map((k) => [k.time, k.value]),
+    };
+  });
+}
+
+/**
+ * Intensite d'un emetteur a une distance donnee.
+ *
+ * La courbe du build est echantillonnee lineairement entre ses cles : elle n'a
+ * que deux points sur les neuf emetteurs, et interpoler leurs tangentes
+ * donnerait la meme chose a un cheveu pres pour bien plus de code.
+ */
+export function radiationAt(emitter, distance) {
+  const c = emitter.curve || [];
+  if (c.length >= 2) {
+    if (distance <= c[0][0]) return emitter.magnitude * c[0][1];
+    for (let i = 1; i < c.length; i++) {
+      if (distance > c[i][0]) continue;
+      const [t0, v0] = c[i - 1], [t1, v1] = c[i];
+      const t = t1 > t0 ? (distance - t0) / (t1 - t0) : 0;
+      return emitter.magnitude * (v0 + (v1 - v0) * t);
+    }
+    return 0;
+  }
+  const r = (emitter.volume && emitter.volume.radius) || 0;
+  if (!r) return 0;
+  return emitter.magnitude * Math.max(0, 1 - distance / r);
 }

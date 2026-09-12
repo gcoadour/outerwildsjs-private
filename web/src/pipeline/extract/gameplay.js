@@ -21,7 +21,38 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "SandLevelController", "SandFunnelController",
                 // Ou l'on meurt, et comment on repare : deux familles de
                 // volumes que le portage decidait a sa place (web/src/volumes.js).
-                "DestructionVolume", "RepairVolume"];
+                "DestructionVolume", "RepairVolume",
+                // --- ce que docs/44-reste-a-migrer.md demandait, par lot ---
+                //
+                // §1 les referentiels : le build DECLARE son referentiel par
+                // volume, la ou le portage le deduisait de la gravite dominante.
+                "MajorReferenceFrameVolume", "ReferenceFrameVolume",
+                "AttachOnAwake", "MatchInitialMotion", "FieldInheritor",
+                // §2 les decalcomanies : la geometrie est deja exportee, il
+                // manque le materiau qui les pose SUR la paroi.
+                "DS_Decals", "DS_DecalsMeshRenderer", "DS_DecalProjector",
+                // §3 la vie du decor : les visages, les panneaux, les
+                // reacteurs, les six passages anciens et les meteores.
+                "FaceActiveCamera", "FacePlayerWhenTalking",
+                "ThrusterParticlesBehavior", "RandomParticleBursts",
+                "AncientTeleporter", "AncientTeleportReceiver", "MeteorLauncher",
+                "DerelictWarp", "Elevator", "HatchController", "BlinkingRenderer",
+                // §4 les volumes et zones de jeu.
+                "InteractZone", "SuitBarrier", "SuitRemovalVolume", "HazardVolume",
+                "DarkZone", "InterferenceVolume", "ZeroGField", "ZeroGSector",
+                "MajorSector", "ProbePromptTrigger", "TelescopePromptTrigger",
+                "RadiationEmitter",
+                // §5 le son reactif : le jeu repond a ce qu'on FAIT.
+                "PlayerMovementAudio", "TurbulenceAudio", "ThrusterAudio",
+                "SpacesuitAudioController", "PlayerAudioEffects",
+                "UIAudioController", "RepairAudioController",
+                "TravelMusicController", "EndOfTimeMusicController",
+                // §7 le joueur et son equipement : la combinaison, la sonde et
+                // la minicarte se RAMASSENT.
+                "GearPickup", "PlayerLockOnTargeting", "ZeroGTrainingManager",
+                "PlayerAttachPoint", "LandingPadSensor",
+                // §8 les impostures de planete, gardees pour ce qu'elles disent.
+                "LODCameraSnapshot"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -41,8 +72,23 @@ const PLACED_PATTERNS = [
   /^lod|lodgroup/i,     // A8  : la hierarchie de niveau de detail
 ];
 
-/** Volumes qu'on veut mesurer : leur collider dit leur portee. */
-const WANT_VOLUME = /forcefield|fluid|ocean|oxygen|heatsource|zone|volume/i;
+/**
+ * Volumes qu'on veut mesurer : leur collider dit leur portee.
+ *
+ * La premiere moitie ramasse des FAMILLES par leur nom ; la seconde nomme les
+ * classes du lot de `docs/44-reste-a-migrer.md` dont la portee vit elle aussi
+ * dans un collider — un champ d'apesanteur, une barriere de combinaison, un
+ * passage ancien. Les nommer une par une plutot que d'elargir les motifs evite
+ * d'ajouter un volume a des classes qui n'en avaient pas et dont personne ne
+ * l'a mesure.
+ */
+const WANT_VOLUME = new RegExp([
+  "forcefield|fluid|ocean|oxygen|heatsource|zone|volume",
+  "|^(ZeroGField|ZeroGSector|MajorSector|SuitBarrier|ProbePromptTrigger",
+  "|TelescopePromptTrigger|AncientTeleporter|AncientTeleportReceiver",
+  "|RadiationEmitter|DerelictWarp|GearPickup|LandingPadSensor",
+  "|PlayerAttachPoint|LODCameraSnapshot)$",
+].join(""), "i");
 
 /**
  * Composants dont l'ORIENTATION compte autant que la position.
@@ -77,6 +123,15 @@ export function extractGameplay(ctx) {
     const plain = ctx.plain(fields);
     const gid = ctx.ownerId(obj);
     const entry = { name: ctx.name(gid), position: ctx.worldPosition(gid), fields: plain };
+    // A QUEL CORPS cet objet appartient. La scene pose neuf GameObject nommes
+    // « RFVolume » et trente « Decals Mesh Renderer » : le nom seul ne designe
+    // rien, et c'est le corps porteur qui fait la difference entre le
+    // referentiel de Timber Hearth et celui du vaisseau pose dessus.
+    const body = ctx.bodyOf(gid);
+    // Emis meme quand il vaut le nom de l'objet : `PlayerLockOnTargeting` est
+    // pose SUR `Player_Body`, et un champ absent se lirait « sans corps »
+    // plutot que « le corps, c'est moi ».
+    if (body) entry.body = body;
 
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;
     if (!PLACED.includes(cls) && !PLACED_PATTERNS.some((p) => p.test(cls))) continue;
@@ -98,6 +153,16 @@ export function extractGameplay(ctx) {
       if (v && typeof v === "object" && "$ref" in v && rbOwner.has(v.$ref)) {
         (entry.refs ||= {})[k] = rbOwner.get(v.$ref);
       }
+    }
+    // Reference vers un COMPOSANT de la scene : on emet l'objet qui le porte.
+    //
+    // C'est le cas general — les references d'un script visent des scripts —
+    // et il restait un identifiant nu. Sans lui, `AncientTeleporter._receiver`
+    // ne dit pas ou l'on arrive : six passages qui ne menent nulle part.
+    for (const [k, v] of Object.entries(fields)) {
+      if (!v || typeof v !== "object" || !("pathId" in v) || !v.pathId) continue;
+      const info = ctx.ownerInfo(v);
+      if (info && info.name) (entry.targets ||= {})[k] = info;
     }
     // Texte des objets lisibles, resolu depuis le TextAsset.
     if (cls === "ReadableObject") {

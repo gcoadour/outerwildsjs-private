@@ -68,6 +68,18 @@ import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
+// Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
+import { referenceFrames, DeclaredFrames, restingPoint } from "./frames.js";
+import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
+         nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
+         qrot as qrotDecor } from "./decor.js";
+import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
+         gameSectorAt } from "./volumes.js";
+import { gearPickups, suitVolumes, suitVolumeStep, Equipment,
+         ZeroGTraining } from "./gear.js";
+import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
+         TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO } from "./reactaudio.js";
+import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -139,6 +151,46 @@ async function boot() {
     }
     return ap;
   }
+
+  /**
+   * Deplacement d'un corps depuis sa position de REPOS.
+   *
+   * Les positions extraites sont celles de la scene a l'arret ; les corps
+   * orbitent. Comparer un point du moment a une position de repos derive donc
+   * de tout le chemin parcouru — pour Timber Hearth, les six cents unites du
+   * volume de referentiel sont avalees en une douzaine de secondes, et le
+   * volume cesse de contenir sa propre planete. Mesure dans un vrai Chromium,
+   * profil rempli : `__lots.etat.referentiel` valait `null` a la surface.
+   *
+   * L'objet extrait porte desormais le NOM de son corps porteur, ce qui rend
+   * la correction possible : elle n'existait pas avant que l'extracteur emette
+   * `body` (docs/46).
+   */
+  const corpsParNom = new Map();
+  function decalageDuCorps(bodyName, framePos) {
+    if (!bodyName) return null;
+    // Le vaisseau n'est pas un corps du systeme : il n'a ni orbite ni entree
+    // dans `bodies`, et il se deplace bien plus que les planetes. Ce qu'il
+    // porte — le paquetage de la cabine, les commandes, la trappe — se ramene
+    // donc a SA position du moment, lue sur le corps simule.
+    if (bodyName === "Ship_Body") {
+      if (!ship || !shipRest) return null;
+      return [ship.pos.x + framePos[0] - shipRest[0],
+              ship.pos.y + framePos[1] - shipRest[1],
+              ship.pos.z + framePos[2] - shipRest[2]];
+    }
+    if (!corpsParNom.size) {
+      for (const b of bodies) if (b.bodyName) corpsParNom.set(b.bodyName, b);
+    }
+    const b = corpsParNom.get(bodyName);
+    if (!b || !b.position0) return null;
+    return [b.position[0] + framePos[0] - b.position0[0],
+            b.position[1] + framePos[1] - b.position0[1],
+            b.position[2] + framePos[2] - b.position0[2]];
+  }
+
+  // Position du vaisseau dans la scene AU REPOS, pour ramener ce qu'il porte.
+  const shipRest = ((gameplay.singletons || {}).ShipBody || {}).position || null;
 
   // Depart : au point d'apparition du joueur, celui que le build pose.
   //
@@ -252,7 +304,70 @@ async function boot() {
   // et jamais lus : c'est le jeu qui dit ou l'on meurt, pas un seuil du portage.
   const destructions = destructionVolumes(gameplay);
   const repairs = repairVolumes(gameplay).map((v) => new Repair(v));
+  // Quinze des dix-huit sont les avaries du VAISSEAU ; les trois autres sont
+  // les noeuds du satellite casse, et c'est l'entrainement en apesanteur. Le
+  // corps porteur les separe (docs/46, lot 7) — avant, la reparation du
+  // vaisseau piochait indifferemment dans les dix-huit.
+  const shipRepairs = repairs.filter((r) => r.volume.body === "Ship_Body");
   window.__volumes = { destructions, repairs };
+  // --- ce que docs/44-reste-a-migrer.md listait, lot par lot ---
+  //
+  // Six familles de plus, lues dans le build et branchees ici. Aucune n'ajoute
+  // de donnee : toutes etaient DANS `level0` depuis le premier jour, sans
+  // lecteur (docs/46-migration-lots.md).
+  //
+  // §1 les referentiels DECLARES : quatorze volumes disent a quel corps on se
+  // rapporte, la ou le portage le deduisait de la gravite dominante.
+  const declared = new DeclaredFrames(referenceFrames(gameplay));
+  // §3 la vie du decor : quinze panneaux, huit visages, six passages anciens.
+  const decor = new DecorField(billboards(gameplay), talkingFaces(gameplay));
+  const decalNames = new Set([
+    ...((gameplay.placed || {}).DS_DecalsMeshRenderer || []).map((c) => c.name),
+    ...((gameplay.placed || {}).DS_Decals || []).map((c) => c.name)]);
+  const nozzles = thrusterNozzles(gameplay);
+  // Les dix-huit bouffees d'etincelles, et ce que la mesure en dit.
+  //
+  // `RandomParticleBursts` tire un delai entre une et trois secondes et appelle
+  // `Play()` a chaque echeance. Mais son `Awake` pose d'abord
+  // `particleSystem.loop = _looping` — et `_looping` vaut VRAI sur les dix-huit
+  // instances. Un systeme qui boucle joue en continu : le tirage n'a donc
+  // aucun effet visible dans l'alpha, et le porter serait porter du bruit.
+  //
+  // La mecanique est ecrite quand meme, et filtre sur le drapeau : la liste est
+  // vide ici, et elle le dit (docs/46, lot 3).
+  const bursts = particleBursts(gameplay).filter((b) => !b.looping)
+    .map((b) => ({ b, t: new RandomTimer(b.min, b.max) }));
+  const passages = new Teleporters(teleporters(gameplay));
+  // §4 les volumes de jeu : ce qui blesse, ce qui fait flotter, ce qui limite.
+  const hazards = new Hazards(hazardVolumes(gameplay));
+  const zeroGVolumes = zeroGFields(gameplay);
+  const playSectors = gameSectors(gameplay);
+  // §7 l'equipement se RAMASSE : le portage le donnait d'emblee.
+  const pickups = gearPickups(gameplay);
+  const suits = suitVolumes(gameplay);
+  const equipment = new Equipment();
+  const training = new ZeroGTraining(repairs);
+  // §5 le son d'evenement : marcher, pousser, voyager, finir.
+  const events = eventAudio(await loadEventAudio());
+  const footsteps = new Footsteps();
+  const turbulence = new Turbulence();
+  const thrusterSound = new ThrusterSound();
+  const travelMusic = new TravelMusic();
+  const endMusic = new EndOfTimeMusic();
+  window.__lots = { declared, decor, passages, hazards, zeroGVolumes, playSectors,
+                    pickups, suits, equipment, training, events,
+                    get etat() {
+                      return { referentiel: declared.current && declared.current.body,
+                               equipement: { combinaison: equipment.suit,
+                                             sonde: equipment.probe,
+                                             minicarte: equipment.minimap },
+                               entrainement: `${training.repaired}/${training.total}` };
+                    } };
+  console.log(`lots : ${declared.count} referentiels declares, ` +
+    `${decor.total} decors vivants, ${passages.count} passages, ` +
+    `${hazards.count} volumes qui blessent, ${pickups.length} objets a ramasser, ` +
+    `${events.count} emetteurs de son d'evenement`);
+
   const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
   // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
@@ -297,6 +412,12 @@ async function boot() {
     if (nScroll) console.log(`textures defilantes : ${nScroll} rattachees`);
     const nSand = sand.attach(entry.meshes);
     if (nSand) console.log(`sable : ${nSand} colonnes rattachees sur ${sand.total}`);
+    // Le decor vivant et les decalcomanies se rattachent au meme moment, et par
+    // le meme chemin : ce qui arrive avec la geometrie porte les noms du build.
+    const nDecor = decor.attach(entry.meshes);
+    if (nDecor) console.log(`decor : ${nDecor} panneaux et visages sur ${decor.total}`);
+    const nDecals = applyDecals(BABYLON, entry.meshes, decalNames);
+    if (nDecals) console.log(`decalcomanies : ${nDecals} maillages poses sur la paroi`);
     window.__shaders = shaderCounts;
     console.log(`geometrie chargee : ${entry.file} (${entry.meshes.length} maillages)`);
   });
@@ -750,6 +871,19 @@ async function boot() {
       ship.pos.x = shipStart[0]; ship.pos.y = shipStart[1]; ship.pos.z = shipStart[2];
     }
     if (starEntry) starEntry.mesh.scaling.setAll(1);
+    // La boucle rend le monde a son etat de depart : la musique de la fin des
+    // temps se tait, les reparations sont a refaire — celles du vaisseau comme
+    // les trois noeuds du satellite — et l'entrainement se rejoue.
+    endMusic.reset();
+    for (const r of repairs) r.reset();
+    training.reset();
+    // L'equipement suit le MONDE, pas la connaissance : ce qu'on sait survit a
+    // la boucle (`PlayerData`), ce qu'on porte non. Le paquetage est a nouveau
+    // dans la cabine au debut de chaque boucle, et se ramasse a nouveau.
+    equipment.suit = false;
+    equipment.probe = false;
+    equipment.minimap = false;
+    equipment.taken.clear();
   }
   window.__loop = loop;
   window.__dialogue = dialogue;
@@ -781,6 +915,12 @@ async function boot() {
   // rayon large est un repli assume, pas une valeur du build. Il ne raccourcit
   // plus le depart, qui se fait desormais au village, 471 u plus loin.
   const SHIP_REACH = 40;
+  // Portee de ramassage. Le `GearPickup` du build n'a pas de forme a lui : sa
+  // zone d'interaction est un objet ENFANT (`InteractVolume`, une capsule de
+  // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
+  // enfants de la zone. Trois unites est donc la hauteur de cette capsule, pas
+  // un nombre choisi.
+  const GEAR_REACH = 3;
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   const telescope = new Telescope();
   const probes = new ProbeLauncher();
@@ -827,7 +967,10 @@ async function boot() {
       probeMeshes[i].setEnabled(false);
     }
   }
-  const autopilot = ship ? new Autopilot(ship) : null;
+  // Le pilote automatique arrive aux distances du BUILD, et non a « rayon de
+  // surface x 1,5 » : elles sont dans les neuf `MajorReferenceFrameVolume`
+  // (docs/46, lot 1).
+  const autopilot = ship ? new Autopilot(ship, declared.frames) : null;
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF);
   window.__map = solarMap;
@@ -1075,8 +1218,17 @@ async function boot() {
     // Le monde tel que la physique le voit : les champs directionnels, qui
     // priment sur le champ radial dans leur volume, et les fluides, qui
     // freinent ce qui les traverse.
+    // §4 L'APESANTEUR DECLAREE. Quatre volumes la posent ; dans le leur, le
+    // champ radial ne s'applique plus. Le point est ramene au repos du corps
+    // porteur, comme tous les volumes extraits.
+    const zeroG = zeroGVolumes.length
+      ? zeroGAt(zeroGVolumes,
+                [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                 player.pos.z + anchorPos[2]],
+                (v) => decalageDuCorps(v.body, anchorPos))
+      : null;
     const world = { directional: dirFields, polar: polFields,
-                    framePos: anchorPos, fluids,
+                    framePos: anchorPos, fluids, zeroG,
                     // Coriolis et centrifuge du repere ancre, qui TOURNE avec
                     // son corps : sans eux le sol ne defile pas sous un
                     // stationnaire (docs/36-audit.md §1.2).
@@ -1088,7 +1240,18 @@ async function boot() {
     // 2. changement de corps dominant : on change de repere. La position du
     //    joueur, exprimee dans l'ancien repere, doit etre reportee dans le
     //    nouveau avant tout le reste.
-    const fb = player.field && player.field.body;
+    //
+    //    LE BUILD DECLARE SON REFERENTIEL, et c'est lui qui decide en premier
+    //    (docs/46, lot 1) : quatorze volumes le posent, et le plus petit
+    //    contenant le joueur gagne. La gravite dominante reste la reponse par
+    //    defaut — les volumes ne couvrent pas tout l'espace — mais la ou le
+    //    build a parle, on l'ecoute : c'est ce qui separe « pose dans un
+    //    hangar » de « pres d'une planete ».
+    declared.update([player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                     player.pos.z + anchorPos[2]],
+                    (fr) => decalageDuCorps(fr.body, anchorPos));
+    const fb = declared.anchorBody(bodies, bodyIsAnchorable)
+            || (player.field && player.field.body);
     if (fb && fb !== anchorBody && bodyIsAnchorable(fb)) {
       const newPos = currentPosition(orbits, fb);
       const shift = sub3(anchorPos, newPos);
@@ -1207,10 +1370,10 @@ async function boot() {
       // repare depuis le poste de pilotage », une piece a la fois, au rythme du
       // build (trois secondes par piece). Leur position extraite, elle, ne
       // vaudrait rien — le vaisseau bouge.
-      if (ship.boarded && repairs.length && ship.damage) {
+      if (ship.boarded && shipRepairs.length && ship.damage) {
         const avarie = ship.damage;
         const abimee = avarie.deadParts.length || avarie.integrity < avarie.total;
-        const en_cours = repairs.find((r) => !r.done) || null;
+        const en_cours = shipRepairs.find((r) => !r.done) || null;
         if (abimee && en_cours) {
           if (keys.KeyH) en_cours.press(); else en_cours.release();
           if (en_cours.update(dt)) {
@@ -1251,7 +1414,10 @@ async function boot() {
     optionPressed = 0;
 
     if (!ship || !ship.boarded) {
-      focus = interactables.focus(player.pos, anchorPos, fwd);
+      // Les objets suivent leur corps : un paquetage pose dans la cabine part
+      // avec le vaisseau, et une zone du village tourne avec sa planete.
+      focus = interactables.focus(player.pos, anchorPos, fwd,
+                                  (it) => decalageDuCorps(it.body, anchorPos));
     }
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
@@ -1267,6 +1433,55 @@ async function boot() {
       inSupply: !!(ship && ship.boarded) || !!zone,
       thrusting: !!player.jetpack && !(ship && ship.boarded),
     });
+
+    // --- les lots de docs/44, image par image ---------------------------
+    //
+    // §4 CE QUI BLESSE. L'unique `HazardVolume` du build est la colonne de
+    // sable entre les jumelles : vingt points par seconde, et rien au premier
+    // contact. Le portage n'avait aucune regle la : on la traversait.
+    {
+      const perdu = hazards.update(dt, playerW, (v) => decalageDuCorps(v.body, anchorPos));
+      if (perdu > 0) resources.hurt(perdu);
+    }
+    // §7 L'EQUIPEMENT SE RAMASSE. Le paquetage du vaisseau donne les trois,
+    // la combinaison de la grotte ne donne qu'elle. On appuie dessus, une fois.
+    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
+      for (const p of pickups) {
+        const q = restingPoint(playerW, decalageDuCorps(p.body, anchorPos));
+        const d = Math.hypot(q[0] - p.position[0], q[1] - p.position[1],
+                             q[2] - p.position[2]);
+        if (d > GEAR_REACH) continue;
+        const gagne = equipment.pickUp(p);
+        if (gagne.length) {
+          console.log(`equipement : ${gagne.join(", ")}`);
+          const son = (events.of("PlayerAudioEffects") || { clips: {} }).clips._suitUpSound;
+          if (son) audio.playOneShot(son);
+        }
+        break;
+      }
+    }
+    // La combinaison se REND : le volume de retour n'existe que si on l'a.
+    if (suits.length && suitVolumeStep(suits, playerW, equipment,
+          (v) => decalageDuCorps(v.body, anchorPos)) === "removed") {
+      const son = (events.of("PlayerAudioEffects") || { clips: {} }).clips._removeSuitSound;
+      if (son) audio.playOneShot(son);
+      console.log("equipement : combinaison rendue");
+    }
+    // L'entrainement en apesanteur : les trois noeuds du satellite casse.
+    if (training.total && !(ship && ship.boarded)) {
+      const noeud = training.nodes.find((r) => !r.done &&
+        r.inRange(restingPoint(playerW, decalageDuCorps(r.volume.body, anchorPos))));
+      if (noeud) {
+        if (keys.KeyH) noeud.press(); else noeud.release();
+        noeud.update(dt);
+      }
+      if (training.update()) {
+        const son = (events.of("ZeroGTrainingManager") || { clips: {} })
+          .clips._systemsBackOnlineClip;
+        if (son) audio.playOneShot(son);
+        console.log("entrainement : systemes du satellite retablis");
+      }
+    }
     interactPressed = false;
 
     if (resHUD) {
@@ -1306,7 +1521,9 @@ async function boot() {
       const sec = sectorState.secteur;
       const near = body && player.field.distance <
         (body.gravity.upperSurfaceRadius || 200) * 2;
+      // La minicarte aussi se ramasse : meme paquetage, meme drapeau.
       minimap.setEnabled(!!near && !!(sec ? sec.useMinimap : true) &&
+                         equipment.minimap &&
                          !(ship && ship.boarded) && !guiMode.hidden);
       if (minimap.on) {
         minimap.update(body.position, player.pos, {
@@ -1451,7 +1668,20 @@ async function boot() {
       }
       // La limite de poussee du secteur s'applique enfin au vaisseau : 20
       // partout, 200 sur la premiere jumelle, illimitee sur Giant's Deep.
-      if (ship) ship.thrustLimit = sectors.thrustLimit;
+      // Les secteurs de JEU (`ZeroGSector` x2, `MajorSector`) portent eux aussi
+      // une limite de poussee — 20 partout — et c'est la plus basse des deux
+      // qui vaut : Dark Bramble ne se traverse pas a pleine puissance
+      // (docs/46, lot 4).
+      let limite = sectors.thrustLimit;
+      const secteurJeu = playSectors.length
+        ? gameSectorAt(playSectors, playerW,
+                       (x) => decalageDuCorps(x.body, anchorPos))
+        : null;
+      if (secteurJeu && secteurJeu.thrustLimit != null) {
+        limite = limite == null ? secteurJeu.thrustLimit
+                                : Math.min(limite, secteurJeu.thrustLimit);
+      }
+      if (ship) ship.thrustLimit = limite;
       // L'eclairage ambiant suit `_ambientLightRange`, mesure depuis le centre
       // du secteur courant.
       const sec = sectorState.secteur;
@@ -1569,6 +1799,13 @@ async function boot() {
     camera.fov = telescope.update(dt);
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
+    }
+    // La sonde se RAMASSE (docs/46, lot 7) : `ExpeditionGear` la debloque, dans
+    // la cabine du vaisseau. Sans elle, la touche ne lance rien — c'est la
+    // progression du build, et le portage donnait tout au premier instant.
+    if (probeFired && !equipment.probe) {
+      probeFired = false;
+      console.log("sonde : elle se ramasse d'abord, dans la cabine du vaisseau");
     }
     if (probeFired) {
       probes.launch(player.pos, fwd);
@@ -1758,8 +1995,12 @@ async function boot() {
     // champ du volume (`_deathType`), et les quatre machoires ne mordent que le
     // joueur et le vaisseau. Le seuil analytique ci-dessous reste le filet.
     if (destructions.length) {
-      const mortel = destroyedBy(destructions, [player.pos.x, player.pos.y, player.pos.z],
-                                 ship && ship.boarded ? "ship" : "player");
+      // Un point MONDE, et chaque volume ramene au mouvement de son corps :
+      // la position dans le repere ancre tombait dans la sphere de 2 000
+      // unites du soleil des la premiere image (docs/46).
+      const mortel = destroyedBy(destructions, playerW,
+                                 ship && ship.boarded ? "ship" : "player",
+                                 (v) => decalageDuCorps(v.body, anchorPos));
       if (mortel) death.kill(deathCause(mortel.deathType));
     }
     // Incineration : entrer dans l'etoile. Le corps est la, son rayon aussi ;
@@ -1847,6 +2088,128 @@ async function boot() {
     // a chaque redemarrage, comme dans le jeu.
     if (sand.count) sand.update(loop.elapsed);
 
+    // §3 LE DECOR VIVANT. Les panneaux se tournent vers la camera — autour de
+    // leur mat quand ils en ont un — et les personnages se tournent vers le
+    // joueur pendant qu'on leur parle, d'un dixieme d'angle par image.
+    if (decor.count) {
+      const cam = [camera.position.x, camera.position.y, camera.position.z];
+      // A QUI l'on parle : le personnage est le parent de la zone de
+      // conversation, et c'est lui qui porte le `FacePlayerWhenTalking`.
+      decor.update(cam, cam, dialogue.active && dialogue.active.convo
+        ? (dialogue.active.convo.speaker || null) : null);
+    }
+    // §3 LES PASSAGES ANCIENS. Ils partent tout seuls quand l'alignement et le
+    // soleil le permettent, que quelqu'un soit dedans ou non — et emportent le
+    // joueur s'il s'y trouve. Les positions sont celles du moment : c'est
+    // l'orbite des jumelles qui ouvre puis ferme la fenetre.
+    if (passages.count && starBody) {
+      const sunW = [starBody.position[0] + anchorPos[0],
+                    starBody.position[1] + anchorPos[1],
+                    starBody.position[2] + anchorPos[2]];
+      // Chaque bout suit SON corps : le passage est sur une jumelle, son
+      // arrivee sur une autre planete, et c'est justement leur mouvement
+      // relatif qui ouvre la fenetre d'alignement.
+      const aujourdhui = (e) => {
+        const d = decalageDuCorps(e.body, anchorPos);
+        return d ? [e.position[0] + d[0], e.position[1] + d[1], e.position[2] + d[2]]
+                 : e.position;
+      };
+      const parti = passages.update(dt, playerW, sunW, (t) => {
+        if (!t.receiver) return null;
+        const up = t.rotation ? qrotDecor(t.rotation, [0, 1, 0]) : [0, 1, 0];
+        return { self: aujourdhui(t), up,
+                 target: aujourdhui(t.viewTarget || t.receiver),
+                 receiver: aujourdhui(t.receiver) };
+      });
+      if (parti) {
+        const son = (events.of("AncientTeleporter") || { clips: {} }).clips._teleportSound;
+        if (son) audio.playOneShot(son);
+        if (parti.carries) {
+          // On arrive AU point d'arrivee, exprime dans le repere courant.
+          player.pos.x = parti.arrival[0] - anchorPos[0];
+          player.pos.y = parti.arrival[1] - anchorPos[1];
+          player.pos.z = parti.arrival[2] - anchorPos[2];
+          if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
+          console.log(`passage : ${parti.teleporter.name} -> ${parti.arrival}`);
+        }
+      }
+    }
+    // §5 LE SON D'EVENEMENT. Marcher, souffler, pousser, voyager, finir.
+    if (events.count) {
+      // Les pas se comptent sur la vitesse AU SOL : dans un vaisseau qui file,
+      // on ne fait pas de bruit de pas.
+      const auSol = player.grounded && !(ship && ship.boarded);
+      const vitesse = Math.hypot(player.vel.x, player.vel.y, player.vel.z);
+      const pas = footsteps.update(dt, auSol ? vitesse : 0, auSol);
+      if (pas) {
+        const famille = events.family("PlayerMovementAudio",
+                                      pas.kind === "run" ? "_run" : "_walk");
+        if (famille.length) {
+          audio.playOneShot(famille[Math.floor(Math.random() * famille.length)],
+                            { volume: pas.volume, pitch: pas.pitch });
+        }
+      }
+      // Le vent de course : dans l'air, au-dela de vingt unites par seconde.
+      const dens = player.fluid ? (player.fluid.density ?? 0) : 0;
+      const vent = turbulence.update(dt, vitesse, dens);
+      const clipVent = (events.of("TurbulenceAudio") || { clips: {} }).clips._turbulenceClip;
+      if (clipVent) audio.loopAt(clipVent, vent);
+      // Les propulseurs : fondu court a l'allumage, un peu plus long a l'arret.
+      // (le detail des buses est plus bas, avec les particules)
+      const pousse = !!(ship && ship.boarded
+        ? (input.forward || input.right || input.up)
+        : player.jetpack);
+      const tourne = !!(ship && ship.boarded && input.roll);
+      const niveau = thrusterSound.update(dt, pousse, tourne);
+      const th = events.of("ThrusterAudio", "Player_Body");
+      if (th) {
+        if (th.clips._translationalClip) audio.loopAt(th.clips._translationalClip, niveau);
+        if (thrusterSound.fired !== null) {
+          const rot = events.family("ThrusterAudio", "_rotationalThrust", "Player_Body");
+          const f = rot[thrusterSound.fired % (rot.length || 1)];
+          if (f) audio.playOneShot(f, { volume: THRUSTER_AUDIO.rotationalVolume });
+        }
+      }
+    }
+    // §3 LES DIX BUSES. Chacune porte une valeur de l'enum `Thruster` et
+    // regarde UNE composante de l'acceleration locale, avec un seuil de 1 :
+    // une buse qui ne repond pas a la commande se remarque des qu'on decolle.
+    if (nozzles.length && particles.live && particles.live.size) {
+      const t = ship && ship.boarded ? ship.effectiveThrust : 0;
+      const local = t
+        ? [(input.right || 0) * t, (input.up ? 1 : 0) * t, (input.forward || 0) * t]
+        : [0, 0, 0];
+      const etats = new Map();
+      for (const b of nozzles) etats.set(b.name, nozzleFires(b.thruster, local));
+      particles.gate(etats);
+    }
+    // §3 LES BOUFFEES D'ETINCELLES : on relance, on n'arrete jamais — un
+    // systeme qui ne boucle pas va au bout de sa vie tout seul.
+    if (bursts.length && particles.live && particles.live.size) {
+      const partent = new Set();
+      for (const x of bursts) if (x.t.update(dt)) partent.add(x.b.name);
+      if (partent.size) particles.pulse(partent);
+    }
+    // §5 LES DEUX MUSIQUES QUE docs/43 AVAIT LAISSEES OUVERTES. Celle du
+    // voyage joue au poste de pilotage ET dans le vide ; celle de la fin des
+    // temps entre sous quatre-vingt-dix secondes et sort a l'explosion. Leurs
+    // clips sont ceux des sources posees sur les deux controleurs.
+    if (audioMap.length) {
+      const clipDe = (nom) => {
+        const src = audioMap.find((x) => x.name === nom);
+        return src ? src.file : null;
+      };
+      const dansLeVide = !player.field || !bodyIsAnchorable(player.field.body)
+        || (player.field.magnitude ?? 0) <= 0;
+      const vVoyage = travelMusic.update(dt, !!(ship && ship.boarded), dansLeVide);
+      const cVoyage = clipDe("TravelMusicController");
+      if (cVoyage) audio.loopAt(cVoyage, vVoyage * mixer.volume("Music"));
+      const vFin = endMusic.update(dt, loop.secondsRemaining,
+                                   { prevented: loop.preventSupernova,
+                                     exploded: loop.supernova });
+      const cFin = clipDe("EndOfTimeMusicController");
+      if (cFin) audio.loopAt(cFin, vFin * mixer.volume("Music"));
+    }
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
     // Les ambiances suivent la position MONDE de l'auditeur, dans la meme

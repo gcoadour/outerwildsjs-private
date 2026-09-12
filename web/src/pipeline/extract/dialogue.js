@@ -126,6 +126,10 @@ export function extractDialogue(ctx) {
     const ctrl = controllers.get(gid) || null;
     conversations.push({
       name: ctx.name(gid),
+      // QUI parle. Les quatorze zones s'appellent toutes « ConversationZone »
+      // ou presque ; le personnage est leur PARENT, et c'est lui qui porte le
+      // `FacePlayerWhenTalking` qu'on veut declencher (docs/46, lot 3).
+      speaker: ctx.ancestors(gid).slice(-1)[0] || null,
       character: f._characterName || null,
       isMuseumSign: !!f._isMuseumSign,
       position: ctx.world(gid)[0].map((v) => round(v, 3)),

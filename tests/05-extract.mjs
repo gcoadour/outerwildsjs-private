@@ -9,7 +9,15 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive } from "../web/src/sand.js";
-import { destructionVolumes, repairVolumes, destroyedBy } from "../web/src/volumes.js";
+import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
+         zeroGFields, gameSectors, probePrompts,
+         radiationEmitters } from "../web/src/volumes.js";
+import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.js";
+import { billboards, talkingFaces, thrusterNozzles, particleBursts,
+         meteorLaunchers, teleporters, warps } from "../web/src/decor.js";
+import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
+import { gearPickups, suitVolumes, interactZones, attachPoints, lockOnTargets,
+         ZeroGTraining } from "../web/src/gear.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
@@ -329,20 +337,213 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   console.log("     clips par conteneur:", JSON.stringify(parExt),
               "| stats:", JSON.stringify(audio.stats));
   check("aucune extension ne ment sur son contenu", mentent, 0);
-  // Le compte est passe de 36 a 48 le jour ou les volumes d'ambiance ont eu un
-  // lecteur : leur clip est vise par `_clip` et n'appartient a AUCUNE source
-  // placee, il n'etait donc pas exporte. Douze clips de plus, et c'est le son
-  // des zones — grottes, musee, village, profondeurs.
-  check("clips exportes en tout", audioFiles.length, 48);
+  // Le compte a bouge deux fois, et chaque fois parce qu'une famille de clips
+  // n'appartenait a AUCUNE source placee :
+  //
+  //   36 -> 48   les volumes d'ambiance, vises par `_clip` (docs/45)
+  //   48 -> 97   les sons d'EVENEMENT, champs d'un script joues en
+  //              `PlayOneShot` : six pas de marche, six de course, trois de
+  //              saut, quatre propulseurs de rotation, huit sons d'interface…
+  //              (docs/46, lot 5)
+  check("clips exportes en tout", audioFiles.length, 97);
   check("clips en Ogg Vorbis", parExt.ogg ?? 0, 23);
-  // 24 RIFF, plus l'AIFF converti.
-  check("clips en WAV", parExt.wav ?? 0, 25);
+  // 73 RIFF, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 74);
   check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
   check("l'unique AIFF du build a ete converti",
         audio.stats["AIFF convertis en WAV"] ?? 0, 1);
   // C'est cette ligne qui rend le reencodage Opus du worker possible : sans un
   // seul `.wav`, il ne s'executait jamais.
   check("le worker a de quoi reencoder", (parExt.wav ?? 0) > 0, true);
+
+  // Les sons d'evenement : qui les porte, et avec quelle loi.
+  const ev = eventAudio(audio);
+  check("emetteurs de son d'evenement", ev.count, 22);
+  check("six pas de marche", ev.family("PlayerMovementAudio", "_walk").length, 6);
+  check("six pas de course", ev.family("PlayerMovementAudio", "_run").length, 6);
+  check("trois sauts", ev.family("PlayerMovementAudio", "_jump").length, 3);
+  check("quatre propulseurs de rotation",
+        ev.family("ThrusterAudio", "_rotationalThrust", "Player_Body").length, 4);
+  check("et le vaisseau miniature a son propre propulseur",
+        ev.of("ThrusterAudio", "ModelShip_Body").clips._translationalClip
+          .startsWith("ModelRocketThruster"), true);
+  // Les seuils de la marche ne sont serialises sur AUCUNE instance : ils
+  // viennent du constructeur, comme les trois secondes de `RepairVolume`.
+  // L'invariant garde le repli — sans lui, une extraction qui cesserait de
+  // lire les champs passerait en silence.
+  check("les seuils de pas ne sont pas dans la scene",
+        Object.keys(ev.of("PlayerMovementAudio").params).length, 0);
+  check("ils viennent donc du constructeur",
+        `${FOOTSTEP.walkThreshold}/${FOOTSTEP.runThreshold}`, "0.5/4.5");
+  // Le vent de course, lui, EST regle par l'instance, et pas comme le
+  // constructeur : 40 au lieu de 80 pour la limite haute.
+  check("la limite haute du vent vient de l'instance",
+        ev.of("TurbulenceAudio").params._upperSpeedLimit, 40);
+}
+
+// --- les six lots de docs/44-reste-a-migrer.md, sur le build ----------------
+
+// §1 LES REFERENTIELS DECLARES. Quatorze volumes : neuf majeurs, un par corps
+// principal, et cinq ordinaires dont le vaisseau et le soleil.
+{
+  const frames = referenceFrames(gp);
+  check("volumes de referentiel", frames.length, 14);
+  check("dont majeurs", frames.filter((f) => f.major).length, 9);
+  check("les neuf majeurs sont primaires",
+        frames.filter((f) => f.major && f.primary).length, 9);
+  check("tous portent un corps", frames.every((f) => f.body), true);
+  check("et tous une sphere",
+        frames.every((f) => f.volume && f.volume.shape === "sphere"), true);
+  const arrivees = [...new Set(frames.filter((f) => f.major)
+    .map((f) => f.arrival))].sort((a, b) => a - b);
+  check("deux distances d'arrivee seulement", arrivees.join(","), "1000,2500");
+  check("Timber Hearth : arrivee 1000, alignement 700",
+        JSON.stringify(autopilotDistances(frames, "TimberHearth_Body")),
+        JSON.stringify({ arrival: 1000, alignment: 700, declared: true }));
+  check("Dark Bramble arrive a 2500 et ne s'aligne jamais",
+        JSON.stringify(autopilotDistances(frames, "DarkBramble_Body")),
+        JSON.stringify({ arrival: 2500, alignment: 0, declared: true }));
+  const vaisseau = frames.find((f) => f.body === "Ship_Body");
+  check("le vaisseau a son propre referentiel, de trente unites",
+        vaisseau.radius, 30);
+  check("et les trois noeuds du satellite casse le leur, non primaire",
+        frames.filter((f) => f.body === "BrokenSatellite_Body" && !f.primary).length, 3);
+  // Le cas que la gravite dominante ne sait pas traiter : dans le hangar,
+  // c'est le vaisseau qui gagne, parce qu'il est le plus petit volume.
+  check("au centre du vaisseau, le referentiel est le sien",
+        frameAt(frames, vaisseau.position).body, "Ship_Body");
+}
+
+// §2 LES DECALCOMANIES. La geometrie est deja exportee — ce sont les trente
+// « Decals Mesh Renderer » de docs/40-solide.md ; ce qui manquait est le
+// materiau, et `_meshOffset` vaut zero partout : rien n'est decale
+// geometriquement, tout se joue au rendu.
+{
+  check("projecteurs de decalcomanie", n("DS_DecalProjector"), 38);
+  check("groupes de decalcomanies", n("DS_Decals"), 30);
+  check("maillages de decalcomanies", n("DS_DecalsMeshRenderer"), 30);
+  check("aucun decalage geometrique",
+        (gp.placed.DS_DecalProjector || []).every((c) => (c.fields || {}).meshOffset === 0),
+        true);
+  check("les trente maillages portent tous le meme nom",
+        new Set((gp.placed.DS_DecalsMeshRenderer || []).map((c) => c.name)).size, 1);
+  check("mais pas le meme corps : c'est lui qui les distingue",
+        new Set((gp.placed.DS_DecalsMeshRenderer || []).map((c) => c.body)).size > 1,
+        true);
+}
+
+// §3 LA VIE DU DECOR.
+{
+  const panneaux = billboards(gp);
+  check("panneaux face camera", panneaux.length, 15);
+  check("dont cinq en LookAt — les plans des planetes lointaines",
+        panneaux.filter((p) => p.lookAt).length, 5);
+  // Quatre seulement tournent autour d'un mat, et ce sont les quatre
+  // villageois : les six autres regardent librement la camera.
+  check("et quatre qui tournent autour d'un axe",
+        panneaux.filter((p) => !p.lookAt && Math.hypot(...p.axis) > 0).length, 4);
+  check("personnages qui se tournent quand on leur parle",
+        talkingFaces(gp).length, 8);
+  // Le declenchement passe par le nom : la zone de conversation est l'ENFANT du
+  // personnage, et c'est son parent qu'on cherche. Les quatorze zones
+  // s'appellent presque toutes « ConversationZone » — sans ce chemin, aucun
+  // personnage ne se tournerait jamais.
+  {
+    const dlg = extractDialogue(ctx);
+    const parlants = new Set(dlg.conversations.map((c) => c.speaker));
+    check("chaque visage a bien une conversation a son nom",
+          talkingFaces(gp).filter((f) => parlants.has(f.name)).length, 8);
+  }
+
+  const buses = thrusterNozzles(gp);
+  check("buses de reacteur", buses.length, 10);
+  check("une par valeur de l'enum Thruster",
+        new Set(buses.map((b) => b.thruster)).size, 10);
+  check("et toutes sur le vaisseau",
+        buses.every((b) => b.body === "Ship_Body"), true);
+
+  check("bouffees de particules", particleBursts(gp).length, 18);
+  check("toutes entre une et trois secondes",
+        particleBursts(gp).every((b) => b.min === 1 && b.max === 3), true);
+  // Et toutes en BOUCLE, ce qui annule le tirage : `Awake` pose
+  // `particleSystem.loop = _looping`, et un systeme qui boucle joue en continu.
+  // Le delai aleatoire n'a donc aucun effet visible dans l'alpha.
+  check("et toutes en boucle, ce qui rend le tirage sans effet",
+        particleBursts(gp).filter((b) => b.looping).length, 18);
+  const meteores = meteorLaunchers(gp);
+  check("lanceurs de meteores", meteores.length, 4);
+  check("l'un d'eux attend plus longtemps que les autres",
+        meteores.filter((m) => m.minInterval === 15).length, 1);
+
+  const passages = teleporters(gp);
+  check("passages anciens", passages.length, 6);
+  check("tous connaissent leur arrivee",
+        passages.every((t) => t.receiver && t.receiver.name), true);
+  check("deux visent une cible de vue differente de leur arrivee",
+        passages.filter((t) => t.viewTarget !== t.receiver).length, 2);
+  check("et leurs arrivees se repartissent sur quatre corps",
+        new Set(passages.map((t) => t.receiver.body)).size, 4);
+  check("passages de la dimension abandonnee", warps(gp).length, 3);
+}
+
+// §4 LES VOLUMES DE JEU.
+{
+  const haz = hazardVolumes(gp);
+  check("volumes qui blessent", haz.length, 1);
+  check("le sable de l'entonnoir fait vingt points par seconde",
+        haz[0].perSecond, 20);
+  check("et rien au premier contact", haz[0].firstContact, 0);
+
+  const zg = zeroGFields(gp);
+  check("champs d'apesanteur", zg.length, 4);
+  check("dont un sans forme, qui vit de ses declencheurs",
+        zg.filter((f) => !f.volume && f.entryways).length, 1);
+  const secteurs = gameSectors(gp);
+  check("secteurs de jeu", secteurs.length, 3);
+  check("tous limitent la poussee a vingt",
+        secteurs.every((x) => x.thrustLimit === 20), true);
+  check("aucun ne limite la lampe du joueur",
+        secteurs.every((x) => x.flashlightLimit === null), true);
+
+  check("zones d'interaction", interactZones(gp).length, 7);
+  check("trois fenetres de vue distinctes",
+        [...new Set(interactZones(gp).map((z) => z.viewingWindow))]
+          .sort((a, b) => a - b).join(","), "60,90,360");
+  const invites = probePrompts(gp);
+  check("invites de sonde et de lunette", invites.length, 5);
+  check("les quatre invites de sonde demandent 45 degres de regard",
+        invites.filter((p) => p.kind === "probe" && p.minAngle === 45).length, 4);
+  check("emetteurs de rayonnement", radiationEmitters(gp).length, 9);
+  check("huit feux de camp a la meme courbe, plus l'etoile",
+        radiationEmitters(gp).filter((e) => e.type === 1).length, 8);
+}
+
+// §7 L'EQUIPEMENT SE RAMASSE.
+{
+  const pickups = gearPickups(gp);
+  check("objets a ramasser", pickups.length, 2);
+  const paquetage = pickups.find((p) => p.name === "ExpeditionGear");
+  const combi = pickups.find((p) => p.name === "SpaceSuit");
+  check("le paquetage du vaisseau donne les trois",
+        `${paquetage.suit}${paquetage.probe}${paquetage.minimap}`, "truetruetrue");
+  check("la combinaison de la grotte ne donne qu'elle-meme",
+        `${combi.suit}${combi.probe}${combi.minimap}`, "truefalsefalse");
+  check("le paquetage est dans le vaisseau", paquetage.body, "Ship_Body");
+  check("volumes de combinaison", suitVolumes(gp).length, 2);
+  check("le mur invisible est nomme",
+        suitVolumes(gp).find((v) => v.kind === "barrier").wall, "InvisibleWall");
+  check("points d'accrochage du joueur", attachPoints(gp).length, 4);
+  check("verrouillages de camera", lockOnTargets(gp).length, 2);
+  check("dont un pose sur le joueur lui-meme",
+        lockOnTargets(gp).filter((t) => t.body === "Player_Body").length, 1);
+
+  // Les trois volumes de reparation du satellite casse sont l'entrainement en
+  // apesanteur ; les quinze autres sont les avaries du vaisseau. Le CORPS les
+  // separe, la portee ne fait que les distinguer aujourd'hui.
+  const entrainement = new ZeroGTraining(
+    repairVolumes(gp).map((v) => ({ volume: v, done: false })));
+  check("trois noeuds a reparer dans la chambre d'apesanteur",
+        entrainement.total, 3);
 }
 
 // Les PNJ : une conversation sans arbre dans la scene reste jouable.

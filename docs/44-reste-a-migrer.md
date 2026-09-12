@@ -19,15 +19,24 @@ famille, dans un ordre prêt à écrire. Elle ne refait ni l'inventaire d'état
 > build ([`45-recensement-mesure.md`](45-recensement-mesure.md)) les a chiffrés :
 > le recoupement voyait 38 classes, il y en a **117**. Les chiffres ci-dessous
 > sont ceux du build, et trois des lots ont depuis été écrits.
+>
+> **Puis six autres l'ont été** — les lots 1, 2, 3, 4, 5 et 7 de la liste
+> ci-dessous, dans l'ordre conseillé en fin de page.
+> [`46-migration-lots.md`](46-migration-lots.md) raconte ce que leur écriture a
+> mesuré, et les sections concernées portent ci-dessous un renvoi vers lui. Il
+> reste **59 classes et 94 instances** sans lecteur.
 
 ## Le compte, mesuré
 
 | | |
 |---|---|
 | classes distinctes posées dans `level0` | 275 |
-| nommées quelque part dans `web/src/` | 114 |
+| nommées quelque part dans `web/src/` | 114 → **172** |
 | lues par **motif** plutôt que par nom | 44 classes, 96 instances |
-| **sans aucun lecteur** | **109 classes, 413 instances** |
+| **sans aucun lecteur** | 109 classes, 413 instances → **59 classes, 94 instances** |
+
+Les seconds chiffres sont ceux d'après les six lots de
+[`46`](46-migration-lots.md) ; le recensement est le même, refait.
 
 Les 44 classes lues par motif ne sont pas un manque : `OxygenVolume` répond à
 `/oxygen/i`, `TornadoBaseFluidVolume` à `/tornadobase/i`, et le compte les
@@ -40,6 +49,8 @@ destruction et de réparation, les zones d'ambiance.
 ## Ce qui reste, par famille
 
 ### 1. Les référentiels hérités — 12 classes, 106 instances
+
+> **Écrit** — [`46`](46-migration-lots.md) §lot 1. Les quatorze volumes décident de l'ancre, les distances du pilote automatique viennent du build, et `AttachOnAwake`/`MatchInitialMotion` se sont révélés satisfaits par construction.
 
 La famille la plus lourde, et la moins comprise.
 
@@ -68,6 +79,8 @@ champ qui désigne le porteur, et si le mouvement hérité inclut la rotation.
 
 ### 2. Les décalcomanies — 3 classes, 98 instances
 
+> **Écrit** — [`46`](46-migration-lots.md) §lot 2. Deux réglages de matériau, comme annoncé.
+
 `DS_DecalProjector` 38, `DS_Decals` 30, `DS_DecalsMeshRenderer` 30. Un système
 tiers, dont la géométrie est **déjà exportée** : ce sont les 30 *Decals Mesh
 Renderer* que [`40-solide.md`](40-solide.md) a rendus traversables. Elles sont
@@ -76,6 +89,8 @@ profondeur ni le mélange que le système prévoit — ce qui se voit en rasant 
 paroi. Le coût est un matériau, pas une mécanique.
 
 ### 3. La vie du décor — 22 classes, 83 instances
+
+> **Écrit** — [`46`](46-migration-lots.md) §lot 3, moins les quinze « et 15 autres » qui restent en queue.
 
 | classe | n | effet |
 |---|---|---|
@@ -94,6 +109,8 @@ changer la **topologie** du monde.
 
 ### 4. Les volumes et zones de jeu — 18 classes, 34 instances
 
+> **Écrit** — [`46`](46-migration-lots.md) §lot 4.
+
 `InteractZone` 7, `ChildTriggerVolume` 4, `ProbePromptTrigger` 4, `ZeroGField` 4,
 `ZeroGSector` 2, puis un chacun : `SuitBarrier`, `SuitRemovalVolume`,
 `HazardVolume`, `DarkZone`, `EnergyGate`, `InterferenceVolume`,
@@ -104,6 +121,8 @@ changer la **topologie** du monde.
 lire avec `GearPickup` (§7).
 
 ### 5. Le son réactif — 16 classes, 18 instances
+
+> **Écrit** — [`46`](46-migration-lots.md) §lot 5, y compris les deux déclencheurs de musique. Le compte de clips passe de 48 à 97.
 
 Le portage joue des sources **placées** ; le build joue en plus des sons
 **d'événement**, et c'est une couche entière qui manque :
@@ -129,6 +148,8 @@ Le portage a son propre HUD ([`28-hud.md`](28-hud.md)) : ce lot est à lire pour
 **comparer**, pas forcément pour porter.
 
 ### 7. Le joueur et le vaisseau — 11 classes, 18 instances
+
+> **Écrit** — [`46`](46-migration-lots.md) §lot 7 : l'équipement se ramasse, et l'entraînement en apesanteur avec lui.
 
 `PlayerAttachPoint` 4, `LandingPadSensor` 3, `GearPickup` 2,
 `PlayerLockOnTargeting` 2, puis `PlayerState`, `PlayerSpawner`,
@@ -190,6 +211,9 @@ audio et des particules, rendu des atmosphères et des brouillards, et une parti
 jouée — ne se referme pas par du code.
 
 ## Ordre conseillé
+
+Suivi tel quel, à l'exception du lot 8, laissé ouvert, et du lot 6, laissé à la
+comparaison — les raisons sont dans [`46`](46-migration-lots.md).
 
 | ordre | lot | effet ressenti | coût |
 |---|---|---|---|

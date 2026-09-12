@@ -169,6 +169,11 @@ L'export des clips est sorti de la boucle des sources pour servir aussi aux
 zones. **Le compte passe de 36 à 48 clips** — 23 Ogg, 25 WAV — et le chiffre
 bouge partout où il était écrit, README compris.
 
+> Il a rebougé depuis, et pour la même raison : les **sons d'événement** ne sont
+> sur aucune source non plus, ce sont des champs de script joués en
+> `PlayOneShot`. Le compte est aujourd'hui de **97 clips** — 23 Ogg, 74 WAV
+> ([`46-migration-lots.md`](46-migration-lots.md), lot 5).
+
 Ce que le build ne donne pas : la **forme** du fondu (la durée, oui : 2 s
 partout, 5 s pour la musique du village). Il est linéaire, et c'est dit comme
 tel. Ni le sens de `_dayWindow`, qui vaut 200 sur les trois volumes jour/nuit :
@@ -185,6 +190,10 @@ signal de nuit, qui vient de la hauteur du soleil.
 Ce qui reste est trié par famille dans [`44`](44-reste-a-migrer.md), qui a été
 réécrite sur ces chiffres-ci.
 
+> **Et six de ces familles ont été écrites depuis.** Le même recensement, refait
+> après elles, donne **59 classes et 94 instances** sans lecteur
+> ([`46-migration-lots.md`](46-migration-lots.md)).
+
 ## Invariants posés
 
 Sans le build ([`tests/09-jeu.mjs`](../tests/09-jeu.mjs)) : les deux lois du
@@ -198,7 +207,17 @@ Sur le build ([`tests/05-extract.mjs`](../tests/05-extract.mjs)) : les deux
 colonnes de sable nommées avec leurs quatre nombres et le refus du repli du
 constructeur, l'entonnoir et sa fenêtre, six volumes de destruction dont quatre
 mâchoires et deux causes distinctes, dix-huit volumes de réparation en 15/3, et
-les 48 clips en 23 Ogg et 25 WAV.
+les 48 clips en 23 Ogg et 25 WAV — 97 aujourd'hui, en 23 et 74.
+
+> **Un invariant manquait, et il a coûté la partie.** Les six volumes de
+> destruction étaient comptés, leurs causes lues, leur portée mesurée — mais
+> rien ne vérifiait *dans quel repère* on les interrogeait. La boucle leur
+> passait la position du joueur dans le repère ancré ; celui du soleil est une
+> sphère de 2 000 unités centrée sur l'origine du **monde**. Tout joueur posé
+> sur une planète mourait donc incinéré à la première image. Il a fallu un vrai
+> Chromium, profil rempli, pour le voir ([`46`](46-migration-lots.md)) — ce qui
+> est, mot pour mot, la leçon de [`43`](43-pnj-son-decollage.md) : un système
+> qui passe ses tests n'est pas un système qu'on a joué.
 
 ## La leçon, d'un cran encore
 
