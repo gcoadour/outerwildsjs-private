@@ -8,7 +8,9 @@ lisait**.
 
 > [`44-reste-a-migrer.md`](44-reste-a-migrer.md) reprend la même question par
 > l'autre bout — **ce que l'alpha pose et que le portage ne nomme pas** — et en
-> fait des lots ordonnés, prêts à écrire.
+> fait des lots ordonnés, prêts à écrire. Ses chiffres viennent du recensement
+> refait sur le build ([`45-recensement-mesure.md`](45-recensement-mesure.md)) :
+> **109 classes et 413 instances n'ont toujours aucun lecteur**.
 
 Inventaire fondé sur les composants et assets réellement présents dans le
 build, pas sur une impression. Ce document dit honnêtement où en est le
@@ -84,6 +86,10 @@ portage.
 | ciel | voûte, 24 nuages et leurs 10 textures, champ d'étoiles, extraits ; fusions corrigées |
 | lumières vivantes | 15 `NightLight`, 15 `PulsingLight`, 9 `LightFlicker` |
 | textures qui défilent | 44 extraites, 27 rattachées et 23 en mouvement |
+| sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
+| volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
+| réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 > **Corrigé par le jeu** ([`43-pnj-son-decollage.md`](43-pnj-son-decollage.md)).
@@ -117,12 +123,19 @@ dans l'alpha.
 | le modèle de sonde | `_probePrefab` n'est pas résolu |
 | les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
 | la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
-| l'entraînement et le ciblage | aucune source |
+| ~~l'entraînement et le ciblage~~ | **faux, mesuré** : `PlayerLockOnTargeting` ×2 (dont une sur `Player_Body`) et `ZeroGTrainingManager` sont dans le build ([`45`](45-recensement-mesure.md)) |
 
 > **Corrigé par la mesure** ([`36-audit.md`](36-audit.md)).
 > `RocketKidConvoController` **est** dans le build, lisible, et porte trois
 > arbres (`_introduction`, `_successfulLanding`, `_tooManyCrashes`). Il sort
 > donc de cette liste : c'est un manque du portage, pas de l'alpha.
+>
+> **Et une deuxième fois** ([`45-recensement-mesure.md`](45-recensement-mesure.md)).
+> Le ciblage et l'entraînement y sont aussi. Deux lignes de ce tableau sur dix
+> étaient donc des manques du portage déguisés en manques de l'alpha, et les
+> deux sont tombées à la mesure, jamais au raisonnement. S'y ajoute une
+> troisième chose que personne n'avait cherchée : la combinaison, la sonde et la
+> minicarte **se ramassent** (`GearPickup` ×2), là où le portage les donne.
 
 ### 2. Ce qui demande un œil ou une oreille humaine
 
