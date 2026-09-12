@@ -6,6 +6,10 @@ ordonnées**, et [`35-monde.md`](35-monde.md) raconte ce qu'a donné leur mise e
 œuvre : l'essentiel de ce qui manquait était **déjà extrait, et personne ne le
 lisait**.
 
+> [`44-reste-a-migrer.md`](44-reste-a-migrer.md) reprend la même question par
+> l'autre bout — **ce que l'alpha pose et que le portage ne nomme pas** — et en
+> fait des lots ordonnés, prêts à écrire.
+
 Inventaire fondé sur les composants et assets réellement présents dans le
 build, pas sur une impression. Ce document dit honnêtement où en est le
 portage.

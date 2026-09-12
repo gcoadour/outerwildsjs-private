@@ -63,3 +63,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`36-audit.md`](36-audit.md) — l'audit mesuré sur le build : matrice des écarts, actions, backlog
 - [`37-corrections.md`](37-corrections.md) — **l'audit mis en œuvre : marche, inertie de rotation, courants, référentiels**
 - [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) — **parler, entendre, décoller : trois systèmes qui passaient leurs tests sans fonctionner**
+- [`44-reste-a-migrer.md`](44-reste-a-migrer.md) — **ce qui reste à migrer de l'alpha d'origine : six familles, 378 composants sans lecteur, par ordre**
