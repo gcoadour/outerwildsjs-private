@@ -26,7 +26,9 @@ import { polarFields, polarDirection, strongestPolar,
 import { rolloffModel, curveGain } from "../web/src/audio.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep } from "../web/src/physics.js";
+import { underAsleep, noCollide } from "../web/src/physics.js";
+import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky } from "../web/src/sky.js";
+import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
@@ -44,9 +46,10 @@ import { bodySpin, spinPeriod, rotateAbout, SpinField,
 import { directionalFields, insideVolume, strongestDirectional,
          dominantField } from "../web/src/gravity.js";
 import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
-         applyDrag, terminalSpeed, densityAt, mediumVelocity,
+         applyDrag, terminalSpeed, densityAt, mediumVelocity, lawOf, curveAt,
          FluidField } from "../web/src/fluids.js";
-import { pickLights, LIGHT_BUDGET } from "../web/src/lights.js";
+import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
+         NIGHT_FADE } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
          Marshmallow } from "../web/src/consoles.js";
@@ -738,6 +741,89 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     cyclone.apply([0, 0, 0], vc, 0.01, { magnitude: 12, dir: { x: 0, y: -1, z: 0 } });
   }
   check("la tornade ejecte vers le haut", vc.y > 250, true);
+
+  // Les QUATRE lois de vitesse du build (docs/39-fluides.md). Trois d'entre
+  // elles calculent leur direction a partir du point : elles ne serialisent
+  // donc AUCUN `_localLinearFlow`, et le portage, qui n'attendait que celui-la,
+  // rendait immobiles six bases de tornade, un rayon tracteur et un ocean.
+  check("la loi se lit dans la classe", lawOf("TornadoBaseFluidVolume"), "tornadoBase");
+  check("... celle du rayon tracteur aussi", lawOf("TractorBeamFluid"), "tractor");
+  check("... celle de l'ocean aussi", lawOf("SphereOceanFluidVolume"), "ocean");
+  check("une classe inconnue suit la loi lineaire", lawOf("SimpleFluidVolume"), "simple");
+
+  // Base de tornade : elle aspire vers l'AXE, pas vers le centre. Cinq bases
+  // du build aspirent (`_flowType` 0), une repousse (1), toutes a 100 u/s.
+  const bse = fluidVolumes({ placed: { TornadoBaseFluidVolume: [{
+    name: "Base", position: [0, 0, 0], rotation: null,
+    volume: { shape: "sphere", radius: 80, center: [0, 0, 0] },
+    fields: { _density: 2, _flowSpeed: 100, _flowType: 0, _priority: 1 },
+  }] } }, {})[0];
+  check("la base garde son flux sans direction serialisee", bse.flowSpeed, 100);
+  const vb = mediumVelocity(bse, [40, 0, 0]);
+  check("elle aspire vers l'axe", round(vb[0], 3), -100);
+  check("... a pleine vitesse", round(Math.hypot(vb[0], vb[1], vb[2]), 3), 100);
+  const vh = mediumVelocity(bse, [30, 50, 0]);
+  check("l'aspiration est horizontale, quelle que soit la hauteur",
+        round(vh[1], 6), 0);
+  check("... et vaut toujours 100", round(Math.hypot(vh[0], vh[1], vh[2]), 3), 100);
+  check("sur l'axe meme, aucune direction n'est definie",
+        mediumVelocity(bse, [0, 50, 0]), null);
+  const rep = mediumVelocity({ ...bse, flowType: 1 }, [40, 0, 0]);
+  check("`_flowType` 1 repousse au lieu d'aspirer", round(rep[0], 3), 100);
+
+  // Rayon tracteur : `up * _flowSpeed`, plus un rappel lateral vers l'axe.
+  const beam = fluidVolumes({ placed: { TractorBeamFluid: [{
+    name: "Faisceau", position: [0, 0, 0], rotation: null,
+    volume: { shape: "capsule", radius: 1, height: 10, axis: 1, center: [0, 0, 0] },
+    fields: { _density: 500, _flowSpeed: 10, _priority: 100 },
+  }] } }, {})[0];
+  const vt = mediumVelocity(beam, [0, 0, 0]);
+  check("le faisceau souleve le long de son axe", round(vt[1], 3), 10);
+  const vl = mediumVelocity(beam, [2, 0, 0]);
+  check("... et ramene vers l'axe, a cinq fois l'ecart", round(vl[0], 3), -10);
+  check("le soulevement ne depend pas de l'ecart", round(vl[1], 3), 10);
+
+  // L'ocean de Giant's Deep : il REPOUSSE. Entre `_outerRadius` 500 et
+  // `_innerRadius` 440, une courbe donne la part de `_maxRepelSpeed` 250 qui
+  // pousse vers le haut ; sous le rayon interne, plus rien, et la densite
+  // saute d'un coup a 100. C'est ce qui rend le coeur inatteignable en
+  // nageant, et donne sa raison d'etre a la tornade inversee.
+  const mer = fluidVolumes({ placed: { SphereOceanFluidVolume: [{
+    name: "Mer", position: [0, 0, 0], rotation: null,
+    volume: { shape: "sphere", radius: 498, center: [0, 0, 0] },
+    fields: { _density: 10, _deepDensity: 100, _innerRadius: 440,
+              _outerRadius: 500, _maxRepelSpeed: 250, _currentSpeed: 10,
+              _priority: 1, _repelCurve: { m_Curve: [{ time: 0, value: 0 },
+                                                     { time: 1, value: 1 }] } },
+  }] } }, {})[0];
+  check("la courbe de repulsion est echantillonnee", mer.repelCurve.length, 9);
+  check("elle part de zero", curveAt(mer.repelCurve, 0), 0);
+  check("et arrive a un", curveAt(mer.repelCurve, 1), 1);
+  const surf = mediumVelocity(mer, [0, 0, 500]);
+  check("en surface, rien ne repousse", round(surf[2], 6), 0);
+  check("... mais le courant porte a pleine vitesse", round(surf[0], 3), -10);
+  const mi = mediumVelocity(mer, [0, 0, 470]);
+  check("a mi-chemin, la repulsion vaut la moitie du maximum",
+        round(mi[2], 3), 125);
+  check("... et le courant s'est eteint de moitie", round(mi[0], 3), -5);
+  check("au rayon interne, la repulsion est maximale",
+        round(mediumVelocity(mer, [0, 0, 440])[2], 3), 250);
+  check("sous le rayon interne, plus rien ne pousse",
+        mediumVelocity(mer, [0, 0, 430]), null);
+  // Le palier de densite, et non la rampe : le build bascule d'un coup.
+  check("au-dessus du rayon interne, la densite de surface",
+        densityAt(mer, depthIn(mer, [0, 0, 450])), 10);
+  check("en dessous, la densite profonde d'un coup",
+        densityAt(mer, depthIn(mer, [0, 0, 430])), 100);
+
+  // `_flowType` 1 et 2 d'un volume simple : radial rentrant et sortant. Aucun
+  // volume du build ne s'en sert, mais la loi est la et ne coute rien.
+  const radial = { law: "simple", position: [0, 0, 0], rotation: null,
+                   radius: 100, flowSpeed: 20, flowType: 2 };
+  check("`_flowType` 2 pousse vers l'exterieur",
+        round(mediumVelocity(radial, [10, 0, 0])[0], 3), 20);
+  check("`_flowType` 1 attire vers le centre",
+        round(mediumVelocity({ ...radial, flowType: 1 }, [10, 0, 0])[0], 3), -20);
 
   // `_priority` tranche avant la profondeur : l'interieur du vaisseau est a
   // 100, le centre d'une tornade a 5, l'ocean a 1.
@@ -1500,6 +1586,155 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         underAsleep({ name: "Sol", parent: null }, new Set(["Observatoire"])), false);
   check("sans groupe endormi, rien n'est ecarte",
         underAsleep(enfant, new Set()), false);
+
+  // Ce que le build ne rend pas solide ne doit pas le devenir : 725 des 2 219
+  // objets porteurs de maillage n'ont AUCUN collider (docs/40-solide.md).
+  // L'exportateur les marque, et la physique les laisse passer.
+  const nuage = { name: "PieceOfRing",
+                  metadata: { gltf: { extras: { noCollide: true } } } };
+  const sol = { name: "Terrain", metadata: { gltf: { extras: {} } } };
+  check("un noeud marque traversable l'est", noCollide(nuage), true);
+  check("... et le terrain ne l'est pas", noCollide(sol), false);
+  check("un maillage sans metadonnees reste solide",
+        noCollide({ name: "Rocher" }), false);
+  check("un maillage sans extras non plus",
+        noCollide({ name: "Rocher", metadata: { gltf: {} } }), false);
+}
+
+// --- textures qui defilent -------------------------------------------------
+//
+// Une seule loi pour les quatre classes du build, 44 instances
+// (docs/42-lumieres.md) : offset += rate x echelle x dt, replie dans [0, 1].
+{
+  check("un pas avance l'offset", round(scrollOffset(0, 0.05, 1, 1), 6), 0.05);
+  check("l'echelle de la texture multiplie le pas",
+        round(scrollOffset(0, 0.05, 4, 1), 6), 0.2);
+  // Le build teste STRICTEMENT au-dela de 1 : on repart de zero, on ne module
+  // pas. Un pas qui deborde perd donc son reste, et c'est ce que fait le jeu.
+  check("au-dela de un, on repart de zero", scrollOffset(0.99, 0.05, 1, 1), 0);
+  check("exactement a un, on ne repart pas encore",
+        round(scrollOffset(0.95, 0.05, 1, 1), 6), 1);
+  check("un rythme negatif remonte", round(scrollOffset(0.5, -0.05, 1, 1), 6), 0.45);
+  check("... et sous zero, on repart de un", scrollOffset(0.01, -0.05, 1, 1), 1);
+  check("une echelle absente vaut un", round(scrollOffset(0, 0.05, 0, 1), 6), 0.05);
+
+  // Le rattachement se fait par NOM : la position extraite est statique, et
+  // les corps orbitent — un appariement geometrique echoue des la premiere
+  // seconde, ce qu'un premier essai a montre a zero surface sur quarante-quatre.
+  const d = { scrollers: [
+    { name: "Sable", position: [10, 0, 0], channels: { main: { direction: [0, 1], rate: 0.05 } } },
+    { name: "Sable", position: [50, 0, 0], channels: { main: { direction: [0, 1], rate: 0.07 } } },
+  ] };
+  const mk = (nom) => ({ name: nom, material: null });
+  const sc = new TextureScrollers(d);
+  check("deux surfaces decrites", sc.total, 2);
+  check("les deux se retrouvent par leur nom",
+        sc.attach([mk("Sable"), mk("Sable"), mk("Roche")]), 2);
+  check("... et aucune autre", sc.count, 2);
+  check("chaque description prend un maillage distinct",
+        new Set(sc.live.map((x) => x.mesh)).size, 2);
+  // Moins de maillages que de descriptions : on n'en invente pas.
+  const court = new TextureScrollers(d);
+  check("une seule surface pour deux descriptions", court.attach([mk("Sable")]), 1);
+  // Un nom qui n'est pas la ne rattache rien.
+  check("un nom absent ne rattache rien",
+        new TextureScrollers(d).attach([mk("Roche")]), 0);
+  // Sans donnees, rien ne se rattache et rien ne casse.
+  const vide = new TextureScrollers(null);
+  check("sans donnees, aucune surface", vide.total, 0);
+  check("... et rattacher ne trouve rien", vide.attach([mk("Sable")]), 0);
+  check("... et avancer ne fait rien", vide.update(0.016), 0);
+}
+
+// --- ce qui fait vivre une lumiere -----------------------------------------
+//
+// Trois `Update` du build, transcrits (docs/42-lumieres.md). Le portage posait
+// l'intensite serialisee et n'en bougeait plus.
+{
+  // `PulsingLight` : sinusoide ADDITIVE, pas un facteur.
+  const f = { _pulseRate: 2, _timeOffset: 0, _intensityFluctuation: 0.3,
+              _rangeFluctuation: 5 };
+  const base = { intensity: 1, range: 20 };
+  check("au temps zero, la sinusoide ne decale rien",
+        round(pulse(base, f, 0).intensity, 6), 1);
+  // sin(pi/2) = 1 : le maximum est atteint quand (t x rate) vaut pi/2.
+  const haut = pulse(base, f, Math.PI / 4);
+  check("au sommet, on ajoute toute la fluctuation",
+        round(haut.intensity, 6), 1.3);
+  check("... et la portee suit la sienne", round(haut.range, 6), 25);
+  const bas = pulse(base, f, 3 * Math.PI / 4);
+  check("au creux, on la retranche", round(bas.intensity, 6), 0.7);
+  check("une fluctuation nulle laisse tout en place",
+        round(pulse(base, { _pulseRate: 2 }, 1).intensity, 6), 1);
+  // Le decalage de phase existe pour que deux lampes voisines ne battent pas
+  // ensemble.
+  check("le decalage de phase change la valeur",
+        round(pulse(base, { ...f, _timeOffset: Math.PI / 4 }, 0).intensity, 6), 1.3);
+
+  // `LightFlicker` : on tire une cible, on s'en approche par un Lerp.
+  const etat = { intensity: 1, target: 1 };
+  // alea = 1 -> cible = (1 x 2 - 1) x range + base = base + range
+  const apres = flicker(etat, 1, { range: 0.1, rate: 0.2 }, () => 1);
+  check("une cible atteinte en fait tirer une autre", round(etat.target, 6), 1.1);
+  check("on s'en approche du taux donne", round(apres, 6), 1.02);
+  // Tant qu'on n'est pas arrive, la cible ne change pas.
+  const cible0 = etat.target;
+  flicker(etat, 1, { range: 0.1, rate: 0.2 }, () => 0);
+  check("en chemin, la cible tient", round(etat.target, 6), round(cible0, 6));
+  check("les valeurs par defaut sont celles du build",
+        round(flicker({ intensity: 5, target: 5 }, 5, {}, () => 1), 4), 5.02);
+
+  // `NightLight` : l'intensite serialisee est celle de la NUIT.
+  const nf = { _dayIntensityMultiplier: 0.5 };
+  check("le fondu dure cinq secondes", NIGHT_FADE, 5);
+  check("de nuit, fondu acheve, on est a l'intensite du build",
+        round(nightIntensity(2, nf, true, 5), 6), 2);
+  check("de jour, fondu acheve, on est a la moitie",
+        round(nightIntensity(2, nf, false, 5), 6), 1);
+  check("a mi-fondu vers la nuit, on est entre les deux",
+        round(nightIntensity(2, nf, true, 2.5), 6), 1.5);
+  check("au-dela de la duree, on ne depasse pas",
+        round(nightIntensity(2, nf, false, 100), 6), 1);
+  check("sans multiplicateur, c'est la moitie du build",
+        round(nightIntensity(2, {}, false, 5), 6), 1);
+}
+
+// --- la voute celeste ------------------------------------------------------
+//
+// `SkyBehavior` fait deux choses par image, et le portage n'en faisait aucune :
+// il tourne la voute vers l'etoile — c'est de la que viennent le jour et la
+// nuit — et il l'efface quand on s'en eloigne (docs/41-ciel.md).
+{
+  // La courbe relevee sur le build : pleine jusqu'aux trois quarts, puis elle
+  // tombe a zero.
+  const courbe = [1, 1, 1, 1, 1, 1, 1, 0.8221, 0];
+  check("le rayon de ciel par defaut est celui du constructeur", SKY_RADIUS, 320);
+  check("au centre, la voute est pleine", skyAlpha(courbe, 0, 320), 1);
+  check("au village, elle l'est encore", skyAlpha(courbe, 132, 320), 1);
+  // Le build divise par `_skyRadius` (320) et NON par le rayon du collider
+  // (250,7) : a la surface de la voute, on la voit donc encore.
+  check("a la surface de la voute, elle tient presque entierement",
+        round(skyAlpha(courbe, 250.749, 320), 3), 0.952);
+  check("au rayon de ciel, elle a disparu", skyAlpha(courbe, 320, 320), 0);
+  check("au-dela, elle reste disparue", skyAlpha(courbe, 900, 320), 0);
+  check("entre les deux, elle decroit",
+        round(skyAlpha(courbe, 300, 320), 3), 0.411);
+  check("sans rayon, on ne divise pas par zero", skyAlpha(courbe, 10, 0), 1);
+  check("sans courbe, la voute reste pleine", skyAlpha(null, 10, 320), 1);
+  check("une courbe s'interpole", skyCurveAt([0, 1], 0.5), 0.5);
+
+  // Sans donnees de ciel, le module ne fabrique rien : il n'y a pas de voute
+  // inventee, seulement celle du build.
+  const vide = new Sky(null);
+  check("sans donnees, aucune voute", vide.ready, false);
+  check("... et rattacher ne trouve rien", vide.attach([{ name: "SkyShell" }]), 0);
+  const ciel = new Sky({ shell: { name: "SkyShell", alphaCurve: courbe, skyRadius: 320 },
+                         clouds: new Array(24).fill({ texture: "cloud_01" }) });
+  check("la voute se retrouve par son nom",
+        ciel.attach([{ name: "Sol" }, { name: "SkyShell" }]), 1);
+  check("... et le ciel est alors pret", ciel.ready, true);
+  check("les nuages du build sont comptes", ciel.cloudCount, 24);
+  check("sans donnees, aucun nuage", vide.cloudCount, 0);
 }
 
 // --- detecteur d'oxygene ---------------------------------------------------

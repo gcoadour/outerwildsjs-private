@@ -62,6 +62,8 @@ import { SpinField, sunElevation } from "./spin.js";
 import { directionalFields, polarFields } from "./gravity.js";
 import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { loadLighting, LightField } from "./lights.js";
+import { loadSky, Sky } from "./sky.js";
+import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 
 function setStatus(msg) {
   const el = document.getElementById("status");
@@ -226,6 +228,13 @@ async function boot() {
   // lumieres posees, les reglages de rendu, les champs de force directionnels,
   // les volumes de fluide et les zones d'oxygene. Voir docs/34-actions.md.
   const lighting = await loadLighting();
+  // Le ciel du build : la voute tourne vers l'etoile, et c'est elle qui
+  // fait le jour et la nuit (docs/41-ciel.md).
+  const sky = new Sky(await loadSky());
+  window.__sky = sky;
+  // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
+  const scrollers = new TextureScrollers(await loadTextureAnimators());
+  window.__texanim = scrollers;
   const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
   // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
@@ -265,6 +274,9 @@ async function boot() {
       shaderCounts[k] = (shaderCounts[k] || 0) + v;
     }
     syncGeometry([entry], origin);
+    if (sky.attach(entry.meshes)) console.log(`ciel : voute rattachee`);
+    const nScroll = scrollers.attach(entry.meshes);
+    if (nScroll) console.log(`textures defilantes : ${nScroll} rattachees`);
     window.__shaders = shaderCounts;
     console.log(`geometrie chargee : ${entry.file} (${entry.meshes.length} maillages)`);
   });
@@ -327,8 +339,14 @@ async function boot() {
       meshesForBody(entry, body.bodyName, ["Ship_Body"]),
       { asleep: colLOD.asleep() });
     colliderFile = key;
+    // sonde de verification : ce qui est solide, et ce que le build laisse
+    // traverser (docs/40-solide.md)
+    window.__colliders = { poses: colliders.aggregates.length,
+                           ignores: colliders.skipped, endormis: colliders.dormants,
+                           traversables: colliders.traversables, fichier: key };
     console.log(`colliders : ${colliders.aggregates.length} sur ${key} ` +
-      `(${colliders.skipped} ignores, ${colliders.dormants} endormis) en ` +
+      `(${colliders.skipped} ignores, ${colliders.dormants} endormis, ` +
+      `${colliders.traversables} traversables) en ` +
       `${(performance.now() - t0).toFixed(0)} ms`);
   }
 
@@ -1713,15 +1731,35 @@ async function boot() {
     if (starEntry) starEntry.mesh.scaling.setAll(sunState.scale);
     if (supernovaView && starBody) supernovaView.update(sunState, starBody.position);
 
-    // coques atmospheriques : elles suivent leur corps
+    // Coques atmospheriques : elles suivent leur corps, et s'effacent quand on
+    // entre dedans.
+    //
+    // Ce halo de limbe est fait pour etre vu DE L'EXTERIEUR : c'est un terme de
+    // Fresnel sur une sphere, dont les faces arriere sont eliminees justement
+    // pour cela. Vu de l'interieur, il ne reste que l'hemisphere oppose, dont
+    // les normales fuient le regard — et le voile sature sur tout l'ecran.
+    //
+    // Sur Timber Hearth, cela repeignait en plein jour une scene de depart dont
+    // le soleil est a 77 degres sous l'horizon, par-dessus la vraie voute que
+    // le build livre pourtant (docs/41-ciel.md). Le jeu, lui, n'a pas de coque
+    // inventee : il a `SkyShell`.
     for (const a of mats.atmospheres) {
       const p = a.entry.data.position;
       a.mesh.position.set(p[0], p[1], p[2]);
+      const dx = camera.position.x - p[0], dy = camera.position.y - p[1],
+            dz = camera.position.z - p[2];
+      const rayon = a.mesh.getBoundingInfo().boundingSphere.radius
+        * (a.mesh.scaling ? a.mesh.scaling.x : 1);
+      a.mesh.setEnabled(Math.hypot(dx, dy, dz) > rayon);
     }
     updateMaterials(BABYLON, mats, camera.position, sun.direction,
                     performance.now() / 1000, loop.fraction);
     updateGameShaders(BABYLON, scene, camera.position, performance.now() / 1000,
                       sun.direction);
+    // Le ciel du build : ce qu'il calcule, on le calcule. Ce qu'il n'applique
+    // pas, on ne l'applique pas non plus (docs/41-ciel.md).
+    if (sky.ready) sky.update(player.pos);
+    if (scrollers.count) scrollers.update(dt);
 
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
@@ -1729,6 +1767,11 @@ async function boot() {
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
     // lieu d'eclairage pour un systeme solaire entier.
     placedLights.update(player.pos, anchorPos);
+    // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
+    // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne
+    // vacille pas se remarque (docs/42-lumieres.md).
+    placedLights.setNight(night, performance.now() / 1000);
+    placedLights.animate(performance.now() / 1000);
     // le champ dominant du joueur tient lieu de `Physics.gravity` pour le
     // `gravityModifier` des systemes de particules
     if (particleMap.length) particles.update(player.pos, anchorPos, player.field);

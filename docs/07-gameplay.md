@@ -116,4 +116,12 @@ sur une coque d'atmosphère. Répartition radiale réelle des 445 maillages sous
 | 200–250 | 25 |
 
 Le terrain s'étale bien de 100 à 250 u, et les objets les plus éloignés
-(218–238) sont des `PieceOfRing`, de la géométrie solide. Aucune coque parasite.
+(218–238) sont des `PieceOfRing`.
+
+> **Démenti par la mesure suivante** ([`40-solide.md`](40-solide.md)). La
+> crainte était fondée et la conclusion fausse : les `PieceOfRing` sont les
+> **nuages** de Timber Hearth, et ils n'ont aucun collider dans le build. La
+> coque parasite existait bel et bien — c'était `SkyShell`, la voûte céleste,
+> une sphère de rayon **250,749** dont le collider est un *déclencheur*. Le
+> portage la rendait solide parce qu'il fabriquait un collider pour chaque
+> maillage rendu ; le joueur se posait donc à l'intérieur du ciel, à 249 u.

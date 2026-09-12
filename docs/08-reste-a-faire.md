@@ -72,6 +72,11 @@ portage.
 | repère tournant | Coriolis et force centrifuge : le sol défile sous un stationnaire |
 | colliders par portée | les 21 `ChildColliderLOD` endorment leur sous-arbre |
 | départ de la partie | **au point d'apparition du build, à sa hauteur et dans son regard** |
+| fluides | **quatre lois du build** : aspiration des bases de tornade, rayon tracteur, répulsion de l'océan |
+| ce qui est solide | **1 691 obstacles sur 2 219 maillages** : le décor se traverse, la voûte aussi |
+| ciel | voûte, 24 nuages et leurs 10 textures, champ d'étoiles, extraits ; fusions corrigées |
+| lumières vivantes | 15 `NightLight`, 15 `PulsingLight`, 9 `LightFlicker` |
+| textures qui défilent | 44 extraites, 27 rattachées et 23 en mouvement |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 ## Ce qui manque, par famille
@@ -116,12 +121,15 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
 - **Le rendu général** : atmosphères, surface stellaire, brouillards et
   explosion sont des implémentations originales visant un résultat comparable,
   pas des transpositions de shaders.
-- **La première image du jeu** — le pose de départ vient désormais du build
-  ([`38-depart.md`](38-depart.md)) : point d'apparition du joueur, sa hauteur,
-  sa rotation. Le **rendu** de cette image, lui, n'est pas mesuré — ciel de
-  nuit, nuages de Timber Hearth, lumière de la lune. Les nuages, en
-  particulier, n'ont aucun lecteur dans le portage, et personne n'a encore
-  demandé au build ce qu'ils sont.
+- **La première image du jeu** — le pose de départ vient du build
+  ([`38-depart.md`](38-depart.md)), et elle a depuis été **regardée** : lancée
+  dans un Chromium réel, le build fourni à la page, et photographiée
+  ([`41-ciel.md`](41-ciel.md)). Elle montrait un plein jour cyan sur une scène
+  dont le soleil est à 77 degrés sous l'horizon. Trois causes mesurées et
+  corrigées : les coques d'atmosphère du portage vues de l'intérieur, les
+  nuages rendus en additif quand le build les fond en alpha, et la voûte rendue
+  opaque quand elle est transparente. Les nuages, eux, ont désormais un
+  lecteur : 24 `CloudTextureController`, dix textures distinctes.
 - **Une partie jouée**, tout simplement.
 
 ### 3. Ce qui reste techniquement ouvert
@@ -141,6 +149,20 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   groupe hors de portée n'entre plus dans la construction, et l'ensemble
   éveillé est réévalué en continu — mais reconstruit au plus une fois toutes
   les deux secondes, parce que reconstruire coûte près d'une seconde.
+- **La rotation de la voûte céleste** (`SkyBehavior.LookAt`) : c'est elle qui
+  fait le jour et la nuit, et la convention d'axes entre le `LookAt` d'Unity et
+  l'export glTF, qui inverse Z, reste à établir. Deux orientations essayées,
+  toutes deux fausses ([`41-ciel.md`](41-ciel.md)).
+- **Les dix textures de nuage** sont extraites et nommées par nuage ; il reste à
+  les exporter comme images et à les poser sur 24 maillages qui portent tous le
+  même nom.
+- **Le champ d'étoiles** (`DistantStarController`) est extrait, son système de
+  particules ne l'est pas.
+- **170 des 275 classes posées dans `level0` ne sont nommées nulle part** dans le
+  portage ([`42-lumieres.md`](42-lumieres.md)). Les trois familles les plus
+  lourdes : les référentiels (84 instances), les textures animées (44), les
+  décalcomanies (98). Ce compte est une borne haute — certaines classes sont
+  lues par motif — et c'est désormais la carte de ce qui reste.
 - **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
   restent ouvertes : le jeu affiche un système entier parce que les planètes
   lointaines sont des textures rafraîchies une fois par seconde. Le portage a
@@ -197,6 +219,10 @@ autre chose qu'un texte.
 | caméra embarquée de la sonde | [`25-interface.md`](25-interface.md) |
 | commandes tactiles et jeu en paysage | [`33-mobile.md`](33-mobile.md) |
 | rotation, lumières, fluides, champs, manette | [`35-monde.md`](35-monde.md) |
+| les quatre lois de fluide, lues dans l'IL | [`39-fluides.md`](39-fluides.md) |
+| ce qui est solide, et ce qu'on traversait | [`40-solide.md`](40-solide.md) |
+| la première image, regardée | [`41-ciel.md`](41-ciel.md) |
+| le recensement, lumières vivantes et textures défilantes | [`42-lumieres.md`](42-lumieres.md) |
 
 ## Estimation honnête
 

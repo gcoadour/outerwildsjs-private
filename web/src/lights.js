@@ -52,6 +52,70 @@ export function pickLights(lights, listener, budget = LIGHT_BUDGET,
   return near.slice(0, budget);
 }
 
+/**
+ * Ce qui fait vivre une lumiere, transcrit des `Update` du build.
+ *
+ * Trois comportements, 39 lumieres sur Timber Hearth, et le portage n'en lisait
+ * aucun : il posait l'intensite serialisee, fixe (docs/42-lumieres.md).
+ */
+
+/** Duree du fondu de `NightLight`, en secondes. Le build la code en dur. */
+export const NIGHT_FADE = 5;
+
+/**
+ * `PulsingLight` : une sinusoide ADDITIVE autour des valeurs initiales.
+ *
+ *     intensite = sin((t + _timeOffset) x _pulseRate) x _intensityFluctuation
+ *                 + intensite initiale
+ *
+ * et de meme pour la portee. C'est bien une addition, pas un facteur : une
+ * fluctuation de 0,3 fait varier de plus ou moins 0,3, quelle que soit
+ * l'intensite de depart.
+ */
+export function pulse(base, f, t) {
+  const s = Math.sin((t + (f._timeOffset || 0)) * (f._pulseRate || 1));
+  return {
+    intensity: s * (f._intensityFluctuation || 0) + base.intensity,
+    range: s * (f._rangeFluctuation || 0) + base.range,
+  };
+}
+
+/**
+ * `LightFlicker` : on vise un point au hasard autour de l'intensite initiale,
+ * et on s'en approche par un `Lerp`. Une fois arrive (a 0,01 pres), on en tire
+ * un autre.
+ *
+ * `rate` est un pas PAR IMAGE dans le build, et il est transcrit tel quel : le
+ * vacillement d'un feu n'a pas de vitesse juste, seulement une allure.
+ *
+ * @param etat  {{ intensity, target }} modifie sur place
+ * @param alea  fonction rendant un nombre dans [0, 1[
+ */
+export function flicker(etat, base, f, alea = Math.random) {
+  const portee = f.range ?? 0.1, taux = f.rate ?? 0.2;
+  if (Math.abs(etat.intensity - etat.target) < 0.01) {
+    etat.target = (alea() * 2 - 1) * portee + base;
+  }
+  etat.intensity += (etat.target - etat.intensity) * taux;
+  return etat.intensity;
+}
+
+/**
+ * `NightLight` : l'intensite SERIALISEE est celle de la nuit. Au lever du
+ * soleil elle fond vers `_dayIntensityMultiplier` (0,5 par defaut) en cinq
+ * secondes ; au coucher, elle revient.
+ *
+ * @param night  vrai s'il fait nuit a cet endroit
+ * @param t      secondes ecoulees depuis le dernier changement
+ */
+export function nightIntensity(base, f, night, t) {
+  const jour = base * (f._dayIntensityMultiplier ?? 0.5);
+  const de = night ? jour : base;      // on vient de l'etat precedent
+  const vers = night ? base : jour;
+  const u = Math.max(0, Math.min(1, t / NIGHT_FADE));
+  return de + (vers - de) * u;
+}
+
 /** Champ de lumieres : instancie et libere selon le budget. */
 export class LightField {
   constructor(BABYLON, scene, lights = [], budget = LIGHT_BUDGET) {
@@ -61,6 +125,49 @@ export class LightField {
     this.budget = budget;
     this.live = new Map();     // lumiere -> objet Babylon
     this.failed = 0;
+    this.anim = new Map();     // lumiere -> etat d'animation
+    this.night = true;         // vrai tant qu'on n'a pas dit le contraire
+    this.nightSince = 0;       // horodatage du dernier basculement
+  }
+
+  /** Le jour se leve, ou tombe : `NightLight` s'en sert, et rien d'autre. */
+  setNight(night, t) {
+    if (night === this.night) return;
+    this.night = night;
+    this.nightSince = t;
+  }
+
+  /**
+   * Applique aux lumieres vivantes ce qui les anime.
+   *
+   * @param t temps en secondes, la meme horloge que `setNight`
+   */
+  animate(t) {
+    let touchees = 0;
+    for (const [light, node] of this.live) {
+      const bs = light.behaviours;
+      if (!bs || !bs.length) continue;
+      let intensite = light.intensity ?? 1;
+      let portee = light.range ?? 0;
+      for (const b of bs) {
+        if (b.kind === "PulsingLight") {
+          const v = pulse({ intensity: intensite, range: portee }, b.fields, t);
+          intensite = v.intensity; portee = v.range;
+        } else if (b.kind === "NightLight") {
+          intensite = nightIntensity(intensite, b.fields, this.night,
+                                     t - this.nightSince);
+        } else if (b.kind === "LightFlicker") {
+          let etat = this.anim.get(light);
+          if (!etat) { etat = { intensity: intensite, target: intensite };
+                       this.anim.set(light, etat); }
+          intensite = flicker(etat, light.intensity ?? 1, b.fields);
+        }
+      }
+      node.intensity = Math.max(0, intensite);
+      if (portee > 0 && "range" in node) node.range = portee;
+      touchees += 1;
+    }
+    return touchees;
   }
 
   get count() { return this.live.size; }
@@ -91,6 +198,7 @@ export class LightField {
       if (want.has(light)) continue;
       try { node.dispose(); } catch (e) { /* deja liberee */ }
       this.live.delete(light);
+      this.anim.delete(light);
     }
     return this.live.size;
   }

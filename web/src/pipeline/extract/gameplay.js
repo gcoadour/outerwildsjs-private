@@ -108,15 +108,22 @@ export function extractGameplay(ctx) {
     // les cherchait par NOM (« ...WithCodes », « ...Preflight ») faute de les
     // avoir sous la main ; ce sont pourtant des references directes.
     //
-    // INVARIANT : ce que vise un controleur de dialogue est un TextAsset, et
-    // rien d'autre. `ctx.texts` est desormais indexe par `fichier:path_id`, et
-    // le pointeur suit son `fileId` : un `Transform` d'un autre fichier ne
-    // peut plus se faire passer pour un arbre parce que son path_id tombe sur
-    // celui d'un texte de la scene (docs/36-audit.md §2.7).
+    // INVARIANT : ce qu'on RETIENT comme arbre est un TextAsset, et rien
+    // d'autre. `ctx.texts` est desormais indexe par `fichier:path_id`, et le
+    // pointeur suit son `fileId` : un `Transform` d'un autre fichier ne peut
+    // plus se faire passer pour un arbre parce que son path_id tombe sur celui
+    // d'un texte de la scene (docs/36-audit.md §2.7).
+    //
+    // Un controleur peut en revanche viser autre chose qu'un texte, et c'est
+    // legitime : `SecondLoopConvoTrigger._rocketScientistConversation` pointe
+    // sur le composant `Conversation` de la zone du scientifique (level0:23486),
+    // pas sur un arbre. Ces pointeurs-la sont ecartes des arbres et NOMMES dans
+    // `stats`, champ compris : c'est la liste, et non son absence, qui garde
+    // contre le retour du `fileId` perdu.
     for (const [k, v] of Object.entries(plain)) {
       if (!v || typeof v !== "object" || !("$ref" in v)) continue;
       if (v.$ref !== null && ctx.texts.has(v.$ref)) (entry.trees ||= {})[k] = v.$ref;
-      else if (/convocontroller|convotrigger/i.test(cls)) ecartes.add(cls);
+      else if (/convocontroller|convotrigger/i.test(cls)) ecartes.add(`${cls}.${k}`);
     }
     (placed[cls] ||= []).push(entry);
   }

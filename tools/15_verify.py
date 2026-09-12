@@ -14,8 +14,16 @@ des qu'un seul echoue.
 Il ne remplace pas l'oeil humain sur le rendu — il garantit que ce qui a ete
 mesure une fois le reste.
 
+Le moteur ne demarre qu'une fois le build fourni a la page : les controles qui
+suivent supposent donc une extraction. Elle vit dans le stockage prive de
+l'origine, donc dans un PROFIL de navigateur, et le port fait partie de
+l'origine — un profil rempli sur le port 8102 est vide sur le 8099.
+
 Usage:
-  python3 tools/15_verify.py                 # sert le depot et verifie
+  # premiere fois : on depose l'archive, le profil garde l'extraction
+  python3 tools/15_verify.py --profil work/profil --zip work/downloads/OuterWilds_Alpha_1_2_Linux.zip
+  # ensuite : le profil suffit, et c'est bien plus rapide
+  python3 tools/15_verify.py --profil work/profil
   python3 tools/15_verify.py --url http://localhost:8080/web/
   python3 tools/15_verify.py --lourd          # ajoute les controles lents
 """
@@ -78,15 +86,25 @@ def serve(root, port):
     return httpd
 
 
-def run(url, heavy):
+def run(url, heavy, profil=None, zip_path=None):
     from playwright.sync_api import sync_playwright
 
     rep = Report()
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            executable_path=CHROMIUM if os.path.exists(CHROMIUM) else None,
-            args=["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox"])
-        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        args = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox"]
+        exe = CHROMIUM if os.path.exists(CHROMIUM) else None
+        # Sans profil persistant, le stockage prive de l'origine est vide a
+        # chaque lancement : la page reste sur son ecran d'accueil et rien de ce
+        # qui suit n'a de sens. C'est pourquoi ces controles ne se mesuraient
+        # jusqu'ici que sur le systeme de substitution.
+        if profil:
+            browser = p.chromium.launch_persistent_context(
+                profil, executable_path=exe, args=args,
+                viewport={"width": 1280, "height": 720})
+            page = browser.pages[0] if browser.pages else browser.new_page()
+        else:
+            browser = p.chromium.launch(executable_path=exe, args=args)
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -102,6 +120,28 @@ def run(url, heavy):
 
         page.on("response", on_response)
         page.goto(url, wait_until="load", timeout=90000)
+        # L'ecran d'accueil demande le fichier de l'alpha, puis un clic. Sans
+        # profil persistant il n'y a rien a franchir : la page va droit au
+        # moteur avec son systeme de substitution.
+        page.wait_for_timeout(3000)
+        if page.locator("#gate-play").count():
+            if zip_path and not page.locator("#gate-step-done").is_visible():
+                page.set_input_files("#gate-file", zip_path)
+                page.wait_for_selector("#gate-step-done", state="visible",
+                                       timeout=3_000_000)
+            if page.locator("#gate-step-done").is_visible():
+                weight["total"] = 0        # l'extraction n'est pas le demarrage
+                page.click("#gate-play")
+            elif not zip_path:
+                # Le moteur ne demarre pas tant que le build n'a pas ete fourni :
+                # la page reste sur son ecran d'accueil. Le dire tout de suite
+                # vaut mieux que cinq minutes d'attente et une trace d'appel.
+                print("La page attend le fichier de l'alpha, et le profil est vide.\n"
+                      "  Donnez --zip chemin/vers/OuterWilds_Alpha_1_2_Linux.zip,\n"
+                      "  ou --profil vers un profil Chromium ou l'extraction est faite.\n"
+                      "  Sans build, il n'y a pas de moteur a verifier.")
+                browser.close()
+                sys.exit(2)
         page.wait_for_function("window.__ready===true", timeout=300000)
         page.wait_for_timeout(3000)
 
@@ -464,7 +504,12 @@ def run(url, heavy):
         if rot:
             rep.eq("le vaisseau tourne par la physique", rot["physique"], True)
             rep.eq("poussee rotationnelle du build", rot["couple"], 2)
-            rep.eq("trainee angulaire du build", rot["trainee"], 0.92)
+            # `_angularDrag` est un flottant 32 bits du build : il vaut
+            # 0,9200000166893005 une fois elargi, et l'egalite stricte le
+            # refusait. Ce controle ne passait donc jamais sur un vrai build —
+            # ce que personne ne pouvait voir tant qu'il tournait sur le
+            # systeme de substitution.
+            rep.near("trainee angulaire du build", rot["trainee"], 0.92, 1e-6)
             rep.eq("il porte son propre quaternion", rot["quat"], 4)
 
         # --- colliders par groupe de niveau de detail ---------------------------
@@ -636,6 +681,11 @@ def main():
     ap.add_argument("--port", type=int, default=8099)
     ap.add_argument("--lourd", action="store_true",
                     help="ajoute les controles qui chargent une planete entiere")
+    ap.add_argument("--profil", default=None,
+                    help="dossier de profil Chromium ou l'extraction est deja faite ; "
+                         "sans lui, la page tourne sur son systeme de substitution")
+    ap.add_argument("--zip", dest="zip_path", default=None,
+                    help="archive de l'alpha a deposer sur la page si le profil est vide")
     a = ap.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -646,7 +696,7 @@ def main():
         url = f"http://127.0.0.1:{a.port}/web/"
     print(f"Verification de {url}\n")
     try:
-        rep = run(url, a.lourd)
+        rep = run(url, a.lourd, a.profil, a.zip_path)
     finally:
         if httpd:
             httpd.shutdown()

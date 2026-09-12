@@ -36,7 +36,11 @@ web/serve.sh 8080                  # http://localhost:8080/ — le Service Worke
 # Pipeline Python d'origine, pour le travail local seulement
 tools/00_setup.sh                  # .NET 9, ilspycmd, UnityPy, numpy, Pillow
 tools/01_fetch.sh Linux            # telecharge le build dans work/ (gitignore)
-python3 tools/15_verify.py [--lourd]  # invariants mesures dans un vrai Chromium (Playwright)
+# Invariants mesures dans un vrai Chromium (Playwright). Le moteur ne demarre
+# qu'une fois le build fourni a la PAGE : l'extraction vit dans le stockage
+# prive de l'origine, donc dans un profil, et le port fait partie de l'origine.
+python3 tools/15_verify.py --profil work/profil --zip work/downloads/OuterWilds_Alpha_1_2_Linux.zip
+python3 tools/15_verify.py --profil work/profil [--lourd]   # ensuite, le profil suffit
 ```
 
 `tests/01`…`08` lisent le build ; `tests/09-jeu.mjs` est de la logique pure et

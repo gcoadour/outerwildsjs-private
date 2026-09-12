@@ -147,6 +147,12 @@ const fake = {
 
 const out = exportSubtree(fake, 1, "villager", { emitImage: () => null });
 check("noeuds exportes", out.gltf.nodes.length, 3);
+// Aucun objet de ce monde fabrique ne porte de collider : tout maillage emis
+// doit donc ressortir marque traversable (docs/40-solide.md).
+const avecMaillage = out.gltf.nodes.filter((n) => n.mesh !== undefined);
+check("un maillage sans collider est marque traversable",
+      avecMaillage.every((n) => n.extras && n.extras.noCollide), true);
+check("... et le compte le dit", out.stats.noCollide, avecMaillage.length);
 check("animations exportees", out.stats.animations, 2);
 check("os Mecanim non resolus (monde fabrique)", out.stats.unresolvedBones, 0);
 const byName = new Map(out.gltf.animations.map((a) => [a.name, a]));

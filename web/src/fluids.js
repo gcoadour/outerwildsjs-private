@@ -17,9 +17,15 @@
 //
 // Trois effets, donc, et non plus un seul :
 //
-//   milieu     v_milieu = flux lineaire + omega x r
+//   milieu     v_milieu = flux de la loi du volume + omega x r
 //   trainee    v = v_milieu + (v - v_milieu) x max(0, 1 - k dt)
 //   poussee    a = -g x (rho - 1)        vers le haut si le fluide est dense
+//
+// Et « le flux » n'est pas une chose : le build a QUATRE `GetPointFluidVelocity`
+// (docs/39-fluides.md). Trois d'entre elles calculent leur direction a partir
+// du point, et ne serialisent donc rien — c'est pourquoi les six bases de
+// tornade portaient `_flowSpeed` 100 et ne poussaient rien, et pourquoi l'ocean
+// de Giant's Deep, qui REPOUSSE a 250 u/s, ne repoussait pas.
 //
 // La poussee suit la convention d'un corps de densite 1 : un fluide de densite
 // 1,2 (l'atmosphere) allege de 20 %, l'ocean a 10 pousse vers le haut a neuf
@@ -117,10 +123,19 @@ export function fluidVolumes(gameplay = {}, solar = {}) {
         drag: NUM(f._dragCoefficient) ?? NUM(f._drag) ?? DEFAULT_DRAG,
         density: NUM(f._density) ?? 0,
         deepDensity: NUM(f._deepDensity),
+        law: lawOf(cls),
+        flowType: NUM(f._flowType) ?? 0,
         flowSpeed: NUM(f._flowSpeed) ?? 0,
         flowDir: vec3(f._localLinearFlow),
         angularSpeed: NUM(f._angularSpeed) ?? 0,
         spinAxis: vec3(f._localRotationAxis),
+        // L'ocean : palier de densite sous `_innerRadius`, repulsion entre les
+        // deux rayons, courant tangentiel en surface.
+        innerRadius: NUM(f._innerRadius),
+        outerRadius: NUM(f._outerRadius),
+        maxRepelSpeed: NUM(f._maxRepelSpeed) ?? 0,
+        currentSpeed: NUM(f._currentSpeed) ?? 0,
+        repelCurve: sampleCurve(f._repelCurve),
         priority: NUM(f._priority) ?? 0,
         ocean: /ocean/i.test(cls),
       }));
@@ -132,21 +147,85 @@ export function fluidVolumes(gameplay = {}, solar = {}) {
       name: b.name, kind: b.kind || "SphereOceanFluidVolume",
       position: b.position, rotation: null, volume: null, radius: b.radius,
       drag: b.drag ?? DEFAULT_DRAG, density: b.density ?? 0,
-      deepDensity: NUM(b.deepDensity), flowSpeed: 0, flowDir: null,
-      angularSpeed: 0, spinAxis: null, priority: NUM(b.priority) ?? 0,
+      deepDensity: NUM(b.deepDensity), law: lawOf(b.kind || ""),
+      flowType: 0, flowSpeed: 0, flowDir: null,
+      angularSpeed: 0, spinAxis: null,
+      innerRadius: NUM(b.innerRadius), outerRadius: NUM(b.outerRadius),
+      maxRepelSpeed: 0, currentSpeed: 0, repelCurve: null,
+      priority: NUM(b.priority) ?? 0,
       ocean: true,
     }));
   }
   return dedupe(out);
 }
 
+/**
+ * La loi de vitesse d'un volume se lit dans SA CLASSE, pas dans ses champs.
+ *
+ * Quatre classes de `FluidVolume` redefinissent `GetPointFluidVelocity`, et
+ * chacune calcule une direction que le volume ne serialise pas : c'est
+ * pourquoi les six bases de tornade portaient `_flowSpeed` 100 sans aucun
+ * `_localLinearFlow`, et pourquoi le portage les rendait immobiles. Les corps
+ * de methode sont lisibles dans `Assembly-CSharp.dll` — voir
+ * `docs/39-fluides.md` pour leur transcription.
+ */
+export function lawOf(cls) {
+  if (/tornadobase/i.test(cls)) return "tornadoBase";
+  if (/tractorbeam/i.test(cls)) return "tractor";
+  if (/sphereocean/i.test(cls)) return "ocean";
+  return "simple";
+}
+
+/**
+ * Echantillonne une `AnimationCurve` en `n` points reguliers de 0 a 1.
+ *
+ * Meme convention que les courbes d'attenuation audio : le moteur n'a pas
+ * besoin des tangentes, seulement de la valeur a un parametre donne.
+ */
+export function sampleCurve(ac, n = 9) {
+  const keys = (ac && (ac.m_Curve || ac.curve || ac)) || null;
+  if (!Array.isArray(keys) || keys.length < 2) return null;
+  const pts = keys
+    .filter((k) => k && typeof k.time === "number" && typeof k.value === "number")
+    .map((k) => [k.time, k.value])
+    .sort((a, b) => a[0] - b[0]);
+  if (pts.length < 2) return null;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = pts[0][0] + (i / (n - 1)) * (pts[pts.length - 1][0] - pts[0][0]);
+    let v = pts[pts.length - 1][1];
+    for (let j = 0; j < pts.length - 1; j++) {
+      const a = pts[j], b = pts[j + 1];
+      if (a[0] <= t && t <= b[0]) {
+        v = a[1] + (b[1] - a[1]) * ((t - a[0]) / ((b[0] - a[0]) || 1));
+        break;
+      }
+    }
+    out.push(v);
+  }
+  return out;
+}
+
+/** Valeur d'une courbe echantillonnee, en un parametre de 0 a 1. */
+export function curveAt(curve, u) {
+  if (!curve || !curve.length) return 0;
+  const x = Math.max(0, Math.min(1, u)) * (curve.length - 1);
+  const i = Math.min(curve.length - 2, Math.floor(x));
+  return curve[i] + (curve[i + 1] - curve[i]) * (x - i);
+}
+
 function makeVolume(v) {
   const dir = v.flowDir ? normalize(v.flowDir) : null;
   const axis = v.spinAxis ? normalize(v.spinAxis) : null;
+  // Une direction absente n'annule le flux QUE pour la loi lineaire : les
+  // autres lois deduisent la leur de la position du point.
+  const linear = (v.law || "simple") === "simple" && (v.flowType || 0) === 0;
   return {
     ...v,
+    law: v.law || "simple",
+    flowType: v.flowType || 0,
     flowDir: dir,
-    flowSpeed: dir ? v.flowSpeed : 0,
+    flowSpeed: linear && !dir ? 0 : v.flowSpeed,
     spinAxis: axis,
     angularSpeed: axis ? v.angularSpeed : 0,
     deepDensity: v.deepDensity ?? null,
@@ -180,9 +259,10 @@ function same(a, b) {
          Math.abs(a.radius - b.radius) <= tol;
 }
 
-/** Ce qu'une description apporte : densite, courant, rotation. */
+/** Ce qu'une description apporte : densite, repulsion, courant, rotation. */
 function richness(v) {
-  return (v.density > 0 ? 4 : 0) + (v.flowSpeed ? 2 : 0) + (v.angularSpeed ? 1 : 0);
+  return (v.density > 0 ? 8 : 0) + (v.repelCurve ? 4 : 0) +
+         (v.flowSpeed ? 2 : 0) + (v.angularSpeed ? 1 : 0);
 }
 
 /**
@@ -248,36 +328,152 @@ export function fluidAt(volumes, world) {
  *
  * L'ocean porte `_density` 10 en surface et `_deepDensity` 100 : c'est ce qui
  * rend le fond infranchissable sans etre un mur.
+ *
+ * Le build ne fait pas croitre l'une vers l'autre — `GetPointDensity` est un
+ * PALIER : sous `_innerRadius` (440 sur un rayon de 498), la densite saute
+ * d'un coup a 100. La rampe qui etait ecrite ici n'atteignait les 100 qu'au
+ * CENTRE de la planete, et laissait donc descendre a une densite d'une
+ * vingtaine la ou le jeu en oppose cent. Faute de rayon interne, on garde la
+ * rampe : c'est une interpolation prudente, pas une mesure.
  */
 export function densityAt(volume, depth) {
   const d0 = volume.density || 0;
   if (volume.deepDensity == null) return d0;
+  if (volume.innerRadius != null) {
+    // `depth` se compte depuis la surface du COLLIDER (498), pas depuis
+    // `_outerRadius` (500) : c'est donc ce rayon-la qui convertit le seuil.
+    return depth > (volume.radius || 0) - volume.innerRadius ? volume.deepDensity : d0;
+  }
   const span = volume.radius || 1;
   const u = Math.max(0, Math.min(1, depth / span));
   return d0 + (volume.deepDensity - d0) * u;
 }
 
+/** Axe du repere du volume, ramene en coordonnees monde. */
+function axisOf(volume, local) {
+  return volume.rotation ? rotateByQuaternion(volume.rotation, local) : local.slice();
+}
+
+/** Vecteur du centre du volume vers un point monde. */
+function offset(volume, world) {
+  return [world[0] - volume.position[0], world[1] - volume.position[1],
+          world[2] - volume.position[2]];
+}
+
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                         a[2] * b[0] - a[0] * b[2],
+                         a[0] * b[1] - a[1] * b[0]];
+
 /**
- * Vitesse du milieu en un point monde : flux lineaire, plus la rotation propre
- * du volume autour de son axe. Les deux sont exprimes dans le repere LOCAL du
- * volume — un cyclone pose de biais tourne autour de son axe a lui.
+ * Vitesse lineaire du milieu, selon la loi de la classe du volume.
+ *
+ * Transcription des quatre `GetPointFluidVelocity` du build. Le portage n'en
+ * connaissait qu'une — le flux lineaire — et lisait donc `_flowSpeed` 100 sur
+ * les six bases de tornade et 10 sur le rayon tracteur sans rien en faire,
+ * faute d'une direction serialisee. Les trois autres lois DEDUISENT leur
+ * direction du point ou l'on se trouve.
+ */
+function flowVelocity(volume, world) {
+  const speed = volume.flowSpeed || 0;
+  const law = volume.law || "simple";
+
+  if (law === "ocean") return oceanVelocity(volume, world);
+
+  if (law === "tractor") {
+    // `up * _flowSpeed`, plus un rappel lateral vers l'axe du faisceau. Le
+    // facteur 5 est celui du build, et il ne porte que sur `right`.
+    const up = axisOf(volume, [0, 1, 0]);
+    const right = axisOf(volume, [1, 0, 0]);
+    const toAxis = offset(volume, world).map((x) => -x);
+    const k = dot(toAxis, right) * 5;
+    return [up[0] * speed + right[0] * k,
+            up[1] * speed + right[1] * k,
+            up[2] * speed + right[2] * k];
+  }
+
+  if (law === "tornadoBase") {
+    // La base aspire vers l'AXE, pas vers le centre : on retranche la part du
+    // vecteur qui suit `up`, et il reste la composante horizontale.
+    if (!speed) return null;
+    const d = offset(volume, world);
+    const up = axisOf(volume, [0, 1, 0]);
+    const along = dot(d, up);
+    const radial = [d[0] - up[0] * along, d[1] - up[1] * along, d[2] - up[2] * along];
+    const n = normalize(radial);
+    if (!n) return null;
+    // `_flowType` 0 aspire, 1 repousse — cinq bases aspirent, une repousse.
+    const s = (volume.flowType || 0) === 0 ? -speed : speed;
+    return [n[0] * s, n[1] * s, n[2] * s];
+  }
+
+  if (!speed) return null;
+  if ((volume.flowType || 0) === 0) {
+    // Flux lineaire, exprime dans le repere local du volume.
+    if (!volume.flowDir) return null;
+    const v = [volume.flowDir[0] * speed, volume.flowDir[1] * speed,
+               volume.flowDir[2] * speed];
+    return volume.rotation ? rotateByQuaternion(volume.rotation, v) : v;
+  }
+  // `_flowType` 1 et 2 : radial rentrant et radial sortant, depuis le centre.
+  const n = normalize(offset(volume, world));
+  if (!n) return null;
+  const s = volume.flowType === 1 ? -speed : speed;
+  return [n[0] * s, n[1] * s, n[2] * s];
+}
+
+/**
+ * L'ocean de Giant's Deep : il REPOUSSE, et il porte un courant.
+ *
+ * Entre `_outerRadius` (500) et `_innerRadius` (440), une courbe donne la part
+ * de `_maxRepelSpeed` (250 u/s) qui pousse vers le haut — c'est ce qui rend le
+ * fond inatteignable en nageant, et c'est la raison d'etre de la tornade
+ * inversee. Sous le rayon interne, plus rien ne pousse : on est arrive.
+ * Le courant, lui, est tangentiel (`d x up`) et s'eteint avec la profondeur.
+ */
+function oceanVelocity(volume, world) {
+  const outer = volume.outerRadius ?? volume.radius;
+  const inner = volume.innerRadius;
+  if (inner == null || !(outer > inner)) return null;
+  const d = offset(volume, world);
+  const len = Math.hypot(d[0], d[1], d[2]);
+  const t = Math.max(0, (outer - len) / (outer - inner));
+  if (t > 1) return null;                 // sous le rayon interne : le coeur
+  const v = [0, 0, 0];
+  const n = normalize(d);
+  if (n && volume.maxRepelSpeed) {
+    const push = curveAt(volume.repelCurve, t) * volume.maxRepelSpeed;
+    v[0] += n[0] * push; v[1] += n[1] * push; v[2] += n[2] * push;
+  }
+  if (volume.currentSpeed) {
+    const tangent = normalize(cross(d, axisOf(volume, [0, 1, 0])));
+    if (tangent) {
+      const c = volume.currentSpeed * (1 - t);
+      v[0] += tangent[0] * c; v[1] += tangent[1] * c; v[2] += tangent[2] * c;
+    }
+  }
+  return v;
+}
+
+/**
+ * Vitesse du milieu en un point monde : le flux de la loi du volume, plus la
+ * rotation propre autour de son axe. La rotation est exprimee dans le repere
+ * LOCAL du volume — un cyclone pose de biais tourne autour de son axe a lui.
  */
 export function mediumVelocity(volume, world) {
-  if (!volume.flowSpeed && !volume.angularSpeed) return null;
-  let v = [0, 0, 0];
-  if (volume.flowSpeed && volume.flowDir) {
-    v = [volume.flowDir[0] * volume.flowSpeed,
-         volume.flowDir[1] * volume.flowSpeed,
-         volume.flowDir[2] * volume.flowSpeed];
-  }
-  if (volume.angularSpeed && volume.spinAxis) {
+  const flow = flowVelocity(volume, world);
+  const spin = volume.angularSpeed && volume.spinAxis;
+  if (!flow && !spin) return null;
+  const v = flow ? flow.slice() : [0, 0, 0];
+  if (spin) {
     const p = localPoint(volume, world);
     const a = volume.spinAxis;
-    v[0] += (a[1] * p[2] - a[2] * p[1]) * volume.angularSpeed;
-    v[1] += (a[2] * p[0] - a[0] * p[2]) * volume.angularSpeed;
-    v[2] += (a[0] * p[1] - a[1] * p[0]) * volume.angularSpeed;
+    let w = [(a[1] * p[2] - a[2] * p[1]) * volume.angularSpeed,
+             (a[2] * p[0] - a[0] * p[2]) * volume.angularSpeed,
+             (a[0] * p[1] - a[1] * p[0]) * volume.angularSpeed];
+    if (volume.rotation) w = rotateByQuaternion(volume.rotation, w);
+    v[0] += w[0]; v[1] += w[1]; v[2] += w[2];
   }
-  if (volume.rotation) v = rotateByQuaternion(volume.rotation, v);
   return v;
 }
 

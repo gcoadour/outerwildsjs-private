@@ -23,6 +23,10 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`18-vaisseau.md`](18-vaisseau.md) — pilote automatique et dégâts
 - [`23-connaissance.md`](23-connaissance.md) — la connaissance débloque le jeu
 - [`38-depart.md`](38-depart.md) — **le départ de la partie : point d'apparition, regard, hauteur des yeux**
+- [`39-fluides.md`](39-fluides.md) — **les quatre lois de fluide, lues dans l'IL du build : l'océan repousse**
+- [`40-solide.md`](40-solide.md) — **ce qui est solide : un tiers des maillages ne l'est pas, et on se posait sur le ciel**
+- [`41-ciel.md`](41-ciel.md) — **la première image, regardée : voûte, nuages, étoiles, et pourquoi il faisait jour la nuit**
+- [`42-lumieres.md`](42-lumieres.md) — **le recensement des 275 classes posées : lumières vivantes et textures qui défilent**
 
 ## Les lieux
 
