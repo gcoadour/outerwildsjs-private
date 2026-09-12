@@ -10,7 +10,8 @@ import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
-import { extractAudio } from "../web/src/pipeline/extract/audio.js";
+import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
+import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { extractSky } from "../web/src/pipeline/extract/sky.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
@@ -244,6 +245,66 @@ check("l'attenuation `custom` est majoritaire",
 const courbes = audio.sources.filter((x) => x.rolloffCurve).length;
 console.log("     sources avec courbe echantillonnee:", courbes,
             "/", (rolloffs.custom ?? 0));
+
+// Un clip doit etre NOMME comme il est fait.
+//
+// L'extension venait de `m_Format`, qui ne dit rien du conteneur : mesure sur
+// le build, 20 des 36 clips exportes partaient en `.ogg` en etant du RIFF ou
+// de l'AIFF. Consequences : un `Content-Type` faux au Service Worker, et le
+// reencodage Opus du worker — qui filtre sur `/\.wav$/` — sans aucun fichier a
+// se mettre sous la dent. Voir docs/09-audio.md.
+{
+  const parExt = {};
+  let mentent = 0;
+  for (const { name, bytes } of audioFiles) {
+    const ext = name.split(".").pop().toLowerCase();
+    parExt[ext] = (parExt[ext] || 0) + 1;
+    const vrai = sniffContainer(bytes);
+    if (vrai && vrai !== ext) mentent++;
+  }
+  console.log("     clips par conteneur:", JSON.stringify(parExt),
+              "| stats:", JSON.stringify(audio.stats));
+  check("aucune extension ne ment sur son contenu", mentent, 0);
+  check("clips en Ogg Vorbis", parExt.ogg ?? 0, 16);
+  // 19 RIFF d'origine, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 20);
+  check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
+  check("l'unique AIFF du build a ete converti",
+        audio.stats["AIFF convertis en WAV"] ?? 0, 1);
+  // C'est cette ligne qui rend le reencodage Opus du worker possible : sans un
+  // seul `.wav`, il ne s'executait jamais.
+  check("le worker a de quoi reencoder", (parExt.wav ?? 0) > 0, true);
+}
+
+// Les PNJ : une conversation sans arbre dans la scene reste jouable.
+//
+// Le `_activeDialogueTree` du Conservateur est NUL dans le build, et ce n'est
+// pas un oubli : `CuratorConvoController` pose l'arbre a l'execution. Le
+// portage l'ecartait, et avec lui les codes de lancement qu'il est le seul a
+// accorder — donc le decollage. Voir docs/13-dialogue.md.
+{
+  const dlg = extractDialogue(ctx);
+  console.log("     dialogue:", JSON.stringify(dlg.stats));
+  check("conversations de la scene", dlg.conversations.length, 14);
+  check("une seule n'a pas d'arbre pose", dlg.stats["conversations liees"], 13);
+  check("les controleurs sont rattaches par GameObject",
+        dlg.stats["conversations a controleur"], 4);
+  check("et toutes les conversations sont jouables",
+        dlg.stats["conversations jouables"], 14);
+
+  const curator = dlg.conversations.find((c) => c.character === "Curator");
+  check("le Conservateur est bien la", !!curator, true);
+  check("son arbre est nul dans la scene", curator.tree, null);
+  check("son controleur, lui, est pose dessus",
+        curator.controller && curator.controller.kind, "CuratorConvoController");
+  // Les deux arbres que l'IL nomme : avant le vol, puis les souhaits.
+  check("et il porte ses deux arbres",
+        Object.keys(curator.controller.trees).sort().join(","),
+        "_goodLuck,_preFlightObservations");
+  // Le nom ne distingue rien : c'est pourquoi le lien se fait par GameObject.
+  const zones = dlg.conversations.filter((c) => c.name === "ConversationZone").length;
+  check("les zones de conversation sont homonymes", zones, 13);
+}
 
 // §2.7 : l'objet vise par un controleur de dialogue est un ARBRE, jamais un
 // Transform. Le `fileId` etait perdu au dereferencement, et les pointeurs se

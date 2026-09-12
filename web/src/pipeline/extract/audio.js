@@ -6,6 +6,7 @@
 // (_track). On croise les deux via leur GameObject.
 
 import { readAudioClip } from "../unity/classes.js";
+import { aiffToWav } from "../audioenc.js";
 import { round } from "./context.js";
 
 // AudioMixer.TrackName, drapeaux binaires.
@@ -70,9 +71,43 @@ function trackName(v) {
   return "Undefined";
 }
 
-/** Extension deduite du format Unity ; le build n'utilise que de l'Ogg Vorbis. */
-function clipExtension(format) {
-  return format === 1 ? ".wav" : ".ogg";
+/**
+ * Conteneur d'un clip.
+ *
+ * CORRECTION, et elle rendait un clip sur deux inecoutable. L'extension etait
+ * deduite de `m_Format` — `.wav` s'il vaut 1, `.ogg` sinon — et `m_Format` ne
+ * dit RIEN du conteneur. Mesure sur les 142 AudioClip du build :
+ *
+ *   m_Format=2 m_Type=14  OggS   n=28      m_Format=2 m_Type=2   FORM   n=1
+ *   m_Format=2 m_Type=20  RIFF   n=109     m_Format=3 m_Type=20  RIFF   n=4
+ *
+ * `m_Format` est un FMOD_SOUND_FORMAT : la profondeur des echantillons (2 pour
+ * du 16 bits, 3 pour du 24). Il vaut 2 pour de l'Ogg, du WAV et de l'AIFF
+ * indifferemment. Le conteneur est dans `m_Type`, qui est l'AudioType d'Unity :
+ * 2 = AIFF, 14 = Ogg Vorbis, 20 = WAV.
+ *
+ * Consequences de l'erreur, toutes mesurees : 20 clips sur 36 partaient sous
+ * `.ogg` en etant du RIFF ou de l'AIFF, le Service Worker leur posait donc un
+ * `Content-Type: audio/ogg` faux, et surtout le reencodage Opus du worker —
+ * qui filtre sur `/\.wav$/` — ne trouvait JAMAIS de fichier a reencoder. Les
+ * « 15 Mo de WAV » que docs/27-poids.md voulait economiser ne l'etaient pas.
+ *
+ * Les octets tranchent en dernier ressort : un en-tete se lit, une enumeration
+ * se fait confiance.
+ */
+const AUDIO_TYPE = { 2: "aiff", 14: "ogg", 20: "wav" };
+
+export function sniffContainer(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  const tag = (o) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
+  if (tag(0) === "OggS") return "ogg";
+  if (tag(0) === "RIFF" && tag(8) === "WAVE") return "wav";
+  if (tag(0) === "FORM" && (tag(8) === "AIFF" || tag(8) === "AIFC")) return "aiff";
+  return null;
+}
+
+export function clipContainer(clip, bytes) {
+  return sniffContainer(bytes) || AUDIO_TYPE[clip && clip.m_Type] || "ogg";
 }
 
 /**
@@ -114,10 +149,24 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
             const bytes = clip.data !== null ? clip.data
               : target.file.resource(clip.offset, clip.size);
             if (bytes && bytes.length) {
+              let container = clipContainer(clip, bytes);
+              let out = bytes;
+              // Un AIFF ne se decode dans AUCUN navigateur. Celui du build est
+              // du PCM non compresse : le convertir en WAV ne coute que de
+              // retourner les octets, et c'est la difference entre un son et
+              // un silence. Si la conversion echoue, on garde l'original —
+              // mal nomme, il resterait muet, mais nomme juste il reste au
+              // moins diagnosticable.
+              if (container === "aiff") {
+                const wav = aiffToWav(bytes);
+                if (wav) { out = wav; container = "wav"; bump("AIFF convertis en WAV"); }
+                else bump("AIFF non convertible");
+              }
               const safe = (clip.m_Name || `clip_${pid}`).replace(/[^\w.\- ]/g, "_").trim();
-              const name = `${safe}_${pid}${clipExtension(clip.m_Format)}`;
-              emit(name, bytes);
+              const name = `${safe}_${pid}.${container}`;
+              emit(name, out);
               clipFiles.set(pid, name);
+              bump(`clips ${container}`);
               bump("clips exportes");
             } else bump("clip vide");
           } catch { bump("clip illisible"); }

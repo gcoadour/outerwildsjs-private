@@ -27,10 +27,31 @@ export class DialogueSystem {
   constructor(data) {
     this.trees = data.trees || {};
     this.conversations = data.conversations || [];
+    // Identite stable d'une conversation : son rang. Le NOM n'en est pas une —
+    // les quatorze zones du build s'appellent toutes `ConversationZone`.
+    this.conversations.forEach((c, i) => { c.index = i; });
     this.active = null;      // { convo, tree, branchId, line }
     this.knowledge = new Set();
+    // Etat de la BOUCLE courante, par conversation. Il ne se sauvegarde pas :
+    // le jeu remet `_hasGivenLaunchCodes` et `_triggerSecondConvo` a faux a
+    // chaque redemarrage, quand la connaissance, elle, survit.
+    this.loopState = new Map();
+    // Appele quand une conversation se termine, avec la conversation tenue.
+    // C'est le moment ou le build accorde les codes de lancement.
+    this.onEnd = null;
     this.load();
   }
+
+  /** Etat de boucle d'une conversation : combien de fois on l'a menee a son terme. */
+  stateOf(convo) {
+    const k = convo && convo.index != null ? convo.index : -1;
+    let st = this.loopState.get(k);
+    if (!st) { st = { ended: 0, crashes: 0, landings: 0 }; this.loopState.set(k, st); }
+    return st;
+  }
+
+  /** Nouvelle boucle : le monde oublie, la connaissance non. */
+  resetLoop() { this.loopState.clear(); }
 
   // --- memoire persistante ---
 
@@ -70,7 +91,12 @@ export class DialogueSystem {
   nearest(pos, frameOffset, maxDist = 6) {
     let best = null, bestD = maxDist;
     for (const c of this.conversations) {
-      if (!c.tree) continue;
+      // Une conversation SANS arbre pose dans la scene reste jouable si un
+      // controleur en pose un a l'execution : c'est le cas du Conservateur,
+      // dont `_activeDialogueTree` est nul et dont `CuratorConvoController`
+      // choisit l'arbre au demarrage. L'ecarter ici le rendait muet, et avec
+      // lui les codes de lancement qu'il est le seul a donner.
+      if (!c.tree && !(c.controller && c.controller.trees)) continue;
       const d = Math.hypot(c.position[0] - frameOffset[0] - pos.x,
                            c.position[1] - frameOffset[1] - pos.y,
                            c.position[2] - frameOffset[2] - pos.z);
@@ -88,7 +114,20 @@ export class DialogueSystem {
     return true;
   }
 
-  close() { this.active = null; }
+  /**
+   * Fin d'une conversation.
+   *
+   * Le moment compte : `CuratorConvoController.OnEndConversation` accorde les
+   * codes de lancement, pas `OnStartConversation`. Les accorder a l'ouverture
+   * revenait a les donner sans avoir ecoute.
+   */
+  close() {
+    const convo = this.active && this.active.convo;
+    this.active = null;
+    if (!convo) return;
+    this.stateOf(convo).ended += 1;
+    if (this.onEnd) this.onEnd(convo);
+  }
 
   get branch() {
     const a = this.active;

@@ -83,6 +83,38 @@ export function extractDialogue(ctx) {
     }
   }
 
+  // Controleurs de personnage, indexes par GameObject.
+  //
+  // Pourquoi cet index, et pourquoi PAR GAMEOBJECT. Le Conservateur — celui-la
+  // meme qui accorde les codes de lancement — a un `_activeDialogueTree` NUL
+  // dans la scene, et ce n'est pas un oubli du build : `CuratorConvoController`
+  // pose l'arbre a l'execution, dans `OnStartConversation`, en choisissant
+  // entre `_preFlightObservations` et `_goodLuck`. Le portage exigeait un arbre
+  // deja pose ; il rendait donc le Conservateur INACCESSIBLE, et avec lui le
+  // decollage, puisque les codes s'obtiennent en lui parlant.
+  //
+  // Le lien se fait par GameObject parce que c'est le seul qui soit exact :
+  // `Awake` fait `GetComponent<Conversation>()`, donc le controleur et la
+  // conversation sont sur le MEME objet. Les rapprocher par le nom ne pouvait
+  // pas marcher — les quatorze zones du build s'appellent toutes
+  // `ConversationZone`, et le premier trouve gagnait.
+  const controllers = new Map();
+  for (const { obj, cls } of ctx.behaviours((c) => /convocontroller|convotrigger/i.test(c))) {
+    const f = ctx.scriptFields(obj);
+    if (!f) continue;
+    const gid = ctx.ownerId(obj);
+    const owned = {};
+    for (const [k, v] of Object.entries(f)) {
+      if (!v || typeof v !== "object" || !("pathId" in v)) continue;
+      // INVARIANT, le meme qu'ailleurs : n'est retenu comme arbre que ce qui
+      // EST un arbre. `SecondLoopConvoTrigger._rocketScientistConversation`
+      // vise un composant Conversation, pas un texte.
+      const ref = ctx.refOf(v);
+      if (ref !== null && trees[ref]) owned[k] = ref;
+    }
+    if (Object.keys(owned).length) controllers.set(gid, { kind: cls, trees: owned });
+  }
+
   const conversations = [];
   for (const { obj } of ctx.behaviours(["Conversation"])) {
     const f = ctx.scriptFields(obj);
@@ -91,16 +123,23 @@ export function extractDialogue(ctx) {
     // Le pointeur suit son `fileId` : sans cela il visait l'objet de meme
     // path_id dans le fichier de la scene, ce qui n'est pas un arbre.
     const ref = f._activeDialogueTree ? ctx.refOf(f._activeDialogueTree) : null;
+    const ctrl = controllers.get(gid) || null;
     conversations.push({
       name: ctx.name(gid),
       character: f._characterName || null,
       isMuseumSign: !!f._isMuseumSign,
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
       tree: ref !== null && trees[ref] ? ref : null,
+      controller: ctrl,
     });
   }
   stats.conversations = conversations.length;
   stats["conversations liees"] = conversations.filter((c) => c.tree).length;
+  stats["conversations a controleur"] = conversations.filter((c) => c.controller).length;
+  // Ce qu'on veut vraiment savoir : combien de conversations sont ATTEIGNABLES,
+  // arbre pose dans la scene ou arbre pose par leur controleur.
+  stats["conversations jouables"] =
+    conversations.filter((c) => c.tree || c.controller).length;
 
   return { unity: ctx.env.get(ctx.sceneFile).unityVersion, trees, conversations, stats };
 }

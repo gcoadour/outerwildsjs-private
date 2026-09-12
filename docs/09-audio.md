@@ -139,13 +139,65 @@ de 0,75 à 0 en deux secondes pendant que la piste des signaux reste à 1.
   détaché avec la source. Le `_lowPassCutoff` de chaque émetteur est lu depuis la
   source elle-même — l'extracteur le pose déjà sur elle — et non pris comme une
   constante.
-- ~~**15 Mo de WAV non compressés**~~ — réencodés en Opus à l'extraction
-  (WebCodecs), avec repli WAV : voir [`27-poids.md`](27-poids.md) et
-  [`35-monde.md`](35-monde.md) §9. Le gain reste à mesurer sur un build.
+- **15 Mo de WAV non compressés** — le réencodage Opus (WebCodecs, repli WAV)
+  est écrit depuis longtemps ([`27-poids.md`](27-poids.md),
+  [`35-monde.md`](35-monde.md) §9) et **ne s'était jamais exécuté**. Mesuré :
+  il filtre sur `/\.wav$/`, et l'extracteur ne nommait **aucun** fichier
+  `.wav`. Le nommage corrigé (ci-dessous) lui donne enfin 20 fichiers à
+  reprendre ; le gain, lui, reste à mesurer dans un navigateur.
 - **L'équilibrage des volumes** demande une écoute humaine — mais elle portera
   désormais sur les portées du jeu, non sur des valeurs choisies par piste.
 - **Le bruit des prédateurs** vient maintenant de ce champ audio : les sources
   qui jouent vraiment attirent les anglerfish ([`16-bramble.md`](16-bramble.md)).
+
+## Correction : un clip doit être nommé comme il est fait
+
+L'extension venait de `m_Format` — `.wav` s'il vaut 1, `.ogg` sinon. **`m_Format`
+ne dit rien du conteneur.** Mesure sur les 142 `AudioClip` du build :
+
+| `m_Format` | `m_Type` | octets de tête | n |
+|---|---|---|---|
+| 2 | 14 | `OggS` | 28 |
+| 2 | 20 | `RIFF` | 109 |
+| 3 | 20 | `RIFF` | 4 |
+| 2 | 2 | `FORM` | 1 |
+
+`m_Format` est un `FMOD_SOUND_FORMAT` : la profondeur des échantillons (2 pour
+du 16 bits, 3 pour du 24). Il vaut 2 pour de l'Ogg, du WAV et de l'AIFF
+indifféremment. Le conteneur est dans **`m_Type`**, l'`AudioType` d'Unity :
+`2` = AIFF, `14` = Ogg Vorbis, `20` = WAV.
+
+**20 des 36 clips exportés partaient donc en `.ogg` sans en être** : le Service
+Worker leur posait un `Content-Type` faux, le réencodage Opus ne trouvait jamais
+de fichier, et l'unique **AIFF** du build — qu'aucun navigateur ne décode —
+restait muet. Il est converti en WAV sans perte (seul l'ordre des octets les
+sépare), taux d'échantillonnage compris, qui est un flottant étendu IEEE sur
+80 bits.
+
+Le nom vient désormais des **octets de tête**, `m_Type` ne servant que s'ils
+sont illisibles : **16 Ogg, 20 WAV, aucune extension qui mente**.
+
+## Correction : la musique ne repartait jamais après le premier clic
+
+Le navigateur interdit le son avant un geste de l'utilisateur. Les deux moitiés
+du champ audio ne posaient pas la même condition :
+
+```js
+_spawn : if (this.unlocked && (s.playOnAwake || LOOPED.has(s.track))) …
+unlock : if (snd && this.sources[i].playOnAwake) …
+```
+
+Une source créée **avant** le premier clic ne repartait donc que si elle était
+`playOnAwake`. Or **les cinq sources de piste `Music` du build sont toutes à
+`playOnAwake` faux**, toutes en portée 500, donc toutes créées dès la première
+image au village — et définitivement silencieuses. Les 45 ambiances sur 49 qui
+sont `playOnAwake`, elles, jouaient : d'où un jeu qui avait du son et pas de
+musique. La condition est maintenant posée une seule fois.
+
+Voir [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md), qui relève aussi ce
+que le build fait de sa musique — `TravelMusicController`,
+`ShipOnlyMusicVolume`, `EndOfTimeMusicController` : elle est entièrement
+événementielle.
 
 ## Instanciation à la volée
 
