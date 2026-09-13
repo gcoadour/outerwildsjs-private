@@ -586,3 +586,12 @@ body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
   #gate-drop { padding: 22px 14px; }
   .gate-card button { width: 100%; margin: 0 0 8px; padding: 12px 16px; }
 }
+
+/* L'onde du telescope (`DrawSoundWave`, docs/65-onde.md). La boite est celle
+   des quatre sommets d'`Awake`, en coordonnees de viewport dont l'origine est
+   en BAS a gauche : (0,4 ; 0,15) a (0,6 ; 0,25). D'ou le `bottom`, comme pour
+   le cadre de la sonde. */
+.ow-soundwave {
+  position: absolute; left: 40%; bottom: 15%; width: 20%; height: 10%;
+  pointer-events: none;
+}

@@ -61,7 +61,8 @@ import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
-import { Telescope, ProbeCamera } from "./tools.js";
+import { Telescope, ProbeCamera, SoundWave, WAVE,
+         telescopeScale } from "./tools.js";
 // La sonde entiere vient du prefabrique `sharedassets1.assets:2295`, que le
 // recensement ne voyait pas : il ne lisait que `level0` (docs/60-sonde.md).
 import { ProbeLauncher, SONDE, snapshotSize, probeIcon,
@@ -1265,6 +1266,43 @@ async function boot() {
   // Le champ de repos du telescope n'est pas un champ du telescope : c'est
   // celui de la camera, que `SnapToInitFieldOfView` retrouve en sortant.
   const telescope = new Telescope({ restFOV: reglagesCam.fov || 70 });
+  // L'onde de la lunette : cinq cents points, un par image, dans une boite du
+  // coin de l'ecran (docs/65-onde.md). Le trace est un canvas HTML plutot
+  // qu'un `GL.LINES` : ce que le build dessine avec `OnPostRender` est une
+  // polyligne, et un canvas en fait autant sans toucher au rendu 3D.
+  const onde = new SoundWave();
+  const ondeEl = uiRoot ? document.createElement("canvas") : null;
+  if (ondeEl) {
+    ondeEl.className = "ow-soundwave";
+    ondeEl.width = WAVE.points;
+    ondeEl.height = 64;
+    ondeEl.hidden = true;
+    uiRoot.appendChild(ondeEl);
+  }
+  const ondeCtx = ondeEl ? ondeEl.getContext("2d") : null;
+  /**
+   * Un point de plus, et le trace.
+   *
+   * L'echantillon vient d'une sinusoide et non du clip `ProbeLoop` que le
+   * build echantillonne : le portage joue ses sons par des elements `<audio>`
+   * et n'a donc pas leurs octets sous la main. C'est la seule liberte de ce
+   * lot, et la loi qui compte — un point par image, `(echantillon x force + 1)
+   * / 2` — est celle du build.
+   */
+  function traceOnde(force, t) {
+    onde.push(Math.sin(t * 37) * 0.8 + Math.sin(t * 11.3) * 0.2, force);
+    if (!ondeCtx) return;
+    const pts = onde.ordered();
+    ondeCtx.clearRect(0, 0, ondeEl.width, ondeEl.height);
+    ondeCtx.strokeStyle = "rgba(159, 214, 196, .85)";
+    ondeCtx.lineWidth = 1;
+    ondeCtx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const y = (1 - pts[i]) * ondeEl.height;
+      if (i === 0) ondeCtx.moveTo(i, y); else ondeCtx.lineTo(i, y);
+    }
+    ondeCtx.stroke();
+  }
   const probes = new ProbeLauncher();
   // La sonde est un appareil photo qu'on jette : sa camera embarquee occupe un
   // coin de l'ecran tant qu'elle vole.
@@ -2343,11 +2381,18 @@ async function boot() {
     // precision de profondeur sur tout le lointain.
     camera.minZ = telescope.nearClip;
     // La lunette a un corps et un verre dans le build : on les montre quand
-    // elle sert, et le portage ne montrait rien.
+    // elle sert, et le portage ne montrait rien. `TelescopeGUI.LateUpdate` la
+    // fait GROSSIR avec le champ — quatre fois plus grande a soixante degres
+    // qu'a quinze — et elle se retracte a mesure qu'on resserre.
     {
       const lunette = enMain.get("telescopegui");
-      if (lunette) for (const m of lunette.meshes) m.setEnabled(telescope.active);
+      if (lunette) {
+        for (const m of lunette.meshes) m.setEnabled(telescope.active);
+        const k = telescopeScale(telescope.fov);
+        lunette.racine.scaling.set(k, k, k);
+      }
     }
+    if (ondeEl) ondeEl.hidden = !telescope.active || guiMode.hidden;
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
     }
@@ -2487,6 +2532,10 @@ async function boot() {
         for (const i of t.sources || []) audio.lowPassFor(i, s);
       }
     }
+    // L'onde se trace APRES la somme des emetteurs, et non avant : c'est
+    // l'ordre de `Telescope.Update`, qui lit `_signalStrength`, dessine, puis
+    // remet a zero. Tracer plus haut dans la boucle rendrait l'image d'avant.
+    if (telescope.active) traceOnde(telescope.signalStrength, now);
 
     // --- mixage par piste ---
     //

@@ -196,3 +196,111 @@ export class ProbeCamera {
     return this.on;
   }
 }
+
+// --- l'onde du telescope (docs/65-onde.md) ------------------------------------
+//
+// `DrawSoundWave` etait la derniere classe de la scene sans lecteur qui fasse
+// quelque chose de visible. C'est un oscilloscope : cinq cents points, une
+// boite dans le coin de l'ecran, et UN point ecrit par image.
+//
+// @lit DrawSoundWave, TelescopeGUI, SettingsMenuTrigger
+
+/**
+ * Les nombres du trace, tous du constructeur ou d'`Awake`.
+ *
+ * La boite est en coordonnees de VIEWPORT, origine en bas a gauche : elle
+ * occupe le cinquieme central en largeur, un dixieme en hauteur, un peu
+ * au-dessus du milieu.
+ */
+export const WAVE = {
+  points: 500,
+  // `_xOffset` / `_yOffset` du constructeur. Ils ne servent pas au trace lui-
+  // meme — les quatre sommets ci-dessous le posent — et on les garde parce
+  // qu'ils sont mesures.
+  xOffset: 0.4, yOffset: -0.3,
+  // `_beginTopVertex` … `_endBottomVertex`, d'`Awake`.
+  x0: 0.4, y0: 0.15, x1: 0.6, y1: 0.25,
+};
+
+/** La duree de reference du trace : `_numPoints` images. */
+export const WAVE_POINTS = WAVE.points;
+
+/**
+ * L'onde : un tampon circulaire de cinq cents valeurs, une par image.
+ *
+ * `SetPoints` boucle sur UN seul echantillon — la boucle est ecrite pour deux
+ * et s'arrete a un (`blt 1`), ce qui est sans doute un reste — et pose
+ *
+ *     (echantillon x force + 1) / 2
+ *
+ * Force nulle, la valeur vaut donc 0,5 partout : une ligne plate au milieu de
+ * la boite, ce qui est exactement ce qu'on veut voir quand la lunette ne capte
+ * rien. C'est aussi pourquoi `InitializePoints` remplit de 0,5.
+ *
+ * Le curseur DESCEND : le point neuf s'ecrit a droite et l'onde defile vers la
+ * gauche.
+ */
+export class SoundWave {
+  constructor(n = WAVE.points) {
+    this.n = n;
+    this.points = new Array(n).fill(0.5);
+    this.cursor = n - 1;
+  }
+
+  /**
+   * @param sample   l'echantillon du clip, entre -1 et 1
+   * @param strength la force de signal de l'image, remise a zero apres
+   */
+  push(sample, strength) {
+    const v = (sample * strength + 1) * 0.5;
+    this.points[this.cursor] = v;
+    this.cursor = (this.cursor - 1 + this.n) % this.n;
+    return v;
+  }
+
+  /**
+   * Les points du plus ancien au plus recent, prets a tracer.
+   *
+   * Le curseur DESCEND — c'est `_currentPoint--` du build — donc le point neuf
+   * est celui qui vient JUSTE APRES lui dans le tampon, et le plus ancien est
+   * celui qu'on va ecrire. On remonte donc a l'envers.
+   */
+  ordered() {
+    const out = new Array(this.n);
+    for (let i = 0; i < this.n; i++) {
+      out[i] = this.points[(this.cursor + this.n - i) % this.n];
+    }
+    return out;
+  }
+}
+
+/**
+ * `TelescopeGUI.LateUpdate` : la lunette GROSSIT quand on desserre le zoom.
+ *
+ *     echelle = echelle_initiale x champ / _minFOV
+ *
+ * `_minFOV` vaut 15 sur `TelescopeGUI` et 10 sur `Telescope` — deux composants,
+ * deux valeurs, et c'est celle de l'interface qui commande l'echelle. A 60
+ * degres la lunette est donc quatre fois plus grande qu'a 15, et elle se
+ * retracte a mesure qu'on resserre. Le portage ne la faisait pas bouger, mais
+ * il ne la dessinait pas non plus (docs/64-mains.md).
+ */
+export const TELESCOPE_GUI = { minFOV: 15, maxFOV: 60 };
+
+export function telescopeScale(fov, base = 1, cfg = TELESCOPE_GUI) {
+  return base * fov / cfg.minFOV;
+}
+
+/**
+ * La position de la fleche du zoom sur sa reglette, de 0 (en bas) a 1 (en haut).
+ *
+ *     y = (hauteur_reglette - hauteur_fleche / 2) x _zoomDistance
+ *     y x= (champ - _minFOV) / _maxFOV
+ *
+ * On rend la seconde ligne seule, normalisee : la premiere n'est que la mise a
+ * l'echelle en pixels de l'image, et le portage n'a pas ces images.
+ */
+export function zoomArrowFraction(fov, cfg = TELESCOPE_GUI) {
+  const f = (fov - cfg.minFOV) / cfg.maxFOV;
+  return f < 0 ? 0 : f > 1 ? 1 : f;
+}

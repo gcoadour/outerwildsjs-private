@@ -31,6 +31,7 @@ import argparse
 import http.server
 import json
 import os
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -251,6 +252,19 @@ def run(url, heavy, profil=None, zip_path=None):
         # qui suit n'a de sens. C'est pourquoi ces controles ne se mesuraient
         # jusqu'ici que sur le systeme de substitution.
         if profil:
+            # Le cache HTTP du profil, et lui seul.
+            #
+            # `no-store` empeche Chromium de GARDER une reponse ; il n'efface
+            # pas celles qu'il garde deja. Un profil qui a servi a autre chose
+            # — une mise au point, une version d'avant — peut donc rendre un
+            # module perime sans meme demander au serveur, et le symptome est
+            # celui-la : « le module ne fournit pas d'export nomme X », alors
+            # que le fichier sur le disque l'exporte (docs/62-visee.md).
+            #
+            # On vide donc le cache et lui seul : l'extraction vit dans le
+            # stockage prive de l'origine, qui est ailleurs et qu'on garde.
+            for sous in ("Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage"):
+                shutil.rmtree(os.path.join(profil, "Default", sous), ignore_errors=True)
             browser = p.chromium.launch_persistent_context(
                 profil, executable_path=exe, args=args,
                 viewport={"width": 1280, "height": 720})
@@ -853,6 +867,40 @@ def run(url, heavy, profil=None, zip_path=None):
                page.evaluate("() => window.__consoles.flashlight.on"), not allumee)
         page.keyboard.press("KeyF")
         page.wait_for_timeout(300)
+
+        # --- l'onde de la lunette (docs/65-onde.md) -----------------------------
+        #
+        # `DrawSoundWave` : cinq cents points, un par image, dans une boite du
+        # coin de l'ecran. Au repos la ligne est plate au milieu ; elle ne se
+        # trace que lunette ouverte, et la lunette GROSSIT avec le champ.
+        rep.eq("l'onde est rangee lunette baissee",
+               page.evaluate("() => document.querySelector('.ow-soundwave').hidden"),
+               True)
+        page.mouse.move(640, 360)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(2500)
+        onde = page.evaluate(
+            "() => ({ cachee: document.querySelector('.ow-soundwave').hidden,"
+            "   largeur: document.querySelector('.ow-soundwave').width,"
+            "   lunette: window.__tools.telescope.active,"
+            "   echelle: Math.round(window.__mains.enMain.get('telescopegui')"
+            "              .racine.scaling.x * 100) / 100 })")
+        rep.eq("la lunette est ouverte", onde["lunette"], True)
+        rep.eq("l'onde se montre", onde["cachee"], False)
+        rep.eq("cinq cents points", onde["largeur"], 500)
+        # `TelescopeGUI.LateUpdate` : echelle = champ / 15. En entrant, le
+        # champ vise 33,33 degres et le suivi met deux secondes a l'atteindre —
+        # l'echelle est donc entre celle du repos (70/15) et celle de l'entree.
+        rep.check("la lunette grossit avec le champ",
+                  1 < onde["echelle"] <= 70 / 15 + 0.01, onde["echelle"],
+                  "entre 1 et 4,67")
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(1500)
+        rep.eq("et l'onde se range avec elle",
+               page.evaluate("() => document.querySelector('.ow-soundwave').hidden"),
+               True)
 
         # --- ce qu'on tient dans la main (docs/64-mains.md) ---------------------
         #

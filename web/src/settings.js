@@ -18,6 +18,14 @@
 // de la sauvegarde de partie) : effacer sa partie ne remet pas la sensibilite a
 // zero. Le portage garde cette separation, et la boucle temporelle non plus n'y
 // touche pas.
+//
+// @lit SettingsMenuTrigger
+//
+// `SettingsMenuTrigger.Update` tient DEJA dans le portage, et ne s'y voyait
+// pas : le canal `Pause` bascule le menu, et `Time.timeScale` passe a zero —
+// ici, le `dt` de la boucle vaut zero tant que le menu est ouvert. La classe
+// etait donc lue sans etre nommee, ce que le recensement ne peut pas deviner
+// (docs/65-onde.md).
 
 // @lit SettingsMenu
 // Les sept options de `SettingsMenu`, et ce que chacune commande.

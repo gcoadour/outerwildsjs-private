@@ -14,7 +14,8 @@ import { check, report } from "./run.mjs";
 import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
          reglagesDe } from "../web/src/cameraeffects.js";
-import { Telescope, TELESCOPE } from "../web/src/tools.js";
+import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
+         zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
@@ -4112,6 +4113,37 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("pas de flamme pendant la sortie", flamme.flame, false);
   flamme.update(0.016, { playing: false });
   check("mais une fois sorti, oui", flamme.flame, true);
+
+  // --- l'onde du telescope (docs/65) ---
+  check("cinq cents points", WAVE.points, 500);
+  check("et une boite dans le coin",
+        `${WAVE.x0},${WAVE.y0},${WAVE.x1},${WAVE.y1}`, "0.4,0.15,0.6,0.25");
+  const onde = new SoundWave();
+  check("au repos, la ligne est plate au milieu",
+        new Set(onde.ordered()).size, 1);
+  check("et au milieu vaut un demi", onde.ordered()[0], 0.5);
+  // Force nulle : la valeur reste 0,5 quel que soit l'echantillon.
+  check("sans signal, l'echantillon ne fait rien", onde.push(1, 0), 0.5);
+  check("un signal plein prend toute la hauteur", onde.push(1, 1), 1);
+  check("et l'oppose descend au plancher", onde.push(-1, 1), 0);
+  check("a demi-force, a mi-hauteur", onde.push(1, 0.5), 0.75);
+  // Le point neuf est le DERNIER de la liste : l'onde defile vers la gauche.
+  check("le dernier point est le plus recent", onde.ordered()[499], 0.75);
+  check("et le tampon garde sa taille", onde.ordered().length, 500);
+  // Cinq cents images plus tard, le premier point a disparu.
+  const courte = new SoundWave(4);
+  for (const v of [1, 1, 1, 1, 1]) courte.push(v, 1);
+  check("un tampon de quatre ne garde que quatre points",
+        courte.ordered().join(","), "1,1,1,1");
+  // La lunette grossit avec le champ : quatre fois plus grande a soixante.
+  check("a quinze degres, taille d'origine", telescopeScale(15), 1);
+  check("a soixante, quatre fois plus", telescopeScale(60), 4);
+  check("et l'echelle d'origine multiplie", telescopeScale(30, 2), 4);
+  check("la fleche du zoom est en bas au plus etroit",
+        zoomArrowFraction(TELESCOPE_GUI.minFOV), 0);
+  check("et monte avec le champ",
+        Number(zoomArrowFraction(45).toFixed(4)), 0.5);
+  check("sans jamais deborder", zoomArrowFraction(1000), 1);
 }
 
 report();
