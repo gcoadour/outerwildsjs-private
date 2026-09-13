@@ -953,6 +953,19 @@ check("tous sur le satellite casse",
 check("et tous reparent vers le meme materiau vert",
       new Set(nodes.map((n) => n.fields._repairedMaterial.name)).size, 1);
 check("une trappe", (gp.placed.HatchController || []).length, 1);
+// Les six buses du vaisseau MINIATURE, et non celui du joueur : c'est le champ
+// `body` qui le dit (docs/58-suivi.md).
+const buses = (gp.placed.ThrusterParticleController || []);
+check("un controleur de buses", buses.length, 1);
+check("sur le vaisseau miniature", buses[0].body, "ModelShip_Body");
+check("six buses resolues en positions",
+      Object.values(buses[0].nozzles || {}).filter(Boolean).length, 6);
+check("et les six sont a des places distinctes",
+      new Set(Object.values(buses[0].nozzles).map((p) => p.join(","))).size, 6);
+// Le volume compose et ses declencheurs enfants.
+check("un volume compose", (gp.placed.CompoundTriggerVolume || []).length, 1);
+check("et quatre declencheurs enfants", (gp.placed.ChildTriggerVolume || []).length, 4);
+check("une tempete de sable", (gp.placed.SandstormVolume || []).length, 1);
 // Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build :
 // c'est le meme cas que `_probePrefab`. L'invariant garde ce vide.
 const remous = (gp.placed.WaterEffectVolume || []);

@@ -133,3 +133,62 @@ export function motionDust(speed, { targeting = true, mapView = false } = {}, cf
     alpha: s < cfg.minSpeed ? 0 : Math.min(cfg.maxAlpha, Math.max(0, s * 0.01)),
   };
 }
+
+// --- les trois dernieres pieces de la queue --------------------------------
+//
+// @lit ThrusterParticleController, DissipatingParticlesBehavior
+// @lit AncientProbeController
+
+/**
+ * Les six buses du VAISSEAU MINIATURE, par le signe de son acceleration locale.
+ *
+ * Le porteur est `ModelShip_Body` — le petit vaisseau telecommande de
+ * l'observatoire, et non celui du joueur. Je l'avais ecrit « du vaisseau » a
+ * vue du nom de la classe ; c'est le champ `body` de l'extraction qui l'a
+ * corrige, comme il avait corrige « dans Dark Bramble » pour l'interrupteur du
+ * regard (docs/50-regard.md).
+ *
+ * `ThrusterParticleController.Update` allume la buse OPPOSEE au mouvement :
+ * une acceleration vers la droite (x > 0) allume la buse de GAUCHE, parce que
+ * c'est elle qui pousse. Ecrit a l'envers, cela donne un vaisseau dont les
+ * flammes sortent du cote ou il va — ce qui se voit, et c'est le meme piege que
+ * docs/46 avait releve sur les dix buses du sac dorsal.
+ *
+ *   x < 0 -> droite     x > 0 -> gauche
+ *   y < 0 -> haut       y > 0 -> bas
+ *   z < 0 -> avant      z > 0 -> arriere
+ *
+ * Le seuil est ZERO, et non un seuil de bruit : la moindre commande allume.
+ */
+export const SHIP_NOZZLES = ["right", "left", "up", "down", "forward", "rear"];
+
+/**
+ * Les six buses, avec leur position — elles s'appellent TOUTES `Thruster_Small`,
+ * et seule leur place les distingue.
+ */
+export function modelShipNozzles(gameplay) {
+  const c = ((gameplay.placed || {}).ThrusterParticleController || [])[0];
+  if (!c || !c.nozzles) return [];
+  return SHIP_NOZZLES
+    .filter((d) => c.nozzles[d])
+    .map((d) => ({ direction: d, position: c.nozzles[d], body: c.body || null }));
+}
+
+export function shipNozzles(localAcceleration) {
+  const [x, y, z] = localAcceleration;
+  return {
+    right: x < 0, left: x > 0,
+    up: y < 0, down: y > 0,
+    forward: z < 0, rear: z > 0,
+  };
+}
+
+/**
+ * La sonde ancienne : une acceleration LOCALE constante de cinquante, vers
+ * l'avant, a chaque pas de physique. Elle ne vise rien et ne s'arrete pas.
+ */
+export const ANCIENT_PROBE_THRUST = 50;
+
+export function ancientProbeAcceleration(forward, thrust = ANCIENT_PROBE_THRUST) {
+  return [forward[0] * thrust, forward[1] * thrust, forward[2] * thrust];
+}

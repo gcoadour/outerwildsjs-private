@@ -432,3 +432,67 @@ export function radiationAt(emitter, distance) {
   if (!r) return 0;
   return emitter.magnitude * Math.max(0, 1 - distance / r);
 }
+
+/**
+ * Un volume compose de plusieurs declencheurs enfants.
+ *
+ * @lit CompoundTriggerVolume, ChildTriggerVolume, SandstormVolume
+ *
+ * `CompoundTriggerVolume` tient un COMPTE par collider, a travers tous ses
+ * enfants :
+ *
+ *   entree dans un enfant  si le collider n'est pas suivi -> OnEntry, puis +1
+ *   sortie d'un enfant     -1 ; si le compte tombe a zero -> OnExit
+ *
+ * Une forme faite de plusieurs cylindres qui se chevauchent — l'entonnoir de
+ * sable — ou de plusieurs boites — la tempete de sable — emet donc UNE entree
+ * et UNE sortie, quel que soit le nombre d'enfants traverses. Sans ce compte,
+ * passer d'un cylindre au suivant emettrait une sortie puis une entree, et tout
+ * ce qui ecoute clignoterait.
+ *
+ * La classe ne connait ni Babylon ni le DOM : elle compte, et rend les deux
+ * evenements.
+ */
+export class CompoundTrigger {
+  constructor() {
+    this.counts = new Map();
+    this.entered = [];     // ce qui vient d'entrer, cette image
+    this.exited = [];      // ce qui vient de sortir
+  }
+
+  /** Nombre de corps actuellement dans le volume compose. */
+  get inside() { return this.counts.size; }
+
+  contains(id) { return this.counts.has(id); }
+
+  enterChild(id) {
+    this.entered = [];
+    if (!this.counts.has(id)) { this.counts.set(id, 0); this.entered.push(id); }
+    this.counts.set(id, this.counts.get(id) + 1);
+    return this.entered.length > 0;
+  }
+
+  exitChild(id) {
+    this.exited = [];
+    if (!this.counts.has(id)) return false;
+    const n = this.counts.get(id) - 1;
+    this.counts.set(id, n);
+    if (n <= 0) { this.counts.delete(id); this.exited.push(id); }
+    return this.exited.length > 0;
+  }
+
+  reset() { this.counts.clear(); this.entered = []; this.exited = []; }
+}
+
+/**
+ * Les tempetes de sable, qui vivent sur un volume compose.
+ *
+ * `SandstormVolume.OnEntry` / `OnExit` ne testent qu'une chose : le tag
+ * `PlayerDetector`. Ce n'est donc pas n'importe quoi qui declenche la tempete,
+ * c'est le JOUEUR — un vaisseau qui traverse ne la declenche pas.
+ */
+export function sandstormVolumes(gameplay) {
+  return ((gameplay.placed || {}).SandstormVolume || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position, volume: c.volume || null,
+  }));
+}

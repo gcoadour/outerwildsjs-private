@@ -50,6 +50,7 @@
 // `_alternateViewTarget`, et c'est cette cible-la qui compte pour l'alignement.
 
 // @lit TornadoPivotController, MatchTransform, DisposableContainer
+// @lit AncientTeleporter, AncientTeleportReceiver
 // Les pivots qui basculent, les suiveurs, et les conteneurs d'editeur qu'on
 // ne porte pas — comptes pour que la question ne se repose plus.
 

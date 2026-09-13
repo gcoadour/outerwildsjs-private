@@ -118,6 +118,7 @@ portage.
 | modules de particules | la queue de la comète, le plafond de l'explosion |
 | suivi de référentiel | distance et vitesse d'approche de la cible visée |
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
+| volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -226,15 +227,19 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
   pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
   est écrit dans le ciel.
-- **25 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+- **13 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
   compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
   de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
   **commentaires** avant de compter, et c'est un commentaire qui avait caché
   toute la pile d'effets d'image ([`47`](47-effets-image.md)).
   La série du compte : 170 en [`42`](42-lumieres.md), 109 avant les six lots de
   [`46`](46-migration-lots.md), 59 après, 77 une fois les commentaires retirés.
-  Puis **62** après la queue de [`49`](49-queue.md). Ce qui reste est une queue :
-  la moitié des entrées est à une seule instance.
+  Puis **62** après la queue de [`49`](49-queue.md), et **13** après la série
+  [`50`](50-regard.md)–[`58`](58-suivi.md). Sur les **1 390 instances** posées
+  dans `level0`, **1 356 sont lues — 97,6 %**. Les 34 qui restent sont nommées
+  une par une en fin de [`58`](58-suivi.md) : quatorze calibrateurs de tenseur
+  d'inertie, sept outils de studio, sept mises en page, trois singletons de
+  câblage, une bibliothèque d'explosion tierce et un tracé d'onde.
   `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
   de ce qui reste.
 - ~~**Les impostures de planète**~~ **Fermé** ([`56`](56-impostures.md)), et la

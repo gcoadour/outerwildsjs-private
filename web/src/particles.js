@@ -111,6 +111,36 @@ export class ParticleField {
    *
    * @param etats Map nom -> booleen
    */
+  /**
+   * Comme `gate`, mais par POSITION.
+   *
+   * Les six buses du vaisseau miniature s'appellent toutes `Thruster_Small` :
+   * piloter par nom les allumerait ou les eteindrait toutes les six ensemble.
+   * C'est le troisieme endroit du portage ou le nom du build ne suffit pas,
+   * apres les nuages et les pivots de tornade.
+   */
+  gateAt(etats, tolerance = 0.01) {
+    if (!etats || !etats.size) return 0;
+    let n = 0;
+    for (const [i, ps] of this.live) {
+      if (!ps) continue;
+      const p = (this.systems[i] || {}).position;
+      if (!p) continue;
+      let veut;
+      for (const [cle, v] of etats) {
+        const q = cle.split(",").map(Number);
+        if (Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) <= tolerance) { veut = v; break; }
+      }
+      if (veut === undefined) continue;
+      try {
+        const tourne = ps.isStarted ? ps.isStarted() : true;
+        if (veut && !tourne) { ps.start(); n++; }
+        else if (!veut && tourne) { ps.stop(); n++; }
+      } catch (e) { /* un systeme dispose : rien a piloter */ }
+    }
+    return n;
+  }
+
   gate(etats) {
     if (!etats || !etats.size) return 0;
     let n = 0;

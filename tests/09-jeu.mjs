@@ -34,7 +34,9 @@ import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
-         ARROW_OFFSET, DUST, DEAD_THRESHOLD } from "../web/src/tracker.js";
+         ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
+         ancientProbeAcceleration, ANCIENT_PROBE_THRUST,
+         SHIP_NOZZLES } from "../web/src/tracker.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
          BLINK } from "../web/src/attachments.js";
@@ -44,7 +46,7 @@ import { ambienceZones, activeZones, winnersByLayer, clipOf,
          AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, probePrompts, radiationEmitters,
-         radiationAt } from "../web/src/volumes.js";
+         radiationAt, CompoundTrigger, sandstormVolumes } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
@@ -3633,6 +3635,60 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         motionDust(200).lifetime < motionDust(50).lifetime, true);
   check("le debit augmente", motionDust(200).rate > motionDust(50).rate, true);
   check("et la duree de vie a un plancher", motionDust(1000).lifetime, DUST.minLifetime);
+
+  // Les six buses du vaisseau MINIATURE : la buse allumee est celle qui POUSSE,
+  // donc l'OPPOSEE au mouvement. Ecrit a l'envers, les flammes sortent du cote
+  // ou il va.
+  check("six buses", SHIP_NOZZLES.length, 6);
+  const versLaDroite = shipNozzles([1, 0, 0]);
+  check("pousser a droite allume la buse de GAUCHE",
+        `${versLaDroite.left},${versLaDroite.right}`, "true,false");
+  const versLeHaut = shipNozzles([0, -1, 0]);
+  check("monter allume celle du haut",
+        `${versLeHaut.up},${versLeHaut.down}`, "true,false");
+  const enAvant = shipNozzles([0, 0, -1]);
+  check("avancer allume celle de l'avant",
+        `${enAvant.forward},${enAvant.rear}`, "true,false");
+  const repos = shipNozzles([0, 0, 0]);
+  check("au repos, aucune", Object.values(repos).filter(Boolean).length, 0);
+  // Les six s'appellent toutes `Thruster_Small` : seule leur place les
+  // distingue, comme les nuages et les pivots de tornade.
+  const buses = modelShipNozzles({ placed: { ThrusterParticleController: [
+    { name: "Thrusters", body: "ModelShip_Body", nozzles: {
+      forward: [0, 0, -1], rear: [0, 0, 1], right: [-1, 0, 0],
+      left: [1, 0, 0], up: [0, -1, 0], down: [0, 1, 0] } },
+  ] } });
+  check("les six portent une position", buses.length, 6);
+  check("et elles sont toutes distinctes",
+        new Set(buses.map((b) => b.position.join(","))).size, 6);
+  check("sur le vaisseau miniature, pas celui du joueur",
+        buses[0].body, "ModelShip_Body");
+
+  // La sonde ancienne : cinquante d'acceleration locale vers l'avant, sans fin.
+  check("la sonde ancienne pousse a cinquante", ANCIENT_PROBE_THRUST, 50);
+  check("droit devant elle",
+        ancientProbeAcceleration([0, 0, 1]).join(","), "0,0,50");
+
+  // Le volume compose : UNE entree et UNE sortie, quel que soit le nombre
+  // d'enfants traverses. Sans ce compte, passer d'un cylindre au suivant
+  // emettrait une sortie puis une entree, et tout ce qui ecoute clignoterait.
+  const compose = new CompoundTrigger();
+  check("entrer dans le premier enfant annonce une entree",
+        compose.enterChild("joueur"), true);
+  check("entrer dans un second, chevauchant, n'en annonce pas une seconde",
+        compose.enterChild("joueur"), false);
+  check("et l'on est compte une seule fois", compose.inside, 1);
+  check("sortir du premier n'annonce rien", compose.exitChild("joueur"), false);
+  check("on est toujours dedans", compose.contains("joueur"), true);
+  check("sortir du dernier annonce la sortie", compose.exitChild("joueur"), true);
+  check("et l'on n'est plus dedans", compose.inside, 0);
+  // Deux corps distincts se comptent separement.
+  compose.enterChild("a"); compose.enterChild("b");
+  check("deux corps, deux comptes", compose.inside, 2);
+  compose.exitChild("a");
+  check("l'un sort sans emporter l'autre", compose.contains("b"), true);
+  // Sortir de ce dans quoi on n'est jamais entre ne fait rien.
+  check("une sortie sans entree ne fait rien", compose.exitChild("inconnu"), false);
 }
 
 report();

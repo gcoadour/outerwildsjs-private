@@ -92,14 +92,68 @@ de poussière sans cible ni sur la carte, rien de visible sous trente unités pa
 seconde, l'opacité qui plafonne, la durée de vie qui diminue quand le débit
 augmente, et son plancher.
 
+## Trois pièces de plus, et une correction
+
+**Les six buses du vaisseau… miniature.** `ThrusterParticleController` allume la
+buse **opposée** au mouvement — une accélération vers la droite allume celle de
+gauche, parce que c'est elle qui pousse. Écrit à l'envers, les flammes sortent
+du côté où le vaisseau va, et c'est le même piège que
+[`46`](46-migration-lots.md) avait relevé sur les dix buses du sac dorsal.
+
+Mais le porteur est `ModelShip_Body` : c'est le petit vaisseau télécommandé de
+l'observatoire, pas celui du joueur. Je l'avais écrit « du vaisseau » à vue du
+nom de la classe ; c'est le champ `body` de l'extraction qui l'a corrigé — comme
+il avait corrigé « dans Dark Bramble » pour l'interrupteur du regard
+([`50`](50-regard.md)).
+
+Et comme le vaisseau miniature **n'est pas porté** — `playerdata.js` le disait
+déjà à propos de ses compteurs d'essais — les six buses restent éteintes. La loi
+est écrite et éprouvée, sa liste d'entrées est vide, et on le dit : c'est le même
+choix que pour les dix-huit bouffées de [`46`](46-migration-lots.md).
+
+> Les six systèmes s'appellent **tous** `Thruster_Small`. Troisième endroit du
+> portage où le nom du build ne suffit pas, après les nuages
+> ([`48`](48-ciel-mesure.md)) et les pivots de tornade ([`49`](49-queue.md)) —
+> d'où un pilotage par **position**.
+
+**Le volume composé.** `CompoundTriggerVolume` tient un **compte par collider**
+à travers tous ses enfants :
+
+```
+entrée dans un enfant   si le collider n'est pas suivi → OnEntry, puis +1
+sortie d'un enfant      −1 ; si le compte tombe à zéro → OnExit
+```
+
+Une forme faite de plusieurs cylindres qui se chevauchent — l'entonnoir de
+sable — ou de plusieurs boîtes — la tempête de sable — émet donc **une** entrée
+et **une** sortie, quel que soit le nombre d'enfants traversés. Sans ce compte,
+passer d'un cylindre au suivant émettrait une sortie puis une entrée, et tout ce
+qui écoute clignoterait.
+
+**La sonde ancienne** pousse à **cinquante** d'accélération locale vers l'avant,
+à chaque pas, sans viser ni s'arrêter.
+
 ## Le compte
 
 | | instances |
 |---|---|
 | posées dans `level0` | **1 390** |
-| **lues, en tout** | **1 338 — 96,3 %** |
-| extraites, non lues | 23 |
-| sans aucun lecteur | 29 |
+| **lues, en tout** | **1 356 — 97,6 %** |
+| extraites, non lues | 20 |
+| sans aucun lecteur | 14 |
+
+Les **34** qui restent, une par une :
+
+| | n | pourquoi pas |
+|---|---|---|
+| `InertiaTensorCalibrator` | 14 | ce portage n'a pas de tenseur d'inertie ([`49`](49-queue.md)) |
+| outils de studio | 7 | `DebugBreakAllChildren` ×2, `DebugHUD`, `DebugInputManager`, `LoadTimeTracker`, `TapeMeasure`, `ResetSimulationTrigger` |
+| mise en page | 7 | `CustomAspectRatio` ×3, `HUDCameraScript`, `MapOpenGL`, `MinimapHUD`, `ObservatoryMap` — le portage a les siennes ([`52`](52-casque.md)) |
+| infrastructure | 3 | `InputInitializer`, `Locator`, `LODBiasManager` — des singletons de câblage, sans comportement propre |
+| `Detonator` | 1 | une bibliothèque d'explosion tierce ; le portage a sa supernova ([`32`](32-mort.md)) |
+| `DrawSoundWave` | 1 | l'onde du télescope : 500 points, décalage (0,4 ; −0,3). Dessin pur, non porté |
+
+C'est le fond du tonneau, et il est nommé.
 
 ## La leçon
 

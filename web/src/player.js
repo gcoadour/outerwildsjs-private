@@ -431,6 +431,7 @@ export class Player {
 // --- ce que le joueur porte en plus de son corps ---------------------------
 //
 // @lit PlayerState, PlayerNoiseMaker, FirstPersonManipulator
+// @lit AlignPlayerWithField, PlayerJetpackController, PlayerCharacterController
 // @lit PlayerCompressionSensor, SurfaceSensor
 // Quatre classes de docs/44 §7 restees sans lecteur, et trois d'entre elles
 // portent un NOMBRE que le portage avait remplace par une invention

@@ -104,7 +104,13 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // La fin de la queue : ce qui suit un autre corps, et ce qui
                 // clignote (docs/55-attaches.md).
                 "AlignWithTargetBody", "BlinkingRenderer", "BrokenNode",
-                "HatchController", "WaterEffectVolume"];
+                "HatchController", "WaterEffectVolume",
+                // Les six buses du VAISSEAU, nommees par leur direction
+                // (docs/58-suivi.md).
+                "ThrusterParticleController",
+                // Le volume compose et ses declencheurs enfants : une entree,
+                // une sortie, quel que soit le nombre d'enfants traverses.
+                "CompoundTriggerVolume", "ChildTriggerVolume", "SandstormVolume"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -153,6 +159,22 @@ const WANT_VOLUME = new RegExp([
  * extraite, et le portage tournait donc la tete au hasard (docs/38-depart.md).
  */
 const WANT_ROTATION = /spawnpoint/i;
+
+/**
+ * La position MONDE du GameObject qu'un PPtr de composant designe.
+ *
+ * Les six buses du vaisseau s'appellent TOUTES `Thruster_Small` : leur nom ne
+ * les distingue pas, leur place si. C'est le meme cas que les nuages
+ * (docs/48-ciel-mesure.md) et les pivots de tornade (docs/49-queue.md).
+ */
+function positionDuComposant(ctx, ptr) {
+  if (!ptr || !ptr.pathId) return null;
+  const o = ctx.env.deref(ptr, ctx.sceneObj);
+  const v = o && ctx.readEngine(o);
+  const gid = v && v.m_GameObject ? v.m_GameObject.pathId : 0;
+  if (!gid || !ctx.transformOf.has(gid)) return null;
+  return ctx.world(gid)[0].map((x) => Math.round(x * 1000) / 1000);
+}
 
 export function extractGameplay(ctx) {
   // OWRigidbody -> nom du GameObject, pour resoudre les references entre
@@ -251,6 +273,17 @@ export function extractGameplay(ctx) {
       if (!v || typeof v !== "object" || !("$ref" in v)) continue;
       if (v.$ref !== null && ctx.texts.has(v.$ref)) (entry.trees ||= {})[k] = v.$ref;
       else if (/convocontroller|convotrigger/i.test(cls)) ecartes.add(`${cls}.${k}`);
+    }
+    // `ThrusterParticleController` designe ses six buses par pointeur, et les
+    // six systemes portent le MEME nom : on resout en positions.
+    if (cls === "ThrusterParticleController") {
+      const brut = ctx.scriptFields(obj) || {};
+      entry.nozzles = {};
+      for (const [k, dir] of [["_forwardThruster", "forward"], ["_rearThruster", "rear"],
+                              ["_rightThruster", "right"], ["_leftThruster", "left"],
+                              ["_upThruster", "up"], ["_downThruster", "down"]]) {
+        entry.nozzles[dir] = positionDuComposant(ctx, brut[k]);
+      }
     }
     (placed[cls] ||= []).push(entry);
   }

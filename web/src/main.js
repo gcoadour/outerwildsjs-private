@@ -79,7 +79,8 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
-import { relativeMotion, trackerReadout, motionDust } from "./tracker.js";
+import { relativeMotion, trackerReadout, motionDust,
+         shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
@@ -419,6 +420,8 @@ async function boot() {
   const voyants = new DamageDisplay();
   const notifications = new Notifications();
   const invitesGuimauve = roastPrompts(gameplay);
+  // Les six buses du vaisseau miniature : homonymes, donc pilotees par POSITION.
+  const busesModele = modelShipNozzles(gameplay);
   window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
   // Ce que le joueur porte en plus de son corps (docs/53-joueur.md) : l'etat,
   // le bruit qu'il fait, et le capteur qui le tue s'il reste coince.
@@ -2517,6 +2520,22 @@ async function boot() {
 
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
     for (const a of ascenseurs) a.update(now);
+
+    // Les six buses du vaisseau MINIATURE — celui de l'observatoire, pas celui
+    // du joueur : le champ `body` dit `ModelShip_Body`.
+    //
+    // Le vaisseau miniature n'est PAS porte (playerdata.js le dit deja a propos
+    // de ses compteurs d'essais) : il n'y a donc aucune commande a lire, et les
+    // six buses restent eteintes. La loi est ecrite et eprouvee — la buse
+    // allumee est celle qui POUSSE, donc l'opposee au mouvement — et c'est le
+    // meme choix que pour les dix-huit bouffees de docs/46 : la mecanique
+    // existe, sa liste d'entrees est vide, et on le dit.
+    if (busesModele.length && particles.live && particles.live.size) {
+      const etats = shipNozzles([0, 0, 0]);
+      const parPosition = new Map();
+      for (const b of busesModele) parPosition.set(b.position.join(","), etats[b.direction]);
+      particles.gateAt(parPosition);
+    }
 
     // Les pivots de tornade culbutent, lentement et chacun a son rythme.
     if (tornades.count) tornades.update(dt);

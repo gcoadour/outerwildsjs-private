@@ -32,6 +32,9 @@
 // de Dark Bramble. Les fragments, leurs proprietes et leur chute, eux, sont
 // ceux du jeu.
 
+// @lit BreakableFragment, MakeChildrenBreakable, DetachableFragment
+// Les 122 fragments de la croute : 72 tombent, 50 se brisent.
+
 export const FIELD_PARENT_ONLY = 2;
 
 /** Porteurs de croute, avec leurs proprietes de fragment. */
