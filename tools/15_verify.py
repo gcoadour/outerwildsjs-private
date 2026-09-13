@@ -74,9 +74,23 @@ class Report:
 
 
 def serve(root, port):
-    """Sert le depot en tache de fond, comme web/serve.sh."""
+    """Sert le depot en tache de fond, comme web/serve.sh.
+
+    A une difference pres, et elle a coute une demi-heure : on annonce
+    `no-store`. `http.server` n'envoie aucun `Cache-Control`, Chromium applique
+    alors sa mise en cache HEURISTIQUE, et un profil persistant garde donc les
+    modules de la session precedente. Le symptome est parfaitement trompeur —
+    « le module ne fournit pas d'export nomme X » alors que le fichier sur le
+    disque l'exporte — et il ne se produit QU'avec `--profil`, jamais en
+    `--repli`, qui repart d'un profil vide.
+    """
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        http.server.SimpleHTTPRequestHandler.end_headers(self)
+
     handler = type("H", (http.server.SimpleHTTPRequestHandler,),
                    {"directory": root,
+                    "end_headers": end_headers,
                     "log_message": lambda *a, **k: None})
     # un port laisse en TIME_WAIT par une execution precedente ne doit pas
     # empecher la suivante
@@ -832,6 +846,30 @@ def run(url, heavy, profil=None, zip_path=None):
                page.evaluate("() => window.__consoles.flashlight.on"), not allumee)
         page.keyboard.press("KeyF")
         page.wait_for_timeout(300)
+
+        # --- viser un referentiel (docs/62-visee.md) ----------------------------
+        #
+        # La cible se REGARDE : un clic gauche verrouille ce qu'on a devant soi,
+        # un second sur la meme la relache. Le portage ne la choisissait que
+        # dans la carte, et les trois canaux de vol du build ne pilotaient rien.
+        page.mouse.move(640, 360)
+        page.mouse.down(button="left"); page.mouse.up(button="left")
+        page.wait_for_timeout(600)
+        visee = page.evaluate("""() => { const l = window.__visee;
+          return { cible: l.current ? l.current.name : null,
+                   crochets: Math.round(l.bracket * 100) / 100,
+                   carte: window.__map.selected ? window.__map.selected.name : null };
+        }""")
+        rep.check("le clic gauche vise un referentiel", visee["cible"] is not None,
+                  visee["cible"], "!= None")
+        rep.eq("et la carte tient la meme cible", visee["carte"], visee["cible"])
+        rep.eq("les crochets se sont fermes", visee["crochets"], 0)
+        page.mouse.down(button="left"); page.mouse.up(button="left")
+        page.wait_for_timeout(600)
+        rep.eq("un second clic la relache",
+               page.evaluate("() => window.__visee.current"), None)
+        rep.eq("et les crochets se rouvrent",
+               page.evaluate("() => Math.round(window.__visee.bracket)"), 1)
 
         # --- coupure passe-bas des emetteurs -------------------------------------
         rep.at_least("sources reliees a un emetteur",

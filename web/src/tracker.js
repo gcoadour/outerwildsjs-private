@@ -192,3 +192,154 @@ export const ANCIENT_PROBE_THRUST = 50;
 export function ancientProbeAcceleration(forward, thrust = ANCIENT_PROBE_THRUST) {
   return [forward[0] * thrust, forward[1] * thrust, forward[2] * thrust];
 }
+
+// --- viser un referentiel, et s'y accorder (docs/62-visee.md) ------------------
+//
+// `ReferenceFrameTracker.UpdateTargeting` : la cible ne se choisit pas dans la
+// carte, elle se REGARDE. Le portage ne la choisissait que dans la carte, et
+// les trois canaux de vol du build — `Lock On`, `Match Velocity`, `Autopilot` —
+// ne pilotaient rien une fois lus (docs/61-commandes.md).
+//
+// @lit ReferenceFrame, ReferenceFrameVolume, Autopilot, AutopilotGUI
+// @lit PlayerJetpackController, ShipThrusterController
+
+/** La portee du rayon proche, celui qui traverse le decor. */
+export const LOCK_NEAR = 1000;
+/** Celle du rayon lointain, qui ne voit que les volumes de referentiel. */
+export const LOCK_FAR = 100000;
+/** Vitesse de fermeture des crochets de visee, par seconde. */
+export const BRACKET_RATE = 10;
+
+/**
+ * Les crochets de visee se ferment en un dixieme de seconde, et se rouvrent
+ * aussi vite. `_bracketScale` va de 1 (ouvert) a 0 (ferme) a dix par seconde,
+ * borne a [0, 1] — et il est REMIS a 1 au moment ou l'on vise, pour que
+ * l'animation reparte de l'ouverture a chaque nouvelle cible.
+ */
+export function bracketScale(prev, targeted, dt, rate = BRACKET_RATE) {
+  const v = prev + (targeted ? -1 : 1) * dt * rate;
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+const _sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const _len = (a) => Math.hypot(a[0], a[1], a[2]);
+
+/** L'angle, en degres, entre deux directions. */
+export function angleTo(a, b) {
+  const la = _len(a) || 1, lb = _len(b) || 1;
+  const c = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb);
+  return Math.acos(c < -1 ? -1 : c > 1 ? 1 : c) * 180 / Math.PI;
+}
+
+/**
+ * Le referentiel VISE, en deux temps comme le build.
+ *
+ * 1. un rayon de mille unites droit devant, sur le masque physique : ce qu'on
+ *    touche vraiment. C'est ce qui permet de viser une lune en la regardant de
+ *    pres, meme si un plus gros volume l'englobe.
+ * 2. a defaut, tous les volumes de referentiel a cent mille unites, et le plus
+ *    proche EN ANGLE gagne — pas le plus proche en distance. Viser une planete
+ *    lointaine mais bien centree l'emporte donc sur une lune du coin de l'oeil.
+ *
+ * Le portage n'a pas de volumes de referentiel a lancer un rayon dessus : il a
+ * la liste des corps et leur rayon d'arrivee declare (`frames.js`). Le premier
+ * temps devient donc « le corps dont on perce la sphere a moins de mille », le
+ * second « le mieux centre ». La regle du build est conservee, sa mise en
+ * oeuvre non — et c'est dit.
+ *
+ * @param corps  [{ name, position, radius }]
+ * @returns le corps vise, ou null
+ */
+export function aimedFrame(corps, origine, avant,
+                           { near = LOCK_NEAR, far = LOCK_FAR } = {}) {
+  let proche = null, procheDist = Infinity;
+  let centre = null, meilleurAngle = 180;
+  for (const b of corps || []) {
+    if (!b || !b.position) continue;
+    const d = _sub(b.position, origine);
+    const dist = _len(d);
+    const angle = angleTo(avant, d);
+    // Temps 1 : la sphere du corps est PERCEE par le rayon proche. Le demi-angle
+    // sous lequel on la voit borne l'ecart tolere.
+    const r = b.radius || 0;
+    if (dist - r <= near && r > 0 && dist > 0) {
+      const demi = Math.asin(Math.min(1, r / Math.max(dist, r))) * 180 / Math.PI;
+      if (angle <= demi && dist < procheDist) { proche = b; procheDist = dist; }
+    }
+    // Temps 2 : le mieux centre, a portee du rayon lointain.
+    if (dist <= far && angle < meilleurAngle) { meilleurAngle = angle; centre = b; }
+  }
+  return proche || centre;
+}
+
+/**
+ * Le verrouillage : une touche, trois issues.
+ *
+ * Viser du vide ou re-viser ce qu'on visait deja DEVERROUILLE — c'est la meme
+ * touche qui pose et qui retire, et le build ne s'en cache pas
+ * (`UntargetReferenceFrame`).
+ */
+export class LockOn {
+  constructor() {
+    this.current = null;
+    this.last = null;
+    this.possible = null;
+    this.bracket = 1;
+    this.showPrompt = false;
+    this.events = [];
+  }
+
+  /**
+   * @param dt
+   * @param press  le front de `Lock On`
+   * @param vise   le referentiel regarde, ou null (`aimedFrame`)
+   */
+  update(dt, press, vise) {
+    this.events = [];
+    if (press) {
+      if (!vise || vise === this.current) {
+        if (this.current) {
+          this.last = this.current;
+          this.current = null;
+          this.events.push("UntargetReferenceFrame");
+        }
+      } else {
+        this.last = this.current;
+        this.current = vise;
+        // Les crochets repartent grands ouverts : c'est ce que fait
+        // `_bracketScale = 1f` juste apres l'evenement.
+        this.bracket = 1;
+        this.events.push("TargetReferenceFrame");
+      }
+    }
+    this.bracket = bracketScale(this.bracket, !!this.current, dt);
+    // L'invite « vous pouvez viser ceci » ne s'affiche que sur une cible
+    // DIFFERENTE de celle qu'on tient deja.
+    this.showPrompt = !!vise && vise !== this.current;
+    this.possible = vise;
+    return this.current;
+  }
+}
+
+/**
+ * `Autopilot.InitMatchVelocity` : accorder sa vitesse a celle du referentiel.
+ *
+ * Le build laisse le pilote automatique y aller par la poussee ; le portage n'a
+ * pas son asservissement, et pose la vitesse. La difference se voit sur une
+ * seconde, pas sur le resultat — et elle est ecrite ici plutot que cachee.
+ */
+export function matchedVelocity(targetVelocity) {
+  return [targetVelocity[0], targetVelocity[1], targetVelocity[2]];
+}
+
+/**
+ * `Autopilot.InitFlyToDestination` : il REFUSE si l'on y est deja.
+ *
+ * « Deja » veut dire : plus pres que la distance d'arrivee declaree par le
+ * volume de referentiel. Le portage engageait toujours, et le pilote partait
+ * pour un voyage de zero unite.
+ */
+export function canFlyTo(distance, arrivalDistance, allowAutopilot = true) {
+  if (!allowAutopilot) return false;
+  return distance >= arrivalDistance;
+}

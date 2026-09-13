@@ -33,6 +33,8 @@ import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
+import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo, matchedVelocity,
+         LOCK_NEAR, BRACKET_RATE } from "../web/src/tracker.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
          ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
          ancientProbeAcceleration, ANCIENT_PROBE_THRUST,
@@ -3974,6 +3976,68 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la manette aussi", cmd2.padButton("Probe"), 7);
   check("les canaux absents du fichier gardent la table",
         cmd2.get("Jump").pos.codes[0], "Space");
+
+  // --- viser un referentiel (docs/62) ---
+  //
+  // `ReferenceFrameTracker` : la cible se REGARDE, elle ne se choisit pas dans
+  // la carte. Le portage ne la choisissait que dans la carte.
+  check("les crochets se ferment a dix par seconde",
+        bracketScale(1, true, 0.05), 0.5);
+  check("et se rouvrent aussi vite", bracketScale(0, false, 0.05), 0.5);
+  check("sans jamais depasser un", bracketScale(0.9, false, 1), 1);
+  check("ni descendre sous zero", bracketScale(0.1, true, 1), 0);
+  check("dix par seconde", BRACKET_RATE, 10);
+  check("l'angle a la perpendiculaire", Math.round(angleTo([0, 0, 1], [0, 1, 0])), 90);
+  // La visee : le mieux CENTRE gagne, pas le plus proche.
+  const corps = [
+    { name: "loin mais centre", position: [0, 0, 5000], radius: 200 },
+    { name: "pres mais de cote", position: [3000, 0, 300], radius: 100 },
+  ];
+  check("le mieux centre gagne",
+        aimedFrame(corps, [0, 0, 0], [0, 0, 1]).name, "loin mais centre");
+  check("et regarder de cote change la cible",
+        aimedFrame(corps, [0, 0, 0], [1, 0, 0.1]).name, "pres mais de cote");
+  // Temps 1 : un corps perce par le rayon PROCHE l'emporte sur un mieux centre.
+  const pres = [
+    { name: "la lune, sous le nez", position: [0, 0, 300], radius: 250 },
+    { name: "la planete, derriere", position: [0, 0, 40000], radius: 2000 },
+  ];
+  check("ce qu'on touche a mille l'emporte",
+        aimedFrame(pres, [0, 0, 0], [0, 0, 1]).name, "la lune, sous le nez");
+  check("le rayon proche porte a mille", LOCK_NEAR, 1000);
+  check("et rien devant ne donne rien",
+        aimedFrame([], [0, 0, 0], [0, 0, 1]), null);
+  // Le verrouillage : la meme touche pose et retire.
+  const lock = new LockOn();
+  const cible1 = { name: "a" }, cible2 = { name: "b" };
+  lock.update(0.016, true, cible1);
+  check("viser pose la cible", lock.current, cible1);
+  check("et l'annonce", lock.events.join(","), "TargetReferenceFrame");
+  check("les crochets repartent d'en haut", lock.bracket > 0.8, true);
+  lock.update(0.016, true, cible1);
+  check("re-viser la meme la retire", lock.current, null);
+  check("et l'annonce aussi", lock.events.join(","), "UntargetReferenceFrame");
+  lock.update(0.016, true, cible1);
+  lock.update(0.016, true, cible2);
+  check("viser une autre change de cible", lock.current, cible2);
+  check("l'ancienne est retenue", lock.last, cible1);
+  lock.update(0.016, true, null);
+  check("viser le vide devise", lock.current, null);
+  check("deviser deux fois ne dit rien",
+        (lock.update(0.016, true, null), lock.events.length), 0);
+  // L'invite ne s'affiche que sur une cible AUTRE que celle qu'on tient.
+  lock.update(0.016, true, cible1);
+  lock.update(0.016, false, cible1);
+  check("pas d'invite sur ce qu'on vise deja", lock.showPrompt, false);
+  lock.update(0.016, false, cible2);
+  check("mais une sur ce qu'on pourrait viser", lock.showPrompt, true);
+  // Le pilote automatique REFUSE si l'on est deja arrive.
+  check("aller plus loin que la distance d'arrivee", canFlyTo(5000, 1000), true);
+  check("y etre deja, non", canFlyTo(500, 1000), false);
+  check("et un referentiel qui l'interdit, non plus",
+        canFlyTo(5000, 1000, false), false);
+  check("accorder sa vitesse la copie",
+        matchedVelocity([1, 2, 3]).join(","), "1,2,3");
 }
 
 report();

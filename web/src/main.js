@@ -85,6 +85,7 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
+import { LockOn, aimedFrame, canFlyTo } from "./tracker.js";
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep } from "./lights.js";
@@ -95,7 +96,8 @@ import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
-import { referenceFrames, DeclaredFrames, restingPoint } from "./frames.js";
+import { referenceFrames, DeclaredFrames, restingPoint,
+         autopilotDistances } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
@@ -1225,6 +1227,16 @@ async function boot() {
   const marqueurs = mapMarkers(gameplay);
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF, marqueurs);
+  // La liste des corps visables : construite UNE fois, rafraichie en place.
+  // Elle se declare ICI, avec les corps, et non pres de son lecteur — c'est la
+  // deuxieme zone morte de ce fichier en deux lots (voir `impostures`), et le
+  // symptome est le meme : une erreur au premier usage, muette jusque-la.
+  const visables = [];
+  for (const b of bodies) {
+    visables.push({ body: b, name: b.name,
+                    position: [b.position0[0], b.position0[1], b.position0[2]],
+                    radius: (b.gravity && b.gravity.upperSurfaceRadius) || 0 });
+  }
   if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
   window.__map = solarMap;
   window.__autopilot = autopilot;
@@ -1303,6 +1315,10 @@ async function boot() {
   // et le meme bouton la rappelle quand elle est posee. C'est l'etat MAINTENU
   // qui compte, donc `keys`, et non un drapeau leve par `command()`.
   let probeRefusee = false;
+  // Les trois fronts de vol : viser, s'accorder, piloter. Ils sont poses par
+  // `command()` et consommes par la boucle, comme `interactPressed`.
+  let lockPressed = false, matchPressed = false, autoPressed = false;
+  const lockOn = new LockOn();
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
 
@@ -1328,6 +1344,13 @@ async function boot() {
       return c.pos.codes.includes(code) || c.neg.codes.includes(code);
     };
     if (est("Interact")) interactPressed = true;
+    // `Lock On` (clic gauche), `Match Velocity` (espace) et `Autopilot` (E)
+    // sont les trois canaux de vol. Les deux derniers partagent leur touche
+    // avec le saut et l'interaction : c'est le MODE qui tranche dans le build,
+    // et ici la condition (en vol, une cible) qui joue le meme role.
+    if (est("Lock On")) lockPressed = true;
+    if (est("Match Velocity")) matchPressed = true;
+    if (est("Autopilot")) autoPressed = true;
     const m = /^Digit([1-9])$/.exec(code);
     if (m) optionPressed = parseInt(m[1], 10);
     if (est("Map")) solarMap.toggle();
@@ -1468,7 +1491,13 @@ async function boot() {
   canvas.addEventListener("click", () => {
     // Le verrouillage de souris n'a pas de sens au doigt, et le demander
     // ferait echouer la promesse a chaque tape.
-    if (!touch.enabled) canvas.requestPointerLock();
+    // La promesse peut echouer — un navigateur sans verrou de souris, une
+    // page qui n'a pas le focus, un Chromium sans tete. Sans ce `catch`, elle
+    // remonte en erreur non attrapee, et `15_verify.py` la compte comme telle.
+    if (!touch.enabled) {
+      const p = canvas.requestPointerLock();
+      if (p && p.catch) p.catch(() => {});
+    }
   });
   // le navigateur bloque l'audio tant qu'aucun geste utilisateur n'a eu lieu ;
   // au doigt, ce geste n'atteint jamais le canvas, qui est sous la couche
@@ -2727,6 +2756,65 @@ async function boot() {
         resHUD.setTracker(trackerReadout(m.distance, m.zSpeed));
         window.__suivi = m;
       } else resHUD.setTracker(null);
+    }
+
+    // --- viser un referentiel, et s'y accorder (docs/62-visee.md) ---
+    //
+    // `ReferenceFrameTracker` : la cible se REGARDE. Le portage ne la
+    // choisissait que dans la carte, et les trois canaux de vol du build ne
+    // pilotaient rien une fois lus.
+    {
+      const moi = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                   player.pos.z + anchorPos[2]];
+      // Les positions se rafraichissent EN PLACE, dans une liste construite une
+      // fois. Les recreer a chaque image donnait des objets tout neufs, et
+      // `LockOn` compare par identite — comme le build compare deux
+      // `ReferenceFrame` : re-viser la meme cible ne la relachait donc jamais,
+      // parce que ce n'etait jamais « la meme ».
+      for (const v of visables) {
+        v.position[0] = v.body.position0[0];
+        v.position[1] = v.body.position0[1];
+        v.position[2] = v.body.position0[2];
+      }
+      const vise = solarMap.open ? null : aimedFrame(visables, moi, [fwd.x, fwd.y, fwd.z]);
+      const avant = lockOn.current;
+      lockOn.update(dt, lockPressed, vise);
+      lockPressed = false;
+      if (lockOn.current !== avant) {
+        // La carte et la visee tiennent la MEME cible : viser du regard et
+        // choisir sur la carte sont deux gestes pour une seule chose.
+        solarMap.selected = lockOn.current ? lockOn.current.body : null;
+        console.log(lockOn.current
+          ? `referentiel vise : ${lockOn.current.name}`
+          : "referentiel abandonne");
+      }
+      // `PlayerJetpackController.Update` : accorder sa vitesse demande une
+      // cible, du carburant, et le canal `Match Velocity` — l'espace, celui du
+      // saut. Au sol on saute ; en vol, on s'accorde.
+      if (matchPressed && lockOn.current && !player.grounded
+          && resources.fuel > 0) {
+        const t = lockOn.current.body;
+        const v = frameVelocity(orbits, t);
+        if (v) {
+          player.vel.x = v[0]; player.vel.y = v[1]; player.vel.z = v[2];
+          console.log(`vitesse accordee a ${t.name}`);
+        }
+      }
+      matchPressed = false;
+      // `Autopilot.InitFlyToDestination` REFUSE si l'on est deja arrive : le
+      // portage engageait toujours, et le pilote partait pour zero unite.
+      if (autoPressed && autopilot && lockOn.current) {
+        const t = lockOn.current.body;
+        const d = Math.hypot(t.position[0] - player.pos.x,
+                             t.position[1] - player.pos.y,
+                             t.position[2] - player.pos.z);
+        const { arrival } = autopilotDistances(
+          declared.frames, t.name, (t.gravity && t.gravity.upperSurfaceRadius) || 0);
+        if (canFlyTo(d, arrival)) autopilot.engage(t);
+        else console.log(`pilote auto : deja arrive (${Math.round(d)} u)`);
+      }
+      autoPressed = false;
+      window.__visee = lockOn;
     }
 
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
