@@ -150,6 +150,7 @@ export class ResourceHUD {
     if (this.alarm) warn.push("hull breach");
     // Et la notification en cours, qui s'efface toute seule.
     if (this.notice) warn.push(this.notice);
+    if (this.tracker) warn.push(this.tracker);
     this.warnings.textContent = warn.join("\n");
 
     // OnInstantDamage fixe la vignette a plein puis la laisse s'effacer en une
@@ -157,6 +158,12 @@ export class ResourceHUD {
     const a = this.exposed ? 1 : Math.max(0, (this.vignetteUntil - now) / this.r.vignetteFade);
     this.vignette.style.opacity = String(a);
   }
+
+  /**
+   * `ReferenceFrameTracker` : la lecture de la cible visee — distance et
+   * vitesse d'approche, sur deux lignes, a cote des jauges.
+   */
+  setTracker(texte) { this.tracker = texte || null; }
 
   /** `MasterAlarm.TurnOnAlarm` / `TurnOffAlarm`, vus de l'ecran. */
   setAlarm(on) { this.alarm = !!on; }

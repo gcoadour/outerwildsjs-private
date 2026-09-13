@@ -79,6 +79,7 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
+import { relativeMotion, trackerReadout, motionDust } from "./tracker.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
@@ -2499,6 +2500,20 @@ async function boot() {
     }
     const avis = notifications.update(now);
     if (resHUD) resHUD.setNotice(avis);
+    // `ReferenceFrameTracker` : quand une cible est visee sur la carte, on lit
+    // sa distance et sa vitesse d'approche. Le portage selectionnait une cible
+    // et n'en disait rien (docs/58-suivi.md).
+    if (resHUD) {
+      const cible = solarMap.selected;
+      if (cible && !solarMap.open) {
+        const moi = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                     player.pos.z + anchorPos[2]];
+        const vRel = [player.vel.x, player.vel.y, player.vel.z];
+        const m = relativeMotion(vRel, moi, cible.position);
+        resHUD.setTracker(trackerReadout(m.distance, m.zSpeed));
+        window.__suivi = m;
+      } else resHUD.setTracker(null);
+    }
 
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
     for (const a of ascenseurs) a.update(now);

@@ -33,6 +33,8 @@ import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
+import { relativeMotion, trackerReadout, directThreshold, motionDust,
+         ARROW_OFFSET, DUST, DEAD_THRESHOLD } from "../web/src/tracker.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
          BLINK } from "../web/src/attachments.js";
@@ -3580,6 +3582,57 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // La camera se met DERRIERE le plan, a la distance de la planete.
   check("la camera d'imposture est derriere le plan",
         imposteur.cameraPosition([0, 0, 0], [0, 0, 1], 500).join(","), "0,0,500");
+
+  // --- le suivi de referentiel (docs/58) ----------------------------------
+  //
+  // Le build INVERSE notre vitesse avant de raisonner : il parle du mouvement
+  // apparent de la cible. Le signe de `zSpeed` en sort negatif en approche, ce
+  // qui surprend jusqu'a ce qu'on se souvienne de l'inversion.
+  const approche = relativeMotion([0, 0, -50], [0, 0, 1000], [0, 0, 0]);
+  check("en approche, la vitesse est negative", approche.zSpeed, -50);
+  check("et le cercle est rouge", `${approche.hue},${approche.saturation}`, "0,1");
+  const fuite = relativeMotion([0, 0, 50], [0, 0, 1000], [0, 0, 0]);
+  check("en fuite, elle est positive", fuite.zSpeed, 50);
+  check("et le cercle est vert", `${fuite.hue},${fuite.saturation}`, "140,1");
+  const lent = relativeMotion([0, 0, -0.5], [0, 0, 1000], [0, 0, 0]);
+  check("entre les deux, il est blanc", lent.saturation, 0);
+
+  // La derive laterale, et le seuil qui s'elargit avec la distance.
+  check("tout droit, c'est direct", approche.lateralSpeed, 0);
+  const travers = relativeMotion([30, 0, -50], [0, 0, 1000], [0, 0, 0]);
+  check("trente de travers a mille unites ne sont pas directs", travers.direct, false);
+  const doux = relativeMotion([5, 0, -50], [0, 0, 1000], [0, 0, 0]);
+  check("cinq, oui", doux.direct, true);
+  const proche = relativeMotion([5, 0, -50], [0, 0, 50], [0, 0, 0]);
+  check("les memes cinq a cinquante unites, non", proche.direct, false);
+  // Le palier a 100 est du CODE MORT : la table de saut le rend inatteignable,
+  // et l'invariant garde qu'on ne l'a pas porte « par evidence ».
+  check("deux paliers seulement, pas trois",
+        [10, 150, 2000].map(directThreshold).join(","), "1,10,10");
+  check("et le troisieme est prevu sans etre atteint", DEAD_THRESHOLD, 100);
+  // Le decalage des fleches grandit avec la DISTANCE, et suit le signe de la
+  // vitesse INVERSEE.
+  check("le decalage suit la distance et le facteur",
+        Number(travers.xyOffset[0].toFixed(4)),
+        Number((-30 * 1000 * ARROW_OFFSET).toFixed(4)));
+
+  // La lecture passe en kilometres au-dela de CINQ mille, pas de mille.
+  check("sous cinq mille, des metres", trackerReadout(4999, -10), " 4999m\n -10m/s");
+  check("au-dela, des kilometres", trackerReadout(6200, -50), " 6km\n -50m/s");
+
+  // La poussiere de mouvement : rien sous trente unites par seconde.
+  check("sans cible visee, pas de poussiere",
+        motionDust(100, { targeting: false }).emitting, false);
+  check("sur la carte non plus", motionDust(100, { mapView: true }).emitting, false);
+  check("le seuil de visibilite est a trente", DUST.minSpeed, 30);
+  check("a dix, on emet mais on ne voit rien", motionDust(10).alpha, 0);
+  check("a cinquante, on voit", motionDust(50).alpha > 0, true);
+  check("et l'opacite plafonne", motionDust(1000).alpha, DUST.maxAlpha);
+  // Plus vite : plus de traits, et plus courts.
+  check("la duree de vie diminue avec la vitesse",
+        motionDust(200).lifetime < motionDust(50).lifetime, true);
+  check("le debit augmente", motionDust(200).rate > motionDust(50).rate, true);
+  check("et la duree de vie a un plancher", motionDust(1000).lifetime, DUST.minLifetime);
 }
 
 report();

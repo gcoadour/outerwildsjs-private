@@ -116,6 +116,8 @@ portage.
 | réparation visible | un nœud réparé devient vert |
 | impostures de planète | les 3 câblées rendues à 1 Hz, effacées si le réel est là |
 | modules de particules | la queue de la comète, le plafond de l'explosion |
+| suivi de référentiel | distance et vitesse d'approche de la cible visée |
+| poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -224,7 +226,7 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
   pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
   est écrit dans le ciel.
-- **27 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+- **25 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
   compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
   de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
   **commentaires** avant de compter, et c'est un commentaire qui avait caché
