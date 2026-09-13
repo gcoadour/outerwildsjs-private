@@ -66,8 +66,10 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
          EndOfTimeMusic, END_OF_TIME, eventAudio } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
-         zoneFaced, ZeroGTraining, CameraLock } from "../web/src/gear.js";
+         zoneFaced, ZeroGTraining, CameraLock,
+         suitBarrierPush } from "../web/src/gear.js";
 import { Interactables } from "../web/src/interact.js";
+import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          launchSpeed, launchPitch, orbitalSpeed, launchWindowLength,
@@ -4181,6 +4183,47 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   bas.landed = true;
   check("pousser vers le bas au sol ne fait rien", bas.ignition(0.1, -1), 0);
   check("et n'allume pas", bas.events.length, 0);
+
+  // --- ce que le jeu annonce, lot 2 (docs/67) ---
+  //
+  // Le mur qui reclame la combinaison : un collider qu'on allume et qu'on
+  // eteint, pas un volume qui declenche.
+  const barriere = [{ kind: "barrier", name: "SuitBarrier", position: [0, 0, 0],
+                 volume: { shape: "box", size: [10, 10, 10] } }];
+  const nu = new Equipment({ suit: false });
+  const vetu = new Equipment({ suit: true });
+  check("sans combinaison, le barriere repousse",
+        suitBarrierPush(barriere, [4, 0, 0], nu) !== null, true);
+  check("et il repousse par la face la plus proche",
+        suitBarrierPush(barriere, [4, 0, 0], nu).map((v) => Math.round(v * 100) / 100)
+          .join(","), "1,0,0");
+  check("de l'autre cote, dans l'autre sens",
+        Math.sign(suitBarrierPush(barriere, [-4, 0, 0], nu)[0]), -1);
+  check("et par le haut si c'est plus court",
+        suitBarrierPush(barriere, [0, 4.5, 0], nu).findIndex((v) => v !== 0), 1);
+  check("avec la combinaison, il n'existe pas",
+        suitBarrierPush(barriere, [0, 0, 0], vetu), null);
+  check("et dehors, rien non plus",
+        suitBarrierPush(barriere, [50, 0, 0], nu), null);
+  // Manger une guimauve REND TOUTE LA SANTE. Deux lignes d'IL, et le portage
+  // comptait les guimauves sans rien en faire.
+  const res = { health: 12, maxHealth: 100, dead: true };
+  check("manger rend toute la sante", eatMarshmallowHeals(res), 88);
+  check("la sante est pleine", res.health, 100);
+  check("et l'on n'est plus mort", res.dead, false);
+  check("sans ressources, rien ne casse", eatMarshmallowHeals(null), 0);
+  // L'invite de lampe : sept conditions, et la derniere est un OU.
+  const invite = (o) => flashlightPromptVisible({ suit: true, onDaySide: false, ...o });
+  check("de nuit, sans lampe allumee, on propose", invite({}), true);
+  check("lampe allumee, non", invite({ on: true }), false);
+  check("sans combinaison, non", invite({ suit: false }), false);
+  check("dans le vaisseau, non", invite({ inShip: true }), false);
+  check("sur la carte, non", invite({ inMapView: true }), false);
+  check("assis quelque part, non", invite({ attached: true }), false);
+  check("a la camera du satellite, non", invite({ satelliteCam: true }), false);
+  check("en plein jour, non", invite({ onDaySide: true }), false);
+  check("mais en plein jour dans une zone sombre, oui",
+        invite({ onDaySide: true, inDarkZone: true }), true);
 }
 
 report();

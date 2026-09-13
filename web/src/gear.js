@@ -115,6 +115,47 @@ export function suitVolumeStep(volumes, worldPoint, equipment, shiftOf = null) {
   return null;
 }
 
+/**
+ * Le mur qui reclame la combinaison.
+ *
+ * `SuitBarrier` n'est pas un volume qui declenche : c'est un COLLIDER qu'on
+ * allume et qu'on eteint. `OnRemoveSuit` l'allume, `OnSuitUp` l'eteint — sans
+ * combinaison, on ne sort pas du village, et c'est tout ce que fait la classe.
+ *
+ * Le portage ne peut pas s'en remettre a Havok pour ce mur-la : `InvisibleWall`
+ * porte un `BoxCollider` et AUCUN maillage, et l'export glTF ne fabrique de
+ * collider que pour ce qui se dessine. Le mur n'existe donc nulle part dans la
+ * scene du portage. On le rend ici comme ce qu'il est pour un joueur qui
+ * marche — une poussee vers l'exterieur de la boite — plutot que de reconstruire
+ * un agregat Havok pour un cube (docs/67-annonces.md).
+ *
+ * @returns la correction a appliquer a la position, ou null
+ */
+export function suitBarrierPush(volumes, worldPoint, equipment, shiftOf = null) {
+  for (const v of volumes) {
+    if (v.kind !== "barrier" || !v.volume || v.volume.shape !== "box") continue;
+    // Le collider est ETEINT tant qu'on porte la combinaison.
+    if (equipment.suit) continue;
+    const p = shiftOf ? restingPoint(worldPoint, shiftOf(v)) : worldPoint;
+    const c = v.position;
+    const demi = v.volume.size.map((x) => x / 2);
+    const d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+    if (Math.abs(d[0]) > demi[0] || Math.abs(d[1]) > demi[1]
+        || Math.abs(d[2]) > demi[2]) continue;
+    // On sort par la face la plus PROCHE : c'est ce que fait un contact, et
+    // c'est ce qui evite de traverser la boite en diagonale.
+    let axe = 0, jeu = demi[0] - Math.abs(d[0]);
+    for (let i = 1; i < 3; i++) {
+      const j = demi[i] - Math.abs(d[i]);
+      if (j < jeu) { jeu = j; axe = i; }
+    }
+    const push = [0, 0, 0];
+    push[axe] = (d[axe] >= 0 ? 1 : -1) * (jeu + 1e-3);
+    return push;
+  }
+  return null;
+}
+
 /** Les quatre points d'accrochage du joueur (pilotage, ordinateur, lift…). */
 export function attachPoints(gameplay) {
   return ((gameplay.placed || {}).PlayerAttachPoint || []).map((c) => {

@@ -868,6 +868,36 @@ def run(url, heavy, profil=None, zip_path=None):
         page.keyboard.press("KeyF")
         page.wait_for_timeout(300)
 
+        # --- ce que le jeu annonce, lot 2 (docs/67-annonces.md) -----------------
+        #
+        # Manger une guimauve rend TOUTE la sante : deux lignes d'IL, et le
+        # soin du jeu. Le portage comptait les guimauves sans rien en faire.
+        soin = page.evaluate("""() => {
+          const r = window.__resources, m = window.__consoles.marshmallow;
+          const avant = r.health;
+          r.health = 20;
+          m.held = true; m.toast = 1;                 // assez grillee
+          const mange = m.eat();
+          const apres = r.health;
+          r.health = avant;
+          return { mange, apres, max: r.maxHealth };
+        }""")
+        rep.eq("la guimauve se mange", soin["mange"], True)
+        # Le soin passe par `command()`, pas par `eat()` : on mesure donc la
+        # regle a part, la ou elle est ecrite.
+        rep.eq("et manger rend toute la sante", page.evaluate(
+            "() => { const r = { health: 3, maxHealth: 100, dead: true };"
+            "  return [window.__soin(r), r.health, r.dead].join(','); }"),
+            "97,100,false")
+        # Le mur qui reclame la combinaison : il repousse tant qu'on n'en a pas.
+        rep.eq("le mur reclame la combinaison", page.evaluate(
+            "() => { const b = [{ kind: 'barrier', position: [0,0,0],"
+            "   volume: { shape: 'box', size: [10,10,10] } }];"
+            "  const nu = { suit: false }, vetu = { suit: true };"
+            "  return [!!window.__mur(b, [4,0,0], nu),"
+            "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
+            "true,true")
+
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #
         # Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME une seconde,

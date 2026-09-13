@@ -27,7 +27,8 @@ import { loadInterface, ResourceHUD, Prompts, GuiMode,
 import { Minimap } from "./minimap.js";
 import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
-         heatSources, heatAt, remoteConsoles, RemoteConsoles } from "./consoles.js";
+         heatSources, heatAt, remoteConsoles, RemoteConsoles,
+         eatMarshmallowHeals, flashlightPromptVisible } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust } from "./crust.js";
@@ -110,7 +111,7 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          qrot as qrotDecor } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, signalVolumes, signalZoneAt } from "./volumes.js";
-import { gearPickups, suitVolumes, suitVolumeStep, Equipment,
+import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining } from "./gear.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO } from "./reactaudio.js";
@@ -918,6 +919,10 @@ async function boot() {
   window.__audioMix = { mixer, transmitters };
 
   window.__consoles = { computer, flashlight, marshmallow };
+  // Sondes de verification : deux regles que le navigateur mesure a part, la
+  // ou elles sont ecrites (docs/67-annonces.md).
+  window.__soin = eatMarshmallowHeals;
+  window.__mur = suitBarrierPush;
   window.__mains = { baton, enMain };
   // Le chargement ne bloque pas le demarrage : ces deux objets pesent quelques
   // dizaines de kilo-octets, et la page doit s'ouvrir sans eux.
@@ -1457,6 +1462,8 @@ async function boot() {
   let lockPressed = false, matchPressed = false, autoPressed = false;
   // La guimauve mangee dans cette image : le baton s'en sert pour se ranger.
   let mangeCetteImage = false;
+  // Pour ne pas repeter l'annonce du mur a chaque image ou l'on s'y appuie.
+  let murAnnonce = false;
   const lockOn = new LockOn();
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
@@ -1524,7 +1531,12 @@ async function boot() {
       // `MarshmallowStick.Update` range le baton TOUT SEUL une fois la
       // guimauve mangee : on lui passe le fait, pas l'ordre.
       mangeCetteImage = true;
-      console.log(`guimauve mangee (${marshmallow.eaten})`);
+      // `PlayerResources.OnEatMarshmallow` : la sante repart au MAXIMUM. Deux
+      // lignes d'IL, et le soin du jeu — le portage comptait les guimauves
+      // sans rien en faire (docs/67-annonces.md).
+      const soigne = eatMarshmallowHeals(resources);
+      console.log(`guimauve mangee (${marshmallow.eaten})`
+        + (soigne > 0 ? `, +${soigne.toFixed(0)} de sante` : ""));
     }
     // Sortir ou ranger le baton : `ToggleStick`. Le build n'a pas de canal pour
     // lui — c'est le tutoriel du feu de camp qui l'appelle — et le portage lui
@@ -2013,6 +2025,22 @@ async function boot() {
         break;
       }
     }
+    // Le mur qui RECLAME la combinaison : `SuitBarrier` allume un collider tant
+    // qu'on n'en porte pas, et `InvisibleWall` n'a aucun maillage — donc aucun
+    // collider dans le portage. On repousse a la main (docs/67-annonces.md).
+    if (suits.length) {
+      const poussee = suitBarrierPush(suits, playerW, equipment,
+        (v) => decalageDuCorps(v.body, anchorPos));
+      if (poussee) {
+        player.pos.x += poussee[0];
+        player.pos.y += poussee[1];
+        player.pos.z += poussee[2];
+        if (!murAnnonce) {
+          console.log("il faut la combinaison pour aller par la");
+          murAnnonce = true;
+        }
+      } else murAnnonce = false;
+    }
     // La combinaison se REND : le volume de retour n'existe que si on l'a.
     if (suits.length && suitVolumeStep(suits, playerW, equipment,
           (v) => decalageDuCorps(v.body, anchorPos)) === "removed") {
@@ -2118,6 +2146,24 @@ async function boot() {
         left.push(P("JetpackPromptController._upThrustPrompt"),
                   P("JetpackPromptController._horizontalThrustPrompt"));
         left.push(P("ProbePromptController._launchPrompt"));
+        // `Flashlight.CheckPromptStatus` : SEPT conditions, toutes
+        // necessaires, et la derniere est un OU — une zone sombre, ou la face
+        // nuit. Le portage n'affichait pas cette invite du tout
+        // (docs/67-annonces.md).
+        if (flashlightPromptVisible({
+          on: flashlight.on, suit: equipment.suit,
+          inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
+          attached: !!consoles.active, satelliteCam: false,
+          inDarkZone: !!(sectorState.secteur && sectorState.secteur.sunless),
+          onDaySide: !night,
+        })) {
+          // Le texte, lui, n'est pas extractible : `_flashlightPrompt` est un
+          // `ScreenPrompt` serialise sur l'instance, et le portage ne sait pas
+          // lire ce type-la — `composants.mjs` rend un objet vide pour tout le
+          // composant. La REGLE vient du build, le mot est du portage, et
+          // c'est dit ici plutot que passe sous silence.
+          left.push({ text: "Lampe (F)", priority: 0, button: null });
+        }
       }
       // GUIMode : le mode capture n'affiche ni le bas ni la gauche, le mode
       // masque n'affiche rien

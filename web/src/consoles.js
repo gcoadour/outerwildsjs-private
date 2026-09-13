@@ -310,3 +310,40 @@ export class RemoteConsoles {
     return { pos: p, vel: Math.hypot(...d) > 1e-3 ? d : [0, 0, 1] };
   }
 }
+
+/**
+ * `PlayerResources.OnEatMarshmallow` : la sante repart au MAXIMUM.
+ *
+ *     _currentHealth = _maxHealth
+ *
+ * Deux lignes d'IL, et une mecanique entiere que le portage n'avait pas : la
+ * guimauve n'est pas un decor de feu de camp, c'est le soin du jeu. Le portage
+ * comptait les guimauves mangees et n'en faisait rien
+ * ([`docs/67`](../../docs/67-annonces.md)).
+ *
+ * @lit PlayerResources
+ */
+export function eatMarshmallowHeals(resources) {
+  if (!resources) return 0;
+  const avant = resources.health;
+  resources.health = resources.maxHealth;
+  resources.dead = false;
+  return resources.health - avant;
+}
+
+/**
+ * `Flashlight.CheckPromptStatus` : quand proposer d'allumer la lampe.
+ *
+ * Sept conditions, toutes necessaires, et la derniere est un OU. Le portage
+ * affichait l'invite sur la seule portee, ce qui la montrait en plein jour et
+ * dans le vaisseau.
+ *
+ * @lit Flashlight
+ */
+export function flashlightPromptVisible({
+  on = false, suit = false, inShip = false, inMapView = false,
+  attached = false, satelliteCam = false, inDarkZone = false, onDaySide = true,
+} = {}) {
+  if (on || !suit || inShip || inMapView || attached || satelliteCam) return false;
+  return inDarkZone || !onDaySide;
+}

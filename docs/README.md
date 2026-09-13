@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`67-annonces.md`](67-annonces.md) — **trois annonces lues : la guimauve soigne, le mur réclame la combinaison, la lampe se propose**
 - [`66-allumage.md`](66-allumage.md) — **ce que le jeu annonce : 124 événements, et l'allumage du vaisseau qu'aucun compte de classes ne montrait**
 - [`65-onde.md`](65-onde.md) — **l'onde de la lunette, la lunette qui grossit, et une classe lue depuis toujours sans être nommée**
 - [`64-mains.md`](64-mains.md) — **ce qu'on tient dans la main : le bâton à guimauve, sa lunette, et un thermomètre qui est une pose d'animation**
