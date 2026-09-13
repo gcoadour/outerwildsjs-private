@@ -33,6 +33,7 @@ import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
+import { clipLoops, WRAP } from "../web/src/pipeline/extract/gltf.js";
 import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo, matchedVelocity,
          LOCK_NEAR, BRACKET_RATE } from "../web/src/tracker.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
@@ -4038,6 +4039,32 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         canFlyTo(5000, 1000, false), false);
   check("accorder sa vitesse la copie",
         matchedVelocity([1, 2, 3]).join(","), "1,2,3");
+
+  // --- ce qui boucle et ce qui ne boucle pas (docs/63) ---
+  //
+  // Le portage jouait TOUT en boucle. Le build ne le fait pas, et la regle
+  // d'Unity est en deux etages pour les clips legacy.
+  check("un clip en Loop boucle",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.LOOP }), true);
+  check("un clip en Once ne boucle pas",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.ONCE }), false);
+  check("un ping-pong boucle aussi",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.PINGPONG }), true);
+  // En Default, c'est le composant qui tranche...
+  check("en Default, le composant tranche",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.DEFAULT }, WRAP.LOOP), true);
+  // ... et si le composant est en Default aussi, Unity retombe sur Once.
+  check("et deux Default valent Once",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.DEFAULT }, WRAP.DEFAULT), false);
+  // Mecanim ne lit pas le wrapMode du clip : la reponse est dans le muscle.
+  check("un clip Mecanim en boucle boucle",
+        clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT,
+                    m_MuscleClip: { m_LoopBlend: true } }), true);
+  check("et sans boucle, non",
+        clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT,
+                    m_MuscleClip: { m_LoopBlend: false } }), false);
+  check("un muscle absent vaut boucle",
+        clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT }), true);
 }
 
 report();

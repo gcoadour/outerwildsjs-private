@@ -30,6 +30,7 @@ import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { extractPrefabs, mergePrefabs } from "../web/src/pipeline/extract/prefabs.js";
 import { extractInput } from "../web/src/pipeline/extract/input.js";
+import { clipLoops } from "../web/src/pipeline/extract/gltf.js";
 import { Commandes, COMMANDES } from "../web/src/input.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
@@ -1084,6 +1085,30 @@ check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
     if (cle(a) !== cle(b)) ecarts.push(`${nom}: ${cle(a)} != ${cle(b)}`);
   }
   check("la table de repli est celle du build", ecarts.join(" ; "), "");
+}
+
+// A12 : ce qui BOUCLE et ce qui ne boucle pas. Le portage jouait tout en
+// boucle ; le build ne le fait pas (docs/63-boucles.md).
+{
+  const legacy = [], mecanim = [], sansBoucle = [];
+  for (const o of env.objects({ type: "AnimationClip" })) {
+    const v = ctx.readEngine(o);
+    if (!v) continue;
+    (v.m_AnimationType === 2 ? mecanim : legacy).push(v);
+    // Les dix-neuf composants `Animation` du build sont en `WrapMode.Default` :
+    // un clip en `Default` retombe donc sur `Once`.
+    if (!clipLoops(v, 0)) sansBoucle.push(v.m_Name);
+  }
+  check("seize clips d'animation", legacy.length + mecanim.length, 16);
+  check("sept legacy", legacy.length, 7);
+  check("neuf Mecanim", mecanim.length, 9);
+  check("quatre ne bouclent pas", sansBoucle.length, 4);
+  check("et ce sont ceux du baton a guimauve",
+        [...sansBoucle].sort().join(","), "PullOut,PutBack,Therm,idle");
+  // Les neuf Mecanim bouclent : ce sont des inactivites, et leur entete de
+  // muscle porte `m_LoopBlend`.
+  check("les neuf Mecanim bouclent",
+        mecanim.filter((v) => clipLoops(v, 0)).length, 9);
 }
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
