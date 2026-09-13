@@ -65,7 +65,7 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { loadLighting, LightField } from "./lights.js";
-import { loadSky, Sky } from "./sky.js";
+import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
@@ -306,7 +306,36 @@ async function boot() {
   const lighting = await loadLighting();
   // Le ciel du build : la voute tourne vers l'etoile, et c'est elle qui
   // fait le jour et la nuit (docs/41-ciel.md).
-  const sky = new Sky(await loadSky());
+  const skyData = await loadSky();
+  const sky = new Sky(skyData);
+  // Le champ d'etoiles : mille points sur une coquille de 30 000 unites, colles
+  // sur la camera, et qui s'eteignent un a un pendant que la boucle passe.
+  const starField = new StarField(skyData);
+  let starPCS = null, starFlash = [];
+  if (starField.ready) {
+    // Un nuage de points plutot qu'un systeme de particules : les etoiles ne
+    // naissent ni ne meurent — le build MET SON SYSTEME EN PAUSE des la
+    // premiere image — et un nuage de points se met a jour par indice, ce dont
+    // l'extinction a besoin. La taille est en pixels et non en unites monde :
+    // c'est l'approximation assumee du portage, et la seule.
+    const pcs = new BABYLON.PointsCloudSystem("etoiles", 3, scene);
+    const pos = starField.positions(1);
+    const [cr, cg, cb] = starField.color;
+    pcs.addPoints(starField.count, (p, i) => {
+      p.position = new BABYLON.Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+      p.color = new BABYLON.Color4(cr, cg, cb, 1);
+    });
+    pcs.buildMeshAsync().then((mesh) => {
+      // Rendu additif et sans profondeur : une etoile est derriere tout, et
+      // n'a pas a se disputer le tampon de profondeur avec une planete.
+      mesh.material.disableDepthWrite = true;
+      mesh.alwaysSelectAsActiveMesh = true;
+      mesh.isPickable = false;
+      mesh.infiniteDistance = true;
+      starPCS = pcs;
+      console.log(`ciel : ${starField.count} etoiles`);
+    }).catch((e) => console.warn("champ d'etoiles :", e.message));
+  }
   window.__sky = sky;
   // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
   const scrollers = new TextureScrollers(await loadTextureAnimators());
@@ -423,7 +452,36 @@ async function boot() {
       shaderCounts[k] = (shaderCounts[k] || 0) + v;
     }
     syncGeometry([entry], origin);
-    if (sky.attach(entry.meshes)) console.log(`ciel : voute rattachee`);
+    if (sky.attach(entry.meshes)) {
+      // Le repere du parent se lit UNE fois, au rattachement : il ne change pas
+      // ensuite, et le lire chaque image couterait une matrice monde pour rien.
+      sky.readBasis(sky.shell, BABYLON);
+      console.log(`ciel : voute rattachee`);
+    }
+    // Les nuages : dix visages sur vingt-quatre maillages homonymes.
+    //
+    // `CloudTextureController.Awake` ecrit `renderer.material.mainTexture`, et
+    // `renderer.material` — au singulier, pas `sharedMaterial` — INSTANCIE le
+    // materiau. Chaque nuage a donc le sien, ce qu'on reproduit en clonant :
+    // poser la texture sur le materiau partage les repeindrait tous les 24 de
+    // la meme facon, ce qui est exactement le defaut qu'on corrige.
+    const nNuages = sky.attachClouds(entry.meshes);
+    if (nNuages) {
+      let peints = 0;
+      for (const { noeud, nuage } of sky.clouds) {
+        if (!nuage.image || !noeud.material) continue;
+        const mat = noeud.material.clone(`${noeud.material.name}_${nuage.texture}`);
+        if (!mat) continue;
+        const tex = new BABYLON.Texture(`data/sky/${nuage.image}`, scene);
+        tex.hasAlpha = true;
+        mat.diffuseTexture = tex;
+        if ("albedoTexture" in mat) mat.albedoTexture = tex;
+        if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
+        noeud.material = mat;
+        peints += 1;
+      }
+      console.log(`ciel : ${nNuages} nuages rattaches, ${peints} repeints`);
+    }
     const nScroll = scrollers.attach(entry.meshes);
     if (nScroll) console.log(`textures defilantes : ${nScroll} rattachees`);
     const nSand = sand.attach(entry.meshes);
@@ -878,6 +936,14 @@ async function boot() {
 
   function respawn() {
     loop.restart();
+    // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
+    starField.reset();
+    if (starPCS) {
+      const [cr, cg, cb] = starField.color;
+      for (const p of starPCS.particles) p.color.set(cr, cg, cb, 1);
+      starFlash = [];
+      starPCS.setParticles();
+    }
     // Les controleurs de conversation remettent leurs drapeaux a faux au
     // debut d'une boucle (`OnStartOfTimeLoop`) : le Conservateur refait ses
     // observations, le scientifique reparle de son grand jour. Ce que le
@@ -2159,7 +2225,53 @@ async function boot() {
                       sun.direction);
     // Le ciel du build : ce qu'il calcule, on le calcule. Ce qu'il n'applique
     // pas, on ne l'applique pas non plus (docs/41-ciel.md).
-    if (sky.ready) sky.update(player.pos);
+    //
+    // `SkyBehavior.Update` fait tourner la voute vers le soleil a chaque image,
+    // et c'est de la que vient le jour et la nuit : la texture est un disque
+    // bleu centre sur l'axe que le `LookAt` amene sur l'etoile. Face au soleil
+    // on voit le disque, dos a lui son bord transparent.
+    // Le champ d'etoiles : colle sur la camera, et qui se vide.
+    if (starPCS) {
+      const m = starPCS.mesh;
+      m.position.copyFrom(camera.position);
+      // `Update` n'eteint rien tant que la supernova est suspendue.
+      const neufs = starField.update(loop.fraction, loop.preventSupernova);
+      for (const i of neufs) starFlash.push({ i, t: now });
+      if (neufs.length || starFlash.length) {
+        // Le build pose une `DistantSupernova` a la place de chaque etoile
+        // franchie. Mille prefabs de particules seraient hors de portee ici :
+        // on garde le GESTE — l'etoile brille puis s'eteint — sur une seconde,
+        // et on le dit plutot que de le laisser croire porte.
+        const [cr, cg, cb] = starField.color;
+        starFlash = starFlash.filter(({ i, t }) => {
+          const u = (now - t) / 1;
+          const p = starPCS.particles[i];
+          if (!p) return false;
+          if (u >= 1) { p.color.set(0, 0, 0, 0); return false; }
+          const k = u < 0.15 ? 1 + u * 20 : (1 - (u - 0.15) / 0.85) * 4;
+          p.color.set(cr * k, cg * k, cb * k, 1);
+          return true;
+        });
+        starPCS.setParticles();
+      }
+    }
+
+    if (sky.ready) {
+      sky.update(player.pos);
+      const star = entries.find((e) => e.isStar);
+      if (star && sky.shell) {
+        const c = sky.shell.getAbsolutePosition();
+        const p = star.data.position;
+        const v = [p[0] - c.x, p[1] - c.y, p[2] - c.z];
+        const n = Math.hypot(v[0], v[1], v[2]);
+        if (n > 0) {
+          const q = sky.lookAtSun([v[0] / n, v[1] / n, v[2] / n]);
+          if (!sky.shell.rotationQuaternion) {
+            sky.shell.rotationQuaternion = new BABYLON.Quaternion(q[0], q[1], q[2], q[3]);
+          } else sky.shell.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+        }
+      }
+    }
     if (scrollers.count) scrollers.update(dt);
     // Le sable suit la boucle et rien d'autre : il repart de son niveau initial
     // a chaque redemarrage, comme dans le jeu.

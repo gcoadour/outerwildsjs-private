@@ -278,9 +278,14 @@ async function run(blob, options) {
 
   // Le ciel : la voute qui tourne vers l'etoile, les 24 nuages et leurs dix
   // textures, le champ d'etoiles. Voir docs/41-ciel.md.
-  const sky = extractSky(ctx);
+  // Les dix textures de nuage sortent ENFIN comme images : elles etaient
+  // nommees depuis docs/41-ciel.md, et les 24 nuages portaient donc tous le
+  // visage serialise sur le materiau partage (`cloud_01`).
+  const sky = extractSky(ctx, emitImage);
+  await drainImages("data/sky");
   await writeFile("data/sky.json", JSON.stringify(sky));
   summary.nuages = sky.clouds.length;
+  summary["textures de nuage"] = sky.textures.length;
 
   // Les cameras et leur pile d'effets d'image. Voir docs/47-effets-image.md :
   // c'est une couche de rendu entiere que le recensement donnait pour lue,

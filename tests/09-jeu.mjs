@@ -56,7 +56,8 @@ import { DialogueSystem } from "../web/src/dialogue.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
-import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky } from "../web/src/sky.js";
+import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
+         DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
@@ -2858,6 +2859,115 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         Number(lunette.fov.toFixed(3)), TELESCOPE.restFOV);
   check("le grossissement est celui du repos sur le minimum",
         lunette.magnification, 7);
+
+  // --- la voute celeste ---------------------------------------------------
+  //
+  // docs/41-ciel.md laissait la rotation ouverte : « la convention d'axes reste
+  // a etablir ». Elle se mesure sur les uv du maillage — le disque bleu est au
+  // +Z local — et le calcul, lui, ne suppose rien de la chaine glTF : il passe
+  // par les directions MONDE des axes du parent, reflexion comprise.
+  //
+  // Le controle est direct : on tourne l'axe par le quaternion rendu, on le
+  // ramene dans le monde par la base, et il doit tomber sur le soleil.
+  const surLeSoleil = (basis, soleil, axe = DISC_FALLBACK) => {
+    const local = qrot(alignAxis(axe, soleil, basis), axe);
+    const monde = [0, 1, 2].map((k) =>
+      local[0] * basis[0][k] + local[1] * basis[1][k] + local[2] * basis[2][k]);
+    const n = Math.hypot(soleil[0], soleil[1], soleil[2]);
+    return Number(Math.hypot(monde[0] - soleil[0] / n, monde[1] - soleil[1] / n,
+                             monde[2] - soleil[2] / n).toFixed(6));
+  };
+  const IDENT = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const MIROIR = [[1, 0, 0], [0, 1, 0], [0, 0, -1]];   // l'inversion du glTF
+  check("le disque tombe sur le soleil, repere direct", surLeSoleil(IDENT, [1, 0, 0]), 0);
+  check("de dos aussi", surLeSoleil(IDENT, [0, 0, -1]), 0);
+  check("et en oblique", surLeSoleil(IDENT, [0.6, 0.8, 0]), 0);
+  // Le cas qui comptait : une base qui REFLECHIT. C'est celle du chargement
+  // glTF, et c'est elle qui interdisait de composer naivement des quaternions.
+  check("a travers un parent en miroir aussi", surLeSoleil(MIROIR, [1, 0, 0]), 0);
+  check("et en oblique a travers le miroir",
+        surLeSoleil(MIROIR, [0.3, 0.5, -0.81]), 0);
+  // Le soleil pile sur l'axe, et pile a l'oppose : les deux singularites.
+  check("soleil pile sur l'axe", surLeSoleil(IDENT, DISC_FALLBACK), 0);
+  check("soleil pile a l'oppose",
+        surLeSoleil(IDENT, DISC_FALLBACK.map((x) => -x)), 0);
+
+  // Sans donnees, la voute ne fait rien plutot que de faire n'importe quoi.
+  const cielVide = new Sky(null);
+  check("sans data/sky.json, pas de voute", cielVide.ready, false);
+  check("mais le repli de direction reste mesure", DISC_FALLBACK.join(","), "0,0,-1");
+
+  // --- les nuages, rattaches par POSITION ---------------------------------
+  //
+  // Les vingt-quatre s'appellent tous `PieceOfRing` : le rattachement par nom
+  // de tout le reste du portage ne les distingue pas.
+  const faux = (x, y, z) => ({ name: CLOUD_NAME, position: { x, y, z },
+                               getAbsolutePosition() { return this.position; } });
+  const ciel = new Sky({ shell: { name: "SkyShell" }, clouds: [
+    { name: CLOUD_NAME, position: [0, 0, 0], texture: "cloud_01", image: "a.png" },
+    { name: CLOUD_NAME, position: [10, 0, 0], texture: "whisp_02", image: "b.png" },
+    { name: CLOUD_NAME, position: [999, 0, 0], texture: "cloud_03", image: "c.png" },
+  ] });
+  const noeuds = [faux(10, 0, 0), faux(0.2, 0, 0), { name: "AutreChose", position: { x: 0, y: 0, z: 0 } }];
+  check("deux nuages sur trois trouvent leur maillage", ciel.attachClouds(noeuds), 2);
+  check("et chacun le SIEN, pas celui du voisin",
+        ciel.clouds.map((c) => c.nuage.texture).join(","), "cloud_01,whisp_02");
+  check("le plus proche l'emporte",
+        Number(ciel.clouds[0].distance.toFixed(1)), 0.2);
+  check("un maillage d'un autre nom n'est jamais pris",
+        ciel.clouds.every((c) => c.noeud.name === CLOUD_NAME), true);
+  // Un maillage deja pris ne se redonne pas : sans cela, deux nuages voisins
+  // se disputeraient le meme et l'un des deux resterait sans visage.
+  const serres = new Sky({ shell: {}, clouds: [
+    { position: [0, 0, 0], texture: "a", image: "a.png" },
+    { position: [0.1, 0, 0], texture: "b", image: "b.png" },
+  ] });
+  check("deux nuages serres prennent deux maillages",
+        serres.attachClouds([faux(0, 0, 0), faux(0.1, 0, 0)]), 2);
+  check("et pas deux fois le meme",
+        serres.clouds[0].noeud === serres.clouds[1].noeud, false);
+
+  // --- le champ d'etoiles s'eteint ----------------------------------------
+  //
+  // La plus visible des choses que le build fait et que le portage ne faisait
+  // pas : le ciel SE VIDE pendant les vingt minutes, et presque tout a la fin.
+  const COURBE = [0, 0.0171, 0.0343, 0.0514, 0.0686, 0.0857, 0.1029, 0.12,
+                  0.1372, 0.1543, 0.1715, 0.1886, 0.2058, 0.2229, 0.2514,
+                  0.3761, 0.5009, 0.6257, 0.7505, 0.8752, 1];
+  const champ = new StarField({ stars: [{ count: 1000, radius: 30000,
+    size: [200, 400], color: [0.8431, 0.8667, 1], explosionCurve: COURBE }] });
+  check("mille etoiles", champ.count, 1000);
+  check("a trente mille unites", champ.radius, 30000);
+  check("au depart, aucune eteinte", champ.countAt(0), 0);
+  check("a la fin, toutes", champ.countAt(1), 1000);
+  // La forme de la courbe est ce qui compte : lente, puis brutale.
+  check("a mi-boucle, moins d'un cinquieme", champ.countAt(0.5) < 200, true);
+  check("les trois quarts partent dans le dernier tiers",
+        champ.countAt(1) - champ.countAt(0.7) > 700, true);
+  // L'extinction ne rend que ce qui vient DE s'eteindre : une etoile deja
+  // eteinte ne redemande pas sa supernova a chaque image.
+  check("le premier pas eteint un paquet", champ.update(0.5).length > 0, true);
+  check("le meme instant n'en eteint plus", champ.update(0.5).length, 0);
+  check("et revenir en arriere non plus", champ.update(0.2).length, 0);
+  check("la supernova suspendue arrete tout", champ.update(1, true).length, 0);
+  champ.reset();
+  check("le redemarrage remplit le ciel", champ.extinguished, 0);
+
+  // Les positions : sur la coquille, et les memes a chaque chargement.
+  const pts = champ.positions(1);
+  let dedans = true;
+  for (let i = 0; i < champ.count; i++) {
+    const r = Math.hypot(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+    if (Math.abs(r - champ.radius) > 1) { dedans = false; break; }
+  }
+  check("toutes les etoiles sont sur la coquille", dedans, true);
+  check("et la meme graine rend le meme ciel",
+        champ.positions(1)[7], pts[7]);
+  check("une autre graine, un autre ciel",
+        champ.positions(2)[7] !== pts[7], true);
+
+  // Sans champ extrait, on ne fabrique pas d'etoiles.
+  check("sans donnees, pas de champ", new StarField(null).ready, false);
 }
 
 report();

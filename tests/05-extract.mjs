@@ -589,6 +589,35 @@ console.log("     sources avec courbe echantillonnee:", courbes,
               "| textures:", sky.textures.join(" "));
   check("la voute est extraite", !!sky.shell, true);
   check("son rayon de collider", sky.shell && sky.shell.radius, 250.749);
+  // La question que docs/41-ciel.md laissait ouverte — « la convention d'axes
+  // reste a etablir » — se lit sur les uv du maillage : le centre du disque
+  // bleu (uv 0,5 ; 0,5) tombe sur le +Z local, et l'uv est une projection
+  // polaire centree dessus. Rendu ici avec le Z deja inverse par l'export.
+  check("le disque de ciel est au +Z local, Z inverse par l'export",
+        (sky.shell.discDirection || []).join(","), "0,0,-1");
+  // Les dix textures de nuage sortent enfin comme IMAGES. Elles etaient
+  // nommees depuis docs/41, et les 24 nuages portaient donc tous le visage
+  // serialise sur le materiau partage.
+  const vues = [];
+  const skyImg = extractSky(ctx, (nom, img) => { vues.push([nom, img.width]); return nom; });
+  check("dix images de nuage ecrites", vues.length, 10);
+  check("toutes en 256 pixels", vues.every(([, w]) => w === 256), true);
+  check("et chaque nuage sait laquelle est la sienne",
+        skyImg.clouds.every((c) => !!c.image), true);
+  check("les vingt-quatre portent le meme nom",
+        new Set(skyImg.clouds.map((c) => c.name)).size, 1);
+  // Le champ d'etoiles : mille etoiles qui s'eteignent une a une.
+  const champ = sky.stars[0];
+  check("un champ d'etoiles", sky.stars.length, 1);
+  check("de mille etoiles", champ.count, 1000);
+  check("a trente mille unites", champ.radius, 30000);
+  check("de 200 a 400 d'envergure", (champ.size || []).join(","), "200,400");
+  check("sa courbe d'extinction est echantillonnee", champ.explosionCurve.length, 21);
+  check("elle part de zero", champ.explosionCurve[0], 0);
+  check("et finit a un", champ.explosionCurve[20], 1);
+  // `_starsUpdateIntervalInSeconds` vaut zero : le controle est fait a chaque
+  // image, et l'invariant garde ce zero.
+  check("le controle se fait a chaque image", champ.interval, 0);
   // `_skyRadius` n'est pas serialise : c'est le 320 du constructeur, et c'est
   // par LUI que le build divise, pas par le rayon du collider.
   check("son rayon de ciel vient du constructeur", sky.shell && sky.shell.skyRadius, 320);

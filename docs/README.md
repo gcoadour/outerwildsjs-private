@@ -65,5 +65,6 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) — **parler, entendre, décoller : trois systèmes qui passaient leurs tests sans fonctionner**
 - [`44-reste-a-migrer.md`](44-reste-a-migrer.md) — **ce qui reste à migrer de l'alpha d'origine : neuf familles, par ordre (413 composants sans lecteur, 94 après [`46`](46-migration-lots.md))**
 - [`45-recensement-mesure.md`](45-recensement-mesure.md) — **le recensement refait sur le build : le sable des jumelles, la mort là où le jeu la met, l'ambiance par couches**
+- [`48-ciel-mesure.md`](48-ciel-mesure.md) — **le ciel mesuré : la voûte qui tourne enfin, dix visages de nuage, et mille étoiles qui s'éteignent pendant la boucle**
 - [`47-effets-image.md`](47-effets-image.md) — **les effets d'image, et le commentaire qui les cachait : 24 effets sur 15 caméras, le champ de vision et le télescope corrigés**
 - [`46-migration-lots.md`](46-migration-lots.md) — **six lots écrits : référentiels déclarés, décor vivant, son d'événement, équipement à ramasser, décalcomanies, volumes de jeu**

@@ -99,6 +99,9 @@ portage.
 | entraînement en apesanteur | les 3 nœuds du satellite cassé, et leur annonce |
 | volumes de jeu | ce qui blesse, l'apesanteur déclarée, les fenêtres de vue |
 | effets d'image | 24 effets sur 15 caméras : bloom, glow, vignette, tourbillon, grain |
+| voûte céleste | elle **tourne** vers l'étoile : le jour et la nuit du build |
+| nuages | dix visages sur 24 maillages homonymes, rattachés par position |
+| champ d'étoiles | mille étoiles qui **s'éteignent** au fil de la boucle |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -196,15 +199,17 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   groupe hors de portée n'entre plus dans la construction, et l'ensemble
   éveillé est réévalué en continu — mais reconstruit au plus une fois toutes
   les deux secondes, parce que reconstruire coûte près d'une seconde.
-- **La rotation de la voûte céleste** (`SkyBehavior.LookAt`) : c'est elle qui
-  fait le jour et la nuit, et la convention d'axes entre le `LookAt` d'Unity et
-  l'export glTF, qui inverse Z, reste à établir. Deux orientations essayées,
-  toutes deux fausses ([`41-ciel.md`](41-ciel.md)).
-- **Les dix textures de nuage** sont extraites et nommées par nuage ; il reste à
-  les exporter comme images et à les poser sur 24 maillages qui portent tous le
-  même nom.
-- **Le champ d'étoiles** (`DistantStarController`) est extrait, son système de
-  particules ne l'est pas.
+- ~~**La rotation de la voûte céleste**~~ **Fermé** ([`48`](48-ciel-mesure.md)) :
+  la convention ne se déduisait pas de deux captures d'écran, elle se lit sur les
+  uv du maillage. Le disque bleu est au `+Z` local, et le calcul passe par les
+  directions monde des axes du parent plutôt que par un signe supposé.
+- ~~**Les dix textures de nuage**~~ **Fermé** : exportées en images, et posées
+  par **position** — les 24 nuages s'appellent tous `PieceOfRing`. Le matériau
+  est cloné par nuage, comme `renderer.material` le fait dans le build.
+- ~~**Le champ d'étoiles**~~ **Fermé**, et il cachait la plus visible des choses
+  que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
+  pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
+  est écrit dans le ciel.
 - **77 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
   compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
   de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
