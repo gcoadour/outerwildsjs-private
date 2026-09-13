@@ -28,6 +28,15 @@
 import { dominantField } from "./gravity.js";
 import { ShipDamage } from "./shipdamage.js";
 import { landedOn } from "./tower.js";
+
+/**
+ * `ShipThrusterController._ignitionDuration` : UNE seconde.
+ *
+ * Elle est dans le constructeur, pas sur l'instance — `composants.mjs` rend un
+ * objet vide pour ce composant, et c'est encore un cas ou la scene ne dit rien
+ * de ce que le code fait (docs/60-sonde.md).
+ */
+export const IGNITION_DURATION = 1;
 import { frameFriction } from "./player.js";
 import { spawnPoints, nearestTo } from "./start.js";
 
@@ -94,6 +103,11 @@ export class Ship {
     this.omega = [0, 0, 0];                 // vitesse angulaire, repere monde
     this.boarded = false;
     this.landed = false;
+    // `_ignitionDuration`, du constructeur de `ShipThrusterController`.
+    this.igniting = false;
+    this.ignitionTime = 0;
+    this.ignitionDuration = IGNITION_DURATION;
+    this.events = [];
     this.radius = 6;                        // demi-taille approximative
     // Degats : l'integrite globale et les pieces vivent dans ShipDamage, qui
     // porte les quatre champs de ShipDamageController.
@@ -229,6 +243,43 @@ export class Ship {
     return this.quat;
   }
 
+  /**
+   * `ShipThrusterController.ReadTranslationalInput`, la partie « au sol ».
+   *
+   * Un vaisseau pose ne decolle pas a l'appui : il S'ALLUME. Tant qu'il touche
+   * le sol, les poussees laterales sont annulees, la verticale est bornee au
+   * positif — on ne s'enfonce pas dans la piste — et la premiere seconde de
+   * poussee ne produit AUCUNE acceleration. Relacher avant la fin annule tout
+   * et il faut recommencer.
+   *
+   * Le portage decollait a l'instant, ce qui otait au depart son poids : une
+   * seconde d'allumage, c'est le temps qu'il faut pour lever les yeux
+   * (docs/66-allumage.md).
+   *
+   * @returns la poussee verticale a appliquer, apres allumage
+   */
+  ignition(dt, up) {
+    this.events = [];
+    if (!this.landed) { this.igniting = false; this.ignitionTime = 0; return up; }
+    const y = up > 0 ? (up > 1 ? 1 : up) : 0;
+    if (!this.igniting && y > 0) {
+      this.igniting = true;
+      this.ignitionTime = 0;
+      this.events.push("StartShipIgnition");
+    }
+    if (!this.igniting) return 0;
+    if (y === 0) {
+      this.igniting = false;
+      this.events.push("CancelShipIgnition");
+      return 0;
+    }
+    this.ignitionTime += dt;
+    if (this.ignitionTime < this.ignitionDuration) return 0;
+    this.igniting = false;
+    this.events.push("CompleteShipIgnition");
+    return y;
+  }
+
   update(dt, bodies, input, basis, world = null) {
     const f = dominantField(bodies, this.pos, world);
     if (f) {
@@ -262,8 +313,11 @@ export class Ship {
       this.vel.x += (a.fwd[0] * fw + a.right[0] * rt) * t;
       this.vel.y += (a.fwd[1] * fw + a.right[1] * rt) * t;
       this.vel.z += (a.fwd[2] * fw + a.right[2] * rt) * t;
-      if (input.up && this.damage.thrustFactor("bas")) {
-        this.vel.x += a.up[0] * t; this.vel.y += a.up[1] * t; this.vel.z += a.up[2] * t;
+      const vertical = this.ignition(dt, input.up ? 1 : 0);
+      if (vertical > 0 && this.damage.thrustFactor("bas")) {
+        this.vel.x += a.up[0] * t * vertical;
+        this.vel.y += a.up[1] * t * vertical;
+        this.vel.z += a.up[2] * t * vertical;
       }
     }
 

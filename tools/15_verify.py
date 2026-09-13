@@ -868,6 +868,35 @@ def run(url, heavy, profil=None, zip_path=None):
         page.keyboard.press("KeyF")
         page.wait_for_timeout(300)
 
+        # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
+        #
+        # Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME une seconde,
+        # et relacher annule. Ce controle mesure l'ETAT du modele, pas un vol —
+        # faire decoller le vaisseau demanderait d'y monter, et le temps simule
+        # d'une image plafonne a 0,05 s.
+        allumage = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return null;
+          const avant = { landed: s.landed, igniting: s.igniting };
+          s.landed = true;
+          const t0 = s.ignition(0.1, 1);         // l'appui allume
+          const debut = s.events.slice();
+          const t1 = s.ignition(0.5, 1);         // pendant, rien
+          const t2 = s.ignition(0.5, 1);         // la seconde passee, ca pousse
+          const fin = s.events.slice();
+          const t3 = s.ignition(0.1, 0);         // relacher, hors allumage
+          s.landed = avant.landed; s.igniting = avant.igniting;
+          s.ignitionTime = 0;
+          return { duree: s.ignitionDuration, t0, t1, t2, t3, debut, fin };
+        }""")
+        if allumage:
+            rep.eq("une seconde d'allumage", allumage["duree"], 1)
+            rep.eq("l'appui ne pousse pas encore", allumage["t0"], 0)
+            rep.eq("et l'annonce", allumage["debut"], ["StartShipIgnition"])
+            rep.eq("pendant l'allumage non plus", allumage["t1"], 0)
+            rep.eq("la seconde passee, ca pousse", allumage["t2"], 1)
+            rep.eq("et l'allumage est complet", allumage["fin"], ["CompleteShipIgnition"])
+
         # --- l'onde de la lunette (docs/65-onde.md) -----------------------------
         #
         # `DrawSoundWave` : cinq cents points, un par image, dans une boite du

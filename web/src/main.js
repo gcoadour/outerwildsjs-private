@@ -1894,6 +1894,15 @@ async function boot() {
     if (ship) {
       if (autopilot && autopilot.engaged) autopilot.update(dt);
       ship.update(dt, bodies, input, { fwd, right, up }, world);
+      // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
+      // seconde durant, et relacher annule (docs/66-allumage.md). Les trois
+      // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils
+      // s'entendent par la meme voie que les autres sons d'evenement.
+      for (const e of ship.events) {
+        if (e === "StartShipIgnition") console.log("allumage du vaisseau");
+        if (e === "CancelShipIgnition") console.log("allumage interrompu");
+        if (e === "CompleteShipIgnition") console.log("decollage");
+      }
       ship.sync(BABYLON);
       if (ship.boarded) {
         // Le joueur voyage avec le vaisseau, et desormais dans SON repere : le

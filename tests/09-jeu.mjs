@@ -80,7 +80,8 @@ import { TimeLoop } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
          engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
-import { Ship, spinStep, quatRotate, terminalAngularSpeed } from "../web/src/ship.js";
+import { Ship, spinStep, quatRotate, terminalAngularSpeed,
+         IGNITION_DURATION } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
 import { playerConstants } from "../web/src/config.js";
@@ -4144,6 +4145,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et monte avec le champ",
         Number(zoomArrowFraction(45).toFixed(4)), 0.5);
   check("sans jamais deborder", zoomArrowFraction(1000), 1);
+
+  // --- l'allumage du vaisseau (docs/66) ---
+  //
+  // Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME, une seconde
+  // durant, et relacher annule tout.
+  check("une seconde d'allumage", IGNITION_DURATION, 1);
+  const nef = new Ship({}, null, [0, 0, 0]);
+  nef.landed = true;
+  check("l'appui allume", nef.ignition(0.1, 1), 0);
+  check("et l'annonce", nef.events.join(","), "StartShipIgnition");
+  check("pendant l'allumage, aucune poussee", nef.ignition(0.5, 1), 0);
+  check("et rien a annoncer", nef.events.length, 0);
+  check("la seconde passee, la poussee vient", nef.ignition(0.5, 1), 1);
+  check("et l'allumage est complet",
+        nef.events.join(","), "CompleteShipIgnition");
+  // Relacher AVANT la fin annule, et il faut tout recommencer.
+  const nef2 = new Ship({}, null, [0, 0, 0]);
+  nef2.landed = true;
+  nef2.ignition(0.1, 1);
+  nef2.ignition(0.4, 1);
+  check("relacher annule", nef2.ignition(0.1, 0), 0);
+  check("et l'annonce", nef2.events.join(","), "CancelShipIgnition");
+  nef2.ignition(0.1, 1);
+  check("on repart de zero", nef2.ignition(0.5, 1), 0);
+  check("et il faut de nouveau une seconde", nef2.ignition(0.5, 1), 1);
+  // En vol, l'allumage ne s'applique pas : la poussee passe telle quelle.
+  const enVol = new Ship({}, null, [0, 0, 0]);
+  enVol.landed = false;
+  check("en vol, la poussee passe", enVol.ignition(0.016, 1), 1);
+  check("et rien ne s'annonce", enVol.events.length, 0);
+  // Une poussee vers le BAS au sol est bornee a zero : on ne s'enfonce pas
+  // dans la piste.
+  const bas = new Ship({}, null, [0, 0, 0]);
+  bas.landed = true;
+  check("pousser vers le bas au sol ne fait rien", bas.ignition(0.1, -1), 0);
+  check("et n'allume pas", bas.events.length, 0);
 }
 
 report();
