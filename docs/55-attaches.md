@@ -3,6 +3,14 @@
 Six classes, trente-cinq instances, et deux d'entre elles touchent à la
 **physique**. Puis le compte, qui vaut d'être regardé en face.
 
+> **Corrigé par [`68`](68-lois.md).** Cette page décrit six lois comme portées,
+> et elles l'étaient — écrites, éprouvées, documentées. Elles ne
+> *s'exécutaient* pas : `web/src/attachments.js` n'était importé par **aucun**
+> module du moteur, et personne ne s'en est aperçu pendant treize pages parce
+> que quarante vérifications vertes ont l'air d'une preuve de vie. Le module
+> est branché depuis [`68`](68-lois.md) ; ce qui suit se lit comme il a été
+> écrit, sauf que rien de tout cela n'arrivait à l'écran avant.
+
 ## Le haut d'une méduse n'est pas donné par la gravité
 
 `AlignWithTargetBody` ×14 :

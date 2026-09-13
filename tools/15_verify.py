@@ -868,6 +868,41 @@ def run(url, heavy, profil=None, zip_path=None):
         page.keyboard.press("KeyF")
         page.wait_for_timeout(300)
 
+        # --- les lois enfin appelees (docs/68-lois.md) --------------------------
+        #
+        # `attachments.js` — six classes, une page de documentation, quarante
+        # verifications — n'etait importe par AUCUN module du moteur. Ces
+        # controles mesurent qu'il tourne maintenant.
+        att = page.evaluate("""() => {
+          const a = window.__attaches;
+          return { alignes: a.alignes.length, heritiers: a.heritiers.length,
+                   clignotants: a.clignotants.length,
+                   rattaches: a.clignotants.filter(c => c.node).length,
+                   noeuds: a.noeudsCasses.length, remous: a.remous.length,
+                   lanceurs: window.__meteores.launchers.length };
+        }""")
+        rep.eq("quatorze alignements sur un corps designe", att["alignes"], 14)
+        rep.eq("neuf heritiers de champ", att["heritiers"], 9)
+        rep.eq("deux clignotants", att["clignotants"], 2)
+        rep.eq("trois noeuds casses", att["noeuds"], 3)
+        rep.eq("un volume d'eclaboussure", att["remous"], 1)
+        rep.eq("quatre lanceurs de meteores", att["lanceurs"], 4)
+        # Les meteores partent tout seuls : cinq a vingt secondes de delai, et
+        # le temps simule d'une image plafonne a 0,05 — on force donc l'horloge
+        # plutot que d'attendre des minutes de montre.
+        meteo = page.evaluate("""() => {
+          const m = window.__meteores;
+          const avant = m.launched;
+          m.update(1, 1e6);              // largement au-dela de tout delai
+          const nes = m.launched - avant;
+          const vitesse = m.meteors.length
+            ? Math.round(Math.hypot(...m.meteors[m.meteors.length - 1].vel)) : 0;
+          return { nes, vitesse };
+        }""")
+        rep.eq("les quatre lanceurs tirent", meteo["nes"], 4)
+        rep.check("et le meteore part entre cent et deux cents",
+                  100 <= meteo["vitesse"] <= 200, meteo["vitesse"], "100..200")
+
         # --- ce que le jeu annonce, lot 2 (docs/67-annonces.md) -----------------
         #
         # Manger une guimauve rend TOUTE la sante : deux lignes d'IL, et le

@@ -120,7 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **155/155** ([`67`](67-annonces.md)) |
+| vérification avec le build | **163/163** ([`68`](68-lois.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -130,6 +130,8 @@ portage.
 | allumage du vaisseau | **une seconde de poussée tenue** avant de décoller, et relâcher annule ([`66`](66-allumage.md)) |
 | la guimauve **soigne** | manger rend toute la santé : le feu de camp est l'infirmerie ([`67`](67-annonces.md)) |
 | mur de combinaison | on ne quitte pas le village sans elle ([`67`](67-annonces.md)) |
+| attaches **appelées** | le module existait, éprouvé et documenté ; aucun moteur ne l'importait ([`68`](68-lois.md)) |
+| météores de Brittle Hollow | quatre lanceurs, délai **retiré à chaque tir**, 50 de dégâts au contact ([`68`](68-lois.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

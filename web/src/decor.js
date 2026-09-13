@@ -682,3 +682,103 @@ export function axisAngle(axis, degrees) {
   const s = Math.sin(h) / l;
   return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(h)];
 }
+
+// --- les meteores de Brittle Hollow (docs/68-lois.md) -------------------------
+//
+// `meteorLaunchers` etait ecrit, eprouve, et appele par PERSONNE. Quatre
+// lanceurs, un meteore toutes les cinq a vingt secondes, entre cent et deux
+// cents d'elan, et cinquante de degats au contact — c'est ce qui creuse Brittle
+// Hollow pendant qu'on la visite.
+//
+// @lit MeteorLauncher, TouchExplosive, IgnoreInitialCollisions
+
+/**
+ * Ce que le prefabrique `MoltenMeteor` porte, mesure dans
+ * `sharedassets1.assets` (docs/60-sonde.md) : `TouchExplosive._contactDamage`
+ * vaut CINQUANTE — le constructeur en pose vingt, et l'instance le dement — et
+ * `IgnoreInitialCollisions._ignoreDuration` une demi-seconde, le temps que le
+ * meteore quitte son lanceur.
+ */
+export const METEOR = { damage: 50, ignoreSeconds: 0.5, life: 60 };
+
+/**
+ * Un lanceur, et son horloge.
+ *
+ * `Update` : quand `Time.time > _lastLaunchTime + _launchDelay`, on lance et on
+ * TIRE UN NOUVEAU DELAI entre `_minInterval` et `_maxInterval`. Le delai n'est
+ * donc pas une periode : deux lanceurs ne se synchronisent jamais, et le meme
+ * lanceur ne bat pas deux fois pareil.
+ */
+export class MeteorLaunchers {
+  /** @param rng tirage dans [0, 1[, injecte pour que le test soit reproductible */
+  constructor(list = [], rng = Math.random) {
+    this.rng = rng;
+    this.launchers = list.map((d) => ({
+      data: d, last: 0,
+      delay: d.minInterval + rng() * (d.maxInterval - d.minInterval),
+    }));
+    this.meteors = [];
+    this.launched = 0;
+  }
+
+  /** @returns les meteores nes de ce pas */
+  update(dt, now, cfg = METEOR) {
+    const nes = [];
+    for (const l of this.launchers) {
+      if (now <= l.last + l.delay) continue;
+      l.last = now;
+      l.delay = l.data.minInterval + this.rng() * (l.data.maxInterval - l.data.minInterval);
+      const v = l.data.minSpeed + this.rng() * (l.data.maxSpeed - l.data.minSpeed);
+      const d = l.data.direction;
+      const n = Math.hypot(d[0], d[1], d[2]) || 1;
+      const m = {
+        from: l.data.name,
+        pos: [...l.data.position],
+        vel: [d[0] / n * v, d[1] / n * v, d[2] / n * v],
+        radius: l.data.radius, age: 0, damage: cfg.damage,
+      };
+      this.meteors.push(m);
+      nes.push(m);
+      this.launched += 1;
+    }
+    return nes;
+  }
+
+  /**
+   * Avance les meteores. Le champ dominant les infléchit, comme la sonde — ils
+   * retombent donc sur la planete qui les a craches.
+   */
+  step(dt, field = null, cfg = METEOR) {
+    for (const m of this.meteors) {
+      if (field) {
+        m.vel[0] += field.dir.x * field.magnitude * dt;
+        m.vel[1] += field.dir.y * field.magnitude * dt;
+        m.vel[2] += field.dir.z * field.magnitude * dt;
+      }
+      m.pos[0] += m.vel[0] * dt;
+      m.pos[1] += m.vel[1] * dt;
+      m.pos[2] += m.vel[2] * dt;
+      m.age += dt;
+    }
+    this.meteors = this.meteors.filter((m) => m.age < cfg.life);
+    return this.meteors;
+  }
+
+  /**
+   * Qui se prend un meteore ?
+   *
+   * `IgnoreInitialCollisions` epargne la premiere demi-seconde : sans elle le
+   * meteore explose sur son propre lanceur.
+   */
+  hits(point, rayon = 1, cfg = METEOR) {
+    for (const m of this.meteors) {
+      if (m.age < cfg.ignoreSeconds) continue;
+      const d = Math.hypot(m.pos[0] - point[0], m.pos[1] - point[1], m.pos[2] - point[2]);
+      if (d <= m.radius + rayon) return m;
+    }
+    return null;
+  }
+
+  /** Retire un meteore qui a touche : il explose et disparait. */
+  consume(m) { this.meteors = this.meteors.filter((x) => x !== m); }
+}

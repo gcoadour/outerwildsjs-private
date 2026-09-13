@@ -88,6 +88,11 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
 import { LockOn, aimedFrame, canFlyTo } from "./tracker.js";
+// Six classes du build, ecrites et jamais appelees jusqu'ici : le module
+// existait, ses quarante verifications passaient, et aucun module du moteur ne
+// l'importait (docs/68-lois.md).
+import { alignedBodies, alignmentDirection, fieldInheritors, blinkingRenderers,
+         Blinker, brokenNodes, waterEffects } from "./attachments.js";
 // Ce que le joueur TIENT : le baton a guimauve et la lunette pendent sous
 // `PlayerCamera` dans le build, et l'export ne partait que des corps celestes
 // (docs/64-mains.md).
@@ -106,6 +111,7 @@ import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 import { referenceFrames, DeclaredFrames, restingPoint,
          autopilotDistances } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
+         meteorLaunchers, MeteorLaunchers, METEOR,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor } from "./decor.js";
@@ -481,6 +487,29 @@ async function boot() {
   const thrusterSound = new ThrusterSound();
   const travelMusic = new TravelMusic();
   const endMusic = new EndOfTimeMusic();
+  // --- ce qui suit un autre corps, et ce qui clignote (docs/55, cable en 68) ---
+  const alignes = alignedBodies(gameplay);
+  const heritiers = fieldInheritors(gameplay);
+  const clignotants = blinkingRenderers(gameplay).map((d) => ({
+    data: d, blinker: new Blinker(d), node: null,
+  }));
+  const noeudsCasses = brokenNodes(gameplay);
+  const remous = waterEffects(gameplay);
+  console.log(`attaches : ${alignes.length} alignements, ${heritiers.length} heritiers,`
+    + ` ${clignotants.length} clignotants, ${noeudsCasses.length} noeuds casses,`
+    + ` ${remous.length} volumes d'eclaboussure`);
+  window.__attaches = { alignes, heritiers, clignotants, noeudsCasses, remous };
+
+  // Les meteores de Brittle Hollow : quatre lanceurs, un tir toutes les cinq a
+  // vingt secondes, cinquante de degats au contact (docs/68-lois.md).
+  const meteores = new MeteorLaunchers(meteorLaunchers(gameplay));
+  const meteorMat = new BABYLON.StandardMaterial("meteorMat", scene);
+  meteorMat.emissiveColor = new BABYLON.Color3(1, 0.45, 0.12);
+  meteorMat.disableLighting = true;
+  const meteorMeshes = [];
+  console.log(`meteores : ${meteores.launchers.length} lanceurs`);
+  window.__meteores = meteores;
+
   window.__lots = { declared, decor, passages, hazards, zeroGVolumes, playSectors,
                     pickups, suits, equipment, training, events,
                     get etat() {
@@ -2379,6 +2408,89 @@ async function boot() {
     // Les fragments sont integres dans le repere LOCAL du conteneur glTF, ou la
     // planete ne bouge pas : pas de conversion de repere a chaque pas, et le
     // decalage du floating origin reste porte par le conteneur.
+    // --- les meteores ---
+    //
+    // Ils partent de leur lanceur, retombent avec le champ dominant, et
+    // blessent au contact passe la demi-seconde d'immunite du prefabrique.
+    if (meteores.launchers.length) {
+      meteores.update(dt, now);
+      meteores.step(dt, player.field);
+      const touche = meteores.hits([player.pos.x, player.pos.y, player.pos.z], 1);
+      if (touche) {
+        meteores.consume(touche);
+        resources.damage(touche.damage);
+        console.log(`meteore : ${touche.damage} de degats`);
+      }
+      for (let i = 0; i < meteores.meteors.length; i++) {
+        if (!meteorMeshes[i]) {
+          const m = BABYLON.MeshBuilder.CreateSphere(`meteor${i}`,
+            { diameter: 2 * METEOR.damage / 25, segments: 6 }, scene);
+          m.material = meteorMat;
+          m.isPickable = false;
+          meteorMeshes.push(m);
+        }
+        const q = meteores.meteors[i].pos;
+        meteorMeshes[i].position.set(q[0], q[1], q[2]);
+        meteorMeshes[i].setEnabled(true);
+      }
+      for (let i = meteores.meteors.length; i < meteorMeshes.length; i++) {
+        meteorMeshes[i].setEnabled(false);
+      }
+    }
+
+    // --- ce qui clignote, ce qui s'aligne, ce qui est repare ---
+    //
+    // Trois lois de `attachments.js`, ecrites pour docs/55 et jamais appelees.
+    // Elles se rattachent par NOM au maillage charge, comme les nuages et les
+    // pivots de tornade — et comme eux, un nom peut manquer : un objet non
+    // rattache reste simplement sans effet.
+    for (const c of clignotants) {
+      if (!c.node) {
+        for (const e of geo) {
+          const n = e.nodes.get(c.data.name);
+          if (n) { c.node = n; c.blinker.activate(now); break; }
+        }
+        if (!c.node) continue;
+      }
+      c.node.setEnabled(c.blinker.update(now));
+    }
+    for (const a of alignes) {
+      if (a.node === undefined) {
+        a.node = null;
+        for (const e of geo) { const n = e.nodes.get(a.name); if (n) { a.node = n; break; } }
+      }
+      if (!a.node || !a.target) continue;
+      const cible = bodies.find((b) => b.name === a.target || b.bodyName === a.target);
+      if (!cible) continue;
+      // `AlignWithTargetBody` : le HAUT vise le corps designe, et non la
+      // verticale de la gravite dominante.
+      const p0 = a.node.getAbsolutePosition();
+      const dir = alignmentDirection([p0.x, p0.y, p0.z], cible.position);
+      const haut = new BABYLON.Vector3(-dir[0], -dir[1], -dir[2]);
+      a.node.rotationQuaternion = BABYLON.Quaternion.FromLookDirectionLH(
+        BABYLON.Vector3.Cross(haut, BABYLON.Axis.X).normalize(), haut);
+    }
+    // `BrokenNode.OnCompleteRepair` : le materiau change, et la reparation SE
+    // VOIT. Le portage n'a pas les materiaux du build sous la main pour ces
+    // trois noeuds ; il pose la couleur que le nom du materiau annonce.
+    if (training.total) {
+      for (const r of training.nodes) {
+        if (!r.done || r.peint) continue;
+        for (const e of geo) {
+          const n = e.nodes.get(r.name);
+          if (!n) continue;
+          for (const m of (n.getChildMeshes ? n.getChildMeshes() : [])) {
+            if (m.material && m.material.emissiveColor) {
+              m.material = m.material.clone(`${m.material.name}_repare`);
+              m.material.emissiveColor = new BABYLON.Color3(0.2, 0.9, 0.35);
+            }
+          }
+          r.peint = true;
+          break;
+        }
+      }
+    }
+
     if (crust) {
       const e = entryForBody(geo, bhBody.name);
       if (e && !crust.resolved) {

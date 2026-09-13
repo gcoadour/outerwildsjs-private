@@ -57,7 +57,7 @@ import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
 import { tornadoPivots, TornadoPivots, matchTransforms,
-         disposableContainers } from "../web/src/decor.js";
+         disposableContainers, MeteorLaunchers, METEOR } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
@@ -4224,6 +4224,44 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("en plein jour, non", invite({ onDaySide: true }), false);
   check("mais en plein jour dans une zone sombre, oui",
         invite({ onDaySide: true, inDarkZone: true }), true);
+
+  // --- les meteores de Brittle Hollow (docs/68) ---
+  //
+  // `meteorLaunchers` etait ecrit, eprouve, et appele par personne.
+  check("cinquante de degats au contact", METEOR.damage, 50);
+  check("et une demi-seconde d'immunite", METEOR.ignoreSeconds, 0.5);
+  const tireur = [{ name: "L", position: [0, 0, 0], direction: [0, 1, 0],
+                     minSpeed: 100, maxSpeed: 200, minInterval: 5,
+                     maxInterval: 20, radius: 10 }];
+  // Un tirage constant a la moitie : delai 12,5 s, vitesse 150.
+  const lesTireurs = new MeteorLaunchers(tireur, () => 0.5);
+  check("rien ne part avant le delai", lesTireurs.update(1, 10).length, 0);
+  check("puis un meteore part", lesTireurs.update(1, 13).length, 1);
+  check("a la vitesse tiree", Math.round(lesTireurs.meteors[0].vel[1]), 150);
+  check("et il n'y en a qu'un", lesTireurs.meteors.length, 1);
+  // Le delai se RETIRE a chaque tir : ce n'est pas une periode.
+  check("le delai est retire", lesTireurs.launchers[0].delay, 12.5);
+  check("rien juste apres", lesTireurs.update(1, 20).length, 0);
+  check("un second au delai suivant", lesTireurs.update(1, 26).length, 1);
+  // La demi-seconde d'immunite : un meteore tout neuf ne touche personne.
+  const neuf = new MeteorLaunchers(tireur, () => 0);
+  neuf.update(1, 6);
+  check("un meteore tout neuf ne touche pas", neuf.hits([0, 0, 0], 1), null);
+  neuf.step(0.6, null);
+  check("passe la demi-seconde, il touche",
+        neuf.hits(neuf.meteors[0].pos, 1) !== null, true);
+  check("et loin, il ne touche pas", neuf.hits([0, 0, 9999], 1), null);
+  // Le champ le fait retomber.
+  const retombe = new MeteorLaunchers(tireur, () => 0);
+  retombe.update(1, 6);
+  const vAvant = retombe.meteors[0].vel[1];
+  retombe.step(1, { dir: { x: 0, y: -1, z: 0 }, magnitude: 20 });
+  check("le champ le freine", retombe.meteors[0].vel[1], vAvant - 20);
+  // Il ne vit pas eternellement.
+  const vieux = new MeteorLaunchers(tireur, () => 0);
+  vieux.update(1, 6);
+  vieux.step(METEOR.life + 1, null);
+  check("et il finit par disparaitre", vieux.meteors.length, 0);
 }
 
 report();
