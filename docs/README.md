@@ -65,6 +65,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) — **parler, entendre, décoller : trois systèmes qui passaient leurs tests sans fonctionner**
 - [`44-reste-a-migrer.md`](44-reste-a-migrer.md) — **ce qui reste à migrer de l'alpha d'origine : neuf familles, par ordre (413 composants sans lecteur, 94 après [`46`](46-migration-lots.md))**
 - [`45-recensement-mesure.md`](45-recensement-mesure.md) — **le recensement refait sur le build : le sable des jumelles, la mort là où le jeu la met, l'ambiance par couches**
+- [`57-particules.md`](57-particules.md) — **quatre modules de particules, dont la queue de la comète : et un compte qui disait « jamais »**
 - [`56-impostures.md`](56-impostures.md) — **les impostures de planète : deux caméras sur cinq sans plan, et trois quads plats collés sur les vraies planètes**
 - [`55-attaches.md`](55-attaches.md) — **ce qui suit un autre corps, ce qui clignote, et la fin de la queue : 95,8 % des instances du build sont lues**
 - [`54-lumiere.md`](54-lumiere.md) — **la lumière globale qui fond au lieu de sauter, les phares à six cents, et une troisième chose extraite que personne ne lisait**

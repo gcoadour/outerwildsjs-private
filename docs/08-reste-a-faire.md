@@ -115,6 +115,7 @@ portage.
 | attaches | 14 alignements sur un corps désigné, 9 héritiers de champ |
 | réparation visible | un nœud réparé devient vert |
 | impostures de planète | les 3 câblées rendues à 1 Hz, effacées si le réel est là |
+| modules de particules | la queue de la comète, le plafond de l'explosion |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 

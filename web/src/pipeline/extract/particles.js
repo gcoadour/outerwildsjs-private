@@ -204,10 +204,17 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
         angle: round(shape.angle ?? 0, 4),
         randomDirection: !!shape.randomDirection,
       } : null,
-      // Modules secondaires. Mesure d'usage sur les systemes du build :
-      // ColorModule et SizeModule dominent, RotationModule et UVModule suivent,
-      // et force, collision, vitesse par vitesse et sous-emetteurs ne servent
-      // jamais. On ne transporte donc que ces quatre-la.
+      // Modules secondaires. Mesure d'usage sur les 135 systemes du build :
+      // ColorModule (110) et SizeModule (80) dominent, RotationModule (28) et
+      // UVModule (13) suivent.
+      //
+      // Le compte disait ensuite que « force, collision, vitesse par vitesse et
+      // sous-emetteurs ne servent JAMAIS ». C'etait faux, et refait :
+      // VelocityModule x1 (CometTrail), ClampVelocityModule x1
+      // (Explosion_Fiery_Med), RotationBySpeedModule x1 et SubModule x2
+      // (DissapatingParticles, DistantStars). Quatre systemes sur 135, et ce
+      // sont les quatre que docs/08-reste-a-faire.md portait en dette depuis
+      // docs/10-particules.md (docs/57-particules.md).
       colorOverLife: d.ColorModule && d.ColorModule.enabled
         ? gradientKeys(d.ColorModule.gradient) : null,
       sizeOverLife: d.SizeModule && d.SizeModule.enabled
@@ -215,6 +222,35 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
       rotationSpeed: d.RotationModule && d.RotationModule.enabled
         ? round(curve(d.RotationModule.curve, 0), 5) : null,
       sheet: uvAnimation(d.UVModule),
+      // Les quatre modules rares, chacun reduit a ce qui le rend : une vitesse
+      // constante, deux bornes, une rotation par vitesse, un sous-emetteur.
+      velocity: d.VelocityModule && d.VelocityModule.enabled ? {
+        x: round(curve(d.VelocityModule.x, 0), 5),
+        y: round(curve(d.VelocityModule.y, 0), 5),
+        z: round(curve(d.VelocityModule.z, 0), 5),
+        inWorldSpace: !!d.VelocityModule.inWorldSpace,
+      } : null,
+      clampVelocity: d.ClampVelocityModule && d.ClampVelocityModule.enabled ? {
+        magnitude: round(curve(d.ClampVelocityModule.magnitude, 0), 5),
+        dampen: round(d.ClampVelocityModule.dampen ?? 0, 5),
+        separateAxis: !!d.ClampVelocityModule.separateAxis,
+      } : null,
+      rotationBySpeed: d.RotationBySpeedModule && d.RotationBySpeedModule.enabled ? {
+        // `scalar` est en RADIANS par seconde dans le build : 0,349 rad/s font
+        // vingt degres. Le moteur travaille en degres, on convertit ici.
+        degreesPerSecond: round(curve(d.RotationBySpeedModule.curve, 0) * 180 / Math.PI, 4),
+        range: d.RotationBySpeedModule.range
+          ? [round(d.RotationBySpeedModule.range.x ?? 0, 4),
+             round(d.RotationBySpeedModule.range.y ?? 1, 4)] : null,
+      } : null,
+      // `SubModule` porte six pointeurs de sous-emetteur. Celui de
+      // `DistantStars` est ACTIF et les six sont nuls : il ne fait rien, et
+      // l'invariant garde ce vide.
+      subEmitters: d.SubModule && d.SubModule.enabled
+        ? ["subEmitterBirth", "subEmitterBirth1", "subEmitterCollision",
+           "subEmitterCollision1", "subEmitterDeath", "subEmitterDeath1"]
+            .filter((k) => d.SubModule[k] && d.SubModule[k].pathId).length
+        : null,
       texture: texture ? texture.file : null,
       textureSize: texture ? texture.size : null,
       blend,

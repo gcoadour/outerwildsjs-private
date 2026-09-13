@@ -26,6 +26,7 @@ import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { extractSky } from "../web/src/pipeline/extract/sky.js";
+import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
@@ -861,6 +862,29 @@ check("et tous avec le meme son de contact",
       new Set(pads.map((s) => s.fields._touchdownSound.name)).size, 1);
 check("un gestionnaire de pads", (gp.placed.LandingPadManager || []).length, 1);
 check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
+
+// Les quatre modules de particules rares (docs/57-particules.md). Le compte
+// disait qu'ils ne servaient JAMAIS ; refait, il en trouve quatre usages.
+{
+  const parts = extractParticles(ctx, (n) => n);
+  const avec = (k) => parts.systems.filter((s) => s[k]);
+  check("une vitesse constante, sur la comete", avec("velocity").length, 1);
+  check("et elle part en arriere a cent", avec("velocity")[0].velocity.z, 100);
+  check("un plafond de vitesse, sur l'explosion", avec("clampVelocity").length, 1);
+  check("plafond cent, amortissement total",
+        `${avec("clampVelocity")[0].clampVelocity.magnitude},` +
+        `${avec("clampVelocity")[0].clampVelocity.dampen}`, "100,1");
+  check("une rotation par vitesse", avec("rotationBySpeed").length, 1);
+  // `scalar` est en RADIANS dans le build : 0,349 rad/s font vingt degres.
+  check("de vingt degres par seconde",
+        avec("rotationBySpeed")[0].rotationBySpeed.degreesPerSecond, 20);
+  // Deux `SubModule` actifs, et celui de `DistantStars` n'a AUCUN
+  // sous-emetteur : il est allume et ne fait rien.
+  const subs = parts.systems.filter((s) => s.subEmitters !== null);
+  check("deux modules de sous-emetteurs", subs.length, 2);
+  check("dont un entierement vide",
+        subs.filter((s) => s.subEmitters === 0).length, 1);
+}
 
 // Le casque, l'alarme, les voyants, les invites de guimauve (docs/52-casque.md).
 const roasts = (gp.placed.RoastPromptEvent || []);

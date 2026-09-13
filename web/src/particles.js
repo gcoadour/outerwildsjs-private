@@ -197,6 +197,46 @@ export class ParticleField {
         ps.minAngularSpeed = -s.rotationSpeed;
         ps.maxAngularSpeed = s.rotationSpeed;
       }
+      // Les quatre modules rares (docs/57-particules.md). Le compte disait
+      // qu'ils ne servaient JAMAIS ; refait, il en trouve quatre usages sur
+      // 135 systemes — et l'un des quatre est vide.
+      //
+      // VelocityModule : une vitesse constante ajoutee a chaque particule. Sur
+      // `CometTrail`, (0, 0, 100) en repere LOCAL : la queue de la comete part
+      // en arriere a cent unites par seconde, ce qui est ce qui en fait une
+      // queue plutot qu'un halo.
+      if (s.velocity) {
+        const v = new B.Vector3(s.velocity.x, s.velocity.y, s.velocity.z);
+        if (v.lengthSquared() > 0) {
+          ps.direction1 = v.clone();
+          ps.direction2 = v.clone();
+          ps.minEmitPower = v.length();
+          ps.maxEmitPower = v.length();
+        }
+      }
+      // ClampVelocityModule : une vitesse plafond, et un amortissement. Sur
+      // `Explosion_Fiery_Med`, plafond 100 et amortissement 1 — c'est-a-dire
+      // total : une etincelle qui depasse est ramenee au plafond, pas freinee.
+      if (s.clampVelocity && s.clampVelocity.magnitude > 0) {
+        ps.maxEmitPower = Math.min(ps.maxEmitPower, s.clampVelocity.magnitude);
+        ps.minEmitPower = Math.min(ps.minEmitPower, ps.maxEmitPower);
+        // L'amortissement n'a pas d'equivalent direct : Babylon freine par
+        // `limitVelocityOverTime`, qu'on regle sur le meme plafond.
+        if (ps.addLimitVelocityGradient) {
+          ps.addLimitVelocityGradient(0, s.clampVelocity.magnitude);
+          ps.limitVelocityDamping = s.clampVelocity.dampen;
+        }
+      }
+      // RotationBySpeedModule : tourner d'autant plus vite qu'on va vite. Sur
+      // `DissapatingParticles`, vingt degres par seconde sur une plage de
+      // vitesse de zero a un. Babylon n'a pas ce module : on ajoute la
+      // rotation a celle du RotationModule, ce qui est une approximation et se
+      // dit.
+      if (s.rotationBySpeed && s.rotationBySpeed.degreesPerSecond) {
+        const r = s.rotationBySpeed.degreesPerSecond * Math.PI / 180;
+        ps.minAngularSpeed = Math.min(ps.minAngularSpeed ?? 0, -r);
+        ps.maxAngularSpeed = Math.max(ps.maxAngularSpeed ?? 0, r);
+      }
       // UVModule : planche de sprites. 13 systemes, dont les explosions.
       if (s.sheet && tex && s.textureSize) {
         const { tilesX, tilesY, cycles } = s.sheet;
