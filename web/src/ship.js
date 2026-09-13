@@ -79,7 +79,7 @@ export function terminalAngularSpeed(torque, drag, step = 1 / 60) {
 }
 
 export class Ship {
-  constructor(consts, node, startPos, damageFields = {}) {
+  constructor(consts, node, startPos, damageFields = {}, engines = []) {
     this.thrust = consts._maxTranslationalThrust ?? 50;
     this.angularDrag = consts._angularDrag ?? 0.92;
     this.rotationalThrust = consts._maxRotationalThrust ?? 2;
@@ -96,7 +96,7 @@ export class Ship {
     this.radius = 6;                        // demi-taille approximative
     // Degats : l'integrite globale et les pieces vivent dans ShipDamage, qui
     // porte les quatre champs de ShipDamageController.
-    this.damage = new ShipDamage(damageFields);
+    this.damage = new ShipDamage(damageFields, engines);
     // Limite de poussee du secteur courant (PlanetoidSector._thrustLimit), ou
     // null hors de tout secteur. Le vaisseau garde sa pleine puissance sur la
     // premiere jumelle, ou la limite vaut 200 contre 20 partout ailleurs.

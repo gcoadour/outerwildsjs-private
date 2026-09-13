@@ -102,6 +102,9 @@ portage.
 | voûte céleste | elle **tourne** vers l'étoile : le jour et la nuit du build |
 | nuages | dix visages sur 24 maillages homonymes, rattachés par position |
 | champ d'étoiles | mille étoiles qui **s'éteignent** au fil de la boucle |
+| dégâts du vaisseau | relus à l'endroit : le masque **s'accumule**, 3 pièces au plus |
+| marqueurs de carte | les 13 du build, avec leurs vrais noms de jeu |
+| tornades | six pivots qui **basculent**, à une vitesse tirée au réveil |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -140,7 +143,7 @@ dans l'alpha.
 | quatre des cinq savoirs | un seul a une source vivante ; les autres sont du code mort |
 | le déblocage par branche de dialogue | les 20 attributs `eventbased` valent tous `"false"` |
 | les machines à états d'animation | 11 états, **zéro transition** dans tout le build |
-| les dégâts localisés du vaisseau | masque et modificateurs à **0** : la mécanique est câblée, les réglages ne l'allument pas |
+| ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |
 | les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
 | le modèle de sonde | `_probePrefab` n'est pas résolu |
 | les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
@@ -210,16 +213,15 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
   pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
   est écrit dans le ciel.
-- **77 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+- **62 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
   compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
   de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
   **commentaires** avant de compter, et c'est un commentaire qui avait caché
   toute la pile d'effets d'image ([`47`](47-effets-image.md)).
   La série du compte : 170 en [`42`](42-lumieres.md), 109 avant les six lots de
   [`46`](46-migration-lots.md), 59 après, 77 une fois les commentaires retirés.
-  Ce qui reste n'est plus une famille mais une queue : la moitié des entrées est
-  à une seule instance, et les plus lourdes sont `CloudTextureController` (24),
-  `DisposableContainer` (18), `InertiaTensorCalibrator` (14) et `MapMarker` (13).
+  Puis **62** après la queue de [`49`](49-queue.md). Ce qui reste est une queue :
+  la moitié des entrées est à une seule instance.
   `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
   de ce qui reste.
 - **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)

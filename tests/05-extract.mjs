@@ -767,6 +767,52 @@ check("un seul controleur d'effets", ctrl.length, 1);
 check("et il ne serialise aucun champ",
       Object.keys(ctx.scriptFields(ctrl[0].obj) || {}).length, 0);
 
+// --- la queue du recensement (docs/49-queue.md) ---------------------------
+//
+// Ce qui restait apres les six lots, une fois les commentaires retires du
+// comptage : quatre classes qui se lisent, deux qui se mesurent et se ferment.
+const marqueurs = (gp.placed.MapMarker || []);
+check("treize marqueurs de carte", marqueurs.length, 13);
+check("et tous portent un nom de jeu",
+      marqueurs.every((m) => (m.fields || {})._label), true);
+check("le vaisseau est du type Ship (6)",
+      (marqueurs.find((m) => m.name === "Ship_Body").fields || {})._markerType, 6);
+check("et l'un d'eux n'est pas un corps mais une ile",
+      !!marqueurs.find((m) => (m.fields || {})._label === "Giant's Landing"), true);
+
+const moteurs = (gp.placed.EngineComponent || []);
+check("dix reacteurs", moteurs.length, 10);
+// `_alertLocation` vaut Left (8) pour les cinq de gauche et Right (16) pour les
+// cinq de droite : cinq et cinq, sans exception.
+check("cinq a gauche", moteurs.filter((m) => m.fields._alertLocation === 8).length, 5);
+check("cinq a droite", moteurs.filter((m) => m.fields._alertLocation === 16).length, 5);
+check("chacun sur une buse distincte",
+      new Set(moteurs.map((m) => m.fields._thrusterLocation)).size, 10);
+// Zero sur les dix : n'importe quel choc abime le reacteur le plus proche.
+check("aucun n'a de seuil d'impact",
+      moteurs.every((m) => (m.fields._impactThreshold ?? 0) === 0), true);
+
+// `_damageLocationMask` est une SORTIE qui s'accumule, pas un filtre : sa
+// valeur serialisee est l'etat de depart d'un vaisseau intact.
+const dmg = (gp.singletons.ShipDamageController || {}).fields || {};
+check("le masque de degats part de zero", dmg._damageLocationMask, 0);
+check("les seuils d'impact sont 15 et 30",
+      `${dmg._lightImpactThreshold},${dmg._mediumImpactThreshold}`, "15,30");
+check("la mort instantanee est a 300", dmg._instantDeathSpeed, 300);
+check("et les propulseurs ne se coupent PAS dans cette alpha",
+      !!dmg._disableDamagedThrusters, false);
+
+check("six pivots de tornade", (gp.placed.TornadoPivotController || []).length, 6);
+// `_speed` n'est serialise sur aucun : il est TIRE au reveil, entre 1 et 2.
+check("dont aucun ne serialise sa vitesse",
+      (gp.placed.TornadoPivotController || []).every((t) => !("_speed" in (t.fields || {}))), true);
+check("trois suiveurs", (gp.placed.MatchTransform || []).length, 3);
+check("dont un sans cible",
+      (gp.placed.MatchTransform || []).filter((m) => !m.fields._targetTransform).length, 1);
+check("dix-huit conteneurs jetables", (gp.placed.DisposableContainer || []).length, 18);
+check("quatorze calibrateurs d'inertie",
+      (gp.placed.InertiaTensorCalibrator || []).length, 14);
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");

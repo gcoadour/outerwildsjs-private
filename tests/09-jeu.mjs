@@ -15,6 +15,7 @@ import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
          reglagesDe } from "../web/src/cameraeffects.js";
 import { Telescope, TELESCOPE } from "../web/src/tools.js";
+import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels } from "../web/src/sand.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
@@ -27,6 +28,8 @@ import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
+import { tornadoPivots, TornadoPivots, matchTransforms,
+         disposableContainers } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
@@ -41,7 +44,8 @@ import { Interactables } from "../web/src/interact.js";
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
-import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS } from "../web/src/shipdamage.js";
+import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
+         engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
@@ -184,65 +188,107 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- degats du vaisseau -------------------------------------------------
 {
-  // Position de l'impact : la normale est exprimee dans le repere du vaisseau.
-  check("impact par en dessous", locationOf([0, -1, 0]), "bas");
+  // Position de l'impact. `DamageAlertLocation` n'a que CINQ valeurs — Front 1,
+  // Top 2, Back 4, Left 8, Right 16 — et pas de « bas » : les six positions
+  // qu'avait le portage etaient inventees. Un choc par en dessous compte donc
+  // pour « arriere », qui est ou sont les reacteurs.
+  check("cinq positions, en drapeaux", ALL_LOCATIONS, 31);
+  check("impact par en dessous", locationOf([0, -1, 0]), "arriere");
   check("impact frontal", locationOf([0, 0, 1]), "avant");
   check("impact par l'arriere", locationOf([0, -0.2, -1]), "arriere");
   check("impact lateral", locationOf([1, 0, 0.5]), "droite");
+  check("impact par le haut", locationOf([0, 1, 0.2]), "haut");
 
-  // Valeurs du build : masque et modificateurs a zero. Les degats restent
-  // globaux — c'est l'etat de l'alpha, pas un manque du portage.
-  const alpha = new ShipDamage({ _damageLocationMask: 0,
-                                 _genericPartImpactModifier: 0,
-                                 _enginePartImpactModifier: 0,
+  // LA LECTURE A L'ENVERS, CORRIGEE. Le portage lisait `_damageLocationMask`
+  // comme un filtre et concluait de son zero qu'« aucune piece n'est touchee
+  // avec les valeurs du build ». `OnImpact` fait `mask |= _alertLocation` : le
+  // masque est un RESULTAT, et zero est l'etat d'un vaisseau intact.
+  //
+  // Un test gardait donc la lecture fausse, et il aurait refuse la correction.
+  const alpha = new ShipDamage({ _damageLocationMask: 0, _shipTotalHealth: 100,
+                                 _instantDeathSpeed: 300,
                                  _disableDamagedThrusters: false });
+  check("au depart, aucune alerte", alpha.alerted.length, 0);
   const r = alpha.impact(40, [0, -1, 0]);
   check("degats a 40 u/s", round(r.damage, 1), 26.3);
-  check("aucune piece touchee avec les valeurs du build", r.part, 0);
-  check("integrite entamee malgre tout", round(alpha.integrity, 1), 73.7);
+  // force = 100 x (40 - 0) / (300 - 0)
+  check("la piece prend sa part, et elle n'est pas nulle", round(r.part, 2), 13.33);
+  check("integrite entamee", round(alpha.integrity, 1), 73.7);
+  check("et le masque porte desormais l'arriere", alpha.alerted.join(","), "arriere");
 
-  // Le mecanisme, allume.
-  const arme = new ShipDamage({ _damageLocationMask: ALL_LOCATIONS,
-                                _genericPartImpactModifier: 0.5,
-                                _enginePartImpactModifier: 1,
-                                _disableDamagedThrusters: true });
-  const bas = arme.impact(40, [0, -1, 0]);
-  check("la piece touchee prend sa part", round(bas.part, 2), 13.16);
-  check("piece encore vivante", arme.parts.bas.dead, false);
+  // TROIS PIECES ABIMEES AU PLUS. Au-dela, un impact ne fait plus de nouvelle
+  // victime — la quatrieme position reste intacte quoi qu'il arrive.
+  const trois = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300 });
+  // Vingt unites par seconde : au-dessus du seuil leger (15), donc un impact
+  // reel, et assez doux pour que la coque survive aux cinq chocs.
+  trois.impact(20, [0, 0, 1]);       // avant
+  trois.impact(20, [0, 1, 0]);       // haut
+  trois.impact(20, [1, 0, 0]);       // droite
+  check("trois pieces abimees", trois.alerted.length, 3);
+  const quatrieme = trois.impact(20, [-1, 0, 0]);   // gauche
+  check("la quatrieme ne prend rien", quatrieme.part, 0);
+  check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
+  // Une piece DEJA abimee peut toujours l'etre davantage.
+  check("mais une deja touchee, si", trois.impact(20, [0, 0, 1]).part > 0, true);
 
-  // Une piece meurt de SES degats a elle, pas de ceux de la coque. Avec un
-  // modificateur eleve, une serie de petits chocs sur le meme cote la detruit
-  // bien avant que le vaisseau ne soit perdu — c'est tout l'interet des degats
-  // localises.
-  const use = new ShipDamage({ _damageLocationMask: ALL_LOCATIONS,
-                               _genericPartImpactModifier: 5,
+  // LA PIECE EST LA PLUS PROCHE DU POINT, quand on a les reacteurs.
+  const moteurs = engineComponents({ placed: { EngineComponent: [
+    { name: "DamageSiteContainer(Engine)", position: [-2, 0, 0],
+      fields: { _thrusterLocation: 0, _alertLocation: 8, _impactThreshold: 0, _integrity: 100 } },
+    { name: "DamageSiteContainer(Engine)", position: [2, 0, 0],
+      fields: { _thrusterLocation: 5, _alertLocation: 16, _impactThreshold: 0, _integrity: 100 } },
+  ] } });
+  check("les reacteurs se lisent", moteurs.length, 2);
+  check("et savent leur cote", moteurs.map((e) => e.location).join(","), "gauche,droite");
+  check("et leur buse", moteurs.map((e) => e.thruster).join(","), "Left,Right");
+  const proche = new ShipDamage({ _shipTotalHealth: 1e9 }, moteurs);
+  // La normale dit « avant » ; le POINT dit « droite ». Le build suit le point.
+  const choix = proche.impact(30, [0, 0, 1], [1.9, 0, 0]);
+  check("la piece touchee est la plus proche du point", choix.location, "droite");
+  check("et non celle que designe la normale", choix.location === "avant", false);
+
+  // `_disableDamagedThrusters` vaut FAUX dans cette alpha : une piece morte ne
+  // coupe rien. Le mecanisme est porte quand meme.
+  //
+  // Quinze chocs a 20 u/s : la piece perd 100 (20/3 par choc) et meurt, quand
+  // la coque n'en perd que 31 — c'est tout l'interet des degats localises.
+  const use = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
                                _disableDamagedThrusters: true });
-  for (let i = 0; i < 6; i++) use.impact(25, [0, -1, 0]);
-  check("piece morte apres une serie de chocs", use.parts.bas.dead, true);
-  check("le vaisseau, lui, tient encore", use.destroyed, false);
-  check("le propulseur coupe est hors service", use.thrustFactor("bas"), 0);
+  for (let i = 0; i < 15; i++) use.impact(20, [0, 0, -1]);
+  check("piece morte apres une serie de chocs", use.parts.arriere.dead, true);
+  check("le propulseur coupe est hors service", use.thrustFactor("arriere"), 0);
   check("les autres poussent encore", use.thrustFactor("avant"), 1);
 
-  const sansOption = new ShipDamage({ _damageLocationMask: ALL_LOCATIONS,
-                                      _genericPartImpactModifier: 5,
+  const sansOption = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
                                       _disableDamagedThrusters: false });
-  for (let i = 0; i < 6; i++) sansOption.impact(25, [0, -1, 0]);
+  for (let i = 0; i < 15; i++) sansOption.impact(20, [0, 0, -1]);
   check("sans _disableDamagedThrusters, la piece morte ne coupe rien",
-        sansOption.thrustFactor("bas"), 1);
+        sansOption.thrustFactor("arriere"), 1);
 
-  const masque = new ShipDamage({ _damageLocationMask: LOCATIONS.arriere,
-                                  _genericPartImpactModifier: 0.5,
-                                  _enginePartImpactModifier: 1 });
-  check("hors du masque, rien n'est reporte", masque.impact(40, [0, -1, 0]).part, 0);
-  check("dans le masque, le reacteur prend le sien",
-        round(masque.impact(40, [0, 0, -1]).part, 1), 26.3);
-
-  const perdu = new ShipDamage({});
-  perdu.impact(300, [0, -1, 0]);
-  check("mort instantanee a 300 u/s", perdu.destroyed, true);
+  // LES DEUX MORTS. Le choc unique trop violent, et l'usure cumulee.
+  const perdu = new ShipDamage({ _instantDeathSpeed: 300 });
+  perdu.impact(301, [0, -1, 0]);
+  check("mort instantanee au-dela de 300 u/s", perdu.destroyed, true);
   check("un vaisseau detruit ne pousse plus", perdu.thrustFactor("arriere"), 0);
   perdu.reset();
   check("la boucle le rend entier", perdu.destroyed, false);
+  check("et efface son alerte", perdu.mask, 0);
+
+  const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300 });
+  // Chaque choc a 20 u/s coute 6,67 a la piece : il en faut quinze pour que le
+  // cumul passe la sante totale, et la coque, elle, tient encore.
+  for (let i = 0; i < 14; i++) usure.impact(20, [0, 0, -1]);
+  check("quatorze chocs ne suffisent pas", usure.destroyed, false);
+  check("et la coque tient encore", usure.integrity > 0, true);
+  usure.impact(20, [0, 0, -1]);
+  check("le cumul au-dela de la sante totale, si", usure.destroyed, true);
+
+  // Reparer retire la position de l'alerte.
+  const repare = new ShipDamage({ _shipTotalHealth: 1e9 });
+  repare.impact(40, [0, 0, -1]);
+  check("l'alerte est levee", repare.covers("arriere"), true);
+  repare.repair("arriere");
+  check("et la reparation la retire", repare.covers("arriere"), false);
 }
 
 // --- limite de poussee du secteur ---------------------------------------
@@ -2968,6 +3014,101 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
   // Sans champ extrait, on ne fabrique pas d'etoiles.
   check("sans donnees, pas de champ", new StarField(null).ready, false);
+
+  // --- la queue du recensement (docs/49) ----------------------------------
+  //
+  // Les marqueurs de carte : le build les DECLARE, avec leurs vrais noms de
+  // jeu. Le portage les deduisait de la gravite et affichait les noms internes.
+  const marq = mapMarkers({ placed: { MapMarker: [
+    { name: "Comet_Body", body: "Comet_Body", fields: { _label: "The Nomad", _markerType: 1 } },
+    { name: "Moon_Body", body: "Moon_Body", fields: { _label: "Lunar Lookout", _markerType: 2 } },
+    { name: "Sun_Body", body: "Sun_Body", fields: { _label: "Sun", _markerType: 3 } },
+    { name: "Player_Body", body: "Player_Body", fields: { _label: "You Are Here", _markerType: 4 } },
+    { name: "OribitingIsland", body: null, fields: { _label: "Giant's Landing", _markerType: 0 } },
+  ] } });
+  check("cinq marqueurs lus", marq.length, 5);
+  check("et leurs vrais noms avec", marq[0].label, "The Nomad");
+  // Les distances viennent de la TABLE DE SAUT d'`Awake`, pas de l'ordre des
+  // blocs : une planete a 50 000, une lune seulement 5 000, le soleil toujours.
+  check("une planete s'affiche a 50 000", marq[0].maxDistance, 50000);
+  check("une lune, seulement a 5 000", marq[1].maxDistance, 5000);
+  check("le soleil, toujours", marq[2].maxDistance, 1e10);
+  check("le joueur est vert", marq[3].color, "#00ff00");
+  check("une planete est blanche", marq[0].color, "#ffffff");
+  // « Giant's Landing » n'est meme pas un corps : c'est une ILE. La deduction
+  // par gravite ne pouvait pas la trouver.
+  check("un marqueur peut n'etre porte par aucun corps", marq[4].body, null);
+
+  // La visibilite, dans l'ordre ou `LateUpdate` decide.
+  const planete = marq[0], lune = marq[1], joueur = marq[3];
+  check("trop loin, une lune disparait",
+        markerVisible(lune, [100, 100, 9000], [0, 0], null), false);
+  check("assez pres, elle revient",
+        markerVisible(lune, [100, 100, 4000], [0, 0], null), true);
+  check("derriere la camera, rien ne s'affiche",
+        markerVisible(planete, [100, 100, -5], [0, 0], null), false);
+  // Les deux regles des dix pixels — celle du joueur, et celle du VAISSEAU que
+  // le portage n'avait pas.
+  check("a moins de dix pixels du joueur, masque",
+        markerVisible(planete, [3, 3, 1000], [0, 0], null), false);
+  check("a moins de dix pixels du vaisseau aussi",
+        markerVisible(planete, [100, 100, 1000], [0, 0], [103, 103]), false);
+  // Le marqueur du joueur, lui, sort avant tous les tests.
+  check("le joueur ne se masque jamais",
+        markerVisible(joueur, [3, 3, 1000], [0, 0], [3, 3]), true);
+  check("sauf derriere la camera", markerVisible(joueur, [3, 3, -1], [0, 0], null), false);
+  check("et la zone brouillee masque tout",
+        markerVisible(planete, [100, 100, 1000], [0, 0], null, true), false);
+
+  // Les pivots de tornade : une culbute autour de l'axe X local, a une vitesse
+  // TIREE au reveil — cinq des six s'appellent pareil, d'ou le rattachement par
+  // position.
+  const pivots = tornadoPivots({ placed: { TornadoPivotController: [
+    { name: "UpTornado_Pivot", position: [0, 0, 0] },
+    { name: "UpTornado_Pivot", position: [50, 0, 0] },
+  ] } }, () => 0.5);
+  check("deux pivots", pivots.length, 2);
+  check("la vitesse est tiree entre 1 et 2", pivots[0].speed, 1.5);
+  check("et l'angle de depart entre 0 et 360", pivots[0].initialSpin, 180);
+  const noeud = (x) => ({ name: "UpTornado_Pivot", position: { x, y: 0, z: 0 },
+    getAbsolutePosition() { return this.position; },
+    rotationQuaternion: { x: 0, y: 0, z: 0, w: 1,
+      set(a, b, c, d) { this.x = a; this.y = b; this.z = c; this.w = d; } } });
+  const tp = new TornadoPivots(pivots);
+  const ns = [noeud(50), noeud(0)];
+  check("chacun trouve le sien", tp.attach(ns), 2);
+  check("et pas le meme deux fois", tp.live[0].noeud === tp.live[1].noeud, false);
+  const avant = { ...ns[1].rotationQuaternion };
+  tp.update(1);
+  check("le pivot a bouge",
+        ns[1].rotationQuaternion.w !== avant.w || ns[1].rotationQuaternion.y !== avant.y, true);
+  // Une culbute, pas une rotation sur soi : l'axe avant du pivot change.
+  const versAvant = qrot([ns[1].rotationQuaternion.x, ns[1].rotationQuaternion.y,
+                          ns[1].rotationQuaternion.z, ns[1].rotationQuaternion.w], [0, 0, 1]);
+  tp.update(100);
+  const apres = qrot([ns[1].rotationQuaternion.x, ns[1].rotationQuaternion.y,
+                      ns[1].rotationQuaternion.z, ns[1].rotationQuaternion.w], [0, 0, 1]);
+  check("et il bascule : son axe avant s'est deplace",
+        Math.abs(apres[1] - versAvant[1]) > 0.01 || Math.abs(apres[2] - versAvant[2]) > 0.01, true);
+
+  // Les suiveurs, dont l'un ne suit RIEN — c'est une propriete du build.
+  const suiv = matchTransforms({ placed: { MatchTransform: [
+    { name: "CampfireSmoke", position: [0, 0, 0],
+      fields: { _targetTransform: null, _matchPosition: true, _matchRotation: true } },
+    { name: "OuterClouds", position: [0, 0, 0],
+      fields: { _targetTransform: { $ref: "level0:9729" }, _matchPosition: true, _matchRotation: false } },
+  ] } });
+  check("deux suiveurs", suiv.length, 2);
+  check("l'un d'eux ne suit rien, et on le dit", suiv[0].target, null);
+  check("l'autre suit la position mais pas la rotation",
+        `${suiv[1].matchPosition},${suiv[1].matchRotation}`, "true,false");
+
+  // Et les conteneurs d'editeur : on les compte pour ne plus se poser la
+  // question. Leur `Start` fait `Destroy(gameObject)`.
+  check("les conteneurs jetables se comptent",
+        disposableContainers({ placed: { DisposableContainer: [
+          { name: "TimberHearth_Pivot", position: [0, 0, 0] },
+          { name: "Islands", position: [0, 0, 0] }] } }).length, 2);
 }
 
 report();

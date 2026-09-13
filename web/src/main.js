@@ -49,7 +49,8 @@ import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
-import { SolarMap } from "./map.js";
+import { SolarMap, mapMarkers } from "./map.js";
+import { engineComponents } from "./shipdamage.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
@@ -74,6 +75,7 @@ import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
 import { referenceFrames, DeclaredFrames, restingPoint } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
+         tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
@@ -366,6 +368,15 @@ async function boot() {
   const declared = new DeclaredFrames(referenceFrames(gameplay));
   // §3 la vie du decor : quinze panneaux, huit visages, six passages anciens.
   const decor = new DecorField(billboards(gameplay), talkingFaces(gameplay));
+  // Les six pivots de tornade : une culbute de 1 a 2 degres par seconde, tiree
+  // au reveil comme dans le build — six tornades qui penchent toutes pareil se
+  // verraient. Ce qui TOURNE, la colonne d'air, est lu depuis docs/39.
+  const tornades = new TornadoPivots(tornadoPivots(gameplay));
+  // Les trois suiveurs, et les dix-huit conteneurs d'editeur qu'on ne porte
+  // pas : comptes ici pour que la question ne se repose plus (docs/49).
+  const suiveurs = matchTransforms(gameplay);
+  const conteneurs = disposableContainers(gameplay);
+  window.__queue = { tornades, suiveurs, conteneurs };
   const decalNames = new Set([
     ...((gameplay.placed || {}).DS_DecalsMeshRenderer || []).map((c) => c.name),
     ...((gameplay.placed || {}).DS_Decals || []).map((c) => c.name)]);
@@ -488,6 +499,8 @@ async function boot() {
     if (nSand) console.log(`sable : ${nSand} colonnes rattachees sur ${sand.total}`);
     // Le decor vivant et les decalcomanies se rattachent au meme moment, et par
     // le meme chemin : ce qui arrive avec la geometrie porte les noms du build.
+    const nTornades = tornades.attach(entry.meshes);
+    if (nTornades) console.log(`tornades : ${nTornades} pivots sur ${tornades.total}`);
     const nDecor = decor.attach(entry.meshes);
     if (nDecor) console.log(`decor : ${nDecor} panneaux et visages sur ${decor.total}`);
     const nDecals = applyDecals(BABYLON, entry.meshes, decalNames);
@@ -587,7 +600,11 @@ async function boot() {
       shipStart = local.slice();
       ship = new Ship((gameplay.singletons.ShipThrusterModel || {}).fields || {},
                       node, local,
-                      (gameplay.singletons.ShipDamageController || {}).fields || {});
+                      (gameplay.singletons.ShipDamageController || {}).fields || {},
+                      // Les dix reacteurs : c'est par eux que le build choisit
+                      // la piece touchee — la plus proche du point d'impact, et
+                      // non celle que designe une normale.
+                      engineComponents(gameplay));
       // Le vaisseau porte desormais son orientation : sans la poser une
       // premiere fois, son « haut » serait celui du repere de travail et non
       // la verticale locale, et sa poussee verticale partirait de travers.
@@ -1076,8 +1093,11 @@ async function boot() {
   // surface x 1,5 » : elles sont dans les neuf `MajorReferenceFrameVolume`
   // (docs/46, lot 1).
   const autopilot = ship ? new Autopilot(ship, declared.frames) : null;
+  // Les treize marqueurs que le build pose, avec leurs vrais noms de jeu.
+  const marqueurs = mapMarkers(gameplay);
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
-                                pdata, SECTOR_OF);
+                                pdata, SECTOR_OF, marqueurs);
+  if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
   window.__map = solarMap;
   window.__autopilot = autopilot;
   window.__ship = !!ship;
@@ -2276,6 +2296,9 @@ async function boot() {
     // Le sable suit la boucle et rien d'autre : il repart de son niveau initial
     // a chaque redemarrage, comme dans le jeu.
     if (sand.count) sand.update(loop.elapsed);
+
+    // Les pivots de tornade culbutent, lentement et chacun a son rythme.
+    if (tornades.count) tornades.update(dt);
 
     // §3 LE DECOR VIVANT. Les panneaux se tournent vers la camera — autour de
     // leur mat quand ils en ont un — et les personnages se tournent vers le

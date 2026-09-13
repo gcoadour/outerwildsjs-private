@@ -528,3 +528,152 @@ export class DecorField {
     }
   }
 }
+
+/**
+ * Le pivot des tornades : une lente culbute.
+ *
+ * `TornadoPivotController` n'a qu'un champ, `_speed`, et il n'est **serialise
+ * sur aucune des six instances** : `Awake` le TIRE entre 1 et 2 degres par
+ * seconde, puis fait tourner le pivot d'un angle tire entre 0 et 360 autour de
+ * son axe Y local. Ensuite, chaque pas de physique :
+ *
+ *     rotation = AngleAxis(_speed x dt, transform.right) x rotation
+ *
+ * Autour de l'axe X, pas de l'axe Y : la tornade ne tourne pas sur elle-meme,
+ * elle BASCULE lentement. Ce qui tourne sur soi est la colonne d'air, et sa
+ * poussee est lue depuis longtemps (docs/39-fluides.md) — ce pivot-ci est ce
+ * qui la fait pencher et derivera.
+ *
+ * Les deux tirages sont ceux du build, et c'est pourquoi ce module les fait
+ * aussi : une culbute identique sur les six tornades se verrait.
+ */
+export function tornadoPivots(gameplay, random = Math.random) {
+  return ((gameplay.placed || {}).TornadoPivotController || []).map((c) => ({
+    name: c.name,
+    position: c.position,
+    body: c.body || null,
+    // Random.Range(1f, 2f) : degres par seconde.
+    speed: 1 + random(),
+    // Random.Range(0f, 360f) autour de l'axe Y local, une fois, au reveil.
+    initialSpin: random() * 360,
+  }));
+}
+
+/**
+ * Les trois `MatchTransform` : un objet qui suit un autre transform.
+ *
+ * `Update` copie la position et/ou la rotation de `_targetTransform`, selon
+ * deux booleens. Trois instances, et l'une des trois — la fumee du feu de camp
+ * — a une cible NULLE : elle ne suit rien, et c'est une propriete du build, pas
+ * un defaut d'extraction. On la rend avec `target: null` plutot que de la
+ * taire.
+ */
+export function matchTransforms(gameplay) {
+  return ((gameplay.placed || {}).MatchTransform || []).map((c) => {
+    const f = c.fields || {};
+    return {
+      name: c.name,
+      position: c.position,
+      target: (f._targetTransform && f._targetTransform.$ref) || null,
+      matchPosition: f._matchPosition !== false,
+      matchRotation: !!f._matchRotation,
+    };
+  });
+}
+
+/**
+ * Les dix-huit `DisposableContainer`, et ce qu'il faut en faire : RIEN.
+ *
+ * Leur `Start` tient en une ligne — `Destroy(gameObject)` — et les dix-huit
+ * portent uniquement un `Transform` : `TimberHearth_Pivot`, `Islands`, `Zones`,
+ * `ShipContainer`... Ce sont des noeuds de RANGEMENT d'editeur. `Awake` court
+ * avant `Start` ; ce qui devait etre rattache ailleurs (`AttachOnAwake`,
+ * `MatchInitialMotion`) l'a deja ete, et le conteneur vide se supprime.
+ *
+ * Ce portage construit sa geometrie depuis les sous-arbres glTF racines par nom
+ * de corps : ces conteneurs n'y apparaissent pas. La fonction existe pour que
+ * le compte soit fait et que la question ne se repose pas — un invariant garde
+ * les dix-huit et le fait qu'aucun ne porte de rendu.
+ */
+export function disposableContainers(gameplay) {
+  return ((gameplay.placed || {}).DisposableContainer || []).map((c) => ({
+    name: c.name, position: c.position,
+  }));
+}
+
+/**
+ * Les six pivots, rattaches et mis a culbuter.
+ *
+ * Rattachement PAR POSITION, comme les nuages (docs/48) et pour la meme
+ * raison : cinq des six s'appellent `UpTornado_Pivot`. Le nom ne les distingue
+ * pas, leur place si.
+ *
+ * La classe ne connait ni Babylon ni le DOM : elle lit et tourne des noeuds, et
+ * se teste donc avec de faux noeuds.
+ */
+export class TornadoPivots {
+  constructor(pivots = []) {
+    this.pivots = pivots;
+    this.live = [];      // { noeud, pivot }
+  }
+
+  get total() { return this.pivots.length; }
+  get count() { return this.live.length; }
+
+  attach(nodes, tolerance = 1) {
+    if (!nodes || !nodes.length) return 0;
+    const pris = new Set();
+    for (const p of this.pivots) {
+      if (this.live.some((x) => x.pivot === p)) continue;
+      let best = null, bestD = Infinity;
+      for (const n of nodes) {
+        if (n.name !== p.name || pris.has(n)) continue;
+        const q = n.getAbsolutePosition ? n.getAbsolutePosition() : n.position;
+        if (!q) continue;
+        const d = Math.hypot(q.x - p.position[0], q.y - p.position[1], q.z - p.position[2]);
+        if (d < bestD) { bestD = d; best = n; }
+      }
+      if (!best || bestD > tolerance) continue;
+      pris.add(best);
+      // Le tirage du reveil : un angle quelconque autour de l'axe Y local.
+      this.live.push({ noeud: best, pivot: p, angle: p.initialSpin, pose: false });
+    }
+    return this.live.length;
+  }
+
+  /**
+   * Avance la culbute. L'axe est le X LOCAL du pivot — `transform.right` —, et
+   * la rotation se compose A GAUCHE de celle du noeud : c'est une rotation
+   * exprimee dans le repere du parent, pas dans celui du pivot.
+   */
+  update(dt) {
+    for (const l of this.live) {
+      if (!l.noeud.rotationQuaternion) {
+        if (l.noeud.rotation && l.noeud.rotation.toQuaternion) {
+          l.noeud.rotationQuaternion = l.noeud.rotation.toQuaternion();
+        } else continue;
+      }
+      const q = l.noeud.rotationQuaternion;
+      let cur = [q.x, q.y, q.z, q.w];
+      if (!l.pose) {
+        // Le tirage initial, une seule fois, autour de l'axe Y du pivot.
+        const up = qrot(cur, [0, 1, 0]);
+        cur = qmul(axisAngle(up, l.pivot.initialSpin), cur);
+        l.pose = true;
+      }
+      const right = qrot(cur, [1, 0, 0]);
+      cur = qmul(axisAngle(right, l.pivot.speed * dt), cur);
+      q.set ? q.set(cur[0], cur[1], cur[2], cur[3])
+            : Object.assign(q, { x: cur[0], y: cur[1], z: cur[2], w: cur[3] });
+    }
+    return this.live.length;
+  }
+}
+
+/** `Quaternion.AngleAxis(degres, axe)`, en [x, y, z, w]. */
+export function axisAngle(axis, degrees) {
+  const l = Math.hypot(axis[0], axis[1], axis[2]) || 1;
+  const h = (degrees * Math.PI / 180) / 2;
+  const s = Math.sin(h) / l;
+  return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(h)];
+}

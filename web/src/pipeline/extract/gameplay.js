@@ -52,7 +52,30 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "GearPickup", "PlayerLockOnTargeting", "ZeroGTrainingManager",
                 "PlayerAttachPoint", "LandingPadSensor",
                 // §8 les impostures de planete, gardees pour ce qu'elles disent.
-                "LODCameraSnapshot"];
+                "LODCameraSnapshot",
+                // --- la queue du recensement (docs/49-queue.md) -------------
+                //
+                // Ce qui restait apres les six lots, une fois les COMMENTAIRES
+                // retires du comptage (docs/47) : plus une famille, une queue.
+                // Quatre de ces classes se lisent, deux se mesurent et se
+                // ferment.
+                //
+                // La carte DECLARE ses marqueurs : treize, avec leurs vrais
+                // noms de jeu. Le portage les deduisait de la gravite et
+                // affichait les noms internes (`Comet_Body` pour « The Nomad »).
+                "MapMarker",
+                // Le chainon manquant de shipdamage.js, ecrit en toutes
+                // lettres dans son commentaire : « elle passe par
+                // EngineComponent, qui n'est pas lu ».
+                "EngineComponent",
+                // Le pivot des tornades : une lente culbute dont la vitesse est
+                // TIREE au reveil, pas serialisee.
+                "TornadoPivotController",
+                // Trois objets qui suivent un autre transform.
+                "MatchTransform",
+                // Et deux qu'on extrait pour pouvoir dire, chiffres en main,
+                // qu'il n'y a rien a en faire.
+                "DisposableContainer", "InertiaTensorCalibrator"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
