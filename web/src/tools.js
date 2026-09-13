@@ -9,8 +9,11 @@
 // ramenait toujours au plus etroit depuis 60, ce qui faisait deux erreurs a la
 // fois : un grossissement de sept au lieu de deux, et un champ de repos de 60
 // au lieu de 70 sur TOUTE la partie, telescope range.
-// ProbeLauncher n'expose aucune valeur numerique ; c'est lui qui accorde
-// KnowsHowProbesWork dans le jeu.
+// Le lanceur de sonde a quitte ce fichier : il vit dans `probe.js` avec le
+// reste du prefabrique. La phrase qui tenait ici — « ProbeLauncher n'expose
+// aucune valeur numerique » — etait vraie de la SCENE et fausse du jeu : les
+// quatre nombres sont dans son constructeur, que personne n'avait ouvert
+// (docs/60-sonde.md).
 //
 // Nuance de fidelite : rien dans le build n'accorde KnowsHowTelescopeWorks.
 // Le drapeau existe et n'est jamais ecrit. Le relier a l'usage du telescope est
@@ -92,48 +95,6 @@ export class Telescope {
   get magnification() { return this.cfg.restFOV / this.cfg.minFOV; }
 }
 
-export class ProbeLauncher {
-  constructor(speed = 200, lifetime = 20) {
-    this.speed = speed;
-    this.lifetime = lifetime;
-    this.probes = [];
-    this.launched = 0;
-  }
-
-  /** Lance une sonde depuis une position, dans une direction. */
-  launch(pos, dir) {
-    this.probes.push({
-      pos: [pos.x, pos.y, pos.z],
-      vel: [dir.x * this.speed, dir.y * this.speed, dir.z * this.speed],
-      age: 0,
-    });
-    this.launched += 1;
-    return this.probes[this.probes.length - 1];
-  }
-
-  /** Avance les sondes ; le champ dominant les infléchit comme le joueur. */
-  update(dt, field) {
-    for (const p of this.probes) {
-      if (field) {
-        p.vel[0] += field.dir.x * field.magnitude * dt;
-        p.vel[1] += field.dir.y * field.magnitude * dt;
-        p.vel[2] += field.dir.z * field.magnitude * dt;
-      }
-      p.pos[0] += p.vel[0] * dt;
-      p.pos[1] += p.vel[1] * dt;
-      p.pos[2] += p.vel[2] * dt;
-      p.age += dt;
-    }
-    this.probes = this.probes.filter((p) => p.age < this.lifetime);
-    return this.probes.length;
-  }
-
-  get active() { return this.probes.length; }
-
-  /** La derniere sonde lancee, celle que la camera embarquee suit. */
-  get last() { return this.probes.length ? this.probes[this.probes.length - 1] : null; }
-}
-
 /**
  * Camera embarquee de la sonde.
  *
@@ -202,14 +163,30 @@ export class ProbeCamera {
     st.height = `${h * 100}%`;
   }
 
-  /** @param probe sonde a suivre, ou null */
-  update(probe) {
+  /**
+   * @param probe sonde a suivre, ou null
+   * @param rear  vue ARRIERE (`RearCamera`, tournee de 180 degres)
+   *
+   * Le prefabrique porte DEUX cameras, et la seconde n'est pas un luxe : une
+   * fois plantee, la sonde a le NEZ DANS la paroi — `AttachToObject` aligne son
+   * avant sur `-normale`, comme une flechette. La camera avant filme donc la
+   * roche, et c'est la camera arriere qui montre quelque chose. Le portage n'en
+   * dessine qu'une, et bascule sur la commande `altProbe`.
+   */
+  update(probe, rear = false) {
     const want = !!probe;
     if (want) {
       this.cam.position.set(probe.pos[0], probe.pos[1], probe.pos[2]);
-      const v = probe.vel, L = Math.hypot(v[0], v[1], v[2]) || 1;
+      // En vol la sonde regarde ou elle va ; posee, sa vitesse est nulle et
+      // c'est son orientation qui vaut, celle que l'ancrage lui a donnee.
+      const v = probe.forward && probe.anchored ? probe.forward
+        : (probe.vel && Math.hypot(...probe.vel) > 1e-6 ? probe.vel : probe.forward)
+          || [0, 0, 1];
+      const s = rear ? -1 : 1;
+      const L = Math.hypot(v[0], v[1], v[2]) || 1;
       this.cam.setTarget(new this.B.Vector3(
-        probe.pos[0] + v[0] / L, probe.pos[1] + v[1] / L, probe.pos[2] + v[2] / L));
+        probe.pos[0] + s * v[0] / L, probe.pos[1] + s * v[1] / L,
+        probe.pos[2] + s * v[2] / L));
     }
     if (want === this.on) return this.on;
     this.on = want;

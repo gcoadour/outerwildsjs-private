@@ -120,7 +120,9 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **112/112**, mesurée après la série ([`59`](59-etat.md)) |
+| vérification avec le build | **118/118**, la sonde comprise ([`60`](60-sonde.md)) |
+| la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
+| les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -161,7 +163,7 @@ dans l'alpha.
 | les machines à états d'animation | 11 états, **zéro transition** dans tout le build |
 | ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |
 | les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
-| le modèle de sonde | `_probePrefab` n'est pas résolu |
+| ~~le modèle de sonde~~ | **faux, mesuré** ([`60`](60-sonde.md)) : `_probePrefab` vise `sharedassets1.assets:2295` et s'y résout du premier coup. Le recensement ne lisait que `level0`, et l'alpha range les préfabriqués ailleurs. Dix nœuds, huit classes, deux caméras |
 | les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
 | la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
 | ~~l'entraînement et le ciblage~~ | **faux, mesuré** : `PlayerLockOnTargeting` ×2 (dont une sur `Player_Body`) et `ZeroGTrainingManager` sont dans le build ([`45`](45-recensement-mesure.md)) |

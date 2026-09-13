@@ -28,6 +28,7 @@ import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { extractSky } from "../web/src/pipeline/extract/sky.js";
 import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
+import { extractPrefabs, mergePrefabs } from "../web/src/pipeline/extract/prefabs.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -966,13 +967,69 @@ check("et les six sont a des places distinctes",
 check("un volume compose", (gp.placed.CompoundTriggerVolume || []).length, 1);
 check("et quatre declencheurs enfants", (gp.placed.ChildTriggerVolume || []).length, 4);
 check("une tempete de sable", (gp.placed.SandstormVolume || []).length, 1);
-// Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build :
-// c'est le meme cas que `_probePrefab`. L'invariant garde ce vide.
+// Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build.
+//
+// Cette ligne disait « c'est le meme cas que `_probePrefab` », et c'etait faux :
+// `_probePrefab` vise `sharedassets1.assets:2295` et s'y resout parfaitement
+// (docs/60-sonde.md). Deux champs vides ne sont pas le meme cas parce qu'ils
+// sont vides ; celui-ci l'est, et le controle ci-dessous le mesure — l'autre ne
+// l'etait pas, et personne ne l'avait mesure. L'invariant garde ce vide-CI.
 const remous = (gp.placed.WaterEffectVolume || []);
 check("un volume d'eclaboussure", remous.length, 1);
 check("et aucun de ses trois prefabs n'est resolu",
       ["_largeSplashPrefab", "_medSplashPrefab", "_smallSplashPrefab"]
         .filter((k) => remous[0].fields[k]).length, 0);
+
+// A10 : les prefabriques. Le recensement ne lisait que `level0`, et l'alpha
+// range dans `sharedassets1.assets` et `resources.assets` tout ce qu'elle
+// instancie en cours de partie — la sonde entiere, et neuf effets a duree de
+// vie. C'est la moitie du jeu que le denominateur ignorait (docs/60-sonde.md).
+console.time("prefabriques");
+const prefabs = mergePrefabs(["sharedassets1.assets", "resources.assets"]
+  .map((f) => extractPrefabs(new ExtractContext(env, u, f, engineTypes))));
+console.timeEnd("prefabriques");
+check("le prefabrique de sonde est la", !!prefabs.probe, true);
+// Neuf et non dix : `ProbeMesh` ne porte QUE de la geometrie, et
+// l'extracteur ne retient un noeud que s'il a quelque chose a dire.
+check("et il a neuf noeuds qui portent quelque chose",
+      Object.keys(prefabs.probe.nodes).length, 9);
+const noeud = (n) => prefabs.probe.nodes[n] || {};
+// La lanterne : une lumiere PONCTUELLE de portee 50, eteinte. Ces deux
+// nombres sont tout le systeme — `ProbeLantern.Awake` lit `light.range` pour
+// s'en faire un maximum, puis remonte de zero en deux secondes.
+check("la lanterne est ponctuelle", noeud("Lantern").light.type, 2);
+check("sa portee est de cinquante", noeud("Lantern").light.range, 50);
+check("et elle part eteinte", noeud("Lantern").light.enabled, false);
+// Les deux cameras, a quatre-vingt-dix degres, et leurs projecteurs.
+check("la camera avant voit a quatre-vingt-dix", noeud("ForwardCamera").camera.fov, 90);
+check("la camera arriere aussi", noeud("RearCamera").camera.fov, 90);
+check("les deux partent eteintes",
+      [noeud("ForwardCamera").camera.enabled, noeud("RearCamera").camera.enabled]
+        .filter(Boolean).length, 0);
+check("le projecteur avant porte a six cents", noeud("ForwardCamera").light.range, 600);
+check("et l'arriere brille a un demi", noeud("RearCamera").light.intensity, 0.5);
+// Les trois spheres : le collider, les detecteurs, le volume de scan.
+check("le collider de la sonde fait 0,45", noeud("Collider").volume.radius, 0.45);
+check("ses detecteurs 0,75", noeud("Detectors").volume.radius, 0.75);
+check("et son volume de scan trente", noeud("ScanVolume").volume.radius, 30);
+// Le marqueur de carte : le QUATORZIEME du build, et il n'est pas dans level0.
+check("la sonde porte un marqueur de carte",
+      prefabs.probe.nodes.SurveyorProbe.scripts.MapMarker._label, "Probe");
+// Les dix effets a duree de vie, chacun la sienne.
+check("dix effets se detruisent seuls",
+      Object.keys(prefabs.selfDestruct).length, 10);
+check("l'explosion tient une seconde", prefabs.selfDestruct.Explosion_Fiery_Med, 1);
+check("l'extinction des etoiles lointaines huit",
+      prefabs.selfDestruct.DistantStarsExplosion, 8);
+check("et une eclaboussure cinq", prefabs.selfDestruct.Splash_Large, 5);
+// Le meteore : son explosion coute CINQUANTE, la ou le constructeur en pose
+// vingt. L'instance dement sa propre valeur par defaut.
+check("le meteore explose au contact",
+      prefabs.touchExplosive.MoltenMeteor.damage, 50);
+check("et il ignore ses collisions une demi-seconde",
+      prefabs.ignoreInitialCollisions.MoltenMeteor, 0.5);
+check("la supernova lointaine disparait de la carte",
+      prefabs.hideInMapView.includes("DistantSupernova"), true);
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
@@ -989,7 +1046,7 @@ console.log("     mainData:", mscene.node_count, "noeuds,",
 for (const [label, obj] of [["scene", scene], ["composants", comps],
                             ["solaire", solar], ["gameplay", gp],
                             ["audio", audio], ["lumieres", lighting],
-                            ["mainData", mscene]]) {
+                            ["mainData", mscene], ["prefabriques", prefabs]]) {
   let ok = true;
   try { JSON.stringify(obj); } catch { ok = false; }
   check(`${label} serialisable en JSON`, ok, true);

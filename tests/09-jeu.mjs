@@ -62,6 +62,11 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock } from "../web/src/gear.js";
 import { Interactables } from "../web/src/interact.js";
+import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
+         launchSpeed, launchPitch, orbitalSpeed, launchWindowLength,
+         tracksHorizon, horizonAim, impendingCollision, lanternRange,
+         snapshotSize, probeIcon, probeReadout, probeLabelPos,
+         selfDestructed, angleEntre } from "../web/src/probe.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
@@ -3689,6 +3694,185 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("l'un sort sans emporter l'autre", compose.contains("b"), true);
   // Sortir de ce dans quoi on n'est jamais entre ne fait rien.
   check("une sortie sans entree ne fait rien", compose.exitChild("inconnu"), false);
+
+  // --- la sonde, telle que le build la pose (docs/60) ---
+  //
+  // Le prefabrique vit dans `sharedassets1.assets` : le recensement ne lisait
+  // que `level0` et docs/08 en avait conclu que le modele de sonde manquait au
+  // build. Ces chiffres viennent tous du prefabrique ou de l'IL du lanceur.
+  check("la charge ignore les quinze premiers centiemes", chargeFraction(0.15), 0);
+  check("une pichenette ne charge rien", chargeFraction(0.05), 0);
+  check("une seconde pleine charge tout", chargeFraction(1), 1);
+  check("a mi-course, un peu plus de la moitie",
+        Number(chargeFraction(0.6).toFixed(4)), Number((0.45 / 0.85).toFixed(4)));
+  check("une charge nulle part a quarante", launchSpeed(0), 40);
+  check("une charge pleine part a cent", launchSpeed(1), 100);
+  // L'inclinaison est SIGNEE : positive quand on vise au-dessus du regard.
+  check("viser droit devant : zero", launchPitch([0, 0, 1], [0, 1, 0], [0, 0, 1]), 0);
+  check("viser vers le haut : positif",
+        launchPitch([0, 0, 1], [0, 1, 0], [0, 1, 0]) > 0, true);
+  check("viser vers le bas : negatif",
+        launchPitch([0, 0, 1], [0, 1, 0], [0, -1, 0]) < 0, true);
+  // La pichenette vise une ORBITE : sqrt(g r) * 1,1, plafonnee a cent.
+  check("la vitesse orbitale, a plat",
+        Number(orbitalSpeed(10, 100, 0).toFixed(3)),
+        Number((Math.sqrt(1000) * 1.1).toFixed(3)));
+  check("viser en l'air la fait monter",
+        orbitalSpeed(10, 100, 45) > orbitalSpeed(10, 100, 0), true);
+  check("mais jamais plus du double",
+        Number(orbitalSpeed(10, 100, 89).toFixed(3)),
+        Number(Math.min(Math.sqrt(1000) * 1.1 * 2, 100).toFixed(3)));
+  check("et jamais plus que la vitesse maximale", orbitalSpeed(100, 1000, 0), 100);
+  // La fenetre de tir : deux cents metres tant qu'on ignore le geste.
+  check("avant d'apprendre, il faut deux cents metres", launchWindowLength(false), 200);
+  check("apres, cinq suffisent", launchWindowLength(true), 5);
+  // Le suivi d'horizon ne s'arme que sur un tir tendu, hors du poste.
+  check("un tir tendu suit l'horizon", tracksHorizon(0, 10, false, 300), true);
+  check("un tir charge ne le suit pas", tracksHorizon(0.8, 10, false, 300), false);
+  check("un tir trop haut non plus", tracksHorizon(0, 60, false, 300), false);
+  check("un tir trop bas non plus", tracksHorizon(0, -20, false, 300), false);
+  check("depuis le poste de pilotage, jamais", tracksHorizon(0, 10, true, 300), false);
+  check("et il faut un secteur qui ait un horizon", tracksHorizon(0, 10, false, 0), false);
+  // La visee tangente : a distance R du centre, le point vise est a
+  // sqrt(dist^2 - R^2) — donc plus court que la distance au centre.
+  const vise = horizonAim([0, 0, 0], [0, 0, -320], [1, 0, 0], 300);
+  check("sous l'horizon plus deux cents, on corrige", vise !== null, true);
+  check("le point vise est le point de tangence",
+        Math.round(Math.hypot(vise[0], vise[1], vise[2])),
+        Math.round(Math.sqrt(320 * 320 - 300 * 300)));
+  check("trop loin, on ne corrige plus",
+        horizonAim([0, 0, 0], [0, 0, -600], [1, 0, 0], 300), null);
+  check("sous l'horizon non plus",
+        horizonAim([0, 0, 0], [0, 0, -200], [1, 0, 0], 300), null);
+  // La collision imminente : le pas de physique depasserait-il le point ?
+  check("a cent metres et cent par seconde, pas encore",
+        impendingCollision([0, 0, 100], [0, 0, 100], [0, 0, 0], 0.02), false);
+  check("a un metre et cent par seconde, oui",
+        impendingCollision([0, 0, 1], [0, 0, 100], [0, 0, 0], 0.02), true);
+  // La lanterne : eteinte a l'ancrage, cinquante deux secondes plus tard.
+  check("la lanterne s'allume a zero", lanternRange(0), 0);
+  check("a mi-parcours, la moitie", lanternRange(1), 25);
+  check("deux secondes plus tard, cinquante", lanternRange(2), SONDE.lanternRange);
+  check("et elle ne monte pas plus haut", lanternRange(10), SONDE.lanternRange);
+  // La photo : 512 pres, 64 loin, et le seuil est a deux cents metres.
+  check("sous deux cents metres, pleine definition", snapshotSize(150), 512);
+  check("a mille metres, la plus petite", snapshotSize(1000), 64);
+  check("et plus loin, pas plus petite", snapshotSize(5000), 64);
+  check("a six cents metres, entre les deux", snapshotSize(600), 288);
+  // Le marqueur : le danger l'emporte, et il tient une seconde.
+  check("en vol, on repere", probeIcon(0, null, false), "locator");
+  check("posee, on ancre", probeIcon(0, null, true), "anchor");
+  check("dans un danger, on alerte", probeIcon(5, null, true), "danger");
+  check("un degat de contact tient une seconde", probeIcon(0, 0.5, false), "danger");
+  check("et pas deux", probeIcon(0, 1.5, false), "locator");
+  check("le texte du marqueur", probeReadout(42.4), " 42m");
+  check("avec l'integrite de la croute", probeReadout(10, 87),
+        " 10m\n Crust Integrity: 87%");
+  check("et les renseignements du lieu", probeReadout(10, null, ["Chert"]),
+        " 10m\n Chert");
+  check("derriere la camera, pas de marqueur",
+        probeLabelPos({ x: 10, y: 10, z: -1 }, 600, { width: 32, height: 32 }), null);
+  check("devant, trente pixels au-dessus du point",
+        probeLabelPos({ x: 100, y: 200, z: 5 }, 600, { width: 32, height: 32 }).y,
+        600 - 200 - 16 - 30);
+  check("l'autodestruction attend sa seconde", selfDestructed(0.5), false);
+  check("puis elle detruit", selfDestructed(1.5), true);
+
+  // Le lanceur : UNE sonde a la fois. C'est la difference de jeu la plus
+  // visible de ce lot — le portage en lancait autant qu'on voulait.
+  const monde = { pos: [0, 0, 0], forward: [0, 0, 1], playerForward: [0, 0, 1],
+                  playerUp: [0, 1, 0], playerVelocity: [0, 0, 0], knowsProbes: true };
+  const lanceur = new Lanceur();
+  lanceur.update(0.016, { launch: true }, monde);
+  check("appuyer met en charge", lanceur.charging, true);
+  check("mais ne lance rien", lanceur.active, 0);
+  for (let i = 0; i < 60; i++) lanceur.update(0.016, { launch: true }, monde);
+  check("la charge monte", lanceur.charge > 0.5, true);
+  lanceur.update(0.016, { launch: false }, monde);
+  check("relacher lance", lanceur.active, 1);
+  check("et le son est celui de la pleine puissance",
+        lanceur.events.includes("ProbeLaunch_HighPower"), true);
+  lanceur.update(0.016, { launch: true }, monde);
+  check("une seconde sonde ne part pas", lanceur.launched, 1);
+  // Le rappel demande un MAINTIEN de trois dixiemes.
+  lanceur.update(0.2, { retrieve: true }, monde);
+  check("un appui bref ne rappelle pas", lanceur.active, 1);
+  lanceur.update(0.4, { retrieve: true }, monde);
+  check("trois dixiemes rappellent", lanceur.active, 0);
+  check("et l'evenement de destruction part",
+        lanceur.events.includes("ProbeDestroyed"), true);
+  // La pichenette, pres d'un corps : elle part en ORBITE, pas a quarante.
+  const orbital = new Lanceur();
+  orbital.update(0.016, { launch: true }, monde);
+  const jete = orbital.update(0.016, { launch: false },
+    { ...monde, field: { magnitude: 12, dir: { x: 0, y: -1, z: 0 } },
+      wellCenter: [0, -300, 0] });
+  check("la pichenette vise l'orbite",
+        Math.round(Math.hypot(...jete.vel)),
+        Math.round(orbitalSpeed(12, 300, 0)));
+  check("et le son est celui de la faible puissance",
+        orbital.events.includes("ProbeLaunch_LowPower"), true);
+  // Un mur devant : le tir est refuse, et une seule fois.
+  const bloque = new Lanceur();
+  const mur = { ...monde, raycast: () => ({ point: [0, 0, 3], normal: [0, 0, -1] }) };
+  bloque.update(0.016, { launch: true }, mur);
+  check("un mur refuse le tir", bloque.events.includes("ProbeLaunchAborted"), true);
+  check("et ne met pas en charge", bloque.charging, false);
+  bloque.update(0.016, { launch: true }, mur);
+  check("maintenir la touche ne le refuse pas deux fois",
+        bloque.events.length, 0);
+  // Dans le vaisseau, hors du poste de pilotage : refuse aussi.
+  const cabine = new Lanceur();
+  cabine.update(0.016, { launch: true }, { ...monde, insideShip: true });
+  check("dans la cabine, le tir est refuse",
+        cabine.events.includes("ProbeLaunchAborted"), true);
+  const poste = new Lanceur();
+  poste.update(0.016, { launch: true },
+               { ...monde, insideShip: true, atFlightConsole: true });
+  check("au poste de pilotage, il passe", poste.charging, true);
+
+  // La sonde en vol : le collider ne s'allume qu'au bout de deux dixiemes,
+  // puis elle se plante NEZ DANS la surface et la lanterne monte.
+  const sonde = new Sonde([0, 0, 0], [0, 0, 1], [0, 0, 50]);
+  check("au depart, pas de collider", sonde.colliderOn, false);
+  sonde.step(0.1, {});
+  check("a un dixieme, toujours pas", sonde.colliderOn, false);
+  sonde.step(0.15, {});
+  check("a deux dixiemes et demi, oui", sonde.colliderOn, true);
+  check("et elle a avance", Math.round(sonde.pos[2]), 13);
+  const sol = { point: [0, 0, 20], normal: [0, 0, -1] };
+  sonde.step(0.5, { raycast: () => sol });
+  check("elle s'ancre", sonde.anchored, true);
+  check("au point touche", sonde.pos.join(","), "0,0,20");
+  check("le nez dans la surface", sonde.forward.join(","), "0,0,1");
+  check("et elle ne bouge plus", Math.hypot(...sonde.vel), 0);
+  check("la lanterne part de zero", sonde.lantern, 0);
+  sonde.step(1, {});
+  check("et monte", sonde.lantern, 25);
+  check("la boucle de vol s'est tue", sonde.flightLoop, 0);
+  // Le scan : la sphere de trente, et le plus proche.
+  sonde.scan([{ nom: "loin", pos: [0, 0, 100] }, { nom: "pres", pos: [0, 0, 25] },
+              { nom: "moyen", pos: [0, 0, 40] }]);
+  check("deux points dans la sphere de trente", sonde.poi.length, 2);
+  check("et le plus proche est retenu", sonde.closestPOI.nom, "pres");
+  // Le capteur haute vitesse : sur un decor STATIQUE, il ancre en reculant de
+  // quinze centimetres du point d'impact.
+  //
+  // Le decor ne repond qu'au rayon du CAPTEUR (portee cent) et pas a celui du
+  // balayage : c'est le cas ou les deux detections divergent, et donc le seul
+  // ou le capteur sert a quelque chose.
+  // Il travaille des la premiere image : `ProbeAnchor.OnImpendingCollision`
+  // n'attend pas que le collider s'allume, seulement que la sonde ne soit pas
+  // deja posee.
+  const rapide = new Sonde([0, 0, 0], [0, 0, 1], [0, 0, 6000]);
+  const paroi = { point: [0, 0, 80], normal: [0, 0, -1], dynamic: false };
+  rapide.step(0.016,
+    { raycast: (from, dir, portee) => (portee === SONDE.sensorRange ? paroi : null) });
+  check("le capteur voit le mur cent metres devant", rapide.anchored, true);
+  check("et recule de quinze centimetres",
+        Number(rapide.pos[2].toFixed(2)), 79.85);
+  check("l'angle entre deux directions opposees vaut cent quatre-vingts",
+        Math.round(angleEntre([0, 0, 1], [0, 0, -1])), 180);
 }
 
 report();

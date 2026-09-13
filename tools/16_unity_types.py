@@ -22,7 +22,16 @@ UNITY_VERSION = "4.1.2f1"
 
 # Classes dont le pipeline a besoin. En ajouter une ne coute qu'un identifiant.
 CLASSES = {
-    1: "GameObject", 4: "Transform", 20: "Camera", 21: "Material",
+    1: "GameObject", 4: "Transform",
+    # Les quatre reglages de projet, tous dans `mainData` et aucun dans
+    # `level0` -- ce qui explique qu'on ne les ait pas lus plus tot. Ils
+    # portent ce qu'aucun composant ne porte : le pas de physique fixe (5), les
+    # LIAISONS DE TOUCHES du jeu (13), la gravite par defaut et le nombre
+    # d'iterations du solveur (55), enfin les noms de balises et de calques
+    # (78) -- ceux que `LayerMask.NameToLayer` et `FindWithRequiredTag`
+    # cherchent partout dans l'IL.
+    5: "TimeManager", 13: "InputManager", 55: "PhysicsManager", 78: "TagManager",
+    20: "Camera", 21: "Material",
     23: "MeshRenderer", 25: "Renderer", 26: "ParticleRenderer", 28: "Texture2D",
     33: "MeshFilter", 43: "Mesh", 48: "Shader", 49: "TextAsset",
     54: "Rigidbody", 64: "MeshCollider", 65: "BoxCollider", 74: "AnimationClip",

@@ -13,6 +13,14 @@
 // n'apparait nulle part dans `web/src/`, et pourtant il est lu — par `/oxygen/i`.
 // Compter sans elle donnait 44 classes absentes de trop.
 //
+// Et une QUATRIEME, ajoutee apres coup, qui a couvert un systeme entier : ce
+// recensement ne lisait que `level0`, et l'alpha pose des composants dans
+// `sharedassets1.assets`, `resources.assets` et `mainData`. La sonde y est en
+// entier — dix noeuds, huit classes — et docs/08 avait conclu de son absence
+// de `level0` que « le modele de sonde » manquait au BUILD. C'est la meme
+// erreur que docs/47 et docs/50, commise sur le denominateur cette fois : on
+// mesurait bien, sur la mauvaise moitie du jeu (docs/60-sonde.md).
+//
 //   OW_BUILD=/chemin/vers/..._Data node scripts/recensement.mjs [--json]
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -105,6 +113,14 @@ const ASSEMBLIES = ["Assembly-CSharp", "Assembly-CSharp-firstpass",
                     "Assembly-UnityScript", "Assembly-UnityScript-firstpass",
                     "DecalSystem.Runtime", "UnityEngine", "mscorlib"];
 
+/**
+ * Les autres fichiers serialises du build. `level0` est la scene du systeme
+ * solaire ; le reste porte les PREFABRIQUES (que le jeu instancie a
+ * l'execution) et la scene de demarrage.
+ */
+export const AUTRES_FICHIERS = ["sharedassets1.assets", "resources.assets",
+                                "mainData", "sharedassets0.assets"];
+
 export async function recenser() {
   const env = await loadEnv();
   const { TypeUniverse } = await import("../web/src/pipeline/dotnet/typetree.js");
@@ -116,9 +132,19 @@ export async function recenser() {
   }
   const ctx = new ExtractContext(env, universe, "level0", engineTypes);
 
-  // 1. ce que le build pose
+  // 1. ce que le build pose — dans `level0`, et AILLEURS
   const poses = new Map();
   for (const { cls } of ctx.behaviours()) poses.set(cls, (poses.get(cls) || 0) + 1);
+  const ailleurs = new Map();          // classe -> Map(fichier -> n)
+  for (const f of AUTRES_FICHIERS) {
+    for (const o of env.objects({ type: "MonoBehaviour", file: f })) {
+      const cls = ctx.scriptName(o);
+      if (!cls) continue;
+      if (!ailleurs.has(cls)) ailleurs.set(cls, new Map());
+      const m = ailleurs.get(cls);
+      m.set(f, (m.get(f) || 0) + 1);
+    }
+  }
 
   // 2. et 3. ce que le portage en lit
   const files = sources();
@@ -138,28 +164,58 @@ export async function recenser() {
                      && (f.text.includes(cls) || f.declare.has(cls)))
       .map((f) => f.path);
     const parMotif = parLeMoteur.length ? [] : motifs.filter((m) => m.re.test(cls)).map((m) => m.path);
-    rows.push({ cls, n, nomme, parLeMoteur, parMotif });
+    rows.push({ cls, n, nomme, parLeMoteur, parMotif, level0: n, ailleurs: 0, ou: [] });
+  }
+  // Les classes posees HORS de `level0`. Celles qui y sont aussi enrichissent
+  // leur ligne ; les autres en ouvrent une, et c'est la moitie du jeu que le
+  // compte ignorait.
+  const parNom = new Map(rows.map((r) => [r.cls, r]));
+  for (const [cls, m] of [...ailleurs].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    let r = parNom.get(cls);
+    if (!r) {
+      const nomme = files.filter((f) => f.text.includes(cls) || f.declare.has(cls))
+                         .map((f) => f.path);
+      const parLeMoteur = moteur
+        .filter((f) => f.text.includes(cls) || f.declare.has(cls)).map((f) => f.path);
+      const parMotif = parLeMoteur.length ? []
+        : motifs.filter((x) => x.re.test(cls)).map((x) => x.path);
+      r = { cls, n: 0, nomme, parLeMoteur, parMotif, level0: 0, ailleurs: 0, ou: [] };
+      rows.push(r);
+      parNom.set(cls, r);
+    }
+    r.ailleurs = total;
+    r.ou = [...m.keys()];
   }
   return rows;
 }
 
 function principal() {
-  return recenser().then((rows) => {
+  return recenser().then((toutes) => {
+    let rows = toutes;
     if (process.argv.includes("--json")) {
       console.log(JSON.stringify(rows, null, 2));
       return;
     }
-    const classes = rows.length;
-    const instances = rows.reduce((s, r) => s + r.n, 0);
+    const dansLevel0 = rows.filter((r) => r.level0 > 0);
+    rows = process.argv.includes("--level0") ? dansLevel0 : rows;
     const parMoteur = rows.filter((r) => r.parLeMoteur.length);
     const motif = rows.filter((r) => !r.parLeMoteur.length && r.parMotif.length);
     const pipeline = rows.filter((r) => !r.parLeMoteur.length && !r.parMotif.length && r.nomme.length);
     const orphelines = rows.filter((r) => !r.nomme.length && !r.parMotif.length);
-    const som = (a) => a.reduce((s, r) => s + r.n, 0);
-    const ligne = (t, a) => console.log(`${t.padEnd(22)}${String(a.length).padStart(3)}   (${som(a)} instances)`);
+    const som = (a, k = null) => a.reduce(
+      (s, r) => s + (k ? r[k] : r.n + r.ailleurs), 0);
+    const ligne = (t, a, k = null) => console.log(
+      `${t.padEnd(22)}${String(a.length).padStart(3)}   (${som(a, k)} instances)`);
 
     console.log(`build            ${BUILD}`);
+    console.log(`fichiers         level0 + ${AUTRES_FICHIERS.join(" + ")}`);
     ligne("classes posees", rows);
+    // Les deux lignes qui suivent comptent des INSTANCES par fichier, pas des
+    // classes : une classe posee des deux cotes est sur les deux lignes, et la
+    // somme des deux colonnes fait bien le total.
+    ligne("  dans level0", dansLevel0, "level0");
+    ligne("  AILLEURS", rows.filter((r) => r.ailleurs > 0), "ailleurs");
     ligne("lues par le moteur", parMoteur);
     ligne("lues par motif", motif);
     ligne("EXTRAITES, NON LUES", pipeline);
@@ -167,7 +223,10 @@ function principal() {
     console.log("\nextraites et que rien ne lit :");
     for (const r of pipeline) console.log(`  ${String(r.n).padStart(3)}  ${r.cls}`);
     console.log("\nsans aucun lecteur :");
-    for (const r of orphelines) console.log(`  ${String(r.n).padStart(3)}  ${r.cls}`);
+    for (const r of orphelines) {
+      console.log(`  ${String(r.n + r.ailleurs).padStart(3)}  ${r.cls.padEnd(30)}`
+        + (r.ou.length ? r.ou.join(",") : "level0"));
+    }
   });
 }
 

@@ -699,28 +699,77 @@ def run(url, heavy, profil=None, zip_path=None):
             # L'equipement se ramasse : la sonde n'est pas donnee.
             rep.eq("la sonde n'est pas donnee au depart", lots["equipement"], False)
 
-        # --- camera embarquee de la sonde ---------------------------------------
+        # --- la sonde, telle que le build la lance (docs/60-sonde.md) -----------
         #
-        # Elle ne s'allume qu'une fois la sonde RAMASSEE (docs/46, lot 7) : le
-        # portage la donnait d'emblee, le build la met dans la cabine.
-        page.keyboard.press("KeyF")
-        page.wait_for_timeout(300)
+        # Elle ne part qu'une fois RAMASSEE (docs/46, lot 7) : le portage la
+        # donnait d'emblee, le build la met dans la cabine. Et elle ne part plus
+        # a l'appui : on TIENT pour charger, on relache pour lancer.
+        #
+        # Le rythme d'images compte ici, et il a couche ce controle : sous
+        # swiftshader une image peut durer une seconde, et `keyboard.press()`
+        # fait l'appui et le relachement dans la meme milliseconde. Le moteur
+        # retient donc les relachements jusqu'a la fin de l'image — sinon la
+        # frappe entiere tombe entre deux images, comme dans Unity qui latche
+        # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
+        # geste avant de mesurer.
+        def sonde_geste(duree_ms, attente_ms=4000):
+            page.keyboard.down("KeyF")
+            page.wait_for_timeout(duree_ms)
+            page.keyboard.up("KeyF")
+            page.wait_for_timeout(attente_ms)
+
+        def etat_sonde():
+            return page.evaluate("""() => {
+              const t = window.__tools.probes, p = t.last;
+              return { active: t.active, launched: t.launched,
+                       ancree: !!(p && p.anchored),
+                       lanterne: p ? Math.round(p.lantern) : 0,
+                       vitesse: p ? Math.round(Math.hypot(...p.vel)) : 0,
+                       cams: (window.__scene || BABYLON.Engine.LastCreatedScene)
+                               .activeCameras.map(c => c.name) };
+            }""")
+
+        sonde_geste(120)
         # Tant que la vue de sonde n'est pas ouverte, la scene n'a pas de liste
         # de cameras actives : c'est `activeCamera` au singulier qui rend.
-        rep.eq("sans la sonde, la touche ne lance rien",
-               page.evaluate("() => (window.__scene || BABYLON.Engine.LastCreatedScene)"
-                             ".activeCameras.map(c => c.name)"),
-               [])
+        rep.eq("sans la sonde, la touche ne lance rien", etat_sonde()["cams"], [])
         page.evaluate("() => window.__lots.equipment.pickUp(window.__lots.pickups"
                       ".find(p => p.probe))")
-        page.keyboard.press("KeyF")
-        page.wait_for_timeout(600)
-        rep.eq("la sonde allume sa camera",
-               page.evaluate("() => (window.__scene || BABYLON.Engine.LastCreatedScene)"
-                             ".activeCameras.map(c => c.name)"),
-               ["cam", "probeCam"])
+        sonde_geste(120)
+        etat = etat_sonde()
+        rep.eq("une fois ramassee, elle part", etat["launched"], 1)
+        rep.eq("et il n'y en a qu'UNE", etat["active"], 1)
+        rep.eq("la sonde allume sa camera", etat["cams"], ["cam", "probeCam"])
         rep.eq("cadre de la vue de sonde",
                page.evaluate("() => !document.querySelector('.ow-probeview').hidden"), True)
+        # Le meme bouton ne relance rien tant qu'une sonde existe : c'est
+        # `_activeProbe`, un champ et non une liste.
+        sonde_geste(120)
+        rep.eq("un second appui ne lance pas de seconde sonde",
+               etat_sonde()["launched"], 1)
+        # Maintenir RAPPELLE la sonde. Le seuil est de trois dixiemes de seconde
+        # de temps SIMULE, et le temps simule d'une image est plafonne a 0,05 :
+        # sous swiftshader, ou une image peut durer une seconde, trois dixiemes
+        # de jeu demandent plusieurs secondes de montre. On tient donc jusqu'a
+        # ce que ca arrive plutot que de parier sur un delai — le chiffre, lui,
+        # est garde par `tests/09-jeu.mjs`.
+        page.keyboard.down("KeyF")
+        try:
+            page.wait_for_function("() => window.__tools.probes.active === 0",
+                                   timeout=60000)
+        except Exception:
+            pass
+        finally:
+            page.keyboard.up("KeyF")
+        page.wait_for_timeout(2000)
+        apres = etat_sonde()
+        rep.eq("maintenir le bouton rappelle la sonde", apres["active"], 0)
+        # `['cam']` et non `[]` : une fois la liste de cameras actives etablie,
+        # `ProbeCamera` y LAISSE celle du joueur seule. Une liste vide donnerait
+        # un ecran noir, et c'est ecrit dans `tools.js`.
+        rep.eq("et la vue se referme", apres["cams"], ["cam"])
+        rep.eq("le cadre aussi",
+               page.evaluate("() => document.querySelector('.ow-probeview').hidden"), True)
 
         # --- coupure passe-bas des emetteurs -------------------------------------
         rep.at_least("sources reliees a un emetteur",

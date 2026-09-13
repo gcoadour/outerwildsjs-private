@@ -61,7 +61,11 @@ import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
-import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
+import { Telescope, ProbeCamera } from "./tools.js";
+// La sonde entiere vient du prefabrique `sharedassets1.assets:2295`, que le
+// recensement ne voyait pas : il ne lisait que `level0` (docs/60-sonde.md).
+import { ProbeLauncher, SONDE, snapshotSize, probeIcon,
+         probeReadout } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
@@ -502,6 +506,24 @@ async function boot() {
     `${dirFields.length} champs directionnels, ${polFields.length} champs polaires, ` +
     `${fluids.count} fluides, ` +
     `${oxygen.length} zones d'oxygene, ${heat.length} sources de chaleur`);
+
+  // Les impostures de planete (docs/56-impostures.md). Les trois plans cables
+  // sont dans la geometrie et leur renderer est ACTIF : sans ce lecteur, le
+  // portage colle trois quads plats par-dessus les vraies planetes.
+  //
+  // Elles se declarent ICI, avant le magasin de geometrie, et pas ou elles se
+  // lisent : le rappel de chargement les nomme, et il s'execute des le premier
+  // glTF — bien avant la ligne qui les creait cinq cents lignes plus bas. Le
+  // `const` etait donc dans sa zone morte, et CHAQUE lot de geometrie mourait
+  // sur `Cannot access 'impostures' before initialization`, en silence : le
+  // magasin attrape l'erreur et se contente d'un « glTF absent ou illisible ».
+  // Les shaders du jeu, le rattachement de la voute et celui du decor vivant ne
+  // s'appliquaient donc JAMAIS. Deux controles de `15_verify.py` le disaient —
+  // « affectations de shaders 0 », « decors vivants rattaches 0 » — et personne
+  // n'avait relie les deux zeros a la ligne d'avertissement qui les precede.
+  const impostures = planetImposters(camerasDuBuild).map((d) => new Imposter(d));
+  const impostersVifs = [];      // { imposture, plan, texture, cam }
+  window.__impostures = { impostures, vifs: impostersVifs };
 
   // Geometrie a la demande. Seuls le corps de depart et le soleil sont
   // telecharges avant la premiere image ; les autres arrivent quand on s'en
@@ -1022,12 +1044,6 @@ async function boot() {
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
   // navigateur et que le rendu ne s'eprouve pas du tout.
-  // Les impostures de planete (docs/56-impostures.md). Les trois plans cables
-  // sont dans la geometrie et leur renderer est ACTIF : sans ce lecteur, le
-  // portage colle trois quads plats par-dessus les vraies planetes.
-  const impostures = planetImposters(camerasDuBuild).map((d) => new Imposter(d));
-  const impostersVifs = [];      // { imposture, plan, texture, cam }
-  window.__impostures = { impostures, vifs: impostersVifs };
 
   const fx = new CameraEffects(reglagesCam);
   const postfx = new PostFX(BABYLON, camera, engine, reglagesCam);
@@ -1162,33 +1178,38 @@ async function boot() {
     onNext: () => { interactPressed = true; },
   });
 
-  // Rendu des sondes : une petite sphere emissive par sonde en vol, reutilisee
-  // d'une sonde a l'autre plutot que recreee.
+  // Rendu de la sonde : une bille emissive — le prefabrique porte un
+  // `ProbeMesh`, mais la geometrie de la sonde n'est pas dans `level0` et le
+  // portage ne charge que ce qui y est. Elle n'est jamais recreee : il n'y en a
+  // qu'UNE, et c'est le fait de jeu de docs/60.
   const PROBE_LAYER = 0x20000000;
-  const probeMeshes = [];
   const probeMat = new BABYLON.StandardMaterial("probeMat", scene);
   probeMat.emissiveColor = new BABYLON.Color3(0.6, 0.9, 1.0);
   probeMat.disableLighting = true;
+  const probeMesh = BABYLON.MeshBuilder.CreateSphere("probe",
+    { diameter: 2 * SONDE.colliderRadius, segments: 6 }, scene);
+  probeMesh.material = probeMat;
+  probeMesh.isPickable = false;
+  // La sonde ne se filme pas elle-meme : sa bille est sur un calque que la
+  // camera embarquee ne regarde pas, sans quoi elle remplirait l'image — elle
+  // est a 30 cm de l'objectif.
+  probeMesh.layerMask = PROBE_LAYER;
+  probeMesh.setEnabled(false);
+  // `ProbeLantern` : eteinte en vol, elle monte de zero a cinquante en deux
+  // secondes une fois la sonde plantee. C'est une lumiere ponctuelle du
+  // prefabrique, pas un projecteur — celui-la est sur les cameras.
+  const probeLantern = new BABYLON.PointLight("probeLantern",
+    BABYLON.Vector3.Zero(), scene);
+  probeLantern.range = 0;
+  probeLantern.intensity = 0;
   function syncProbes() {
-    for (let i = 0; i < probes.probes.length; i++) {
-      if (!probeMeshes[i]) {
-        const m = BABYLON.MeshBuilder.CreateSphere(`probe${i}`,
-          { diameter: 0.6, segments: 6 }, scene);
-        m.material = probeMat;
-        m.isPickable = false;
-        // La sonde ne se filme pas elle-meme : sa bille est sur un calque que
-        // la camera embarquee ne regarde pas, sans quoi elle remplirait
-        // l'image — elle est a 30 cm de l'objectif.
-        m.layerMask = PROBE_LAYER;
-        probeMeshes.push(m);
-      }
-      const p = probes.probes[i].pos;
-      probeMeshes[i].position.set(p[0], p[1], p[2]);
-      probeMeshes[i].setEnabled(true);
-    }
-    for (let i = probes.probes.length; i < probeMeshes.length; i++) {
-      probeMeshes[i].setEnabled(false);
-    }
+    const p = probes.last;
+    probeMesh.setEnabled(!!p);
+    if (p) probeMesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    const portee = p ? p.lantern : 0;
+    probeLantern.range = portee;
+    probeLantern.intensity = portee > 0 ? 1 : 0;
+    if (p && portee > 0) probeLantern.position.set(p.pos[0], p.pos[1], p.pos[2]);
   }
   // Le pilote automatique arrive aux distances du BUILD, et non a « rayon de
   // surface x 1,5 » : elles sont dans les neuf `MajorReferenceFrameVolume`
@@ -1226,9 +1247,27 @@ async function boot() {
   // decide de la premiere image du jeu.
   let yaw = yaw0, pitch = 0;
   const keys = Object.create(null);
+  // Un relachement attend la FIN de l'image.
+  //
+  // `OWInput` interroge Unity, qui latche `GetButtonDown` et `GetButtonUp` : un
+  // appui plus court qu'une image y est vu quand meme. Un objet `keys` lu a
+  // chaque image, lui, perd la frappe entiere si l'appui et le relachement
+  // tombent entre deux images — et la sonde, qui se charge en TENANT, ne
+  // partait jamais sur une pichenette. C'est `15_verify.py` qui l'a montre :
+  // `keyboard.press()` fait les deux dans la meme milliseconde.
+  const relachements = [];
   addEventListener("keydown", (e) => { keys[e.code] = true; });
-  addEventListener("keyup", (e) => { keys[e.code] = false; });
-  let interactPressed = false, optionPressed = 0, probeFired = false;
+  addEventListener("keyup", (e) => { relachements.push(e.code); });
+  window.__keys = keys;
+  /** A appeler en fin d'image : applique les relachements retenus. */
+  function appliquerRelachements() {
+    while (relachements.length) keys[relachements.pop()] = false;
+  }
+  let interactPressed = false, optionPressed = 0;
+  // La sonde ne se declenche plus a l'appui : elle se CHARGE tant qu'on tient,
+  // et le meme bouton la rappelle quand elle est posee. C'est l'etat MAINTENU
+  // qui compte, donc `keys`, et non un drapeau leve par `command()`.
+  let probeRefusee = false;
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
 
@@ -1259,7 +1298,6 @@ async function boot() {
       if (code === "Backspace" || code === "Escape") computer.cancel();
     }
     if (code === "KeyT") telescope.toggle();
-    if (code === "KeyF") probeFired = true;
     // Consoles a camera deportee : on les prend en main a portee de la main,
     // et on les lache de la meme touche.
     if (code === "KeyR" && consoles.count) {
@@ -1501,9 +1539,16 @@ async function boot() {
         ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
         ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2];
       }
-      for (const p of probes.probes) {
+      if (probes.last) {
+        const p = probes.last;
         p.pos[0] += shift[0]; p.pos[1] += shift[1]; p.pos[2] += shift[2];
         if (p.vel) { p.vel[0] += dv[0]; p.vel[1] += dv[1]; p.vel[2] += dv[2]; }
+        // Une sonde POSEE garde sa position d'impact : elle doit suivre le
+        // changement d'ancre comme le reste, sinon elle saute de son mur.
+        if (p.localImpact && !p.attachedTo) {
+          p.localImpact[0] += shift[0]; p.localImpact[1] += shift[1];
+          p.localImpact[2] += shift[2];
+        }
       }
       console.log(`repere : ${anchorBody.name} -> ${fb.name}, ` +
         `ecart de vitesse ${Math.hypot(...dv).toFixed(1)} u/s`);
@@ -1529,9 +1574,9 @@ async function boot() {
       colLOD.update({
         player: w(player.pos),
         ship: ship ? w(ship.pos) : null,
-        probe: probes.probes.length ? [probes.probes[0].pos[0] + anchorPos[0],
-                                       probes.probes[0].pos[1] + anchorPos[1],
-                                       probes.probes[0].pos[2] + anchorPos[2]] : null,
+        probe: probes.last ? [probes.last.pos[0] + anchorPos[0],
+                              probes.last.pos[1] + anchorPos[1],
+                              probes.last.pos[2] + anchorPos[2]] : null,
       });
       if (colLOD.changed && now - colLODAt > 2) {
         colLODAt = now;
@@ -1754,7 +1799,7 @@ async function boot() {
       if (minimap.on) {
         minimap.update(body.position, player.pos, {
           ship: ship && !ship.boarded ? [ship.pos.x, ship.pos.y, ship.pos.z] : null,
-          probe: probes.probes.length ? probes.probes[probes.probes.length - 1].pos : null,
+          probe: probes.last ? probes.last.pos : null,
         });
       }
     }
@@ -2062,30 +2107,97 @@ async function boot() {
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
     }
+    // La sonde : un seul bouton, comme dans le build — `launchProbe`,
+    // `takeSnapshot` et `retrieveProbe` sont trois statiques d'`OWInput`
+    // construites sur le MEME canal (`InputChannels.probe`). Quand la lunette
+    // est ouverte, la touche porte le zoom : les deux ne peuvent pas servir
+    // ensemble, et le build non plus ne les melange pas (`_telescopeInputs`
+    // n'a pas la sonde).
+    const probeHeld = !!keys.KeyF && !telescope.active;
     // La sonde se RAMASSE (docs/46, lot 7) : `ExpeditionGear` la debloque, dans
     // la cabine du vaisseau. Sans elle, la touche ne lance rien — c'est la
     // progression du build, et le portage donnait tout au premier instant.
-    if (probeFired && !equipment.probe) {
-      probeFired = false;
-      console.log("sonde : elle se ramasse d'abord, dans la cabine du vaisseau");
+    if (probeHeld && !equipment.probe && !probes.last) {
+      if (!probeRefusee) console.log("sonde : elle se ramasse d'abord, dans la cabine du vaisseau");
+      probeRefusee = true;
+    } else if (!probeHeld) {
+      probeRefusee = false;
     }
-    if (probeFired) {
-      probes.launch(player.pos, fwd);
-      // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
-      // d'un coup, qui retombe en une seconde.
-      dernierLancement = now;
-      // ProbeLauncher accorde ce savoir dans le build
-      if (pdata.learn("knowsHowProbesWork")) console.log("fonctionnement des sondes appris");
-      probeFired = false;
+    // Le poste de pilotage est le seul « dedans » que ce portage ait : il n'a
+    // pas d'interieur de vaisseau. `IsInsideShip() && !AtFlightConsole()`
+    // refuse le tir ; ici les deux vont donc ensemble, et le refus ne se
+    // declenche jamais. On le cable quand meme, plutot que de le supprimer :
+    // c'est la ligne du build, et l'interieur viendra.
+    etatJoueur.insideShip = etatJoueur.atFlightConsole = !!(ship && ship.boarded);
+    // Le lancer de rayon de la sonde : la fenetre de tir, puis l'ancrage.
+    // Havok travaille dans le repere ancre, comme `player.pos` — les deux
+    // parlent le meme espace, et rien n'a besoin d'etre reporte.
+    const rayonSonde = plugin ? (depuis, dir, portee) => {
+      const eng = scene.getPhysicsEngine();
+      if (!eng || !eng.raycast) return null;
+      try {
+        const a = new BABYLON.Vector3(depuis[0], depuis[1], depuis[2]);
+        const b = new BABYLON.Vector3(depuis[0] + dir[0] * portee,
+                                      depuis[1] + dir[1] * portee,
+                                      depuis[2] + dir[2] * portee);
+        const hit = eng.raycast(a, b);
+        if (!hit || !hit.hasHit) return null;
+        const q = hit.hitPointWorld || hit.hitPoint;
+        const n = hit.hitNormalWorld || hit.hitNormal;
+        if (!q) return null;
+        return { point: [q.x, q.y, q.z],
+                 normal: n ? [n.x, n.y, n.z] : null,
+                 // Tout ce que le portage pose est statique du point de vue de
+                 // Havok : le decor bouge par le repere, pas par un corps. Le
+                 // capteur haute vitesse est donc le seul a s'en servir.
+                 dynamic: false };
+    } catch (e) { return null; }
+    } : null;
+    const champ = player.field;
+    probes.update(dt,
+      { launch: probeHeld && !!equipment.probe, retrieve: probeHeld,
+        alt: !!keys.KeyR && !consoles.count },
+      { pos: [player.pos.x, player.pos.y, player.pos.z],
+        forward: [fwd.x, fwd.y, fwd.z],
+        playerForward: [fwd.x, fwd.y, fwd.z],
+        playerUp: [up.x, up.y, up.z],
+        playerVelocity: [player.vel.x, player.vel.y, player.vel.z],
+        playerPos: [player.pos.x, player.pos.y, player.pos.z],
+        knowsProbes: pdata.knows("knowsHowProbesWork"),
+        insideShip: etatJoueur.insideShip,
+        atFlightConsole: etatJoueur.atFlightConsole,
+        raycast: rayonSonde,
+        field: champ,
+        wellCenter: champ ? champ.body.position : null,
+        sectorCenter: champ ? champ.body.position : null,
+        sectorRadius: champ ? (champ.body.gravity.upperSurfaceRadius || 0) : 0,
+        sectorVelocity: [0, 0, 0] });
+    for (const e of probes.events) {
+      if (e === "LaunchProbe") {
+        // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
+        // d'un coup, qui retombe en une seconde.
+        dernierLancement = now;
+        // ProbeLauncher accorde ce savoir dans le build
+        if (pdata.learn("knowsHowProbesWork")) {
+          console.log("fonctionnement des sondes appris");
+        }
+      }
+      if (e === "ProbeLaunchAborted") console.log("tir de sonde refuse : pas de fenetre");
+      if (e === "ProbeSnapshot" && probes.lastSnapshot) {
+        console.log(`photo de sonde : ${probes.lastSnapshot.size} px`
+          + (probes.lastSnapshot.rear ? " (arriere)" : ""));
+      }
     }
-    probes.update(dt, player.field);
     syncProbes();
     // La vue deportee est la meme, avec une autre cible : une console prise en
     // main passe devant la sonde, qui n'est pas ce qu'on regarde a ce
     // moment-la.
     const remoteView = consoles.view(anchorPos,
       { ship, body: player.field && player.field.body });
-    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last));
+    // La touche `altProbe` (R dans le build) montre l'arriere : c'est la seule
+    // vue utile une fois la sonde plantee.
+    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last),
+                    !remoteView && !!keys.KeyR && !consoles.count);
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {
@@ -2700,6 +2812,9 @@ async function boot() {
         ? ` — orbite ${(period(orbits, anchorBody) / 60).toFixed(1)} min` : "") +
       (data.synthetic ? "  [systeme de substitution]" : "")
     );
+    // Les touches relachees pendant l'image le deviennent maintenant : une
+    // frappe plus courte qu'une image compte pour une image entiere.
+    appliquerRelachements();
   });
 }
 

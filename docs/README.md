@@ -57,7 +57,8 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
-- [`59-etat.md`](59-etat.md) — **où en est le portage : 1 356 des 1 390 instances du build sont lues (97,6 %), et les 34 restantes sont nommées**
+- [`60-sonde.md`](60-sonde.md) — **la sonde, et la moitié du jeu que le recensement ne lisait pas : le préfabriqué existait depuis toujours**
+- [`59-etat.md`](59-etat.md) — où en est le portage : le compte de `level0`, corrigé par [`60`](60-sonde.md) (1 413 des 1 451 instances, 97,4 %)
 - [`08-reste-a-faire.md`](08-reste-a-faire.md) — ce qui manque pour un portage complet
 - [`34-actions.md`](34-actions.md) — le jeu et le portage face à face : les actions à mener
 - [`35-monde.md`](35-monde.md) — le monde qu'on ne lisait pas : rotation, lumières, fluides, champs, manette
