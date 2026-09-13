@@ -37,6 +37,10 @@
 // les sondes — ne passe pas par la hierarchie, et qu'un invariant vaut mieux
 // qu'une coincidence.
 
+// @lit AttachOnAwake, MatchInitialMotion, MajorReferenceFrameVolume, ReferenceFrameVolume
+// Les referentiels declares du build et les deux lois d'heritage de mouvement
+// (docs/46-migration-lots.md, lot 1).
+
 import { insideVolume } from "./gravity.js";
 
 /** Repli quand un corps n'a pas de volume declare : la regle d'avant. */

@@ -229,3 +229,115 @@ export class LightField {
     }
   }
 }
+
+// --- ce qui pilote la lumiere GLOBALE --------------------------------------
+//
+// @lit AmbientLightManager, ExternalLightController, FadeLight, DayNightTracker
+// Quatre classes de plus, et la premiere corrige une ambiance qui SAUTAIT
+// (docs/54-lumiere.md).
+
+/** Portee par defaut des phares du vaisseau, en dur dans `Update`. */
+export const SHIPLIGHT_RANGE = 600;
+
+/**
+ * L'ambiance que le build VISE, avant le fondu.
+ *
+ * `AmbientLightManager.Update` part du NOIR et ne prend l'ambiance du secteur
+ * qu'a trois conditions reunies : aucune zone sans soleil, un secteur majeur
+ * actif, et la camera active qui n'est pas celle de la CARTE.
+ *
+ * Le portage ne posait aucune des trois. Entrer dans une grotte n'assombrissait
+ * donc rien, et ouvrir la carte gardait l'ambiance du lieu — alors que le build
+ * la coupe, pour que les orbites se lisent sur du noir.
+ *
+ * @param sectorIntensity ce que le secteur courant donnerait
+ * @param sunless         est-on dans une zone sans soleil (`DarkZone`)
+ * @param inMajorSector   un secteur majeur est-il actif
+ * @param onMapCamera     la carte est-elle la vue courante
+ */
+export function ambientTarget(sectorIntensity, { sunless = false, inMajorSector = true,
+                                                 onMapCamera = false } = {}) {
+  if (sunless || !inMajorSector || onMapCamera) return 0;
+  return sectorIntensity;
+}
+
+/**
+ * Et le FONDU qui y mene : `Color.Lerp(courant, cible, deltaTime)`.
+ *
+ * Le facteur est `deltaTime` lui-meme, ce qui est une constante de temps d'une
+ * seconde : a soixante images par seconde on parcourt un soixantieme du chemin
+ * restant par image. C'est lent, et c'est ce qui fait qu'une grotte s'assombrit
+ * au lieu de s'eteindre.
+ */
+export function ambientStep(current, target, dt) {
+  return current + (target - current) * Math.max(0, Math.min(1, dt));
+}
+
+/**
+ * La portee des phares du vaisseau.
+ *
+ * `min(limite du secteur, 600)` dans un secteur majeur, 600 partout ailleurs.
+ * Le portage lisait bien `_flashlightRangeLimit` (docs/46, lot 4) mais n'avait
+ * pas la valeur par defaut : hors secteur, ses phares gardaient la portee du
+ * dernier secteur traverse.
+ */
+export function shiplightRange(sectorLimit, inMajorSector = true) {
+  if (!inMajorSector) return SHIPLIGHT_RANGE;
+  const l = sectorLimit > 0 ? sectorLimit : SHIPLIGHT_RANGE;
+  return Math.min(l, SHIPLIGHT_RANGE);
+}
+
+/**
+ * Une lumiere qui fond vers une intensite.
+ *
+ * `FadeLight.FadeIntensity(cible, duree)` retient l'intensite COURANTE comme
+ * point de depart — et non celle d'origine. Deux fondus qui se chevauchent
+ * partent donc de la ou l'on en etait, sans a-coup.
+ */
+export class FadeLight {
+  constructor(intensity = 0) {
+    this.intensity = intensity;
+    this.from = intensity;
+    this.target = intensity;
+    this.duration = 0;
+    this.t0 = 0;
+    this.fading = false;
+  }
+
+  fadeIntensity(target, duration, t = 0) {
+    this.from = this.intensity;
+    this.target = target;
+    this.duration = duration;
+    this.t0 = t;
+    this.fading = true;
+  }
+
+  update(t) {
+    if (!this.fading) return this.intensity;
+    const u = this.duration > 0
+      ? Math.max(0, Math.min(1, (t - this.t0) / this.duration)) : 1;
+    this.intensity = this.from + (this.target - this.from) * u;
+    if (u >= 1) { this.intensity = this.target; this.fading = false; }
+    return this.intensity;
+  }
+}
+
+/**
+ * Le passage du jour a la nuit, et ses deux evenements.
+ *
+ * `DayNightTracker.Update` ne fait qu'une chose : comparer « fait-il jour ici »
+ * a ce qu'il en etait a l'image precedente, et annoncer le lever ou le coucher.
+ * Ce sont ces deux evenements que les quinze `NightLight` ecoutent
+ * (docs/42-lumieres.md) — le portage calculait le jour, mais n'avait pas les
+ * TRANSITIONS, et une lumiere de nuit ne savait donc pas qu'elle devait fondre.
+ */
+export class DayNightTracker {
+  constructor(isDay = false) { this.wasDay = isDay; this.sunrise = false; this.sunset = false; }
+
+  update(isDay) {
+    this.sunrise = isDay && !this.wasDay;
+    this.sunset = !isDay && this.wasDay;
+    this.wasDay = isDay;
+    return this;
+  }
+}

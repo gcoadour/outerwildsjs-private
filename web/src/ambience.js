@@ -38,6 +38,9 @@
 // pas etablie : le portage lui prefere son propre signal de nuit, qui vient de
 // la hauteur du soleil. La valeur est extraite et gardee, pas interpretee.
 
+// @lit AudioVolume, DayNightAudioVolume
+// Les dix-sept volumes d'ambiance, arbitres par priorite.
+
 import { insideVolume } from "./gravity.js";
 
 /**

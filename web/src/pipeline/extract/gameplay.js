@@ -52,7 +52,65 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "GearPickup", "PlayerLockOnTargeting", "ZeroGTrainingManager",
                 "PlayerAttachPoint", "LandingPadSensor",
                 // §8 les impostures de planete, gardees pour ce qu'elles disent.
-                "LODCameraSnapshot"];
+                "LODCameraSnapshot",
+                // --- la queue du recensement (docs/49-queue.md) -------------
+                //
+                // Ce qui restait apres les six lots, une fois les COMMENTAIRES
+                // retires du comptage (docs/47) : plus une famille, une queue.
+                // Quatre de ces classes se lisent, deux se mesurent et se
+                // ferment.
+                //
+                // La carte DECLARE ses marqueurs : treize, avec leurs vrais
+                // noms de jeu. Le portage les deduisait de la gravite et
+                // affichait les noms internes (`Comet_Body` pour « The Nomad »).
+                "MapMarker",
+                // Le chainon manquant de shipdamage.js, ecrit en toutes
+                // lettres dans son commentaire : « elle passe par
+                // EngineComponent, qui n'est pas lu ».
+                "EngineComponent",
+                // Le pivot des tornades : une lente culbute dont la vitesse est
+                // TIREE au reveil, pas serialisee.
+                "TornadoPivotController",
+                // Trois objets qui suivent un autre transform.
+                "MatchTransform",
+                // Et deux qu'on extrait pour pouvoir dire, chiffres en main,
+                // qu'il n'y a rien a en faire.
+                "DisposableContainer", "InertiaTensorCalibrator",
+                // On allume en REGARDANT : une mecanique entiere de Dark
+                // Bramble, sans invite ni touche, que rien ne signalait
+                // (docs/50-regard.md).
+                "GazeSwitch", "GazeWebAnimator", "EnergyGate",
+                // La tour de lancement et ce qui va avec : le terminal qui
+                // refuse, l'ascenseur qui monte de 31,5 unites en 5 secondes,
+                // les trois capteurs qui decident si l'on est POSE, et l'entree
+                // du musee qui se rejoue apres une pause (docs/51-tour.md).
+                "LaunchTerminal", "LaunchElevatorController",
+                "LandingPadManager", "MuseumEntryway",
+                // Le lot « interface » de docs/44, pour ce qui n'est pas une
+                // question de mise en page : le casque qui traine, l'alarme a
+                // trente pour cent, les voyants qui clignotent, les huit
+                // invites de la guimauve (docs/52-casque.md).
+                "RoastPromptEvent", "MarshmallowStick", "HUDHelmet",
+                "MasterAlarm", "HUDDamageDisplay", "NotificationManager",
+                // La seule surface du build qui declare ECRASER, et c'est elle
+                // qui porte la mort par compression : le sable montant
+                // (docs/53-joueur.md).
+                "Surface", "PlayerCompressionSensor", "PlayerNoiseMaker",
+                "PlayerState", "FirstPersonManipulator",
+                // Ce qui pilote la lumiere GLOBALE et les coquilles sonores
+                // (docs/54-lumiere.md).
+                "AmbientLightManager", "ExternalLightController", "FadeLight",
+                "DayNightTracker", "AudioShell", "FadeInAudioOnAwake",
+                // La fin de la queue : ce qui suit un autre corps, et ce qui
+                // clignote (docs/55-attaches.md).
+                "AlignWithTargetBody", "BlinkingRenderer", "BrokenNode",
+                "HatchController", "WaterEffectVolume",
+                // Les six buses du VAISSEAU, nommees par leur direction
+                // (docs/58-suivi.md).
+                "ThrusterParticleController",
+                // Le volume compose et ses declencheurs enfants : une entree,
+                // une sortie, quel que soit le nombre d'enfants traverses.
+                "CompoundTriggerVolume", "ChildTriggerVolume", "SandstormVolume"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -87,7 +145,10 @@ const WANT_VOLUME = new RegExp([
   "|^(ZeroGField|ZeroGSector|MajorSector|SuitBarrier|ProbePromptTrigger",
   "|TelescopePromptTrigger|AncientTeleporter|AncientTeleportReceiver",
   "|RadiationEmitter|DerelictWarp|GearPickup|LandingPadSensor",
-  "|PlayerAttachPoint|LODCameraSnapshot)$",
+  "|PlayerAttachPoint|LODCameraSnapshot",
+  // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
+  // la loi du regard n'a aucune portee.
+  "|GazeSwitch|MuseumEntryway|Surface|AudioShell)$",
 ].join(""), "i");
 
 /**
@@ -98,6 +159,22 @@ const WANT_VOLUME = new RegExp([
  * extraite, et le portage tournait donc la tete au hasard (docs/38-depart.md).
  */
 const WANT_ROTATION = /spawnpoint/i;
+
+/**
+ * La position MONDE du GameObject qu'un PPtr de composant designe.
+ *
+ * Les six buses du vaisseau s'appellent TOUTES `Thruster_Small` : leur nom ne
+ * les distingue pas, leur place si. C'est le meme cas que les nuages
+ * (docs/48-ciel-mesure.md) et les pivots de tornade (docs/49-queue.md).
+ */
+function positionDuComposant(ctx, ptr) {
+  if (!ptr || !ptr.pathId) return null;
+  const o = ctx.env.deref(ptr, ctx.sceneObj);
+  const v = o && ctx.readEngine(o);
+  const gid = v && v.m_GameObject ? v.m_GameObject.pathId : 0;
+  if (!gid || !ctx.transformOf.has(gid)) return null;
+  return ctx.world(gid)[0].map((x) => Math.round(x * 1000) / 1000);
+}
 
 export function extractGameplay(ctx) {
   // OWRigidbody -> nom du GameObject, pour resoudre les references entre
@@ -196,6 +273,17 @@ export function extractGameplay(ctx) {
       if (!v || typeof v !== "object" || !("$ref" in v)) continue;
       if (v.$ref !== null && ctx.texts.has(v.$ref)) (entry.trees ||= {})[k] = v.$ref;
       else if (/convocontroller|convotrigger/i.test(cls)) ecartes.add(`${cls}.${k}`);
+    }
+    // `ThrusterParticleController` designe ses six buses par pointeur, et les
+    // six systemes portent le MEME nom : on resout en positions.
+    if (cls === "ThrusterParticleController") {
+      const brut = ctx.scriptFields(obj) || {};
+      entry.nozzles = {};
+      for (const [k, dir] of [["_forwardThruster", "forward"], ["_rearThruster", "rear"],
+                              ["_rightThruster", "right"], ["_leftThruster", "left"],
+                              ["_upThruster", "up"], ["_downThruster", "down"]]) {
+        entry.nozzles[dir] = positionDuComposant(ctx, brut[k]);
+      }
     }
     (placed[cls] ||= []).push(entry);
   }

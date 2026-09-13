@@ -16,6 +16,10 @@
 // C'est aussi ce que fait l'original avec ses referentiels : le monde est
 // exprime relativement au corps auquel on est rattache.
 
+// @lit CenterOfTheUniverse
+// Le recentrage du monde autour du joueur, que le build appelle « le centre
+// de l'univers ».
+
 export class FloatingOrigin {
   constructor(threshold = 500) {
     this.threshold = threshold;

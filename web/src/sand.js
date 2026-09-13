@@ -82,8 +82,39 @@ export function sandColumns(gameplay) {
       finalScale: f._finalScale ?? 33,
       startMinutes: f._startAfterMinutes ?? 2,
       endMinutes: f._endAfterMinutes ?? 17,
+      // Rempli par `markCrushing()` : la colonne ECRASE-t-elle, et sur quel
+      // rayon. Le drapeau ne vit pas sur le controleur mais sur un `Surface`
+      // pose sur son collider enfant.
+      crushes: false,
+      radius: 0,
     };
   });
+}
+
+/**
+ * Rattache a chaque colonne le `Surface` qui declare ecraser.
+ *
+ * Le build n'en pose qu'UN dans toute la scene, et c'est le collider de
+ * `RisingSand` : la mort par compression de `PlayerCompressionSensor` est
+ * celle-la, et pas une autre. On rattache par proximite plutot que par nom,
+ * parce que le `Surface` est sur un enfant appele « Collider ».
+ */
+export function markCrushing(columns, gameplay, tolerance = 40) {
+  const surfaces = ((gameplay.placed || {}).Surface || [])
+    .filter((c) => (c.fields || {})._allowCompression);
+  for (const col of columns) {
+    for (const s of surfaces) {
+      if (!s.position || !col.position) continue;
+      const d = Math.hypot(s.position[0] - col.position[0],
+                           s.position[1] - col.position[1],
+                           s.position[2] - col.position[2]);
+      if (d > tolerance) continue;
+      col.crushes = true;
+      col.radius = (s.volume && s.volume.radius) || 0;
+      break;
+    }
+  }
+  return columns;
 }
 
 /** L'entonnoir, s'il est pose. Les defauts sont ceux du constructeur. */
@@ -136,6 +167,39 @@ export class SandLevels {
       n += 1;
     }
     return n;
+  }
+
+  /**
+   * Est-on DANS le sable, c'est-a-dire sous sa surface ?
+   *
+   * Le seul `Surface` du build qui declare `_allowCompression` est le collider
+   * de `RisingSand` : la mort par ecrasement de `PlayerCompressionSensor` est
+   * CELLE-LA, et pas une autre. On ne meurt pas en marchant sur le sable — il
+   * vous porte —, on meurt quand il vous a passe dessus parce qu'un plafond
+   * vous retenait.
+   *
+   * Etre sous la surface est exactement cette situation-la : hors d'un
+   * coincement, la montee du sable vous repousse.
+   *
+   * @param point  position MONDE
+   * @param at     fonction qui rend la position monde d'une colonne
+   */
+  swallows(point, at = null) {
+    for (const { noeud, colonne } of this.live) {
+      if (!colonne.crushes) continue;
+      const c = at ? at(colonne)
+        : (noeud.getAbsolutePosition ? noeud.getAbsolutePosition() : noeud.position);
+      if (!c) continue;
+      const cx = c.x ?? c[0], cy = c.y ?? c[1], cz = c.z ?? c[2];
+      // `colonne.radius` est le rayon MONDE a l'echelle d'auteur (30 = 0,5 x 60,
+      // mesure sur le collider). L'echelle courante le fait varier en
+      // proportion : la multiplier telle quelle donnait 1 800 au lieu de 30, et
+      // la sphere avalait toute la planete des la premiere image.
+      const echelle = (noeud.scaling ? noeud.scaling.x : colonne.initScale) || 1;
+      const r = (colonne.radius || 0) * echelle / (colonne.initScale || 1);
+      if (r > 0 && Math.hypot(point[0] - cx, point[1] - cy, point[2] - cz) < r) return colonne;
+    }
+    return null;
   }
 
   /**

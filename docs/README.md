@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`59-etat.md`](59-etat.md) — **où en est le portage : 1 356 des 1 390 instances du build sont lues (97,6 %), et les 34 restantes sont nommées**
 - [`08-reste-a-faire.md`](08-reste-a-faire.md) — ce qui manque pour un portage complet
 - [`34-actions.md`](34-actions.md) — le jeu et le portage face à face : les actions à mener
 - [`35-monde.md`](35-monde.md) — le monde qu'on ne lisait pas : rotation, lumières, fluides, champs, manette
@@ -65,4 +66,16 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`43-pnj-son-decollage.md`](43-pnj-son-decollage.md) — **parler, entendre, décoller : trois systèmes qui passaient leurs tests sans fonctionner**
 - [`44-reste-a-migrer.md`](44-reste-a-migrer.md) — **ce qui reste à migrer de l'alpha d'origine : neuf familles, par ordre (413 composants sans lecteur, 94 après [`46`](46-migration-lots.md))**
 - [`45-recensement-mesure.md`](45-recensement-mesure.md) — **le recensement refait sur le build : le sable des jumelles, la mort là où le jeu la met, l'ambiance par couches**
+- [`58-suivi.md`](58-suivi.md) — **le suivi de référentiel, la poussière de vitesse, et un palier que le build n'atteint jamais**
+- [`57-particules.md`](57-particules.md) — **quatre modules de particules, dont la queue de la comète : et un compte qui disait « jamais »**
+- [`56-impostures.md`](56-impostures.md) — **les impostures de planète : deux caméras sur cinq sans plan, et trois quads plats collés sur les vraies planètes**
+- [`55-attaches.md`](55-attaches.md) — **ce qui suit un autre corps, ce qui clignote, et la fin de la queue : 95,8 % des instances du build sont lues**
+- [`54-lumiere.md`](54-lumiere.md) — **la lumière globale qui fond au lieu de sauter, les phares à six cents, et une troisième chose extraite que personne ne lisait**
+- [`53-joueur.md`](53-joueur.md) — **on vise à dix unités, lancer une sonde s'entend, et le sable montant écrase : ce que le joueur porte en plus de son corps**
+- [`52-casque.md`](52-casque.md) — **le casque qui traîne, l'alarme à trente pour cent, les voyants qui clignotent : le lot d'interface qu'on avait eu tort de fermer**
+- [`51-tour.md`](51-tour.md) — **la tour de lancement, les trois capteurs de pad, et ce que « posé » veut dire**
+- [`50-regard.md`](50-regard.md) — **on allume en regardant : une mécanique entière sans invite ni touche, et un recensement qui compte enfin juste**
+- [`49-queue.md`](49-queue.md) — **la queue du recensement : les dégâts du vaisseau relus à l'endroit, treize marqueurs de carte, six tornades qui penchent — et un test qui gardait une erreur**
+- [`48-ciel-mesure.md`](48-ciel-mesure.md) — **le ciel mesuré : la voûte qui tourne enfin, dix visages de nuage, et mille étoiles qui s'éteignent pendant la boucle**
+- [`47-effets-image.md`](47-effets-image.md) — **les effets d'image, et le commentaire qui les cachait : 24 effets sur 15 caméras, le champ de vision et le télescope corrigés**
 - [`46-migration-lots.md`](46-migration-lots.md) — **six lots écrits : référentiels déclarés, décor vivant, son d'événement, équipement à ramasser, décalcomanies, volumes de jeu**

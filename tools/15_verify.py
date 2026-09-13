@@ -86,6 +86,145 @@ def serve(root, port):
     return httpd
 
 
+def run_repli(url):
+    """Demarre le moteur SANS le build, et verifie qu'il demarre.
+
+    Le mode ordinaire exige une extraction : il quitte avec le code 2 quand la
+    page attend encore son fichier. L'integration continue n'a donc aucun
+    controle NAVIGATEUR — `check-modules.mjs` compile les modules du moteur
+    mais ne les execute pas, et une erreur d'execution dans `boot()` attendait
+    jusqu'ici qu'un humain ouvre la page.
+
+    Ce mode-ci comble exactement cela. Il charge Babylon, entre dans `main.js`
+    en sautant le portique, et ne verifie que ce qui ne demande aucune donnee :
+    que rien ne leve, que les systemes sont montes, et que la couleur du ciel
+    est bien celle qu'on a posee. Les replis sont un chemin garde par CLAUDE.md
+    (« la page doit rester ouvrable sans le build ») : le voici garde pour de
+    bon.
+
+    SA LIMITE, ET ELLE EST REELLE. Sans donnees, des branches entieres de la
+    boucle ne s'executent pas — il n'y a ni secteur, ni decor, ni sonde. Ce
+    mode a laisse passer un `ambientStep is not defined` que le mode complet a
+    trouve : l'appel vit dans une branche qui demande un secteur. Il attrape ce
+    qui casse au DEMARRAGE, pas ce qui casse en jouant.
+    """
+    from playwright.sync_api import sync_playwright
+
+    rep = Report()
+    with sync_playwright() as p:
+        args = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox"]
+        exe = CHROMIUM if os.path.exists(CHROMIUM) else None
+        browser = p.chromium.launch(executable_path=exe, args=args)
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(url, wait_until="load", timeout=90000)
+        # On saute le portique : il attend un fichier qu'on n'a pas, et ce n'est
+        # pas lui qu'on verifie ici.
+        page.evaluate("""async () => {
+          const load = (src) => new Promise((ok, ko) => {
+            const s = document.createElement('script');
+            s.src = src; s.onload = ok; s.onerror = () => ko(new Error(src));
+            document.head.appendChild(s);
+          });
+          await load('vendor/babylon.js');
+          await load('vendor/babylonjs.loaders.min.js');
+          try { await load('vendor/HavokPhysics_umd.js'); } catch (e) { /* repli */ }
+          const g = document.getElementById('gate');
+          if (g) g.hidden = true;
+          document.body.classList.add('playing');
+          await import('./src/main.js');
+        }""")
+        page.wait_for_function("window.__ready===true", timeout=180000)
+        page.wait_for_timeout(4000)
+
+        rep.eq("aucune erreur d'execution sans le build", errors[:3], [])
+        # Les systemes montes par `boot()`. Chacun est un lot de la serie
+        # docs/47 a docs/58 : s'il manque, c'est que `boot()` s'est arrete avant.
+        for nom, expr in [
+            ("effets d'image montes", "!!window.__fx"),
+            ("etat du joueur monte", "!!window.__joueur"),
+            ("tour de lancement montee", "!!window.__tour"),
+            ("interrupteur du regard monte", "!!window.__regard"),
+            ("casque et alarmes montes", "!!window.__casque"),
+            ("queue du recensement montee", "!!window.__queue"),
+            ("impostures montees", "!!window.__impostures"),
+            ("carte montee", "!!window.__map"),
+            ("monde monte", "!!window.__world"),
+        ]:
+            rep.eq(nom, page.evaluate(f"() => {expr}"), True)
+
+        # Le champ de vision vient du build quand il est la, et se SAIT repli
+        # sinon. Les deux moities comptent (docs/47-effets-image.md).
+        rep.eq("champ de vision de la camera (degres)",
+               page.evaluate("() => Math.round(window.__fx.reglagesCam.fov)"), 70)
+        rep.eq("et il se sait repli sans le build",
+               page.evaluate("() => window.__fx.reglagesCam.declared"), False)
+
+        # La couleur du ciel, apres la chaine d'effets d'image. `clearColor` vaut
+        # (0,02 ; 0,02 ; 0,05), soit (5, 5, 13) sur 255 : si une passe teintait
+        # l'ecran, ce controle le dirait.
+        png = page.screenshot()
+        rep.eq("le ciel sort de la chaine d'effets inchange",
+               pixel_png(png, 20, 20), (5, 5, 13))
+
+        browser.close()
+    return rep
+
+
+def pixel_png(data, x, y):
+    """Un pixel d'un PNG, sans dependance : on relit le flux zlib nous-memes."""
+    import struct
+    import zlib
+
+    pos, width, height, raw, canaux = 8, 0, 0, b"", 4
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos:pos + 4])
+        kind = data[pos + 4:pos + 8]
+        body = data[pos + 8:pos + 8 + length]
+        if kind == b"IHDR":
+            width, height = struct.unpack(">II", body[:8])
+            profondeur, couleur = body[8], body[9]
+            if profondeur != 8:
+                raise ValueError(f"PNG en {profondeur} bits, non gere")
+            # Type 2 = RGB, 6 = RGBA. Chromium ecrit l'un ou l'autre selon la
+            # version : le supposer est exactement ce qui a casse ce decodeur.
+            canaux = {0: 1, 2: 3, 4: 2, 6: 4}.get(couleur)
+            if canaux is None:
+                raise ValueError(f"PNG de type {couleur}, non gere")
+        elif kind == b"IDAT":
+            raw += body
+        pos += 12 + length
+    pixels = zlib.decompress(raw)
+    stride = width * canaux + 1     # les canaux, plus l'octet de filtre
+    # Les lignes d'une capture Chromium sont filtrees ; on les defiltre.
+    # On ne defiltre que jusqu'a la ligne demandee : une capture 1280x720
+    # defiltree entierement en Python prend plusieurs secondes pour un pixel.
+    prev = bytearray(width * canaux)
+    ligne = prev
+    for j in range(y + 1):
+        f = pixels[j * stride]
+        ligne = bytearray(pixels[j * stride + 1:(j + 1) * stride])
+        for i in range(len(ligne)):
+            a = ligne[i - canaux] if i >= canaux else 0
+            b = prev[i]
+            c = prev[i - canaux] if i >= canaux else 0
+            if f == 1:
+                ligne[i] = (ligne[i] + a) & 255
+            elif f == 2:
+                ligne[i] = (ligne[i] + b) & 255
+            elif f == 3:
+                ligne[i] = (ligne[i] + (a + b) // 2) & 255
+            elif f == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                ligne[i] = (ligne[i] + pr) & 255
+        prev = ligne
+    o = x * canaux
+    return (ligne[o], ligne[o + 1], ligne[o + 2])
+
+
 def run(url, heavy, profil=None, zip_path=None):
     from playwright.sync_api import sync_playwright
 
@@ -738,6 +877,9 @@ def main():
                          "sans lui, la page tourne sur son systeme de substitution")
     ap.add_argument("--zip", dest="zip_path", default=None,
                     help="archive de l'alpha a deposer sur la page si le profil est vide")
+    ap.add_argument("--repli", action="store_true",
+                    help="demarre le moteur SANS le build et verifie qu'il demarre ; "
+                         "le seul controle navigateur qui tourne sans les 289 Mo")
     a = ap.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -748,7 +890,7 @@ def main():
         url = f"http://127.0.0.1:{a.port}/web/"
     print(f"Verification de {url}\n")
     try:
-        rep = run(url, a.lourd, a.profil, a.zip_path)
+        rep = run_repli(url) if a.repli else run(url, a.lourd, a.profil, a.zip_path)
     finally:
         if httpd:
             httpd.shutdown()

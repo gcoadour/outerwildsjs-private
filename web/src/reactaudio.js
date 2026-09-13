@@ -31,6 +31,10 @@
 // La musique de voyage et celle de la fin des temps sont les deux declencheurs
 // que docs/43-pnj-son-decollage.md avait releves et laisses ouverts.
 
+// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController
+// Le son d'evenement : seize classes, et une couche entiere qui manquait
+// (docs/46-migration-lots.md, lot 5).
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 /** Ce que le constructeur de `PlayerMovementAudio` pose, et que rien n'ecrase. */

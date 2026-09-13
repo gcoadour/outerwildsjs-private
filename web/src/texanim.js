@@ -13,6 +13,10 @@
 //   - l'offset de depart est tire au hasard dans `Awake`, pour que deux surfaces
 //     voisines ne defilent pas en phase.
 
+// @lit TextureAnimatorMultipleMats, OffsetTextureAnimate
+// Les quarante-quatre textures qui defilent : le sable, les cascades, les
+// ecrans (docs/42-lumieres.md).
+
 /** Avance un offset d'un pas de temps, et le replie dans [0, 1]. */
 export function scrollOffset(offset, rate, scaleY, dt) {
   let o = offset + rate * (scaleY || 1) * dt;

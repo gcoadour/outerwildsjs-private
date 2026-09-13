@@ -26,8 +26,14 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 # Un seul fichier de test (le drapeau memoire est indispensable sur les gros fichiers)
 OW_BUILD=... node --max-old-space-size=6000 tests/05-extract.mjs
 
-node scripts/check-modules.mjs     # chaque module du pipeline s'analyse et ses imports resolvent
+node scripts/check-modules.mjs     # le pipeline se charge, le moteur se COMPILE
 node scripts/check-no-assets.mjs   # garde-fou contenu du jeu
+
+# Lire le build : les trois outils que docs/46 avait ecrits puis jetes.
+OW_BUILD=... node scripts/recensement.mjs   # ce que le build pose, ce qu'on lit
+OW_BUILD=... node scripts/il.mjs <Classe>[.<Methode>]   # l'IL, sans SDK .NET
+OW_BUILD=... node scripts/il.mjs --enum <Enumeration>
+OW_BUILD=... node scripts/composants.mjs <Classe>       # les instances de la scene
 
 # Servir la page telle qu'elle sera publiee (web/ est la racine du site)
 web/fetch-deps.sh                  # Babylon.js + Havok dans web/vendor/, non versionne
@@ -41,6 +47,10 @@ tools/01_fetch.sh Linux            # telecharge le build dans work/ (gitignore)
 # prive de l'origine, donc dans un profil, et le port fait partie de l'origine.
 python3 tools/15_verify.py --profil work/profil --zip work/downloads/OuterWilds_Alpha_1_2_Linux.zip
 python3 tools/15_verify.py --profil work/profil [--lourd]   # ensuite, le profil suffit
+# Sans le build : le moteur demarre quand meme, sur ses replis. C'est le seul
+# controle NAVIGATEUR qui tourne sans les 289 Mo, et il attrape ce que
+# check-modules.mjs ne peut pas voir — une erreur d'execution dans boot().
+python3 tools/15_verify.py --repli
 ```
 
 `tests/01`…`08` lisent le build ; `tests/09-jeu.mjs` est de la logique pure et
@@ -133,3 +143,12 @@ README : quand un chiffre bouge, les trois bougent ensemble.
 - Toute correspondance mesurée devient un invariant gardé : un test dans
   `tests/` si elle se vérifie sous Node, un contrôle dans `tools/15_verify.py`
   si elle demande un navigateur.
+- **Un invariant garde une mesure, pas une conclusion.** `check("aucune pièce
+  touchée avec les valeurs du build", r.part, 0)` gardait un raisonnement sous
+  les dehors d'un chiffre, et se serait défendu contre sa propre correction
+  ([`docs/49`](docs/49-queue.md)).
+- Une classe que le moteur lit **sous un nom français** se déclare par un
+  marqueur `// @lit NomDeLaClasse` : c'est ce que `scripts/recensement.mjs`
+  compte, et il retire les commentaires avant de compter — une classe citée en
+  prose n'est pas une classe lue ([`docs/47`](docs/47-effets-image.md),
+  [`docs/50`](docs/50-regard.md)).

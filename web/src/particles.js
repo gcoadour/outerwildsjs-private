@@ -111,6 +111,36 @@ export class ParticleField {
    *
    * @param etats Map nom -> booleen
    */
+  /**
+   * Comme `gate`, mais par POSITION.
+   *
+   * Les six buses du vaisseau miniature s'appellent toutes `Thruster_Small` :
+   * piloter par nom les allumerait ou les eteindrait toutes les six ensemble.
+   * C'est le troisieme endroit du portage ou le nom du build ne suffit pas,
+   * apres les nuages et les pivots de tornade.
+   */
+  gateAt(etats, tolerance = 0.01) {
+    if (!etats || !etats.size) return 0;
+    let n = 0;
+    for (const [i, ps] of this.live) {
+      if (!ps) continue;
+      const p = (this.systems[i] || {}).position;
+      if (!p) continue;
+      let veut;
+      for (const [cle, v] of etats) {
+        const q = cle.split(",").map(Number);
+        if (Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) <= tolerance) { veut = v; break; }
+      }
+      if (veut === undefined) continue;
+      try {
+        const tourne = ps.isStarted ? ps.isStarted() : true;
+        if (veut && !tourne) { ps.start(); n++; }
+        else if (!veut && tourne) { ps.stop(); n++; }
+      } catch (e) { /* un systeme dispose : rien a piloter */ }
+    }
+    return n;
+  }
+
   gate(etats) {
     if (!etats || !etats.size) return 0;
     let n = 0;
@@ -196,6 +226,46 @@ export class ParticleField {
       if (s.rotationSpeed) {
         ps.minAngularSpeed = -s.rotationSpeed;
         ps.maxAngularSpeed = s.rotationSpeed;
+      }
+      // Les quatre modules rares (docs/57-particules.md). Le compte disait
+      // qu'ils ne servaient JAMAIS ; refait, il en trouve quatre usages sur
+      // 135 systemes — et l'un des quatre est vide.
+      //
+      // VelocityModule : une vitesse constante ajoutee a chaque particule. Sur
+      // `CometTrail`, (0, 0, 100) en repere LOCAL : la queue de la comete part
+      // en arriere a cent unites par seconde, ce qui est ce qui en fait une
+      // queue plutot qu'un halo.
+      if (s.velocity) {
+        const v = new B.Vector3(s.velocity.x, s.velocity.y, s.velocity.z);
+        if (v.lengthSquared() > 0) {
+          ps.direction1 = v.clone();
+          ps.direction2 = v.clone();
+          ps.minEmitPower = v.length();
+          ps.maxEmitPower = v.length();
+        }
+      }
+      // ClampVelocityModule : une vitesse plafond, et un amortissement. Sur
+      // `Explosion_Fiery_Med`, plafond 100 et amortissement 1 — c'est-a-dire
+      // total : une etincelle qui depasse est ramenee au plafond, pas freinee.
+      if (s.clampVelocity && s.clampVelocity.magnitude > 0) {
+        ps.maxEmitPower = Math.min(ps.maxEmitPower, s.clampVelocity.magnitude);
+        ps.minEmitPower = Math.min(ps.minEmitPower, ps.maxEmitPower);
+        // L'amortissement n'a pas d'equivalent direct : Babylon freine par
+        // `limitVelocityOverTime`, qu'on regle sur le meme plafond.
+        if (ps.addLimitVelocityGradient) {
+          ps.addLimitVelocityGradient(0, s.clampVelocity.magnitude);
+          ps.limitVelocityDamping = s.clampVelocity.dampen;
+        }
+      }
+      // RotationBySpeedModule : tourner d'autant plus vite qu'on va vite. Sur
+      // `DissapatingParticles`, vingt degres par seconde sur une plage de
+      // vitesse de zero a un. Babylon n'a pas ce module : on ajoute la
+      // rotation a celle du RotationModule, ce qui est une approximation et se
+      // dit.
+      if (s.rotationBySpeed && s.rotationBySpeed.degreesPerSecond) {
+        const r = s.rotationBySpeed.degreesPerSecond * Math.PI / 180;
+        ps.minAngularSpeed = Math.min(ps.minAngularSpeed ?? 0, -r);
+        ps.maxAngularSpeed = Math.max(ps.maxAngularSpeed ?? 0, r);
       }
       // UVModule : planche de sprites. 13 systemes, dont les explosions.
       if (s.sheet && tex && s.textureSize) {

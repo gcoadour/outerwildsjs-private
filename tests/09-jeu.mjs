@@ -11,18 +11,47 @@
 // peut se verifier sans le jeu se verifie sans lui.
 
 import { check, report } from "./run.mjs";
+import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
+         TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
+         reglagesDe } from "../web/src/cameraeffects.js";
+import { Telescope, TELESCOPE } from "../web/src/tools.js";
+import { mapMarkers, markerVisible } from "../web/src/map.js";
+import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
+         webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
+import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
+         roastPrompts, roastBroken, helmetSettings, HELMET_LAG, HELMET_LAG_CTOR,
+         HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
+         ROAST_DISTANCE } from "../web/src/helmet.js";
+import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
+         landingPadSensors, museumEntryways, smoothStep,
+         ELEVATOR } from "../web/src/tower.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
-         sandColumns, sandFunnels } from "../web/src/sand.js";
+         sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
+import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
+         COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
+import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
+         FadeLight, DayNightTracker } from "../web/src/lights.js";
+import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
+import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
+import { relativeMotion, trackerReadout, directThreshold, motionDust,
+         ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
+         ancientProbeAcceleration, ANCIENT_PROBE_THRUST,
+         SHIP_NOZZLES } from "../web/src/tracker.js";
+import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
+         blinkingRenderers, Blinker, brokenNodes, waterEffects,
+         BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, activeZones, winnersByLayer, clipOf,
          AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, probePrompts, radiationEmitters,
-         radiationAt } from "../web/src/volumes.js";
+         radiationAt, CompoundTrigger, sandstormVolumes } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
+import { tornadoPivots, TornadoPivots, matchTransforms,
+         disposableContainers } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
@@ -37,7 +66,8 @@ import { Interactables } from "../web/src/interact.js";
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
 import { TimeLoop } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
-import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS } from "../web/src/shipdamage.js";
+import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
+         engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
@@ -52,7 +82,8 @@ import { DialogueSystem } from "../web/src/dialogue.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
-import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky } from "../web/src/sky.js";
+import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
+         DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
@@ -179,65 +210,107 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- degats du vaisseau -------------------------------------------------
 {
-  // Position de l'impact : la normale est exprimee dans le repere du vaisseau.
-  check("impact par en dessous", locationOf([0, -1, 0]), "bas");
+  // Position de l'impact. `DamageAlertLocation` n'a que CINQ valeurs — Front 1,
+  // Top 2, Back 4, Left 8, Right 16 — et pas de « bas » : les six positions
+  // qu'avait le portage etaient inventees. Un choc par en dessous compte donc
+  // pour « arriere », qui est ou sont les reacteurs.
+  check("cinq positions, en drapeaux", ALL_LOCATIONS, 31);
+  check("impact par en dessous", locationOf([0, -1, 0]), "arriere");
   check("impact frontal", locationOf([0, 0, 1]), "avant");
   check("impact par l'arriere", locationOf([0, -0.2, -1]), "arriere");
   check("impact lateral", locationOf([1, 0, 0.5]), "droite");
+  check("impact par le haut", locationOf([0, 1, 0.2]), "haut");
 
-  // Valeurs du build : masque et modificateurs a zero. Les degats restent
-  // globaux — c'est l'etat de l'alpha, pas un manque du portage.
-  const alpha = new ShipDamage({ _damageLocationMask: 0,
-                                 _genericPartImpactModifier: 0,
-                                 _enginePartImpactModifier: 0,
+  // LA LECTURE A L'ENVERS, CORRIGEE. Le portage lisait `_damageLocationMask`
+  // comme un filtre et concluait de son zero qu'« aucune piece n'est touchee
+  // avec les valeurs du build ». `OnImpact` fait `mask |= _alertLocation` : le
+  // masque est un RESULTAT, et zero est l'etat d'un vaisseau intact.
+  //
+  // Un test gardait donc la lecture fausse, et il aurait refuse la correction.
+  const alpha = new ShipDamage({ _damageLocationMask: 0, _shipTotalHealth: 100,
+                                 _instantDeathSpeed: 300,
                                  _disableDamagedThrusters: false });
+  check("au depart, aucune alerte", alpha.alerted.length, 0);
   const r = alpha.impact(40, [0, -1, 0]);
   check("degats a 40 u/s", round(r.damage, 1), 26.3);
-  check("aucune piece touchee avec les valeurs du build", r.part, 0);
-  check("integrite entamee malgre tout", round(alpha.integrity, 1), 73.7);
+  // force = 100 x (40 - 0) / (300 - 0)
+  check("la piece prend sa part, et elle n'est pas nulle", round(r.part, 2), 13.33);
+  check("integrite entamee", round(alpha.integrity, 1), 73.7);
+  check("et le masque porte desormais l'arriere", alpha.alerted.join(","), "arriere");
 
-  // Le mecanisme, allume.
-  const arme = new ShipDamage({ _damageLocationMask: ALL_LOCATIONS,
-                                _genericPartImpactModifier: 0.5,
-                                _enginePartImpactModifier: 1,
-                                _disableDamagedThrusters: true });
-  const bas = arme.impact(40, [0, -1, 0]);
-  check("la piece touchee prend sa part", round(bas.part, 2), 13.16);
-  check("piece encore vivante", arme.parts.bas.dead, false);
+  // TROIS PIECES ABIMEES AU PLUS. Au-dela, un impact ne fait plus de nouvelle
+  // victime — la quatrieme position reste intacte quoi qu'il arrive.
+  const trois = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300 });
+  // Vingt unites par seconde : au-dessus du seuil leger (15), donc un impact
+  // reel, et assez doux pour que la coque survive aux cinq chocs.
+  trois.impact(20, [0, 0, 1]);       // avant
+  trois.impact(20, [0, 1, 0]);       // haut
+  trois.impact(20, [1, 0, 0]);       // droite
+  check("trois pieces abimees", trois.alerted.length, 3);
+  const quatrieme = trois.impact(20, [-1, 0, 0]);   // gauche
+  check("la quatrieme ne prend rien", quatrieme.part, 0);
+  check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
+  // Une piece DEJA abimee peut toujours l'etre davantage.
+  check("mais une deja touchee, si", trois.impact(20, [0, 0, 1]).part > 0, true);
 
-  // Une piece meurt de SES degats a elle, pas de ceux de la coque. Avec un
-  // modificateur eleve, une serie de petits chocs sur le meme cote la detruit
-  // bien avant que le vaisseau ne soit perdu — c'est tout l'interet des degats
-  // localises.
-  const use = new ShipDamage({ _damageLocationMask: ALL_LOCATIONS,
-                               _genericPartImpactModifier: 5,
+  // LA PIECE EST LA PLUS PROCHE DU POINT, quand on a les reacteurs.
+  const moteurs = engineComponents({ placed: { EngineComponent: [
+    { name: "DamageSiteContainer(Engine)", position: [-2, 0, 0],
+      fields: { _thrusterLocation: 0, _alertLocation: 8, _impactThreshold: 0, _integrity: 100 } },
+    { name: "DamageSiteContainer(Engine)", position: [2, 0, 0],
+      fields: { _thrusterLocation: 5, _alertLocation: 16, _impactThreshold: 0, _integrity: 100 } },
+  ] } });
+  check("les reacteurs se lisent", moteurs.length, 2);
+  check("et savent leur cote", moteurs.map((e) => e.location).join(","), "gauche,droite");
+  check("et leur buse", moteurs.map((e) => e.thruster).join(","), "Left,Right");
+  const proche = new ShipDamage({ _shipTotalHealth: 1e9 }, moteurs);
+  // La normale dit « avant » ; le POINT dit « droite ». Le build suit le point.
+  const choix = proche.impact(30, [0, 0, 1], [1.9, 0, 0]);
+  check("la piece touchee est la plus proche du point", choix.location, "droite");
+  check("et non celle que designe la normale", choix.location === "avant", false);
+
+  // `_disableDamagedThrusters` vaut FAUX dans cette alpha : une piece morte ne
+  // coupe rien. Le mecanisme est porte quand meme.
+  //
+  // Quinze chocs a 20 u/s : la piece perd 100 (20/3 par choc) et meurt, quand
+  // la coque n'en perd que 31 — c'est tout l'interet des degats localises.
+  const use = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
                                _disableDamagedThrusters: true });
-  for (let i = 0; i < 6; i++) use.impact(25, [0, -1, 0]);
-  check("piece morte apres une serie de chocs", use.parts.bas.dead, true);
-  check("le vaisseau, lui, tient encore", use.destroyed, false);
-  check("le propulseur coupe est hors service", use.thrustFactor("bas"), 0);
+  for (let i = 0; i < 15; i++) use.impact(20, [0, 0, -1]);
+  check("piece morte apres une serie de chocs", use.parts.arriere.dead, true);
+  check("le propulseur coupe est hors service", use.thrustFactor("arriere"), 0);
   check("les autres poussent encore", use.thrustFactor("avant"), 1);
 
-  const sansOption = new ShipDamage({ _damageLocationMask: ALL_LOCATIONS,
-                                      _genericPartImpactModifier: 5,
+  const sansOption = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
                                       _disableDamagedThrusters: false });
-  for (let i = 0; i < 6; i++) sansOption.impact(25, [0, -1, 0]);
+  for (let i = 0; i < 15; i++) sansOption.impact(20, [0, 0, -1]);
   check("sans _disableDamagedThrusters, la piece morte ne coupe rien",
-        sansOption.thrustFactor("bas"), 1);
+        sansOption.thrustFactor("arriere"), 1);
 
-  const masque = new ShipDamage({ _damageLocationMask: LOCATIONS.arriere,
-                                  _genericPartImpactModifier: 0.5,
-                                  _enginePartImpactModifier: 1 });
-  check("hors du masque, rien n'est reporte", masque.impact(40, [0, -1, 0]).part, 0);
-  check("dans le masque, le reacteur prend le sien",
-        round(masque.impact(40, [0, 0, -1]).part, 1), 26.3);
-
-  const perdu = new ShipDamage({});
-  perdu.impact(300, [0, -1, 0]);
-  check("mort instantanee a 300 u/s", perdu.destroyed, true);
+  // LES DEUX MORTS. Le choc unique trop violent, et l'usure cumulee.
+  const perdu = new ShipDamage({ _instantDeathSpeed: 300 });
+  perdu.impact(301, [0, -1, 0]);
+  check("mort instantanee au-dela de 300 u/s", perdu.destroyed, true);
   check("un vaisseau detruit ne pousse plus", perdu.thrustFactor("arriere"), 0);
   perdu.reset();
   check("la boucle le rend entier", perdu.destroyed, false);
+  check("et efface son alerte", perdu.mask, 0);
+
+  const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300 });
+  // Chaque choc a 20 u/s coute 6,67 a la piece : il en faut quinze pour que le
+  // cumul passe la sante totale, et la coque, elle, tient encore.
+  for (let i = 0; i < 14; i++) usure.impact(20, [0, 0, -1]);
+  check("quatorze chocs ne suffisent pas", usure.destroyed, false);
+  check("et la coque tient encore", usure.integrity > 0, true);
+  usure.impact(20, [0, 0, -1]);
+  check("le cumul au-dela de la sante totale, si", usure.destroyed, true);
+
+  // Reparer retire la position de l'alerte.
+  const repare = new ShipDamage({ _shipTotalHealth: 1e9 });
+  repare.impact(40, [0, 0, -1]);
+  check("l'alerte est levee", repare.covers("arriere"), true);
+  repare.repair("arriere");
+  check("et la reparation la retire", repare.covers("arriere"), false);
 }
 
 // --- limite de poussee du secteur ---------------------------------------
@@ -2725,6 +2798,897 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("pres du feu, pleine intensite", radiationAt(feux[0], 5), 100);
   check("a mi-courbe, la moitie", radiationAt(feux[0], 27.5), 50);
   check("au-dela, plus rien", radiationAt(feux[0], 60), 0);
+
+  // --- les effets d'image de la camera du joueur --------------------------
+  //
+  // Quatre des six effets sont ETEINTS au reveil : c'est la premiere chose a
+  // garder, parce que les allumer par defaut donnerait un ecran gris et floute
+  // en permanence, et que rien dans une capture au repos ne le trahirait.
+  const fx = new CameraEffects();
+  check("au reveil, le glow est eteint", fx.glow.enabled, false);
+  check("le gris aussi", fx.grayscale.enabled, false);
+  check("la vignette aussi", fx.vignette.enabled, false);
+  check("et le tourbillon aussi", fx.twirl.enabled, false);
+  check("les reglages d'immersion sont ceux de la scene",
+        fx.sousLEau.intensity, REGLAGES_JOUEUR.glow.intensity);
+
+  // Le reveil : blanc a 3, puis retour au noir en trois secondes.
+  fx.startOfTimeLoop();
+  check("le reveil dure trois secondes", WAKE_DURATION, 3);
+  check("il part du blanc", fx.glow.tint.join(","), "255,255,255");
+  fx.update(0);
+  check("et le glow est allume", fx.glow.enabled, true);
+  fx.update(WAKE_DURATION);
+  check("au bout, il s'eteint", fx.glow.enabled, false);
+
+  // L'adoucissement n'est pas symetrique, et c'est LUI qui donne sa brutalite a
+  // l'eclair. A mi-course d'une MONTEE, on n'a fait que 0,5^4 du chemin.
+  const montee = new CameraEffects();
+  montee.flashScreen(1, [1, 0, 0], 1, 0, 0);
+  montee.update(0.5);
+  check("une montee se retient : 0,5^4", Number(montee.glow.intensity.toFixed(4)), 0.0625);
+  const descente = new CameraEffects();
+  descente.glow.intensity = 1;
+  descente.flashScreen(0, [0, 0, 0], 1, 0, 0);
+  descente.update(0.5);
+  check("une descente se traine : 1 - (0,5-1)^4",
+        Number(descente.glow.intensity.toFixed(4)), 0.0625);
+
+  // Les cinq causes de mort, et les TROIS traitements qu'elles recoivent.
+  const asphyxie = new CameraEffects();
+  asphyxie.playerDeath(DEATH_TYPE.Asphyxiation, 0);
+  asphyxie.update(2.5);
+  check("l'asphyxie fond en cinq secondes, a moitie", asphyxie.fadeFraction, 0.25);
+  check("et le gris monte a 1 pour un demi", asphyxie.grayscale.amount, 1);
+  asphyxie.update(4);
+  check("la vignette reste basse a 0,8 du chemin",
+        Math.round(asphyxie.vignette.intensity), 328);
+  asphyxie.update(5);
+  check("puis se referme d'un coup", Math.round(asphyxie.vignette.intensity), 1000);
+  check("la mort demande le flashback quand l'effet est fini", asphyxie.update(5.1).flashbackDemande, true);
+
+  const brulure = new CameraEffects();
+  brulure.playerDeath(DEATH_TYPE.Energy, 0);
+  check("l'energie n'est pas un fondu mais un eclair", brulure.fadeFraction, 0);
+  brulure.update(3);
+  check("et il est rouge", brulure.glow.tint.map(Math.round).join(","), "255,100,100");
+  const nova = new CameraEffects();
+  nova.playerDeath(DEATH_TYPE.Supernova, 0);
+  nova.update(3);
+  check("la supernova recoit le meme traitement que l'energie",
+        nova.glow.tint.map(Math.round).join(","), "255,100,100");
+
+  const impact = new CameraEffects();
+  impact.playerDeath(DEATH_TYPE.Impact, 0);
+  impact.update(0.3);
+  check("un impact, lui, coupe en trois dixiemes", impact.fadeFraction, 1);
+
+  // Le trou noir : de 220 a 360 degres en deux secondes, puis plus rien.
+  const trou = new CameraEffects();
+  trou.enterBlackHole(0);
+  check("le tourbillon part de 220 degres", trou.twirl.angle, TWIRL_START_ANGLE);
+  trou.update(TWIRL_DURATION / 2);
+  check("a mi-course, 290", trou.twirl.angle, 290);
+  trou.update(TWIRL_DURATION);
+  check("au bout, il se coupe", trou.twirl.enabled, false);
+  check("et revient a zero", trou.twirl.angle, 0);
+
+  // L'immersion : le glow reprend les valeurs que `Awake` avait retenues, et
+  // non celles qu'un eclair aurait laissees derriere lui.
+  const eau = new CameraEffects();
+  eau.playerDeath(DEATH_TYPE.Energy, 0);
+  eau.update(3);
+  eau.enterWater();
+  check("sous l'eau, le glow retrouve sa teinte d'origine",
+        eau.glow.tint.join(","), REGLAGES_JOUEUR.glow.tint.slice(0, 3).join(","));
+  eau.exitWater();
+  check("et s'eteint en sortant", eau.glow.enabled, false);
+
+  // Le champ de vision : 70 degres, mesure sur la camera du build. Babylon en
+  // pose 45,8 par defaut, et personne ne le reglait.
+  check("la camera du joueur voit a 70 degres", REGLAGES_JOUEUR.fov, 70);
+
+  // Les reglages se lisent dans `data/camera.json` quand il existe, et se
+  // savent repli sinon — comme les distances du pilote automatique.
+  check("sans extraction, les reglages se savent replis",
+        reglagesDuJoueur(null).declared, false);
+  const doc = { cameras: [{ name: "PlayerCamera", roles: ["joueur"], fov: 70,
+    effects: { GlowEffect: [{ intensity: 2, iterations: 3, tint: [1, 0, 0, 0] }] } }] };
+  check("avec elle, ils se savent declares", reglagesDuJoueur(doc).declared, true);
+  check("et ce sont ceux du build", reglagesDuJoueur(doc).glow.intensity, 2);
+  check("une camera absente ne rend rien", reglagesDe(doc, "LandingCam"), null);
+
+  // --- le telescope, relu dans l'IL --------------------------------------
+  //
+  // Quatre erreurs a la fois dans l'ancienne version, et la plus couteuse etait
+  // invisible : `maxFOV` servait de champ de REPOS, donc toute la partie se
+  // jouait a 60 degres au lieu de 70, telescope range.
+  const lunette = new Telescope();
+  check("au repos, on voit au champ de la camera", lunette.fov, TELESCOPE.restFOV);
+  check("et le plan proche est celui du build", lunette.nearClip, 0.05);
+  check("on entre a (60 - 10) / 1,5", Number(lunette.entryFOV.toFixed(2)), 33.33);
+  lunette.toggle();
+  check("le plan proche recule en visant", lunette.nearClip, 0.5);
+  // Deux secondes pour rejoindre la cible : c'est `_zoomInSeconds`.
+  for (let i = 0; i < 200; i++) lunette.update(0.01);
+  check("et deux secondes suffisent a y arriver",
+        Number(lunette.fov.toFixed(2)), Number(lunette.entryFOV.toFixed(2)));
+  // Puis on zoome A LA MAIN, cinquante degres par seconde, borne a 10.
+  lunette.update(0.2, 1);
+  check("la commande resserre a 50 degres par seconde",
+        Number(lunette.targetFOV.toFixed(2)), Number((lunette.entryFOV - 10).toFixed(2)));
+  for (let i = 0; i < 400; i++) lunette.update(0.05, 1);
+  check("et ne depasse pas le minimum", lunette.targetFOV, TELESCOPE.minFOV);
+  for (let i = 0; i < 400; i++) lunette.update(0.05, -1);
+  check("ni le maximum dans l'autre sens", lunette.targetFOV, TELESCOPE.maxFOV);
+  lunette.toggle();
+  for (let i = 0; i < 400; i++) lunette.update(0.05);
+  check("en sortant, on revient au champ de la camera",
+        Number(lunette.fov.toFixed(3)), TELESCOPE.restFOV);
+  check("le grossissement est celui du repos sur le minimum",
+        lunette.magnification, 7);
+
+  // --- la voute celeste ---------------------------------------------------
+  //
+  // docs/41-ciel.md laissait la rotation ouverte : « la convention d'axes reste
+  // a etablir ». Elle se mesure sur les uv du maillage — le disque bleu est au
+  // +Z local — et le calcul, lui, ne suppose rien de la chaine glTF : il passe
+  // par les directions MONDE des axes du parent, reflexion comprise.
+  //
+  // Le controle est direct : on tourne l'axe par le quaternion rendu, on le
+  // ramene dans le monde par la base, et il doit tomber sur le soleil.
+  const surLeSoleil = (basis, soleil, axe = DISC_FALLBACK) => {
+    const local = qrot(alignAxis(axe, soleil, basis), axe);
+    const monde = [0, 1, 2].map((k) =>
+      local[0] * basis[0][k] + local[1] * basis[1][k] + local[2] * basis[2][k]);
+    const n = Math.hypot(soleil[0], soleil[1], soleil[2]);
+    return Number(Math.hypot(monde[0] - soleil[0] / n, monde[1] - soleil[1] / n,
+                             monde[2] - soleil[2] / n).toFixed(6));
+  };
+  const IDENT = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const MIROIR = [[1, 0, 0], [0, 1, 0], [0, 0, -1]];   // l'inversion du glTF
+  check("le disque tombe sur le soleil, repere direct", surLeSoleil(IDENT, [1, 0, 0]), 0);
+  check("de dos aussi", surLeSoleil(IDENT, [0, 0, -1]), 0);
+  check("et en oblique", surLeSoleil(IDENT, [0.6, 0.8, 0]), 0);
+  // Le cas qui comptait : une base qui REFLECHIT. C'est celle du chargement
+  // glTF, et c'est elle qui interdisait de composer naivement des quaternions.
+  check("a travers un parent en miroir aussi", surLeSoleil(MIROIR, [1, 0, 0]), 0);
+  check("et en oblique a travers le miroir",
+        surLeSoleil(MIROIR, [0.3, 0.5, -0.81]), 0);
+  // Le soleil pile sur l'axe, et pile a l'oppose : les deux singularites.
+  check("soleil pile sur l'axe", surLeSoleil(IDENT, DISC_FALLBACK), 0);
+  check("soleil pile a l'oppose",
+        surLeSoleil(IDENT, DISC_FALLBACK.map((x) => -x)), 0);
+
+  // Sans donnees, la voute ne fait rien plutot que de faire n'importe quoi.
+  const cielVide = new Sky(null);
+  check("sans data/sky.json, pas de voute", cielVide.ready, false);
+  check("mais le repli de direction reste mesure", DISC_FALLBACK.join(","), "0,0,-1");
+
+  // --- les nuages, rattaches par POSITION ---------------------------------
+  //
+  // Les vingt-quatre s'appellent tous `PieceOfRing` : le rattachement par nom
+  // de tout le reste du portage ne les distingue pas.
+  const faux = (x, y, z) => ({ name: CLOUD_NAME, position: { x, y, z },
+                               getAbsolutePosition() { return this.position; } });
+  const ciel = new Sky({ shell: { name: "SkyShell" }, clouds: [
+    { name: CLOUD_NAME, position: [0, 0, 0], texture: "cloud_01", image: "a.png" },
+    { name: CLOUD_NAME, position: [10, 0, 0], texture: "whisp_02", image: "b.png" },
+    { name: CLOUD_NAME, position: [999, 0, 0], texture: "cloud_03", image: "c.png" },
+  ] });
+  const noeuds = [faux(10, 0, 0), faux(0.2, 0, 0), { name: "AutreChose", position: { x: 0, y: 0, z: 0 } }];
+  check("deux nuages sur trois trouvent leur maillage", ciel.attachClouds(noeuds), 2);
+  check("et chacun le SIEN, pas celui du voisin",
+        ciel.clouds.map((c) => c.nuage.texture).join(","), "cloud_01,whisp_02");
+  check("le plus proche l'emporte",
+        Number(ciel.clouds[0].distance.toFixed(1)), 0.2);
+  check("un maillage d'un autre nom n'est jamais pris",
+        ciel.clouds.every((c) => c.noeud.name === CLOUD_NAME), true);
+  // Un maillage deja pris ne se redonne pas : sans cela, deux nuages voisins
+  // se disputeraient le meme et l'un des deux resterait sans visage.
+  const serres = new Sky({ shell: {}, clouds: [
+    { position: [0, 0, 0], texture: "a", image: "a.png" },
+    { position: [0.1, 0, 0], texture: "b", image: "b.png" },
+  ] });
+  check("deux nuages serres prennent deux maillages",
+        serres.attachClouds([faux(0, 0, 0), faux(0.1, 0, 0)]), 2);
+  check("et pas deux fois le meme",
+        serres.clouds[0].noeud === serres.clouds[1].noeud, false);
+
+  // --- le champ d'etoiles s'eteint ----------------------------------------
+  //
+  // La plus visible des choses que le build fait et que le portage ne faisait
+  // pas : le ciel SE VIDE pendant les vingt minutes, et presque tout a la fin.
+  const COURBE = [0, 0.0171, 0.0343, 0.0514, 0.0686, 0.0857, 0.1029, 0.12,
+                  0.1372, 0.1543, 0.1715, 0.1886, 0.2058, 0.2229, 0.2514,
+                  0.3761, 0.5009, 0.6257, 0.7505, 0.8752, 1];
+  const champ = new StarField({ stars: [{ count: 1000, radius: 30000,
+    size: [200, 400], color: [0.8431, 0.8667, 1], explosionCurve: COURBE }] });
+  check("mille etoiles", champ.count, 1000);
+  check("a trente mille unites", champ.radius, 30000);
+  check("au depart, aucune eteinte", champ.countAt(0), 0);
+  check("a la fin, toutes", champ.countAt(1), 1000);
+  // La forme de la courbe est ce qui compte : lente, puis brutale.
+  check("a mi-boucle, moins d'un cinquieme", champ.countAt(0.5) < 200, true);
+  check("les trois quarts partent dans le dernier tiers",
+        champ.countAt(1) - champ.countAt(0.7) > 700, true);
+  // L'extinction ne rend que ce qui vient DE s'eteindre : une etoile deja
+  // eteinte ne redemande pas sa supernova a chaque image.
+  check("le premier pas eteint un paquet", champ.update(0.5).length > 0, true);
+  check("le meme instant n'en eteint plus", champ.update(0.5).length, 0);
+  check("et revenir en arriere non plus", champ.update(0.2).length, 0);
+  check("la supernova suspendue arrete tout", champ.update(1, true).length, 0);
+  champ.reset();
+  check("le redemarrage remplit le ciel", champ.extinguished, 0);
+
+  // Les positions : sur la coquille, et les memes a chaque chargement.
+  const pts = champ.positions(1);
+  let dedans = true;
+  for (let i = 0; i < champ.count; i++) {
+    const r = Math.hypot(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+    if (Math.abs(r - champ.radius) > 1) { dedans = false; break; }
+  }
+  check("toutes les etoiles sont sur la coquille", dedans, true);
+  check("et la meme graine rend le meme ciel",
+        champ.positions(1)[7], pts[7]);
+  check("une autre graine, un autre ciel",
+        champ.positions(2)[7] !== pts[7], true);
+
+  // Sans champ extrait, on ne fabrique pas d'etoiles.
+  check("sans donnees, pas de champ", new StarField(null).ready, false);
+
+  // --- la queue du recensement (docs/49) ----------------------------------
+  //
+  // Les marqueurs de carte : le build les DECLARE, avec leurs vrais noms de
+  // jeu. Le portage les deduisait de la gravite et affichait les noms internes.
+  const marq = mapMarkers({ placed: { MapMarker: [
+    { name: "Comet_Body", body: "Comet_Body", fields: { _label: "The Nomad", _markerType: 1 } },
+    { name: "Moon_Body", body: "Moon_Body", fields: { _label: "Lunar Lookout", _markerType: 2 } },
+    { name: "Sun_Body", body: "Sun_Body", fields: { _label: "Sun", _markerType: 3 } },
+    { name: "Player_Body", body: "Player_Body", fields: { _label: "You Are Here", _markerType: 4 } },
+    { name: "OribitingIsland", body: null, fields: { _label: "Giant's Landing", _markerType: 0 } },
+  ] } });
+  check("cinq marqueurs lus", marq.length, 5);
+  check("et leurs vrais noms avec", marq[0].label, "The Nomad");
+  // Les distances viennent de la TABLE DE SAUT d'`Awake`, pas de l'ordre des
+  // blocs : une planete a 50 000, une lune seulement 5 000, le soleil toujours.
+  check("une planete s'affiche a 50 000", marq[0].maxDistance, 50000);
+  check("une lune, seulement a 5 000", marq[1].maxDistance, 5000);
+  check("le soleil, toujours", marq[2].maxDistance, 1e10);
+  check("le joueur est vert", marq[3].color, "#00ff00");
+  check("une planete est blanche", marq[0].color, "#ffffff");
+  // « Giant's Landing » n'est meme pas un corps : c'est une ILE. La deduction
+  // par gravite ne pouvait pas la trouver.
+  check("un marqueur peut n'etre porte par aucun corps", marq[4].body, null);
+
+  // La visibilite, dans l'ordre ou `LateUpdate` decide.
+  const planete = marq[0], lune = marq[1], joueur = marq[3];
+  check("trop loin, une lune disparait",
+        markerVisible(lune, [100, 100, 9000], [0, 0], null), false);
+  check("assez pres, elle revient",
+        markerVisible(lune, [100, 100, 4000], [0, 0], null), true);
+  check("derriere la camera, rien ne s'affiche",
+        markerVisible(planete, [100, 100, -5], [0, 0], null), false);
+  // Les deux regles des dix pixels — celle du joueur, et celle du VAISSEAU que
+  // le portage n'avait pas.
+  check("a moins de dix pixels du joueur, masque",
+        markerVisible(planete, [3, 3, 1000], [0, 0], null), false);
+  check("a moins de dix pixels du vaisseau aussi",
+        markerVisible(planete, [100, 100, 1000], [0, 0], [103, 103]), false);
+  // Le marqueur du joueur, lui, sort avant tous les tests.
+  check("le joueur ne se masque jamais",
+        markerVisible(joueur, [3, 3, 1000], [0, 0], [3, 3]), true);
+  check("sauf derriere la camera", markerVisible(joueur, [3, 3, -1], [0, 0], null), false);
+  check("et la zone brouillee masque tout",
+        markerVisible(planete, [100, 100, 1000], [0, 0], null, true), false);
+
+  // Les pivots de tornade : une culbute autour de l'axe X local, a une vitesse
+  // TIREE au reveil — cinq des six s'appellent pareil, d'ou le rattachement par
+  // position.
+  const pivots = tornadoPivots({ placed: { TornadoPivotController: [
+    { name: "UpTornado_Pivot", position: [0, 0, 0] },
+    { name: "UpTornado_Pivot", position: [50, 0, 0] },
+  ] } }, () => 0.5);
+  check("deux pivots", pivots.length, 2);
+  check("la vitesse est tiree entre 1 et 2", pivots[0].speed, 1.5);
+  check("et l'angle de depart entre 0 et 360", pivots[0].initialSpin, 180);
+  const noeud = (x) => ({ name: "UpTornado_Pivot", position: { x, y: 0, z: 0 },
+    getAbsolutePosition() { return this.position; },
+    rotationQuaternion: { x: 0, y: 0, z: 0, w: 1,
+      set(a, b, c, d) { this.x = a; this.y = b; this.z = c; this.w = d; } } });
+  const tp = new TornadoPivots(pivots);
+  const ns = [noeud(50), noeud(0)];
+  check("chacun trouve le sien", tp.attach(ns), 2);
+  check("et pas le meme deux fois", tp.live[0].noeud === tp.live[1].noeud, false);
+  const avant = { ...ns[1].rotationQuaternion };
+  tp.update(1);
+  check("le pivot a bouge",
+        ns[1].rotationQuaternion.w !== avant.w || ns[1].rotationQuaternion.y !== avant.y, true);
+  // Une culbute, pas une rotation sur soi : l'axe avant du pivot change.
+  const versAvant = qrot([ns[1].rotationQuaternion.x, ns[1].rotationQuaternion.y,
+                          ns[1].rotationQuaternion.z, ns[1].rotationQuaternion.w], [0, 0, 1]);
+  tp.update(100);
+  const apres = qrot([ns[1].rotationQuaternion.x, ns[1].rotationQuaternion.y,
+                      ns[1].rotationQuaternion.z, ns[1].rotationQuaternion.w], [0, 0, 1]);
+  check("et il bascule : son axe avant s'est deplace",
+        Math.abs(apres[1] - versAvant[1]) > 0.01 || Math.abs(apres[2] - versAvant[2]) > 0.01, true);
+
+  // Les suiveurs, dont l'un ne suit RIEN — c'est une propriete du build.
+  const suiv = matchTransforms({ placed: { MatchTransform: [
+    { name: "CampfireSmoke", position: [0, 0, 0],
+      fields: { _targetTransform: null, _matchPosition: true, _matchRotation: true } },
+    { name: "OuterClouds", position: [0, 0, 0],
+      fields: { _targetTransform: { $ref: "level0:9729" }, _matchPosition: true, _matchRotation: false } },
+  ] } });
+  check("deux suiveurs", suiv.length, 2);
+  check("l'un d'eux ne suit rien, et on le dit", suiv[0].target, null);
+  check("l'autre suit la position mais pas la rotation",
+        `${suiv[1].matchPosition},${suiv[1].matchRotation}`, "true,false");
+
+  // Et les conteneurs d'editeur : on les compte pour ne plus se poser la
+  // question. Leur `Start` fait `Destroy(gameObject)`.
+  check("les conteneurs jetables se comptent",
+        disposableContainers({ placed: { DisposableContainer: [
+          { name: "TimberHearth_Pivot", position: [0, 0, 0] },
+          { name: "Islands", position: [0, 0, 0] }] } }).length, 2);
+
+  // --- on allume en REGARDANT (docs/50) -----------------------------------
+  const lus = gazeSwitches({ placed: { GazeSwitch: [
+    { name: "GazeVolume", position: [0, 0, 0], body: "Twin01_Body",
+      volume: { shape: "sphere", radius: 6, center: [0, 0, 0] },
+      fields: { _angleOfActivation: 10, _secondsToCharge: 3,
+                _switchableDevice: { $ref: "level0:23903" } } },
+  ] } });
+  check("un interrupteur du regard", lus.length, 1);
+  check("son rayon vient du collider", lus[0].radius, 6);
+  // `_activationDist` n'est serialise sur aucune instance : quatre unites, du
+  // constructeur. L'invariant garde le repli, et refuse de le lire ailleurs.
+  check("sa distance d'activation vient du constructeur",
+        lus[0].activationDist, GAZE.activationDist);
+  check("et il sait ce qu'il commande", lus[0].device, "level0:23903");
+
+  // La loi : les DEUX facteurs doivent etre pleins. Etre pres ne suffit pas,
+  // regarder droit non plus.
+  const g = new Regard(lus[0]);
+  const droit = [0, 0, 1];
+  // A trois unites (donc sous les quatre d'activation) et pile dans l'axe.
+  g.update(1, [0, 0, -3], droit, [0, 0, 0]);
+  check("pres et droit : la charge monte", g.charge, 1);
+  check("et le regard est plein", g.gazeFraction, 1);
+  // Meme distance, mais de biais a vingt degres : la fraction retombe.
+  const biais = new Regard(lus[0]);
+  const a = 20 * Math.PI / 180;
+  biais.update(1, [0, 0, -3], [Math.sin(a), 0, Math.cos(a)], [0, 0, 0]);
+  check("de biais, la charge redescend", biais.charge, 0);
+  check("et le regard n'est plus plein", biais.gazeFraction < 1, true);
+  // Droit dans l'axe mais a cinq unites : au-dela des quatre, pareil.
+  const loin = new Regard(lus[0]);
+  loin.update(1, [0, 0, -5], droit, [0, 0, 0]);
+  check("trop loin, la charge ne monte pas", loin.charge, 0);
+
+  // Trois secondes, et ca declenche — une fois.
+  const plein = new Regard(lus[0]);
+  for (let i = 0; i < 30; i++) plein.update(0.1, [0, 0, -3], droit, [0, 0, 0]);
+  check("trois secondes de regard fixe", plein.switched, true);
+  check("l'appareil est allume", plein.on, true);
+  plein.update(0.1, [0, 0, -3], droit, [0, 0, 0]);
+  check("et il ne redeclenche pas", plein.switched, false);
+  // Il faut redescendre sous la MOITIE pour pouvoir rallumer.
+  for (let i = 0; i < 14; i++) plein.update(0.1, [0, 0, -100], droit, [0, 0, 0]);
+  check("a plus de la moitie, toujours en attente", plein.waitForDischarge, true);
+  plein.update(0.2, [0, 0, -100], droit, [0, 0, 0]);
+  check("sous la moitie, on peut rallumer", plein.waitForDischarge, false);
+
+  // La toile : au CUBE, et en sens inverse.
+  const v0 = webSpeeds(0.5, 0);
+  const v1 = webSpeeds(1, 0);
+  check("a demi-regard, un huitieme de la vitesse",
+        Number((v0.outer / v1.outer).toFixed(3)), 0.125);
+  check("l'anneau interieur tourne en sens inverse", webSpeeds(1, 1).inner, -WEB.inner);
+  check("et ne bouge pas sans charge", webSpeeds(1, 0).inner, 0);
+  check("la toile s'efface en deux secondes", webAlpha(WEB.fade), 0);
+  check("a mi-chemin, a moitie", webAlpha(1), 0.5);
+
+  // La porte : les colliders se coupent d'un coup, l'alpha fond en une seconde.
+  const porte = new Porte(energyGates({ placed: { EnergyGate: [
+    { name: "EnergyGate", position: [0, 0, 0], body: "Twin01_Body" }] } })[0]);
+  check("au depart, elle est solide", porte.solid, true);
+  porte.switchOn(0);
+  check("des l'allumage, elle ne bloque plus", porte.solid, false);
+  check("mais elle se voit encore", porte.alpha, 1);
+  porte.update(0.5);
+  check("a mi-fondu, a moitie", porte.alpha, 0.5);
+  porte.update(1);
+  check("puis elle disparait", porte.alpha, 0);
+
+  // --- la tour de lancement (docs/51) -------------------------------------
+  //
+  // La scene CONTREDIT le constructeur — 31,5 et 5 contre 10 et 3 — et c'est
+  // elle qui gagne. C'est le seul endroit de la serie ou cela arrive, et
+  // l'invariant garde les deux.
+  const asc = elevators({ placed: { Elevator: [
+    { name: "Elevator", position: [0, 0, 0], body: "TimberHearth_Body",
+      fields: { _trackHeight: 31.5, _liftDuration: 5,
+                _elevatorStartClip: { name: "elevatorstart" },
+                _elevatorStopClip: { name: "elevatorstop" } } },
+  ] } });
+  check("un ascenseur", asc.length, 1);
+  check("la scene dit 31,5 unites", asc[0].trackHeight, 31.5);
+  check("et le constructeur disait 10", ELEVATOR.trackHeight, 10);
+  check("la scene dit cinq secondes", asc[0].liftDuration, 5);
+  check("et le constructeur disait trois", ELEVATOR.liftDuration, 3);
+
+  const cab = new Cabine(asc[0]);
+  check("au depart, les commandes sont fermees", cab.pressInteract(0), false);
+  check("et la cabine est en bas", cab.fraction, 0);
+  cab.activateControls();
+  check("`ActivateLaunchTower` les ouvre", cab.pressInteract(0), true);
+  cab.update(2.5);
+  // `SmoothStep` et non une rampe : a mi-parcours, exactement la moitie, mais
+  // le depart et l'arrivee sont adoucis.
+  check("a mi-course, la moitie", cab.fraction, 0.5);
+  check("le son, lui, est deja plein", cab.volume, 1);
+  check("mais il ne l'etait pas au depart", smoothStep(0.01) * 10 < 1, true);
+  cab.update(0.5 * 5);
+  check("un quart de temps ne fait pas un quart de course",
+        smoothStep(0.25) !== 0.25, true);
+  cab.update(5);
+  check("au bout, elle est en haut", cab.fraction, 1);
+  check("et elle annonce son arrivee", cab.arrived, true);
+  check("soit 31,5 unites plus haut", cab.height, 31.5);
+  cab.update(6);
+  check("puis elle se tait", cab.arrived, false);
+  // `ReturnToStart` redescend sans basculer le sens.
+  cab.returnToStart(6);
+  cab.update(11);
+  check("et elle redescend", cab.fraction, 0);
+
+  // Le terminal ne verrouille pas : il REFUSE.
+  const term = new LaunchTerminal();
+  check("sans les codes, il refuse", term.pressInteract(false), "refuse");
+  check("et il peut refuser encore", term.pressInteract(false), "refuse");
+  check("l'invite vient de la connaissance", term.learnCodes(), " Enter Launch Codes");
+  check("avec les codes, il actionne", term.pressInteract(true), "activate");
+  check("et une seule fois", term.pressInteract(true), null);
+
+  // Les pads : les trois capteurs, et le MEME corps.
+  check("les trois touchent le meme corps",
+        landedOn(["TimberHearth_Body", "TimberHearth_Body", "TimberHearth_Body"]),
+        "TimberHearth_Body");
+  check("un seul capteur en l'air suffit a ne pas etre pose",
+        landedOn(["TimberHearth_Body", null, "TimberHearth_Body"]), null);
+  check("a cheval sur deux corps, pas pose non plus",
+        landedOn(["TimberHearth_Body", "Moon_Body", "TimberHearth_Body"]), null);
+  check("et aucun capteur du tout n'est pas un atterrissage", landedOn([]), null);
+
+  const pads = landingPadSensors({ placed: { LandingPadSensor: [
+    { name: "SurfaceSensor", position: [0, 0, 0], body: "Ship_Body",
+      volume: { shape: "sphere", radius: 0.5, center: [0, 0, 0] },
+      fields: { _touchdownSound: { name: "podland_thud_hiss" } } },
+  ] } });
+  check("le capteur porte son son de contact", pads[0].touchdownSound, "podland_thud_hiss");
+  check("et son rayon", pads[0].volume.radius, 0.5);
+
+  // L'entree du musee, et sa direction de sortie.
+  const musee = museumEntryways({ placed: { MuseumEntryway: [
+    { name: "MuseumEntryway", position: [0, 0, 0], body: "TimberHearth_Body",
+      fields: { _localExitDirection: { x: 1, y: 0, z: 0 } } },
+  ] } });
+  check("une entree de musee", musee.length, 1);
+  check("et elle sort par son axe X", musee[0].exitDirection.join(","), "1,0,0");
+
+  // --- le casque, l'alarme, les voyants (docs/52) --------------------------
+  //
+  // Encore une fois la scene contredit le constructeur, et c'est elle qui
+  // gagne : le casque traine a 0,05 la ou le code pose 0,1.
+  check("l'instance traine a 0,05", HELMET_LAG, 0.05);
+  check("et le constructeur disait 0,1", HELMET_LAG_CTOR, 0.1);
+  check("sans scene, on prend le repli", helmetSettings({}).lag, HELMET_LAG);
+  check("et il se sait repli", helmetSettings({}).declared, false);
+  check("avec elle, la valeur du build",
+        helmetSettings({ placed: { HUDHelmet: [{ fields: { _helmetLagSpeed: 0.05 } }] } }).lag,
+        0.05);
+
+  const casque = new Helmet();
+  check("au depart, il est range", casque.state, SUIT.OFF);
+  casque.suitUp();
+  for (let i = 0; i < 300; i++) casque.update(1 / 60);
+  check("une fois enfile, il est porte", casque.worn, true);
+  check("et il est pose a zero", Number(casque.y.toFixed(6)), 0);
+  // Il traine derriere le regard, en sens INVERSE et d'un dixieme de l'ecart.
+  casque.update(1 / 60, 1, 0, 10);
+  check("un premier pas ne fait qu'un vingtieme du chemin",
+        Number(casque.x.toFixed(6)), Number((HELMET_AMPLITUDE * HELMET_LAG).toFixed(6)));
+  check("et il part a l'oppose du regard", casque.x < 0, true);
+  for (let i = 0; i < 300; i++) casque.update(1 / 60, 1, 0, 10);
+  check("au bout, il rejoint sa cible",
+        Number(casque.x.toFixed(5)), Number(HELMET_AMPLITUDE.toFixed(5)));
+  // L'axe vertical est bride dans la bande d'angles qu'on ne peut pas atteindre.
+  const bride = new Helmet();
+  bride.suitUp();
+  for (let i = 0; i < 300; i++) bride.update(1 / 60);
+  for (let i = 0; i < 60; i++) bride.update(1 / 60, 0, 1, 150);
+  check("dans la bande morte, le casque ne suit pas le regard vertical",
+        Number(bride.y.toFixed(6)), 0);
+  for (let i = 0; i < 300; i++) bride.update(1 / 60, 0, 1, 10);
+  check("hors de la bande, il suit", bride.y < 0, true);
+
+  // L'alarme : trente pour cent, et les deux transitions.
+  const alarme = new Alarme();
+  check("le seuil est a trente pour cent", ALARM_THRESHOLD, 0.3);
+  check("a quarante pour cent, rien", alarme.update(0.4), false);
+  check("a trente pile, elle part", alarme.update(0.3), true);
+  check("et elle le dit une fois", alarme.turnedOn, true);
+  check("puis ne le redit plus", (alarme.update(0.2), alarme.turnedOn), false);
+  check("au-dessus du seuil, elle se coupe", alarme.update(0.31), false);
+  check("et le dit une fois", alarme.turnedOff, true);
+
+  // Les voyants : le premier en continu, les autres ENSEMBLE a la demi-seconde.
+  const voyants = new DamageDisplay();
+  check("la periode est la demi-seconde", BLINK_PERIOD, 0.5);
+  const a0 = voyants.update(0, true, [true, true]);
+  check("le voyant general est allume des le moindre degat", a0[0], true);
+  check("les autres commencent eteints", a0.slice(1).join(","), "false,false");
+  const a1 = voyants.update(0.6, true, [true, true]);
+  check("et clignotent ENSEMBLE", a1.slice(1).join(","), "true,true");
+  check("une piece saine ne clignote jamais",
+        voyants.update(1.2, true, [false, true]).slice(1).join(","), "false,false");
+  check("sans degat, le voyant general s'eteint",
+        voyants.update(1.8, false, [])[0], false);
+
+  // Les notifications : une seule a la fois, et elle s'efface.
+  const notes = new Notifications();
+  check("au depart, rien", notes.update(0), null);
+  notes.display("sonde genee", 3, 0);
+  check("elle s'affiche", notes.update(1), "sonde genee");
+  notes.display("autre chose", 3, 1);
+  check("une nouvelle remplace l'ancienne", notes.update(2), "autre chose");
+  check("et elle s'efface au bout de sa duree", notes.update(4.1), null);
+
+  // Les huit invites de la guimauve : quatre unites, et toutes la portent.
+  const guimauves = roastPrompts({ placed: { RoastPromptEvent: [
+    { name: "RoastPromptEvent", position: [0, 0, 0], fields: { _roastDistance: 4 } },
+  ] } });
+  check("la distance est celle de la scene", guimauves[0].distance, ROAST_DISTANCE);
+  check("a trois unites, on grille encore", roastBroken(3, guimauves[0]), false);
+  check("a cinq, le grillage s'arrete", roastBroken(5, guimauves[0]), true);
+
+  // --- ce que le joueur porte en plus de son corps (docs/53) --------------
+  //
+  // La portee d'interaction : dix unites, le rayon de
+  // `FirstPersonManipulator`. Le portage exigeait d'etre a la portee du
+  // RECEPTEUR — deux ou trois unites, qui sont la taille de sa cible.
+  check("on vise a dix unites", INTERACT_RANGE, 10);
+
+  // Le bruit : proportionnel a la poussee, plus un COUP au lancement de sonde.
+  check("au repos, aucun bruit", playerNoise(0, 100), 0);
+  check("a pleine poussee, cinq", playerNoise(1, 100), NOISE.thrust);
+  check("a mi-poussee, la moitie", playerNoise(0.5, 100), NOISE.thrust / 2);
+  check("lancer une sonde fait cinq d'un coup", playerNoise(0, 100, 100), NOISE.launch);
+  check("qui retombe de moitie en un demi-seconde",
+        playerNoise(0, 100.5, 100), NOISE.launch / 2);
+  check("et a disparu au bout d'une seconde", playerNoise(0, 101, 100), 0);
+  check("les deux s'ajoutent", playerNoise(1, 100, 100), NOISE.thrust + NOISE.launch);
+
+  // L'ecrasement : cinq PAS de physique, pas cinq secondes.
+  check("cinq pas de grace", COMPRESSION_GRACE, 5);
+  const broyeur = new CompressionSensor();
+  for (let i = 0; i < 5; i++) broyeur.update(0.02, true);
+  check("cinq pas ne suffisent pas", broyeur.crushed, false);
+  broyeur.update(0.02, true);
+  check("le sixieme, si", broyeur.crushed, true);
+  const attache = new CompressionSensor();
+  for (let i = 0; i < 20; i++) attache.update(0.02, true, true);
+  check("attache a un point, on ne se fait pas broyer", attache.crushed, false);
+  const sorti = new CompressionSensor();
+  for (let i = 0; i < 5; i++) sorti.update(0.02, true);
+  sorti.update(0.02, false);
+  for (let i = 0; i < 5; i++) sorti.update(0.02, true);
+  check("et sortir remet le compte a zero", sorti.crushed, false);
+
+  // La surface qui ecrase : UNE dans tout le build, et c'est le sable MONTANT.
+  const colonnes = markCrushing(sandColumns({ placed: { SandLevelController: [
+    { name: "RisingSand", position: [0, 0, 0],
+      fields: { _initScale: 60, _finalScale: 290 } },
+    { name: "DrainingSand", position: [1000, 0, 0],
+      fields: { _initScale: 300, _finalScale: 66 } },
+  ] } }), { placed: { Surface: [
+    { name: "Collider", position: [0, 0, 0], fields: { _allowCompression: true },
+      volume: { shape: "sphere", radius: 30, center: [0, 0, 0] } },
+  ] } });
+  check("le sable qui monte ecrase", colonnes[0].crushes, true);
+  check("celui qui se vide, non", colonnes[1].crushes, false);
+  check("et le rayon vient du collider", colonnes[0].radius, 30);
+
+  // Le rayon suit l'echelle, en PROPORTION : le multiplier tel quel donnait
+  // 1 800 unites, et la sphere avalait la planete des la premiere image.
+  const faux2 = { name: "RisingSand", position: { x: 0, y: 0, z: 0 },
+    scaling: { x: 60, y: 60, z: 60, set(a, b, c) { this.x = a; this.y = b; this.z = c; } },
+    getAbsolutePosition() { return this.position; } };
+  const niveaux = new SandLevels([colonnes[0]]);
+  niveaux.attach([faux2]);
+  niveaux.update(0);
+  check("au depart, le sable n'avale pas a quarante unites",
+        niveaux.swallows([40, 0, 0]), null);
+  check("ni meme a trente", niveaux.swallows([30, 0, 0]), null);
+  check("mais bien a vingt", !!niveaux.swallows([20, 0, 0]), true);
+  niveaux.update(17 * 60);
+  check("a la dix-septieme minute, il avale a quarante",
+        !!niveaux.swallows([40, 0, 0]), true);
+  check("et son rayon a atteint 145", !!niveaux.swallows([144, 0, 0]), true);
+  check("mais pas au-dela", niveaux.swallows([146, 0, 0]), null);
+
+  // L'etat du joueur : quatre drapeaux, et la mort qui ne se defait pas seule.
+  const etat = new PlayerState();
+  check("au depart, il est dehors et vivant",
+        `${etat.insideShip},${etat.dead}`, "false,false");
+  etat.die();
+  check("mourir se retient", etat.dead, true);
+  etat.reset();
+  check("et la remise a zero le rend vivant", etat.dead, false);
+
+  // --- ce qui pilote la lumiere GLOBALE (docs/54) -------------------------
+  //
+  // `AmbientLightManager` part du NOIR et ne prend l'ambiance du secteur qu'a
+  // trois conditions. Le portage n'en posait aucune.
+  check("dans un secteur, a la lumiere, on garde l'ambiance",
+        ambientTarget(0.3, {}), 0.3);
+  check("dans une zone sans soleil, noir", ambientTarget(0.3, { sunless: true }), 0);
+  check("hors secteur majeur, noir", ambientTarget(0.3, { inMajorSector: false }), 0);
+  check("et sur la carte, noir aussi", ambientTarget(0.3, { onMapCamera: true }), 0);
+  // Le fondu est en `deltaTime` : a soixante images, un soixantieme du chemin.
+  check("le fondu ne fait qu'un soixantieme par image",
+        Number(ambientStep(0, 1, 1 / 60).toFixed(6)), Number((1 / 60).toFixed(6)));
+  check("et il ne depasse jamais la cible", ambientStep(0, 1, 5), 1);
+  let amb = 0.35;
+  for (let i = 0; i < 60; i++) amb = ambientStep(amb, 0, 1 / 60);
+  check("une seconde de grotte assombrit sans eteindre", amb > 0.1 && amb < 0.2, true);
+
+  // Les phares du vaisseau : 600 par defaut, et le secteur ne peut que reduire.
+  check("hors secteur, six cents", shiplightRange(100, false), SHIPLIGHT_RANGE);
+  check("dans un secteur qui limite, la limite", shiplightRange(100, true), 100);
+  check("un secteur sans limite ne rallonge pas", shiplightRange(0, true), SHIPLIGHT_RANGE);
+  check("et un secteur plus large non plus", shiplightRange(5000, true), SHIPLIGHT_RANGE);
+
+  // Une lumiere qui fond repart de la ou elle EN EST, pas de son origine.
+  const lampe = new FadeLight(1);
+  lampe.fadeIntensity(0, 2, 0);
+  lampe.update(1);
+  check("a mi-fondu, la moitie", lampe.intensity, 0.5);
+  lampe.fadeIntensity(1, 2, 1);
+  lampe.update(2);
+  check("un second fondu repart de la valeur courante", lampe.intensity, 0.75);
+  lampe.update(3);
+  check("et atteint sa cible", lampe.intensity, 1);
+  check("puis s'arrete", lampe.fading, false);
+
+  // Le jour et la nuit : ce sont les TRANSITIONS qui manquaient.
+  const cycle = new DayNightTracker(false);
+  check("au depart, ni lever ni coucher",
+        `${cycle.sunrise},${cycle.sunset}`, "false,false");
+  cycle.update(true);
+  check("le lever s'annonce une fois", cycle.sunrise, true);
+  cycle.update(true);
+  check("et pas deux", cycle.sunrise, false);
+  cycle.update(false);
+  check("le coucher aussi", cycle.sunset, true);
+
+  // Les coquilles sonores : c'est l'OREILLE qu'on guette, et le fondu dure une
+  // seconde.
+  check("hors coquille, plein volume", shellGain(0, 5), 1);
+  check("dedans, silence", shellGain(1, 5), 0);
+  check("a mi-fondu, la moitie", shellGain(1, 0.5), 0.5);
+  check("et en sortant, ca remonte", shellGain(0, 0.5), 0.5);
+
+  // --- ce qui suit un autre corps, et ce qui clignote (docs/55) -----------
+  //
+  // `AlignWithTargetBody` : le haut d'une meduse n'est pas donne par la
+  // gravite, mais par un corps DESIGNE — et sans aucune condition
+  // (`CheckAlignmentRequirements` rend vrai, toujours).
+  check("la direction va vers la cible",
+        alignmentDirection([0, 0, 0], [0, 10, 0]).join(","), "0,1,0");
+  check("et elle est normalisee",
+        Number(Math.hypot(...alignmentDirection([1, 2, 3], [4, 8, 15])).toFixed(6)), 1);
+  check("cible confondue : on garde un haut par defaut",
+        alignmentDirection([5, 5, 5], [5, 5, 5]).join(","), "0,1,0");
+
+  // `FieldInheritor` : les champs herites s'ADDITIONNENT.
+  check("sans champ, aucune acceleration", inheritedAcceleration([]).join(","), "0,0,0");
+  check("deux champs s'ajoutent",
+        inheritedAcceleration([[1, 0, 0], [0, 2, 0]]).join(","), "1,2,0");
+  check("et un champ nul ne casse rien",
+        inheritedAcceleration([[1, 0, 0], null]).join(","), "1,0,0");
+
+  // Les clignotants : les deux instances ne battent PAS au meme rythme.
+  const clign = blinkingRenderers({ placed: { BlinkingRenderer: [
+    { name: "UpdateIcon", position: [0, 0, 0],
+      fields: { _onSeconds: 1, _offSeconds: 1, _duration: -1 } },
+    { name: "ComputerUpdated", position: [0, 0, 0],
+      fields: { _onSeconds: 1, _offSeconds: 0.5, _duration: -1 } },
+  ] } });
+  check("deux clignotants", clign.length, 2);
+  check("et ils ne battent pas pareil",
+        `${clign[0].off},${clign[1].off}`, "1,0.5");
+  check("le constructeur, lui, dit un et un", `${BLINK.on},${BLINK.off}`, "1,1");
+  const bat = new Blinker(clign[1]);
+  bat.activate(0);
+  check("au depart, visible", bat.visible, true);
+  bat.update(1.1);
+  check("apres une seconde allumee, eteint", bat.visible, false);
+  bat.update(1.7);
+  check("et rallume apres un demi-seconde", bat.visible, true);
+  // Un `_duration` positif eteint le composant au bout du compte.
+  const bref = new Blinker({ on: 1, off: 1, duration: 2 });
+  bref.activate(0);
+  bref.update(3);
+  check("un clignotant a duree finit par s'arreter", bref.done, true);
+
+  // Les trois noeuds du satellite : la reparation SE VOIT.
+  const casses = brokenNodes({ placed: { BrokenNode: [
+    { name: "BrokenNode", position: [0, 0, 0], body: "BrokenSatellite_Body",
+      fields: { _repairedMaterial: { name: "GreenSelfIllumMat" } } },
+  ] } });
+  check("le noeud sait de quoi il aura l'air repare",
+        casses[0].repairedMaterial, "GreenSelfIllumMat");
+
+  // Les eclaboussures : les trois pointeurs ne sont resolus par rien dans le
+  // build. L'invariant garde ce vide, pour que personne ne les cherche.
+  const remous = waterEffects({ placed: { WaterEffectVolume: [
+    { name: "OceanFluid", position: [0, 0, 0], body: "GiantsDeep_Body", fields: {} },
+  ] } });
+  check("trois tailles d'eclaboussure sont prevues", remous[0].splashes.length, 3);
+  check("et aucune n'est resolue", remous[0].splashes.filter(Boolean).length, 0);
+
+  // --- les impostures de planete (docs/56) --------------------------------
+  //
+  // Deux des cinq n'ont PAS de plan, et une troisieme vise une boite grise.
+  // C'est un chantier de l'alpha, pas une technique aboutie a rattraper.
+  const imps = planetImposters({ cameras: [
+    { name: "LODCam_BrittleHollow", effects: { LODCameraSnapshot: [
+      { interval: 1, firstSnapshot: 1, planet: "BrittleHollow_Body",
+        plane: "LODPlane_BrittleHollow" }] } },
+    { name: "LODCam_TimberHearth", effects: { LODCameraSnapshot: [
+      { interval: 1, firstSnapshot: 1.6, planet: "HomePlanet_graybox",
+        plane: "LODPlane_TimberHearth" }] } },
+    { name: "GasGiantCam", effects: { LODCameraSnapshot: [
+      { interval: 1, firstSnapshot: 1, planet: "GiantsDeep_Body", plane: null }] } },
+  ] });
+  check("trois impostures lues", imps.length, 3);
+  check("deux seulement sont cablees", imps.filter((i) => i.wired).length, 2);
+  check("et l'une des deux vise une boite grise",
+        imps.filter((i) => i.graybox).length, 1);
+  check("la texture fait 256", IMPOSTER_SIZE, 256);
+
+  // Les premiers rendus sont DECALES : 1 ; 1,3 ; 1,6. Les trois ne rendent pas
+  // la meme image, ce qui etale leur cout.
+  check("les premiers rendus sont decales",
+        new Set(imps.map((i) => i.firstSnapshot)).size > 1, true);
+
+  const imposteur = new Imposter(imps[0]);
+  check("avant l'heure, rien", imposteur.due(0.5), false);
+  check("a l'heure, un rendu", imposteur.due(1.1), true);
+  check("et pas deux de suite", imposteur.due(1.2), false);
+  check("puis un par seconde", imposteur.due(2.1), true);
+  // Le build avance `_nextSnapshotTime` d'un intervalle, et non depuis le
+  // dernier rendu : une image sautee ne decale pas les suivantes.
+  const saute = new Imposter({ interval: 1, firstSnapshot: 1 });
+  saute.due(5);
+  check("apres une longue absence, le rythme reprend sans derive",
+        saute.next, 2);
+  check("et il rattrape image par image", (saute.due(5), saute.next), 3);
+
+  // Le plan ne se montre que si la vraie geometrie n'est PAS la.
+  check("sans la vraie planete, l'imposture se voit", imposteur.visible(false), true);
+  check("avec elle, elle s'efface", imposteur.visible(true), false);
+
+  // La camera se met DERRIERE le plan, a la distance de la planete.
+  check("la camera d'imposture est derriere le plan",
+        imposteur.cameraPosition([0, 0, 0], [0, 0, 1], 500).join(","), "0,0,500");
+
+  // --- le suivi de referentiel (docs/58) ----------------------------------
+  //
+  // Le build INVERSE notre vitesse avant de raisonner : il parle du mouvement
+  // apparent de la cible. Le signe de `zSpeed` en sort negatif en approche, ce
+  // qui surprend jusqu'a ce qu'on se souvienne de l'inversion.
+  const approche = relativeMotion([0, 0, -50], [0, 0, 1000], [0, 0, 0]);
+  check("en approche, la vitesse est negative", approche.zSpeed, -50);
+  check("et le cercle est rouge", `${approche.hue},${approche.saturation}`, "0,1");
+  const fuite = relativeMotion([0, 0, 50], [0, 0, 1000], [0, 0, 0]);
+  check("en fuite, elle est positive", fuite.zSpeed, 50);
+  check("et le cercle est vert", `${fuite.hue},${fuite.saturation}`, "140,1");
+  const lent = relativeMotion([0, 0, -0.5], [0, 0, 1000], [0, 0, 0]);
+  check("entre les deux, il est blanc", lent.saturation, 0);
+
+  // La derive laterale, et le seuil qui s'elargit avec la distance.
+  check("tout droit, c'est direct", approche.lateralSpeed, 0);
+  const travers = relativeMotion([30, 0, -50], [0, 0, 1000], [0, 0, 0]);
+  check("trente de travers a mille unites ne sont pas directs", travers.direct, false);
+  const doux = relativeMotion([5, 0, -50], [0, 0, 1000], [0, 0, 0]);
+  check("cinq, oui", doux.direct, true);
+  const proche = relativeMotion([5, 0, -50], [0, 0, 50], [0, 0, 0]);
+  check("les memes cinq a cinquante unites, non", proche.direct, false);
+  // Le palier a 100 est du CODE MORT : la table de saut le rend inatteignable,
+  // et l'invariant garde qu'on ne l'a pas porte « par evidence ».
+  check("deux paliers seulement, pas trois",
+        [10, 150, 2000].map(directThreshold).join(","), "1,10,10");
+  check("et le troisieme est prevu sans etre atteint", DEAD_THRESHOLD, 100);
+  // Le decalage des fleches grandit avec la DISTANCE, et suit le signe de la
+  // vitesse INVERSEE.
+  check("le decalage suit la distance et le facteur",
+        Number(travers.xyOffset[0].toFixed(4)),
+        Number((-30 * 1000 * ARROW_OFFSET).toFixed(4)));
+
+  // La lecture passe en kilometres au-dela de CINQ mille, pas de mille.
+  check("sous cinq mille, des metres", trackerReadout(4999, -10), " 4999m\n -10m/s");
+  check("au-dela, des kilometres", trackerReadout(6200, -50), " 6km\n -50m/s");
+
+  // La poussiere de mouvement : rien sous trente unites par seconde.
+  check("sans cible visee, pas de poussiere",
+        motionDust(100, { targeting: false }).emitting, false);
+  check("sur la carte non plus", motionDust(100, { mapView: true }).emitting, false);
+  check("le seuil de visibilite est a trente", DUST.minSpeed, 30);
+  check("a dix, on emet mais on ne voit rien", motionDust(10).alpha, 0);
+  check("a cinquante, on voit", motionDust(50).alpha > 0, true);
+  check("et l'opacite plafonne", motionDust(1000).alpha, DUST.maxAlpha);
+  // Plus vite : plus de traits, et plus courts.
+  check("la duree de vie diminue avec la vitesse",
+        motionDust(200).lifetime < motionDust(50).lifetime, true);
+  check("le debit augmente", motionDust(200).rate > motionDust(50).rate, true);
+  check("et la duree de vie a un plancher", motionDust(1000).lifetime, DUST.minLifetime);
+
+  // Les six buses du vaisseau MINIATURE : la buse allumee est celle qui POUSSE,
+  // donc l'OPPOSEE au mouvement. Ecrit a l'envers, les flammes sortent du cote
+  // ou il va.
+  check("six buses", SHIP_NOZZLES.length, 6);
+  const versLaDroite = shipNozzles([1, 0, 0]);
+  check("pousser a droite allume la buse de GAUCHE",
+        `${versLaDroite.left},${versLaDroite.right}`, "true,false");
+  const versLeHaut = shipNozzles([0, -1, 0]);
+  check("monter allume celle du haut",
+        `${versLeHaut.up},${versLeHaut.down}`, "true,false");
+  const enAvant = shipNozzles([0, 0, -1]);
+  check("avancer allume celle de l'avant",
+        `${enAvant.forward},${enAvant.rear}`, "true,false");
+  const repos = shipNozzles([0, 0, 0]);
+  check("au repos, aucune", Object.values(repos).filter(Boolean).length, 0);
+  // Les six s'appellent toutes `Thruster_Small` : seule leur place les
+  // distingue, comme les nuages et les pivots de tornade.
+  const buses = modelShipNozzles({ placed: { ThrusterParticleController: [
+    { name: "Thrusters", body: "ModelShip_Body", nozzles: {
+      forward: [0, 0, -1], rear: [0, 0, 1], right: [-1, 0, 0],
+      left: [1, 0, 0], up: [0, -1, 0], down: [0, 1, 0] } },
+  ] } });
+  check("les six portent une position", buses.length, 6);
+  check("et elles sont toutes distinctes",
+        new Set(buses.map((b) => b.position.join(","))).size, 6);
+  check("sur le vaisseau miniature, pas celui du joueur",
+        buses[0].body, "ModelShip_Body");
+
+  // La sonde ancienne : cinquante d'acceleration locale vers l'avant, sans fin.
+  check("la sonde ancienne pousse a cinquante", ANCIENT_PROBE_THRUST, 50);
+  check("droit devant elle",
+        ancientProbeAcceleration([0, 0, 1]).join(","), "0,0,50");
+
+  // Le volume compose : UNE entree et UNE sortie, quel que soit le nombre
+  // d'enfants traverses. Sans ce compte, passer d'un cylindre au suivant
+  // emettrait une sortie puis une entree, et tout ce qui ecoute clignoterait.
+  const compose = new CompoundTrigger();
+  check("entrer dans le premier enfant annonce une entree",
+        compose.enterChild("joueur"), true);
+  check("entrer dans un second, chevauchant, n'en annonce pas une seconde",
+        compose.enterChild("joueur"), false);
+  check("et l'on est compte une seule fois", compose.inside, 1);
+  check("sortir du premier n'annonce rien", compose.exitChild("joueur"), false);
+  check("on est toujours dedans", compose.contains("joueur"), true);
+  check("sortir du dernier annonce la sortie", compose.exitChild("joueur"), true);
+  check("et l'on n'est plus dedans", compose.inside, 0);
+  // Deux corps distincts se comptent separement.
+  compose.enterChild("a"); compose.enterChild("b");
+  check("deux corps, deux comptes", compose.inside, 2);
+  compose.exitChild("a");
+  check("l'un sort sans emporter l'autre", compose.contains("b"), true);
+  // Sortir de ce dans quoi on n'est jamais entre ne fait rien.
+  check("une sortie sans entree ne fait rien", compose.exitChild("inconnu"), false);
 }
 
 report();

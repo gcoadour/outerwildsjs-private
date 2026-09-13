@@ -55,6 +55,24 @@ export function deathCause(type) {
   }
 }
 
+/**
+ * L'inverse : la valeur de `DeathType` que produit une cause du portage.
+ *
+ * Elle sert aux effets d'image, qui ne traitent pas les cinq valeurs de la
+ * meme facon — cinq secondes de fondu pour l'asphyxie, un eclair rouge pour
+ * l'energie et la supernova, trois dixiemes pour le reste. Sans cette
+ * correspondance, mourir devore rendrait le meme ecran que bruler.
+ */
+export function deathTypeOf(cause) {
+  switch (cause) {
+    case "impact": return 1;
+    case "asphyxie": return 2;
+    case "incineration": return 3;
+    case "supernova": return 4;
+    default: return 0;            // devore, ecrase : des morts par defaut
+  }
+}
+
 /** Volumes de destruction poses dans la scene. */
 export function destructionVolumes(gameplay) {
   return ((gameplay.placed || {}).DestructionVolume || []).map((c) => {
@@ -342,6 +360,27 @@ export function signalVolumes(gameplay) {
 }
 
 /**
+ * La zone de signal qui contient un point, par genre.
+ *
+ * `signalVolumes` etait extrait depuis longtemps et LU PAR PERSONNE — la
+ * troisieme fois que ce depot rencontre ce cas (docs/35, docs/47). Les zones
+ * sombres commandent l'ambiance globale (`AmbientLightManager` coupe tout dans
+ * une zone sans soleil), les brouilleurs coupent le signal du telescope.
+ *
+ * @param point  position MONDE
+ * @param offset fonction qui rend le decalage du corps porteur
+ */
+export function signalZoneAt(zones, kind, point, offset = () => [0, 0, 0]) {
+  for (const z of zones) {
+    if (z.kind !== kind || !z.volume) continue;
+    const d = offset(z);
+    if (insideVolume(z.volume, [point[0] - d[0], point[1] - d[1], point[2] - d[2]],
+                     z.position, z.rotation)) return z;
+  }
+  return null;
+}
+
+/**
  * Les neuf emetteurs de rayonnement : huit feux de camp et l'etoile.
  *
  * `magnitude` vaut 100 partout ; ce qui change est la portee et la courbe. Les
@@ -392,4 +431,68 @@ export function radiationAt(emitter, distance) {
   const r = (emitter.volume && emitter.volume.radius) || 0;
   if (!r) return 0;
   return emitter.magnitude * Math.max(0, 1 - distance / r);
+}
+
+/**
+ * Un volume compose de plusieurs declencheurs enfants.
+ *
+ * @lit CompoundTriggerVolume, ChildTriggerVolume, SandstormVolume
+ *
+ * `CompoundTriggerVolume` tient un COMPTE par collider, a travers tous ses
+ * enfants :
+ *
+ *   entree dans un enfant  si le collider n'est pas suivi -> OnEntry, puis +1
+ *   sortie d'un enfant     -1 ; si le compte tombe a zero -> OnExit
+ *
+ * Une forme faite de plusieurs cylindres qui se chevauchent — l'entonnoir de
+ * sable — ou de plusieurs boites — la tempete de sable — emet donc UNE entree
+ * et UNE sortie, quel que soit le nombre d'enfants traverses. Sans ce compte,
+ * passer d'un cylindre au suivant emettrait une sortie puis une entree, et tout
+ * ce qui ecoute clignoterait.
+ *
+ * La classe ne connait ni Babylon ni le DOM : elle compte, et rend les deux
+ * evenements.
+ */
+export class CompoundTrigger {
+  constructor() {
+    this.counts = new Map();
+    this.entered = [];     // ce qui vient d'entrer, cette image
+    this.exited = [];      // ce qui vient de sortir
+  }
+
+  /** Nombre de corps actuellement dans le volume compose. */
+  get inside() { return this.counts.size; }
+
+  contains(id) { return this.counts.has(id); }
+
+  enterChild(id) {
+    this.entered = [];
+    if (!this.counts.has(id)) { this.counts.set(id, 0); this.entered.push(id); }
+    this.counts.set(id, this.counts.get(id) + 1);
+    return this.entered.length > 0;
+  }
+
+  exitChild(id) {
+    this.exited = [];
+    if (!this.counts.has(id)) return false;
+    const n = this.counts.get(id) - 1;
+    this.counts.set(id, n);
+    if (n <= 0) { this.counts.delete(id); this.exited.push(id); }
+    return this.exited.length > 0;
+  }
+
+  reset() { this.counts.clear(); this.entered = []; this.exited = []; }
+}
+
+/**
+ * Les tempetes de sable, qui vivent sur un volume compose.
+ *
+ * `SandstormVolume.OnEntry` / `OnExit` ne testent qu'une chose : le tag
+ * `PlayerDetector`. Ce n'est donc pas n'importe quoi qui declenche la tempete,
+ * c'est le JOUEUR — un vaisseau qui traverse ne la declenche pas.
+ */
+export function sandstormVolumes(gameplay) {
+  return ((gameplay.placed || {}).SandstormVolume || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position, volume: c.volume || null,
+  }));
 }

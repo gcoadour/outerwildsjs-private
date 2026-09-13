@@ -11,6 +11,9 @@
 // tombent dans le trou noir et ressortent au trou blanc, a l'autre bout du
 // systeme. Le joueur subit le meme sort.
 
+// @lit BlackHoleVolume, WhiteHoleVolume, DetachableFragment
+// Le trou noir, le trou blanc et les fragments qui tombent dedans.
+
 export const CAPTURE_RADIUS = 40;
 export const EXIT_CONE_DEG = 60;
 export const DETACHABLE_FRACTION = 0.25;

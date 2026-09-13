@@ -119,6 +119,14 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   font-family: "OW Helmet", ui-monospace, monospace;
   font-size: 11px; letter-spacing: 1px; color: rgba(159, 214, 196, .8);
 }
+/* PlayerCameraEffectController.OnGUI : un rectangle noir plein ecran, opacite
+   `_fadeFraction`, pose a `GUI.depth = -1` — c'est-a-dire AU-DESSUS de tout le
+   reste de l'interface. Un fondu de mort qui laisserait le HUD lisible
+   par-dessus ne serait pas un fondu de mort. */
+.fade-ecran {
+  position: absolute; inset: 0; background: #000; pointer-events: none;
+  opacity: 0; z-index: 40;
+}
 .ow-flashback {
   position: absolute; inset: 0; background: #fff; pointer-events: none;
   opacity: 0;

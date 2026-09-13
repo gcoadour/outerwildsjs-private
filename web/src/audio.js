@@ -601,3 +601,40 @@ export class AudioField {
     return n;
   }
 }
+
+/**
+ * Les coquilles sonores : deux `AudioShell` dans la scene.
+ *
+ * @lit AudioShell, FadeInAudioOnAwake, OWAudioSource
+ *
+ * `OnTriggerEnter` teste le tag `PlayerCameraDetector` — c'est l'OREILLE qu'on
+ * guette, pas le corps — et fait fondre sa source en UNE seconde ; sortir la
+ * remonte. Une coquille est donc un endroit ou l'on cesse d'entendre quelque
+ * chose en y entrant la tete.
+ *
+ * `FadeInAudioOnAwake` n'a aucun champ et son `Start` tient en un appel : la
+ * source monte au lieu de commencer a plein volume. Sans lui, le premier
+ * instant de la partie claque.
+ */
+export const SHELL_FADE = 1;
+
+export function audioShells(gameplay) {
+  return ((gameplay.placed || {}).AudioShell || []).map((c) => ({
+    name: c.name,
+    position: c.position,
+    body: c.body || null,
+    volume: c.volume || null,
+  }));
+}
+
+/**
+ * Le volume d'une source sous l'effet des coquilles ou l'on a la tete.
+ *
+ * @param inside nombre de coquilles contenant l'oreille
+ * @param t      temps depuis l'entree (ou la sortie) de la derniere
+ * @returns le facteur a appliquer, de 0 (etouffe) a 1
+ */
+export function shellGain(inside, secondsSinceChange, fade = SHELL_FADE) {
+  const u = fade > 0 ? Math.max(0, Math.min(1, secondsSinceChange / fade)) : 1;
+  return inside > 0 ? 1 - u : u;
+}

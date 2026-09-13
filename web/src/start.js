@@ -31,6 +31,10 @@
 // positions et les directions du build s'emploient donc telles quelles au
 // premier instant, sans conversion.
 
+// @lit PlayerSpawner, SpawnPoint, TimeLoopTeleportReceiver
+// Le point d'apparition, son regard, et la relocalisation du joueur au
+// redemarrage de la boucle.
+
 /** Hauteur des yeux au-dessus du centre du corps du joueur. */
 export const EYE_HEIGHT = 1.2;
 

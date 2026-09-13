@@ -98,6 +98,30 @@ portage.
 | équipement | combinaison, sonde et minicarte **se ramassent** |
 | entraînement en apesanteur | les 3 nœuds du satellite cassé, et leur annonce |
 | volumes de jeu | ce qui blesse, l'apesanteur déclarée, les fenêtres de vue |
+| effets d'image | 24 effets sur 15 caméras : bloom, glow, vignette, tourbillon, grain |
+| voûte céleste | elle **tourne** vers l'étoile : le jour et la nuit du build |
+| nuages | dix visages sur 24 maillages homonymes, rattachés par position |
+| champ d'étoiles | mille étoiles qui **s'éteignent** au fil de la boucle |
+| dégâts du vaisseau | relus à l'endroit : le masque **s'accumule**, 3 pièces au plus |
+| marqueurs de carte | les 13 du build, avec leurs vrais noms de jeu |
+| tornades | six pivots qui **basculent**, à une vitesse tirée au réveil |
+| interrupteur du regard | on **fixe** une toile trois secondes, la porte s'efface |
+| tour de lancement | terminal qui refuse, ascenseur de 31,5 u en 5 s |
+| atterrissage | posé = **trois** capteurs, et le **même** corps |
+| casque et alarme | le verre **traîne** derrière le regard, la coque crie à 30 % |
+| bruit du joueur | proportionnel à la poussée, et lancer une sonde **s'entend** |
+| mort par écrasement | le sable montant, seule surface du build qui écrase |
+| lumière globale | elle **fond**, se coupe dans une zone sombre et sur la carte |
+| attaches | 14 alignements sur un corps désigné, 9 héritiers de champ |
+| réparation visible | un nœud réparé devient vert |
+| impostures de planète | les 3 câblées rendues à 1 Hz, effacées si le réel est là |
+| modules de particules | la queue de la comète, le plafond de l'explosion |
+| suivi de référentiel | distance et vitesse d'approche de la cible visée |
+| poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
+| volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
+| vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
+| vérification avec le build | **112/112**, mesurée après la série ([`59`](59-etat.md)) |
+| champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 > **Corrigé par le navigateur** ([`46-migration-lots.md`](46-migration-lots.md)).
@@ -135,7 +159,7 @@ dans l'alpha.
 | quatre des cinq savoirs | un seul a une source vivante ; les autres sont du code mort |
 | le déblocage par branche de dialogue | les 20 attributs `eventbased` valent tous `"false"` |
 | les machines à états d'animation | 11 états, **zéro transition** dans tout le build |
-| les dégâts localisés du vaisseau | masque et modificateurs à **0** : la mécanique est câblée, les réglages ne l'allument pas |
+| ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |
 | les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
 | le modèle de sonde | `_probePrefab` n'est pas résolu |
 | les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
@@ -194,27 +218,38 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   groupe hors de portée n'entre plus dans la construction, et l'ensemble
   éveillé est réévalué en continu — mais reconstruit au plus une fois toutes
   les deux secondes, parce que reconstruire coûte près d'une seconde.
-- **La rotation de la voûte céleste** (`SkyBehavior.LookAt`) : c'est elle qui
-  fait le jour et la nuit, et la convention d'axes entre le `LookAt` d'Unity et
-  l'export glTF, qui inverse Z, reste à établir. Deux orientations essayées,
-  toutes deux fausses ([`41-ciel.md`](41-ciel.md)).
-- **Les dix textures de nuage** sont extraites et nommées par nuage ; il reste à
-  les exporter comme images et à les poser sur 24 maillages qui portent tous le
-  même nom.
-- **Le champ d'étoiles** (`DistantStarController`) est extrait, son système de
-  particules ne l'est pas.
-- **59 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
-  compris — c'était 170 en [`42`](42-lumieres.md), 109 avant les six lots de
-  [`46`](46-migration-lots.md). Ce qui reste n'est plus une famille mais une
-  queue : la moitié des entrées est à une seule instance, et les plus lourdes
-  sont `InertiaTensorCalibrator` (14), les invites de la guimauve (8) et le
-  pivot des tornades (6). Le compte tient compte des motifs, et c'est la carte
+- ~~**La rotation de la voûte céleste**~~ **Fermé** ([`48`](48-ciel-mesure.md)) :
+  la convention ne se déduisait pas de deux captures d'écran, elle se lit sur les
+  uv du maillage. Le disque bleu est au `+Z` local, et le calcul passe par les
+  directions monde des axes du parent plutôt que par un signe supposé.
+- ~~**Les dix textures de nuage**~~ **Fermé** : exportées en images, et posées
+  par **position** — les 24 nuages s'appellent tous `PieceOfRing`. Le matériau
+  est cloné par nuage, comme `renderer.material` le fait dans le build.
+- ~~**Le champ d'étoiles**~~ **Fermé**, et il cachait la plus visible des choses
+  que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
+  pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
+  est écrit dans le ciel.
+- **13 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+  compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
+  de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
+  **commentaires** avant de compter, et c'est un commentaire qui avait caché
+  toute la pile d'effets d'image ([`47`](47-effets-image.md)).
+  La série du compte : 170 en [`42`](42-lumieres.md), 109 avant les six lots de
+  [`46`](46-migration-lots.md), 59 après, 77 une fois les commentaires retirés.
+  Puis **62** après la queue de [`49`](49-queue.md), et **13** après la série
+  [`50`](50-regard.md)–[`58`](58-suivi.md). Sur les **1 390 instances** posées
+  dans `level0`, **1 356 sont lues — 97,6 %**. Les 34 qui restent sont nommées
+  une par une en fin de [`58`](58-suivi.md) : quatorze calibrateurs de tenseur
+  d'inertie, sept outils de studio, sept mises en page, trois singletons de
+  câblage, une bibliothèque d'explosion tierce et un tracé d'onde.
+  `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
   de ce qui reste.
-- **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
-  restent ouvertes : le jeu affiche un système entier parce que les planètes
-  lointaines sont des textures rafraîchies une fois par seconde. Le portage a
-  résolu le même problème autrement — sphères et secteurs — ce qui est
-  légitime, mais le ciel n'y ressemble pas.
+- ~~**Les impostures de planète**~~ **Fermé** ([`56`](56-impostures.md)), et la
+  mesure a démenti la page : sur les cinq caméras, **deux n'ont aucun plan** et
+  une troisième vise un `HomePlanet_graybox`. Le système est un chantier de
+  l'alpha, pas une technique aboutie. Surtout, les trois plans câblés étaient
+  **dans la géométrie, renderer actif, à la position de leur planète** : le
+  portage collait trois quads plats par-dessus les vraies planètes.
 - **11,1 Mo de Babylon** sur les 66 du démarrage
   ([`27-poids.md`](27-poids.md)) : les réduire demande une étape de
   construction, que le dépôt n'a pas. C'est un choix de projet, pas une

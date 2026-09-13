@@ -5,10 +5,12 @@ import { UnityEnv } from "../web/src/pipeline/unity/env.js";
 import { TypeUniverse } from "../web/src/pipeline/dotnet/typetree.js";
 import { ExtractContext } from "../web/src/pipeline/extract/context.js";
 import { extractScene } from "../web/src/pipeline/extract/scene.js";
+import { extractCameras } from "../web/src/pipeline/extract/camera.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
-import { sandColumns, sandFunnels, funnelActive } from "../web/src/sand.js";
+import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
+import { signalVolumes } from "../web/src/volumes.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
          zeroGFields, gameSectors, probePrompts,
          radiationEmitters } from "../web/src/volumes.js";
@@ -24,6 +26,7 @@ import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { extractSky } from "../web/src/pipeline/extract/sky.js";
+import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
@@ -588,6 +591,35 @@ console.log("     sources avec courbe echantillonnee:", courbes,
               "| textures:", sky.textures.join(" "));
   check("la voute est extraite", !!sky.shell, true);
   check("son rayon de collider", sky.shell && sky.shell.radius, 250.749);
+  // La question que docs/41-ciel.md laissait ouverte — « la convention d'axes
+  // reste a etablir » — se lit sur les uv du maillage : le centre du disque
+  // bleu (uv 0,5 ; 0,5) tombe sur le +Z local, et l'uv est une projection
+  // polaire centree dessus. Rendu ici avec le Z deja inverse par l'export.
+  check("le disque de ciel est au +Z local, Z inverse par l'export",
+        (sky.shell.discDirection || []).join(","), "0,0,-1");
+  // Les dix textures de nuage sortent enfin comme IMAGES. Elles etaient
+  // nommees depuis docs/41, et les 24 nuages portaient donc tous le visage
+  // serialise sur le materiau partage.
+  const vues = [];
+  const skyImg = extractSky(ctx, (nom, img) => { vues.push([nom, img.width]); return nom; });
+  check("dix images de nuage ecrites", vues.length, 10);
+  check("toutes en 256 pixels", vues.every(([, w]) => w === 256), true);
+  check("et chaque nuage sait laquelle est la sienne",
+        skyImg.clouds.every((c) => !!c.image), true);
+  check("les vingt-quatre portent le meme nom",
+        new Set(skyImg.clouds.map((c) => c.name)).size, 1);
+  // Le champ d'etoiles : mille etoiles qui s'eteignent une a une.
+  const champ = sky.stars[0];
+  check("un champ d'etoiles", sky.stars.length, 1);
+  check("de mille etoiles", champ.count, 1000);
+  check("a trente mille unites", champ.radius, 30000);
+  check("de 200 a 400 d'envergure", (champ.size || []).join(","), "200,400");
+  check("sa courbe d'extinction est echantillonnee", champ.explosionCurve.length, 21);
+  check("elle part de zero", champ.explosionCurve[0], 0);
+  check("et finit a un", champ.explosionCurve[20], 1);
+  // `_starsUpdateIntervalInSeconds` vaut zero : le controle est fait a chaque
+  // image, et l'invariant garde ce zero.
+  check("le controle se fait a chaque image", champ.interval, 0);
   // `_skyRadius` n'est pas serialise : c'est le 320 du constructeur, et c'est
   // par LUI que le build divise, pas par le rayon du collider.
   check("son rayon de ciel vient du constructeur", sky.shell && sky.shell.skyRadius, 320);
@@ -679,6 +711,268 @@ const ctrls = Object.entries(gp.placed)
   .flatMap(([cls, l]) => l.map((e) => ({ cls, e })));
 console.log("     controleurs de dialogue:", ctrls.length,
             "| avec arbres:", ctrls.filter(({ e }) => e.trees).length);
+
+// --- les cameras et leurs effets d'image (docs/47-effets-image.md) ---------
+//
+// Le recensement les donnait pour LUES parce que trois de leurs classes sont
+// citees dans un commentaire de `shaders/index.js`. Ces comptes-la sont donc
+// la contre-mesure : ils portent sur la scene, pas sur ce que le portage dit.
+const cams = extractCameras(ctx);
+check("quinze cameras dans level0", cams.count, 15);
+check("et vingt-quatre effets d'image poses dessus", cams.effectCount, 24);
+check("toutes lisibles", Object.keys(cams.unreadable).length, 0);
+
+const parNom = new Map(cams.cameras.map((c) => [c.name, c]));
+const joueur = parNom.get("PlayerCamera");
+check("la camera du joueur voit a 70 degres", joueur.fov, 70);
+check("son plan proche est a 0,05", joueur.near, 0.05);
+check("son plan lointain a 50 000", joueur.far, 50000);
+check("elle est en HDR", joueur.hdr, true);
+check("elle porte six effets", Object.keys(joueur.effects).length, 6);
+check("dont un bloom au seuil de 0,8",
+      joueur.effects.BloomAndLensFlares[0].threshold, 0.8);
+check("additif, comme celui de la carte", joueur.effects.BloomAndLensFlares[0].blend, "add");
+check("son glow est bleu", joueur.effects.GlowEffect[0].tint.slice(0, 3).join(","),
+      "0.3216,0.6588,1");
+check("sa vignette est discrete au repos", joueur.effects.Vignetting[0].intensity, 0.375);
+check("et son tourbillon prend tout l'ecran", joueur.effects.TwirlEffect[0].radius[0], 1.5);
+
+// Les halos de lentille sont poses et ETEINTS sur les deux instances : le
+// build a le composant et ne s'en sert pas. On le garde ecrit, faute de quoi
+// quelqu'un les portera un jour pour rien.
+const blooms = cams.cameras.flatMap((c) => c.effects.BloomAndLensFlares || []);
+check("deux blooms dans la scene", blooms.length, 2);
+check("aucun n'allume ses halos", blooms.filter((b) => b.lensflares).length, 0);
+check("celui de la carte a un seuil plus bas",
+      parNom.get("MapCamera").effects.BloomAndLensFlares[0].threshold, 0.5);
+
+// LandingCam porte DEUX Tonemapping : c'est pourquoi chaque effet est une
+// liste et non un champ.
+check("la camera d'atterrissage voit a 100 degres", parNom.get("LandingCam").fov, 100);
+check("et porte deux tonemapping", parNom.get("LandingCam").effects.Tonemapping.length, 2);
+check("son grain a la force 4", parNom.get("LandingCam").effects.NoiseAndGrain[0].strength, 4);
+check("la camera du satellite est monochrome",
+      parNom.get("SatelliteCamera").effects.NoiseEffect[0].monochrome, true);
+
+// Les cinq impostures de planete : `_snapshotInterval` vaut 1 partout — mais
+// le systeme est A MOITIE CABLE, et c'est le build qui le dit
+// (docs/56-impostures.md).
+const lods = cams.cameras.filter((c) => c.effects.LODCameraSnapshot);
+check("cinq cameras d'imposture", lods.length, 5);
+check("toutes a une image par seconde",
+      lods.filter((c) => c.effects.LODCameraSnapshot[0].interval === 1).length, 5);
+const snaps = lods.map((c) => c.effects.LODCameraSnapshot[0]);
+check("deux d'entre elles n'ont AUCUN plan",
+      snaps.filter((s) => !s.plane).length, 2);
+check("une n'a meme pas de planete", snaps.filter((s) => !s.planet).length, 1);
+check("et l'une des trois cablees vise une boite grise",
+      snaps.filter((s) => /graybox/i.test(s.planet || "")).length, 1);
+// Les premiers rendus sont DECALES, pour ne pas rendre les trois la meme image.
+check("les premiers rendus sont decales",
+      new Set(snaps.map((s) => s.firstSnapshot)).size, 3);
+check("les trois plans cables portent leur nom",
+      snaps.filter((s) => s.plane).map((s) => s.plane).sort().join(","),
+      "LODPlane_BrittleHollow,LODPlane_DB,LODPlane_TimberHearth");
+
+// Le controleur ne serialise RIEN : ses constantes viennent du constructeur.
+// L'invariant garde cette absence, exactement comme pour les seuils de la
+// marche (docs/46) — sans lui, une extraction qui cesserait de lire ses champs
+// passerait pour normale.
+const ctrl = [...ctx.behaviours(["PlayerCameraEffectController"])];
+check("un seul controleur d'effets", ctrl.length, 1);
+check("et il ne serialise aucun champ",
+      Object.keys(ctx.scriptFields(ctrl[0].obj) || {}).length, 0);
+
+// --- la queue du recensement (docs/49-queue.md) ---------------------------
+//
+// Ce qui restait apres les six lots, une fois les commentaires retires du
+// comptage : quatre classes qui se lisent, deux qui se mesurent et se ferment.
+const marqueurs = (gp.placed.MapMarker || []);
+check("treize marqueurs de carte", marqueurs.length, 13);
+check("et tous portent un nom de jeu",
+      marqueurs.every((m) => (m.fields || {})._label), true);
+check("le vaisseau est du type Ship (6)",
+      (marqueurs.find((m) => m.name === "Ship_Body").fields || {})._markerType, 6);
+check("et l'un d'eux n'est pas un corps mais une ile",
+      !!marqueurs.find((m) => (m.fields || {})._label === "Giant's Landing"), true);
+
+const moteurs = (gp.placed.EngineComponent || []);
+check("dix reacteurs", moteurs.length, 10);
+// `_alertLocation` vaut Left (8) pour les cinq de gauche et Right (16) pour les
+// cinq de droite : cinq et cinq, sans exception.
+check("cinq a gauche", moteurs.filter((m) => m.fields._alertLocation === 8).length, 5);
+check("cinq a droite", moteurs.filter((m) => m.fields._alertLocation === 16).length, 5);
+check("chacun sur une buse distincte",
+      new Set(moteurs.map((m) => m.fields._thrusterLocation)).size, 10);
+// Zero sur les dix : n'importe quel choc abime le reacteur le plus proche.
+check("aucun n'a de seuil d'impact",
+      moteurs.every((m) => (m.fields._impactThreshold ?? 0) === 0), true);
+
+// `_damageLocationMask` est une SORTIE qui s'accumule, pas un filtre : sa
+// valeur serialisee est l'etat de depart d'un vaisseau intact.
+const dmg = (gp.singletons.ShipDamageController || {}).fields || {};
+check("le masque de degats part de zero", dmg._damageLocationMask, 0);
+check("les seuils d'impact sont 15 et 30",
+      `${dmg._lightImpactThreshold},${dmg._mediumImpactThreshold}`, "15,30");
+check("la mort instantanee est a 300", dmg._instantDeathSpeed, 300);
+check("et les propulseurs ne se coupent PAS dans cette alpha",
+      !!dmg._disableDamagedThrusters, false);
+
+check("six pivots de tornade", (gp.placed.TornadoPivotController || []).length, 6);
+// `_speed` n'est serialise sur aucun : il est TIRE au reveil, entre 1 et 2.
+check("dont aucun ne serialise sa vitesse",
+      (gp.placed.TornadoPivotController || []).every((t) => !("_speed" in (t.fields || {}))), true);
+check("trois suiveurs", (gp.placed.MatchTransform || []).length, 3);
+check("dont un sans cible",
+      (gp.placed.MatchTransform || []).filter((m) => !m.fields._targetTransform).length, 1);
+check("dix-huit conteneurs jetables", (gp.placed.DisposableContainer || []).length, 18);
+check("quatorze calibrateurs d'inertie",
+      (gp.placed.InertiaTensorCalibrator || []).length, 14);
+
+// On allume en REGARDANT (docs/50-regard.md) : un interrupteur, une toile, une
+// porte. Trois classes enchainees, aucune lue avant.
+const regards = (gp.placed.GazeSwitch || []);
+check("un seul interrupteur du regard", regards.length, 1);
+check("pose sur une jumelle, et non dans Dark Bramble", regards[0].body, "Twin01_Body");
+check("son rayon vient de son collider", regards[0].volume.radius, 6);
+check("dix degres d'ouverture", regards[0].fields._angleOfActivation, 10);
+check("trois secondes de charge", regards[0].fields._secondsToCharge, 3);
+// `_activationDist` vient du constructeur : l'invariant garde son ABSENCE de
+// la scene, comme les seuils de la marche (docs/46).
+check("mais la distance d'activation n'est pas dans la scene",
+      "_activationDist" in regards[0].fields, false);
+check("une toile", (gp.placed.GazeWebAnimator || []).length, 1);
+check("et une porte d'energie", (gp.placed.EnergyGate || []).length, 1);
+
+// La tour de lancement (docs/51-tour.md).
+const asc = (gp.placed.Elevator || []);
+check("un ascenseur", asc.length, 1);
+check("sur Timber Hearth", asc[0].body, "TimberHearth_Body");
+// La scene CONTREDIT le constructeur (10 et 3), et c'est le seul endroit de
+// la serie ou cela arrive : l'invariant garde la valeur de la scene.
+check("sa course fait 31,5 unites", asc[0].fields._trackHeight, 31.5);
+check("et dure cinq secondes", asc[0].fields._liftDuration, 5);
+check("un terminal de lancement", (gp.placed.LaunchTerminal || []).length, 1);
+check("et son controleur d'ascenseur", (gp.placed.LaunchElevatorController || []).length, 1);
+const pads = (gp.placed.LandingPadSensor || []);
+check("trois capteurs de pad", pads.length, 3);
+check("tous sur le vaisseau", pads.every((s) => s.body === "Ship_Body"), true);
+check("tous de rayon un demi", pads.every((s) => s.volume && s.volume.radius === 0.5), true);
+check("et tous avec le meme son de contact",
+      new Set(pads.map((s) => s.fields._touchdownSound.name)).size, 1);
+check("un gestionnaire de pads", (gp.placed.LandingPadManager || []).length, 1);
+check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
+
+// Les quatre modules de particules rares (docs/57-particules.md). Le compte
+// disait qu'ils ne servaient JAMAIS ; refait, il en trouve quatre usages.
+{
+  const parts = extractParticles(ctx, (n) => n);
+  const avec = (k) => parts.systems.filter((s) => s[k]);
+  check("une vitesse constante, sur la comete", avec("velocity").length, 1);
+  check("et elle part en arriere a cent", avec("velocity")[0].velocity.z, 100);
+  check("un plafond de vitesse, sur l'explosion", avec("clampVelocity").length, 1);
+  check("plafond cent, amortissement total",
+        `${avec("clampVelocity")[0].clampVelocity.magnitude},` +
+        `${avec("clampVelocity")[0].clampVelocity.dampen}`, "100,1");
+  check("une rotation par vitesse", avec("rotationBySpeed").length, 1);
+  // `scalar` est en RADIANS dans le build : 0,349 rad/s font vingt degres.
+  check("de vingt degres par seconde",
+        avec("rotationBySpeed")[0].rotationBySpeed.degreesPerSecond, 20);
+  // Deux `SubModule` actifs, et celui de `DistantStars` n'a AUCUN
+  // sous-emetteur : il est allume et ne fait rien.
+  const subs = parts.systems.filter((s) => s.subEmitters !== null);
+  check("deux modules de sous-emetteurs", subs.length, 2);
+  check("dont un entierement vide",
+        subs.filter((s) => s.subEmitters === 0).length, 1);
+}
+
+// Le casque, l'alarme, les voyants, les invites de guimauve (docs/52-casque.md).
+const roasts = (gp.placed.RoastPromptEvent || []);
+check("huit invites de guimauve", roasts.length, 8);
+check("toutes a quatre unites",
+      roasts.every((r) => r.fields._roastDistance === 4), true);
+const casqueB = (gp.placed.HUDHelmet || []);
+check("un casque", casqueB.length, 1);
+// La scene CONTREDIT le constructeur (0,1), comme la course de l'ascenseur.
+check("qui traine a 0,05 et non 0,1",
+      Number(casqueB[0].fields._helmetLagSpeed.toFixed(2)), 0.05);
+check("une alarme generale", (gp.placed.MasterAlarm || []).length, 1);
+check("posee sur le vaisseau", (gp.placed.MasterAlarm || [])[0].body, "Ship_Body");
+check("un afficheur de degats", (gp.placed.HUDDamageDisplay || []).length, 1);
+check("un gestionnaire de notifications", (gp.placed.NotificationManager || []).length, 1);
+check("et un baton a guimauve", (gp.placed.MarshmallowStick || []).length, 1);
+
+// La seule surface du build qui declare ECRASER (docs/53-joueur.md).
+const surfaces = (gp.placed.Surface || []);
+check("une seule surface declaree", surfaces.length, 1);
+check("elle ecrase", !!surfaces[0].fields._allowCompression, true);
+check("elle est sur une jumelle", surfaces[0].body, "Twin01_Body");
+check("et son rayon est de trente", surfaces[0].volume.radius, 30);
+// Le rattachement doit designer le sable qui MONTE, pas celui qui se vide.
+const colonnesB = markCrushing(sandColumns(gp), gp);
+check("le sable qui monte ecrase",
+      colonnesB.find((c) => c.name === "RisingSand").crushes, true);
+check("celui qui se vide, non",
+      colonnesB.find((c) => c.name === "DrainingSand").crushes, false);
+check("un capteur de compression", (gp.placed.PlayerCompressionSensor || []).length, 1);
+check("un bruiteur de joueur", (gp.placed.PlayerNoiseMaker || []).length, 1);
+check("un etat de joueur", (gp.placed.PlayerState || []).length, 1);
+check("et un manipulateur", (gp.placed.FirstPersonManipulator || []).length, 1);
+
+// Ce qui pilote la lumiere GLOBALE (docs/54-lumiere.md).
+check("un gestionnaire d'ambiance", (gp.placed.AmbientLightManager || []).length, 1);
+check("deux phares exterieurs", (gp.placed.ExternalLightController || []).length, 2);
+check("une lumiere a fondu", (gp.placed.FadeLight || []).length, 1);
+check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length, 1);
+// Les coquilles sonores, et les zones sombres qui n'etaient lues par personne.
+const coques = (gp.placed.AudioShell || []);
+check("deux coquilles sonores", coques.length, 2);
+check("et toutes deux ont une forme", coques.every((c) => !!c.volume), true);
+const signaux = signalVolumes(gp);
+check("des zones de signal sont posees", signaux.length > 0, true);
+check("dont des zones sombres", signaux.some((z) => z.kind === "dark"), true);
+
+// La fin de la queue (docs/55-attaches.md).
+check("quatorze objets s'alignent sur un corps designe",
+      (gp.placed.AlignWithTargetBody || []).length, 14);
+check("et tous savent lequel",
+      (gp.placed.AlignWithTargetBody || []).every((c) => !!c.fields._targetBody), true);
+check("neuf corps heritent d'un champ", (gp.placed.FieldInheritor || []).length, 9);
+const clignotants = (gp.placed.BlinkingRenderer || []);
+check("deux clignotants", clignotants.length, 2);
+// Les deux serialisent leur rythme, et PAS a la meme valeur : un clignotement
+// plus rapide dit quelque chose de plus urgent.
+check("et ils ne battent pas au meme rythme",
+      new Set(clignotants.map((c) => c.fields._offSeconds)).size, 2);
+check("aucun n'a de duree finie",
+      clignotants.every((c) => (c.fields._duration ?? -1) < 0), true);
+const nodes = (gp.placed.BrokenNode || []);
+check("trois noeuds casses", nodes.length, 3);
+check("tous sur le satellite casse",
+      nodes.every((n) => n.body === "BrokenSatellite_Body"), true);
+check("et tous reparent vers le meme materiau vert",
+      new Set(nodes.map((n) => n.fields._repairedMaterial.name)).size, 1);
+check("une trappe", (gp.placed.HatchController || []).length, 1);
+// Les six buses du vaisseau MINIATURE, et non celui du joueur : c'est le champ
+// `body` qui le dit (docs/58-suivi.md).
+const buses = (gp.placed.ThrusterParticleController || []);
+check("un controleur de buses", buses.length, 1);
+check("sur le vaisseau miniature", buses[0].body, "ModelShip_Body");
+check("six buses resolues en positions",
+      Object.values(buses[0].nozzles || {}).filter(Boolean).length, 6);
+check("et les six sont a des places distinctes",
+      new Set(Object.values(buses[0].nozzles).map((p) => p.join(","))).size, 6);
+// Le volume compose et ses declencheurs enfants.
+check("un volume compose", (gp.placed.CompoundTriggerVolume || []).length, 1);
+check("et quatre declencheurs enfants", (gp.placed.ChildTriggerVolume || []).length, 4);
+check("une tempete de sable", (gp.placed.SandstormVolume || []).length, 1);
+// Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build :
+// c'est le meme cas que `_probePrefab`. L'invariant garde ce vide.
+const remous = (gp.placed.WaterEffectVolume || []);
+check("un volume d'eclaboussure", remous.length, 1);
+check("et aucun de ses trois prefabs n'est resolu",
+      ["_largeSplashPrefab", "_medSplashPrefab", "_smallSplashPrefab"]
+        .filter((k) => remous[0].fields[k]).length, 0);
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
