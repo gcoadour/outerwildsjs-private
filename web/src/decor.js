@@ -49,6 +49,10 @@
 // Quatre des six visent leur arrivee directement ; deux passent par
 // `_alternateViewTarget`, et c'est cette cible-la qui compte pour l'alignement.
 
+// @lit TornadoPivotController, MatchTransform, DisposableContainer
+// Les pivots qui basculent, les suiveurs, et les conteneurs d'editeur qu'on
+// ne porte pas — comptes pour que la question ne se repose plus.
+
 import { insideVolume } from "./gravity.js";
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

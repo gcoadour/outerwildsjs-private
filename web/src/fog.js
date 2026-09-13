@@ -28,6 +28,9 @@
 // (0,5 ; 0,5 ; 0,5) qui figurait ici etait FAUX. Mesure sur le build, le
 // brouillard de la scene est un vert-gris tres sombre — trois fois plus
 // sombre que ce qui etait recopie.
+// @lit PlayerCameraController
+// Le plan lointain reduit dans le brouillard vient de son `LateUpdate`.
+
 export const FOG_COLOR = [0.1456, 0.1567, 0.1403];
 export const FOG_MODE = "exp2";
 export const MAX_DENSITY = 0.5;        // FogDetector._maxDensity

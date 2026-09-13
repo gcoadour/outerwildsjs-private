@@ -15,6 +15,9 @@
 // progressive. Le jeu n'affiche pas le texte caractere par caractere, et je
 // n'ajoute donc pas cet effet.
 
+// @lit DialogueGUI
+// Proportions, curseur et limites de `DialogueGUI`, rapportees a sa hauteur.
+
 const REF_H = 1080;
 // Plancher de lisibilite. En paysage de telephone, la hauteur d'ecran vaut le
 // tiers de la reference : les proportions du jeu, appliquees telles quelles,

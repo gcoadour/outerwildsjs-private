@@ -51,6 +51,8 @@ import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents } from "./shipdamage.js";
+import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
+         webSpeeds } from "./gaze.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
@@ -377,6 +379,11 @@ async function boot() {
   const suiveurs = matchTransforms(gameplay);
   const conteneurs = disposableContainers(gameplay);
   window.__queue = { tornades, suiveurs, conteneurs };
+  // On allume en REGARDANT (docs/50-regard.md) : trois secondes de regard fixe,
+  // a moins de quatre unites et dix degres, et la porte d'energie s'efface.
+  const regards = gazeSwitches(gameplay).map((d) => new GazeSwitch(d));
+  const portes = energyGates(gameplay).map((d) => new EnergyGate(d));
+  window.__regard = { regards, portes };
   const decalNames = new Set([
     ...((gameplay.placed || {}).DS_DecalsMeshRenderer || []).map((c) => c.name),
     ...((gameplay.placed || {}).DS_Decals || []).map((c) => c.name)]);
@@ -2296,6 +2303,28 @@ async function boot() {
     // Le sable suit la boucle et rien d'autre : il repart de son niveau initial
     // a chaque redemarrage, comme dans le jeu.
     if (sand.count) sand.update(loop.elapsed);
+
+    // L'interrupteur du regard. La position de l'interrupteur BOUGE — il est
+    // pose sur une jumelle, qui orbite — donc on la ramene au repere courant a
+    // chaque image plutot que de la lire une fois.
+    if (regards.length) {
+      const oeil = [camera.position.x, camera.position.y, camera.position.z];
+      const vue = camera.getDirection
+        ? camera.getDirection(new BABYLON.Vector3(0, 0, 1)) : null;
+      if (vue) {
+        for (const g of regards) {
+          const dec = decalageDuCorps(g.data.body, anchorPos);
+          g.update(dt, oeil, [vue.x, vue.y, vue.z],
+                   [g.data.position[0] - dec[0], g.data.position[1] - dec[1],
+                    g.data.position[2] - dec[2]]);
+          if (g.switched) {
+            console.log(`regard : ${g.data.name} allume ${g.data.device}`);
+            for (const p of portes) p.switchOn(now);
+          }
+        }
+      }
+    }
+    for (const p of portes) p.update(now);
 
     // Les pivots de tornade culbutent, lentement et chacun a son rythme.
     if (tornades.count) tornades.update(dt);

@@ -17,6 +17,9 @@
 //                 une HUDCamera dediee ; leur etendue a l'ecran depend de cette
 //                 camera, que ce portage ne reproduit pas.
 
+// @lit GUIMode, PromptManager, PlayerResourceGUI
+// Les quatre modes d'affichage, le catalogue d'invites et les jauges.
+
 const DIR = "data/interface/";
 
 export async function loadInterface() {

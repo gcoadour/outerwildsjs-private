@@ -75,7 +75,11 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "MatchTransform",
                 // Et deux qu'on extrait pour pouvoir dire, chiffres en main,
                 // qu'il n'y a rien a en faire.
-                "DisposableContainer", "InertiaTensorCalibrator"];
+                "DisposableContainer", "InertiaTensorCalibrator",
+                // On allume en REGARDANT : une mecanique entiere de Dark
+                // Bramble, sans invite ni touche, que rien ne signalait
+                // (docs/50-regard.md).
+                "GazeSwitch", "GazeWebAnimator", "EnergyGate"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -110,7 +114,10 @@ const WANT_VOLUME = new RegExp([
   "|^(ZeroGField|ZeroGSector|MajorSector|SuitBarrier|ProbePromptTrigger",
   "|TelescopePromptTrigger|AncientTeleporter|AncientTeleportReceiver",
   "|RadiationEmitter|DerelictWarp|GearPickup|LandingPadSensor",
-  "|PlayerAttachPoint|LODCameraSnapshot)$",
+  "|PlayerAttachPoint|LODCameraSnapshot",
+  // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
+  // la loi du regard n'a aucune portee.
+  "|GazeSwitch)$",
 ].join(""), "i");
 
 /**

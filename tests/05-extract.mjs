@@ -813,6 +813,21 @@ check("dix-huit conteneurs jetables", (gp.placed.DisposableContainer || []).leng
 check("quatorze calibrateurs d'inertie",
       (gp.placed.InertiaTensorCalibrator || []).length, 14);
 
+// On allume en REGARDANT (docs/50-regard.md) : un interrupteur, une toile, une
+// porte. Trois classes enchainees, aucune lue avant.
+const regards = (gp.placed.GazeSwitch || []);
+check("un seul interrupteur du regard", regards.length, 1);
+check("pose sur une jumelle, et non dans Dark Bramble", regards[0].body, "Twin01_Body");
+check("son rayon vient de son collider", regards[0].volume.radius, 6);
+check("dix degres d'ouverture", regards[0].fields._angleOfActivation, 10);
+check("trois secondes de charge", regards[0].fields._secondsToCharge, 3);
+// `_activationDist` vient du constructeur : l'invariant garde son ABSENCE de
+// la scene, comme les seuils de la marche (docs/46).
+check("mais la distance d'activation n'est pas dans la scene",
+      "_activationDist" in regards[0].fields, false);
+check("une toile", (gp.placed.GazeWebAnimator || []).length, 1);
+check("et une porte d'energie", (gp.placed.EnergyGate || []).length, 1);
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");

@@ -46,6 +46,9 @@
 // de droite. Leur `_impactThreshold` vaut ZERO : n'importe quel choc abime le
 // reacteur le plus proche.
 
+// @lit ShipDamageController, ShipComponent, EngineComponent
+// Le modele de degats du build, relu a l'endroit (docs/49-queue.md).
+
 import { impactDamage, DAMAGE } from "./autopilot.js";
 
 /**

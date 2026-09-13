@@ -22,6 +22,9 @@
 // lecture — c'est un debordement VOULU, qui sature l'ecran. On garde les
 // nombres tels quels, et c'est le rendu qui les borne.
 
+// @lit PlayerCameraEffectController, GlowEffect, Vignetting, GrayscaleEffect, TwirlEffect
+// L'etat des six effets d'image de la camera du joueur (docs/47).
+
 export const WAKE_DURATION = 3;
 export const TWIRL_START_ANGLE = 220;
 export const TWIRL_DURATION = 2;

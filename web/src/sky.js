@@ -38,6 +38,11 @@
 //
 // `_skyRadius` n'est pas serialise : c'est le 320 du constructeur.
 
+// @lit SkyBehavior, CloudTextureController, DistantStarController
+// La voute qui tourne, les dix visages de nuage, les mille etoiles qui
+// s'eteignent. Aucun de ces trois noms n'apparait dans le code : ce depot
+// traduit, et le marqueur ci-dessus est ce qui le dit au recensement.
+
 import { lookRotation, qmul, qconj, qrot } from "./decor.js";
 
 /** Rayon de ciel par defaut : le `_skyRadius` du constructeur de SkyBehavior. */

@@ -10,6 +10,9 @@
 //   integrite       100
 //   mort instantanee a 300 u/s
 
+// @lit AutopilotGUI
+// Les messages du pilote automatique viennent d'`AutopilotGUI`.
+
 export const DAMAGE = {
   light: 15, medium: 30, total: 100, instantDeath: 300,
 };

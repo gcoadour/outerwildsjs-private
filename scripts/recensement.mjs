@@ -24,6 +24,31 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(ROOT, "web/src");
 
 /**
+ * Les classes qu'un module declare lire, par un marqueur `@lit`.
+ *
+ * Le recensement compte des NOMS, et ce depot traduit : `sky.js` porte
+ * `SkyBehavior` sous `lookAtSun()`, `CloudTextureController` sous
+ * `attachClouds()`, et aucun des deux noms n'y figure. Compter ces classes
+ * absentes serait faux ; les compter presentes parce qu'un commentaire les
+ * cite le serait aussi — c'est exactement l'erreur que docs/47 a corrigee.
+ *
+ * D'ou un marqueur, et non de la prose :
+ *
+ *     // @lit SkyBehavior, CloudTextureController, DistantStarController
+ *
+ * Il se grep, il ne s'ecrit pas par accident, et il oblige a nommer ce qu'on
+ * pretend lire. Un module qui triche se voit : la classe est dans le marqueur
+ * et nulle part dans le code.
+ */
+function declarees(texte) {
+  const out = [];
+  for (const m of texte.matchAll(/@lit\s+([A-Za-z0-9_,\s]+)/g)) {
+    for (const n of m[1].split(/[,\s]+/)) if (n) out.push(n);
+  }
+  return out;
+}
+
+/**
  * Le texte d'un module, ses COMMENTAIRES retires.
  *
  * Sans cela le recensement se ment a lui-meme, et il l'a fait : `TwirlEffect`,
@@ -47,7 +72,9 @@ function sources() {
       const p = join(dir, e);
       if (statSync(p).isDirectory()) walk(p);
       else if (e.endsWith(".js")) {
-        out.push({ path: relative(ROOT, p), text: sansCommentaires(readFileSync(p, "utf8")) });
+        const brut = readFileSync(p, "utf8");
+        out.push({ path: relative(ROOT, p), text: sansCommentaires(brut),
+                   declare: new Set(declarees(brut)) });
       }
     }
   })(SRC);
@@ -100,12 +127,16 @@ export async function recenser() {
 
   const rows = [];
   for (const [cls, n] of [...poses].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
-    const nomme = files.filter((f) => f.text.includes(cls)).map((f) => f.path);
+    const nomme = files.filter((f) => f.text.includes(cls) || f.declare.has(cls))
+                       .map((f) => f.path);
     // La distinction qui compte, et que le compte brut de docs/45 melangeait :
     // une classe que SEUL le pipeline nomme est extraite et lue par personne.
     // C'est la nature de manque que docs/35-monde.md a rencontree, et elle ne
     // se voit pas si l'on compte `web/src/` d'un bloc.
-    const parLeMoteur = nomme.filter((p) => !p.includes("/pipeline/"));
+    const parLeMoteur = files
+      .filter((f) => !f.path.includes("/pipeline/")
+                     && (f.text.includes(cls) || f.declare.has(cls)))
+      .map((f) => f.path);
     const parMotif = parLeMoteur.length ? [] : motifs.filter((m) => m.re.test(cls)).map((m) => m.path);
     rows.push({ cls, n, nomme, parLeMoteur, parMotif });
   }

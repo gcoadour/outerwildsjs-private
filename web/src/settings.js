@@ -19,6 +19,9 @@
 // zero. Le portage garde cette separation, et la boucle temporelle non plus n'y
 // touche pas.
 
+// @lit SettingsMenu
+// Les sept options de `SettingsMenu`, et ce que chacune commande.
+
 const KEY = "outerwilds.settings";
 
 export class Settings {

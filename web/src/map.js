@@ -7,6 +7,9 @@
 // Vue de dessus en projection orthographique sur le plan XZ, ce qui suffit ici :
 // toutes les orbites du systeme sont pratiquement coplanaires.
 
+// @lit MapMarker, MapController
+// Les marqueurs declares et le zoom de la carte.
+
 export const ZOOM_DEFAULT = 40000;
 export const ZOOM_MIN = 10000;
 // MapMarker et IconGenerator.GenerateSquareBracket

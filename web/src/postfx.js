@@ -17,6 +17,9 @@
 // (main.js), qui reproduit le `TonemappingManager` du build — eteint par
 // defaut, allume par l'option.
 
+// @lit BloomAndLensFlares, NoiseEffect, NoiseAndGrain
+// Le rendu de ces effets — refait, pas transpose (docs/47).
+
 const SHADERS = {
   // --- glow : un halo additif tire des zones claires ------------------------
   //

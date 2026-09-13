@@ -16,6 +16,8 @@ import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          reglagesDe } from "../web/src/cameraeffects.js";
 import { Telescope, TELESCOPE } from "../web/src/tools.js";
 import { mapMarkers, markerVisible } from "../web/src/map.js";
+import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
+         webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels } from "../web/src/sand.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
@@ -3109,6 +3111,75 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         disposableContainers({ placed: { DisposableContainer: [
           { name: "TimberHearth_Pivot", position: [0, 0, 0] },
           { name: "Islands", position: [0, 0, 0] }] } }).length, 2);
+
+  // --- on allume en REGARDANT (docs/50) -----------------------------------
+  const lus = gazeSwitches({ placed: { GazeSwitch: [
+    { name: "GazeVolume", position: [0, 0, 0], body: "Twin01_Body",
+      volume: { shape: "sphere", radius: 6, center: [0, 0, 0] },
+      fields: { _angleOfActivation: 10, _secondsToCharge: 3,
+                _switchableDevice: { $ref: "level0:23903" } } },
+  ] } });
+  check("un interrupteur du regard", lus.length, 1);
+  check("son rayon vient du collider", lus[0].radius, 6);
+  // `_activationDist` n'est serialise sur aucune instance : quatre unites, du
+  // constructeur. L'invariant garde le repli, et refuse de le lire ailleurs.
+  check("sa distance d'activation vient du constructeur",
+        lus[0].activationDist, GAZE.activationDist);
+  check("et il sait ce qu'il commande", lus[0].device, "level0:23903");
+
+  // La loi : les DEUX facteurs doivent etre pleins. Etre pres ne suffit pas,
+  // regarder droit non plus.
+  const g = new Regard(lus[0]);
+  const droit = [0, 0, 1];
+  // A trois unites (donc sous les quatre d'activation) et pile dans l'axe.
+  g.update(1, [0, 0, -3], droit, [0, 0, 0]);
+  check("pres et droit : la charge monte", g.charge, 1);
+  check("et le regard est plein", g.gazeFraction, 1);
+  // Meme distance, mais de biais a vingt degres : la fraction retombe.
+  const biais = new Regard(lus[0]);
+  const a = 20 * Math.PI / 180;
+  biais.update(1, [0, 0, -3], [Math.sin(a), 0, Math.cos(a)], [0, 0, 0]);
+  check("de biais, la charge redescend", biais.charge, 0);
+  check("et le regard n'est plus plein", biais.gazeFraction < 1, true);
+  // Droit dans l'axe mais a cinq unites : au-dela des quatre, pareil.
+  const loin = new Regard(lus[0]);
+  loin.update(1, [0, 0, -5], droit, [0, 0, 0]);
+  check("trop loin, la charge ne monte pas", loin.charge, 0);
+
+  // Trois secondes, et ca declenche — une fois.
+  const plein = new Regard(lus[0]);
+  for (let i = 0; i < 30; i++) plein.update(0.1, [0, 0, -3], droit, [0, 0, 0]);
+  check("trois secondes de regard fixe", plein.switched, true);
+  check("l'appareil est allume", plein.on, true);
+  plein.update(0.1, [0, 0, -3], droit, [0, 0, 0]);
+  check("et il ne redeclenche pas", plein.switched, false);
+  // Il faut redescendre sous la MOITIE pour pouvoir rallumer.
+  for (let i = 0; i < 14; i++) plein.update(0.1, [0, 0, -100], droit, [0, 0, 0]);
+  check("a plus de la moitie, toujours en attente", plein.waitForDischarge, true);
+  plein.update(0.2, [0, 0, -100], droit, [0, 0, 0]);
+  check("sous la moitie, on peut rallumer", plein.waitForDischarge, false);
+
+  // La toile : au CUBE, et en sens inverse.
+  const v0 = webSpeeds(0.5, 0);
+  const v1 = webSpeeds(1, 0);
+  check("a demi-regard, un huitieme de la vitesse",
+        Number((v0.outer / v1.outer).toFixed(3)), 0.125);
+  check("l'anneau interieur tourne en sens inverse", webSpeeds(1, 1).inner, -WEB.inner);
+  check("et ne bouge pas sans charge", webSpeeds(1, 0).inner, 0);
+  check("la toile s'efface en deux secondes", webAlpha(WEB.fade), 0);
+  check("a mi-chemin, a moitie", webAlpha(1), 0.5);
+
+  // La porte : les colliders se coupent d'un coup, l'alpha fond en une seconde.
+  const porte = new Porte(energyGates({ placed: { EnergyGate: [
+    { name: "EnergyGate", position: [0, 0, 0], body: "Twin01_Body" }] } })[0]);
+  check("au depart, elle est solide", porte.solid, true);
+  porte.switchOn(0);
+  check("des l'allumage, elle ne bloque plus", porte.solid, false);
+  check("mais elle se voit encore", porte.alpha, 1);
+  porte.update(0.5);
+  check("a mi-fondu, a moitie", porte.alpha, 0.5);
+  porte.update(1);
+  check("puis elle disparait", porte.alpha, 0);
 }
 
 report();
