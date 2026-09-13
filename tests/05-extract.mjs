@@ -5,6 +5,7 @@ import { UnityEnv } from "../web/src/pipeline/unity/env.js";
 import { TypeUniverse } from "../web/src/pipeline/dotnet/typetree.js";
 import { ExtractContext } from "../web/src/pipeline/extract/context.js";
 import { extractScene } from "../web/src/pipeline/extract/scene.js";
+import { extractCameras } from "../web/src/pipeline/extract/camera.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
@@ -679,6 +680,63 @@ const ctrls = Object.entries(gp.placed)
   .flatMap(([cls, l]) => l.map((e) => ({ cls, e })));
 console.log("     controleurs de dialogue:", ctrls.length,
             "| avec arbres:", ctrls.filter(({ e }) => e.trees).length);
+
+// --- les cameras et leurs effets d'image (docs/47-effets-image.md) ---------
+//
+// Le recensement les donnait pour LUES parce que trois de leurs classes sont
+// citees dans un commentaire de `shaders/index.js`. Ces comptes-la sont donc
+// la contre-mesure : ils portent sur la scene, pas sur ce que le portage dit.
+const cams = extractCameras(ctx);
+check("quinze cameras dans level0", cams.count, 15);
+check("et vingt-quatre effets d'image poses dessus", cams.effectCount, 24);
+check("toutes lisibles", Object.keys(cams.unreadable).length, 0);
+
+const parNom = new Map(cams.cameras.map((c) => [c.name, c]));
+const joueur = parNom.get("PlayerCamera");
+check("la camera du joueur voit a 70 degres", joueur.fov, 70);
+check("son plan proche est a 0,05", joueur.near, 0.05);
+check("son plan lointain a 50 000", joueur.far, 50000);
+check("elle est en HDR", joueur.hdr, true);
+check("elle porte six effets", Object.keys(joueur.effects).length, 6);
+check("dont un bloom au seuil de 0,8",
+      joueur.effects.BloomAndLensFlares[0].threshold, 0.8);
+check("additif, comme celui de la carte", joueur.effects.BloomAndLensFlares[0].blend, "add");
+check("son glow est bleu", joueur.effects.GlowEffect[0].tint.slice(0, 3).join(","),
+      "0.3216,0.6588,1");
+check("sa vignette est discrete au repos", joueur.effects.Vignetting[0].intensity, 0.375);
+check("et son tourbillon prend tout l'ecran", joueur.effects.TwirlEffect[0].radius[0], 1.5);
+
+// Les halos de lentille sont poses et ETEINTS sur les deux instances : le
+// build a le composant et ne s'en sert pas. On le garde ecrit, faute de quoi
+// quelqu'un les portera un jour pour rien.
+const blooms = cams.cameras.flatMap((c) => c.effects.BloomAndLensFlares || []);
+check("deux blooms dans la scene", blooms.length, 2);
+check("aucun n'allume ses halos", blooms.filter((b) => b.lensflares).length, 0);
+check("celui de la carte a un seuil plus bas",
+      parNom.get("MapCamera").effects.BloomAndLensFlares[0].threshold, 0.5);
+
+// LandingCam porte DEUX Tonemapping : c'est pourquoi chaque effet est une
+// liste et non un champ.
+check("la camera d'atterrissage voit a 100 degres", parNom.get("LandingCam").fov, 100);
+check("et porte deux tonemapping", parNom.get("LandingCam").effects.Tonemapping.length, 2);
+check("son grain a la force 4", parNom.get("LandingCam").effects.NoiseAndGrain[0].strength, 4);
+check("la camera du satellite est monochrome",
+      parNom.get("SatelliteCamera").effects.NoiseEffect[0].monochrome, true);
+
+// Les cinq impostures de planete : `_snapshotInterval` vaut 1 partout.
+const lods = cams.cameras.filter((c) => c.effects.LODCameraSnapshot);
+check("cinq cameras d'imposture", lods.length, 5);
+check("toutes a une image par seconde",
+      lods.filter((c) => c.effects.LODCameraSnapshot[0].interval === 1).length, 5);
+
+// Le controleur ne serialise RIEN : ses constantes viennent du constructeur.
+// L'invariant garde cette absence, exactement comme pour les seuils de la
+// marche (docs/46) — sans lui, une extraction qui cesserait de lire ses champs
+// passerait pour normale.
+const ctrl = [...ctx.behaviours(["PlayerCameraEffectController"])];
+check("un seul controleur d'effets", ctrl.length, 1);
+check("et il ne serialise aucun champ",
+      Object.keys(ctx.scriptFields(ctrl[0].obj) || {}).length, 0);
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.

@@ -98,6 +98,8 @@ portage.
 | équipement | combinaison, sonde et minicarte **se ramassent** |
 | entraînement en apesanteur | les 3 nœuds du satellite cassé, et leur annonce |
 | volumes de jeu | ce qui blesse, l'apesanteur déclarée, les fenêtres de vue |
+| effets d'image | 24 effets sur 15 caméras : bloom, glow, vignette, tourbillon, grain |
+| champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
 > **Corrigé par le navigateur** ([`46-migration-lots.md`](46-migration-lots.md)).
@@ -203,12 +205,17 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   même nom.
 - **Le champ d'étoiles** (`DistantStarController`) est extrait, son système de
   particules ne l'est pas.
-- **59 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
-  compris — c'était 170 en [`42`](42-lumieres.md), 109 avant les six lots de
-  [`46`](46-migration-lots.md). Ce qui reste n'est plus une famille mais une
-  queue : la moitié des entrées est à une seule instance, et les plus lourdes
-  sont `InertiaTensorCalibrator` (14), les invites de la guimauve (8) et le
-  pivot des tornades (6). Le compte tient compte des motifs, et c'est la carte
+- **77 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+  compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
+  de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
+  **commentaires** avant de compter, et c'est un commentaire qui avait caché
+  toute la pile d'effets d'image ([`47`](47-effets-image.md)).
+  La série du compte : 170 en [`42`](42-lumieres.md), 109 avant les six lots de
+  [`46`](46-migration-lots.md), 59 après, 77 une fois les commentaires retirés.
+  Ce qui reste n'est plus une famille mais une queue : la moitié des entrées est
+  à une seule instance, et les plus lourdes sont `CloudTextureController` (24),
+  `DisposableContainer` (18), `InertiaTensorCalibrator` (14) et `MapMarker` (13).
+  `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
   de ce qui reste.
 - **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
   restent ouvertes : le jeu affiche un système entier parce que les planètes

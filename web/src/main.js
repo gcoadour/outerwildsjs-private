@@ -61,12 +61,15 @@ import { GamepadControls, padAvailable } from "./gamepad.js";
 import { SpinField, sunElevation } from "./spin.js";
 import { directionalFields, polarFields } from "./gravity.js";
 import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
+import { CameraEffects, loadCameras, reglagesDuJoueur,
+         reglagesDe } from "./cameraeffects.js";
+import { PostFX, effetsSecondaires } from "./postfx.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
-         Repair } from "./volumes.js";
+         deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
 import { referenceFrames, DeclaredFrames, restingPoint } from "./frames.js";
@@ -109,8 +112,21 @@ async function boot() {
   // Le monde s'etendant sur ~100 000 unites, un depth buffer logarithmique
   // evite le z-fighting entre le proche et le lointain.
   const camera = new BABYLON.FreeCamera("cam", BABYLON.Vector3.Zero(), scene);
-  camera.minZ = 0.1;
+  // `PlayerCamera` : plan proche a 0,05, plan lointain a 50 000. On garde le
+  // proche du build et NON son lointain : le build n'affiche au-dela que des
+  // impostures rafraichies par `LODCameraSnapshot`, que ce portage ne fait pas
+  // — couper a 50 000 effacerait donc les planetes lointaines au lieu de les
+  // remplacer. Le lointain est le seul des deux qui soit un choix.
+  camera.minZ = 0.05;
   camera.maxZ = 200000;
+  // Le champ de vision du build, et non celui de Babylon. `PlayerCamera` voit a
+  // 70 degres ; la valeur par defaut de Babylon est 0,8 radian, soit 45,8. Rien
+  // ne le reglait, et une scene cadree a 46 degres au lieu de 70 ne ressemble
+  // simplement pas au jeu — c'est le genre d'ecart qu'une capture ne trahit
+  // pas, faute de point de comparaison dans l'image.
+  const camerasDuBuild = await loadCameras();
+  const reglagesCam = reglagesDuJoueur(camerasDuBuild);
+  camera.fov = (reglagesCam.fov || 70) * Math.PI / 180;
   // Calque des billes de sonde : visible du joueur, pas de la sonde elle-meme.
   camera.layerMask = 0x2FFFFFFF;
   scene.activeCamera = camera;
@@ -838,6 +854,23 @@ async function boot() {
   loop.loopCount = pdata.loopCount || 0;
   const spawn0 = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
 
+  // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
+  // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
+  // navigateur et que le rendu ne s'eprouve pas du tout.
+  const fx = new CameraEffects(reglagesCam);
+  const postfx = new PostFX(BABYLON, camera, engine, reglagesCam);
+  window.__fx = { fx, postfx, reglagesCam };
+  // Ce que le build fait avec `GUI.DrawTexture` dans `OnGUI` : un rectangle
+  // noir plein ecran, dont l'opacite est `_fadeFraction`. Ici un div, parce
+  // qu'il doit passer PAR-DESSUS le HUD comme `GUI.depth = -1` le demande.
+  const fadeOverlay = uiRoot ? (() => {
+    const d = document.createElement("div");
+    d.className = "fade-ecran";
+    uiRoot.appendChild(d);
+    return d;
+  })() : null;
+  let fxMort = false, fxEau = false;
+
   // Mort et flashback : une seule porte d'entree pour toutes les causes.
   const death = new PlayerDeathHandler();
   const flashOverlay = uiRoot ? new FlashbackOverlay(uiRoot) : null;
@@ -922,11 +955,17 @@ async function boot() {
   // un nombre choisi.
   const GEAR_REACH = 3;
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
-  const telescope = new Telescope();
+  // Le champ de repos du telescope n'est pas un champ du telescope : c'est
+  // celui de la camera, que `SnapToInitFieldOfView` retrouve en sortant.
+  const telescope = new Telescope({ restFOV: reglagesCam.fov || 70 });
   const probes = new ProbeLauncher();
   // La sonde est un appareil photo qu'on jette : sa camera embarquee occupe un
   // coin de l'ecran tant qu'elle vole.
-  const probeCam = new ProbeCamera(BABYLON, scene, camera, uiRoot);
+  // `LandingCam` du build : champ de 100 degres, plan proche a 0,5, et un
+  // `NoiseAndGrain` de force 4 par-dessus. C'est une camera d'appareil jete,
+  // et elle en a le grain.
+  const probeCam = new ProbeCamera(BABYLON, scene, camera, uiRoot,
+                                   reglagesDe(camerasDuBuild, "LandingCam"));
   // Les consoles a camera deportee — piloter le vaisseau depuis l'observatoire,
   // regarder par le satellite — reutilisent cette meme vue : c'est le moyen qui
   // leur manquait, et il existe depuis que la sonde a un oeil.
@@ -1744,6 +1783,9 @@ async function boot() {
     if (blackHole) {
       const t = blackHole.capture(player.pos, anchorPos);
       if (t) {
+        // `OnPlayerEnterBlackHole` : l'image se visse de 220 a 360 degres en
+        // deux secondes. C'est ce qui fait qu'on ne voit pas la coupure.
+        fx.enterBlackHole(now);
         player.pos.x = t.position[0]; player.pos.y = t.position[1]; player.pos.z = t.position[2];
         player.vel.x = t.velocity[0]; player.vel.y = t.velocity[1]; player.vel.z = t.velocity[2];
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
@@ -1796,7 +1838,18 @@ async function boot() {
     syncDebris(dt, anchorPos);
 
     // --- outils du joueur ---
-    camera.fov = telescope.update(dt);
+    //
+    // Le telescope se zoome A LA MAIN (`OWInput.GetAxis(zoomIn/zoomOut)`, 50
+    // degres par seconde) entre 10 et 60 degres, et il ENTRE a 33,33 — pas au
+    // plus etroit, comme le portage le faisait. Les touches R et F portent
+    // l'axe, faute d'en avoir une paire libre plus naturelle.
+    const zoomAxe = telescope.active
+      ? ((keys.KeyR ? 1 : 0) - (keys.KeyF ? 1 : 0)) : 0;
+    camera.fov = telescope.update(dt, zoomAxe);
+    // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
+    // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
+    // precision de profondeur sur tout le lointain.
+    camera.minZ = telescope.nearClip;
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
     }
@@ -1969,6 +2022,30 @@ async function boot() {
       }
     }
 
+    // --- les effets d'image ---
+    //
+    // On branche les evenements sur les TRANSITIONS plutot que sur les appels :
+    // `death.kill()` est appele sept fois dans cette boucle et ne retient que
+    // la premiere cause, et un volume mortel qu'on ne quitte pas le rappelle a
+    // chaque image. Guetter le passage de vivant a mort ne se trompe pas.
+    if (death.dead && !fxMort) {
+      fxMort = true;
+      fx.playerDeath(deathTypeOf(death.cause), now);
+    } else if (!death.dead && fxMort) {
+      fxMort = false;
+      // Le reveil : le glow blanc a 3 qui retombe au noir en trois secondes.
+      fx.startOfTimeLoop();
+    }
+    // L'immersion : `OnEnterWaterZone` / `OnExitWaterZone`. Le portage sait
+    // deja quand le joueur est dans un fluide ; il ne s'en servait pas pour
+    // l'image. Seuls les liquides comptent — la densite d'un fluide d'AIR est
+    // sous 5, comme pour le vent de course (docs/46, lot 5).
+    const sousLEau = !!(player.fluid && (player.fluid.density ?? 0) >= 5);
+    if (sousLEau !== fxEau) { fxEau = sousLEau; if (sousLEau) fx.enterWater(); else fx.exitWater(); }
+    fx.update(now);
+    postfx.appliquer(fx);
+    if (fadeOverlay) fadeOverlay.style.opacity = String(fx.fadeFraction);
+
     // --- boucle temporelle ---
     const starBody = bodies.find((b) => (b.gravity.surfaceAcceleration || 0) >= 50);
     const sunDist = starBody
@@ -2130,6 +2207,9 @@ async function boot() {
           player.pos.y = parti.arrival[1] - anchorPos[1];
           player.pos.z = parti.arrival[2] - anchorPos[2];
           if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
+          // `OnTeleportPlayer` : eclair BLEU, une demi-seconde pour venir et
+          // deux pour repartir. Le passage etait instantane et muet a l'image.
+          fx.teleport(now);
           console.log(`passage : ${parti.teleporter.name} -> ${parti.arrival}`);
         }
       }

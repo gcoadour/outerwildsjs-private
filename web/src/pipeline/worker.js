@@ -25,6 +25,7 @@ import { extractInterface } from "./extract/interface.js";
 import { extractLighting } from "./extract/lighting.js";
 import { extractSky } from "./extract/sky.js";
 import { extractTextureAnimators } from "./extract/texanim.js";
+import { extractCameras } from "./extract/camera.js";
 import { exportSubtree, findRoots } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
@@ -280,6 +281,13 @@ async function run(blob, options) {
   const sky = extractSky(ctx);
   await writeFile("data/sky.json", JSON.stringify(sky));
   summary.nuages = sky.clouds.length;
+
+  // Les cameras et leur pile d'effets d'image. Voir docs/47-effets-image.md :
+  // c'est une couche de rendu entiere que le recensement donnait pour lue,
+  // parce que trois de ses classes sont citees dans un COMMENTAIRE.
+  const cameras = extractCameras(ctx);
+  await writeFile("data/camera.json", JSON.stringify(cameras));
+  summary["effets d'image"] = cameras.effectCount;
 
   // Textures qui defilent : le sable des jumelles, les cascades, les ecrans.
   const texanim = extractTextureAnimators(ctx);

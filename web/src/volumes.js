@@ -55,6 +55,24 @@ export function deathCause(type) {
   }
 }
 
+/**
+ * L'inverse : la valeur de `DeathType` que produit une cause du portage.
+ *
+ * Elle sert aux effets d'image, qui ne traitent pas les cinq valeurs de la
+ * meme facon — cinq secondes de fondu pour l'asphyxie, un eclair rouge pour
+ * l'energie et la supernova, trois dixiemes pour le reste. Sans cette
+ * correspondance, mourir devore rendrait le meme ecran que bruler.
+ */
+export function deathTypeOf(cause) {
+  switch (cause) {
+    case "impact": return 1;
+    case "asphyxie": return 2;
+    case "incineration": return 3;
+    case "supernova": return 4;
+    default: return 0;            // devore, ecrase : des morts par defaut
+  }
+}
+
 /** Volumes de destruction poses dans la scene. */
 export function destructionVolumes(gameplay) {
   return ((gameplay.placed || {}).DestructionVolume || []).map((c) => {

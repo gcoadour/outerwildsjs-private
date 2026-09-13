@@ -13,10 +13,18 @@
 //   V-Fog                           18
 //   DoubleSidedCutoutDiffuse        12
 //
-// Et surtout : 18 shaders du jeu ne sont JAMAIS utilises dans la scene
+// Et surtout : 18 shaders du jeu ne sont affectes a aucun MATERIAU de la scene
 // (HeatDistortion, TwirlEffect, BillboardTree, MotionBlur, FisheyeShader...),
 // tandis que CrackShader, RimShader et IzzySunShader ne servent qu'une ou deux
 // fois. Les reecrire tous aurait ete du travail perdu.
+//
+// « Aucun materiau » n'est PAS « jamais utilise », et cette ligne a longtemps
+// dit le second : TwirlEffect, MotionBlur et FisheyeShader sont des EFFETS
+// D'IMAGE, poses sur des cameras, ou aucun materiau ne les porte. Pire, les
+// nommer ici suffisait a les faire compter « lus » par le recensement, qui ne
+// retirait pas les commentaires : la pile d'effets entiere de la camera du
+// joueur est restee invisible aussi longtemps que cette phrase. Voir
+// docs/47-effets-image.md.
 //
 // Quand une configuration de materiau standard rend fidelement l'effet, on la
 // prefere a du GLSL maison : moins de code pour le meme resultat.

@@ -11,6 +11,10 @@
 // peut se verifier sans le jeu se verifie sans lui.
 
 import { check, report } from "./run.mjs";
+import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
+         TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
+         reglagesDe } from "../web/src/cameraeffects.js";
+import { Telescope, TELESCOPE } from "../web/src/tools.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels } from "../web/src/sand.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
@@ -2725,6 +2729,135 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("pres du feu, pleine intensite", radiationAt(feux[0], 5), 100);
   check("a mi-courbe, la moitie", radiationAt(feux[0], 27.5), 50);
   check("au-dela, plus rien", radiationAt(feux[0], 60), 0);
+
+  // --- les effets d'image de la camera du joueur --------------------------
+  //
+  // Quatre des six effets sont ETEINTS au reveil : c'est la premiere chose a
+  // garder, parce que les allumer par defaut donnerait un ecran gris et floute
+  // en permanence, et que rien dans une capture au repos ne le trahirait.
+  const fx = new CameraEffects();
+  check("au reveil, le glow est eteint", fx.glow.enabled, false);
+  check("le gris aussi", fx.grayscale.enabled, false);
+  check("la vignette aussi", fx.vignette.enabled, false);
+  check("et le tourbillon aussi", fx.twirl.enabled, false);
+  check("les reglages d'immersion sont ceux de la scene",
+        fx.sousLEau.intensity, REGLAGES_JOUEUR.glow.intensity);
+
+  // Le reveil : blanc a 3, puis retour au noir en trois secondes.
+  fx.startOfTimeLoop();
+  check("le reveil dure trois secondes", WAKE_DURATION, 3);
+  check("il part du blanc", fx.glow.tint.join(","), "255,255,255");
+  fx.update(0);
+  check("et le glow est allume", fx.glow.enabled, true);
+  fx.update(WAKE_DURATION);
+  check("au bout, il s'eteint", fx.glow.enabled, false);
+
+  // L'adoucissement n'est pas symetrique, et c'est LUI qui donne sa brutalite a
+  // l'eclair. A mi-course d'une MONTEE, on n'a fait que 0,5^4 du chemin.
+  const montee = new CameraEffects();
+  montee.flashScreen(1, [1, 0, 0], 1, 0, 0);
+  montee.update(0.5);
+  check("une montee se retient : 0,5^4", Number(montee.glow.intensity.toFixed(4)), 0.0625);
+  const descente = new CameraEffects();
+  descente.glow.intensity = 1;
+  descente.flashScreen(0, [0, 0, 0], 1, 0, 0);
+  descente.update(0.5);
+  check("une descente se traine : 1 - (0,5-1)^4",
+        Number(descente.glow.intensity.toFixed(4)), 0.0625);
+
+  // Les cinq causes de mort, et les TROIS traitements qu'elles recoivent.
+  const asphyxie = new CameraEffects();
+  asphyxie.playerDeath(DEATH_TYPE.Asphyxiation, 0);
+  asphyxie.update(2.5);
+  check("l'asphyxie fond en cinq secondes, a moitie", asphyxie.fadeFraction, 0.25);
+  check("et le gris monte a 1 pour un demi", asphyxie.grayscale.amount, 1);
+  asphyxie.update(4);
+  check("la vignette reste basse a 0,8 du chemin",
+        Math.round(asphyxie.vignette.intensity), 328);
+  asphyxie.update(5);
+  check("puis se referme d'un coup", Math.round(asphyxie.vignette.intensity), 1000);
+  check("la mort demande le flashback quand l'effet est fini", asphyxie.update(5.1).flashbackDemande, true);
+
+  const brulure = new CameraEffects();
+  brulure.playerDeath(DEATH_TYPE.Energy, 0);
+  check("l'energie n'est pas un fondu mais un eclair", brulure.fadeFraction, 0);
+  brulure.update(3);
+  check("et il est rouge", brulure.glow.tint.map(Math.round).join(","), "255,100,100");
+  const nova = new CameraEffects();
+  nova.playerDeath(DEATH_TYPE.Supernova, 0);
+  nova.update(3);
+  check("la supernova recoit le meme traitement que l'energie",
+        nova.glow.tint.map(Math.round).join(","), "255,100,100");
+
+  const impact = new CameraEffects();
+  impact.playerDeath(DEATH_TYPE.Impact, 0);
+  impact.update(0.3);
+  check("un impact, lui, coupe en trois dixiemes", impact.fadeFraction, 1);
+
+  // Le trou noir : de 220 a 360 degres en deux secondes, puis plus rien.
+  const trou = new CameraEffects();
+  trou.enterBlackHole(0);
+  check("le tourbillon part de 220 degres", trou.twirl.angle, TWIRL_START_ANGLE);
+  trou.update(TWIRL_DURATION / 2);
+  check("a mi-course, 290", trou.twirl.angle, 290);
+  trou.update(TWIRL_DURATION);
+  check("au bout, il se coupe", trou.twirl.enabled, false);
+  check("et revient a zero", trou.twirl.angle, 0);
+
+  // L'immersion : le glow reprend les valeurs que `Awake` avait retenues, et
+  // non celles qu'un eclair aurait laissees derriere lui.
+  const eau = new CameraEffects();
+  eau.playerDeath(DEATH_TYPE.Energy, 0);
+  eau.update(3);
+  eau.enterWater();
+  check("sous l'eau, le glow retrouve sa teinte d'origine",
+        eau.glow.tint.join(","), REGLAGES_JOUEUR.glow.tint.slice(0, 3).join(","));
+  eau.exitWater();
+  check("et s'eteint en sortant", eau.glow.enabled, false);
+
+  // Le champ de vision : 70 degres, mesure sur la camera du build. Babylon en
+  // pose 45,8 par defaut, et personne ne le reglait.
+  check("la camera du joueur voit a 70 degres", REGLAGES_JOUEUR.fov, 70);
+
+  // Les reglages se lisent dans `data/camera.json` quand il existe, et se
+  // savent repli sinon — comme les distances du pilote automatique.
+  check("sans extraction, les reglages se savent replis",
+        reglagesDuJoueur(null).declared, false);
+  const doc = { cameras: [{ name: "PlayerCamera", roles: ["joueur"], fov: 70,
+    effects: { GlowEffect: [{ intensity: 2, iterations: 3, tint: [1, 0, 0, 0] }] } }] };
+  check("avec elle, ils se savent declares", reglagesDuJoueur(doc).declared, true);
+  check("et ce sont ceux du build", reglagesDuJoueur(doc).glow.intensity, 2);
+  check("une camera absente ne rend rien", reglagesDe(doc, "LandingCam"), null);
+
+  // --- le telescope, relu dans l'IL --------------------------------------
+  //
+  // Quatre erreurs a la fois dans l'ancienne version, et la plus couteuse etait
+  // invisible : `maxFOV` servait de champ de REPOS, donc toute la partie se
+  // jouait a 60 degres au lieu de 70, telescope range.
+  const lunette = new Telescope();
+  check("au repos, on voit au champ de la camera", lunette.fov, TELESCOPE.restFOV);
+  check("et le plan proche est celui du build", lunette.nearClip, 0.05);
+  check("on entre a (60 - 10) / 1,5", Number(lunette.entryFOV.toFixed(2)), 33.33);
+  lunette.toggle();
+  check("le plan proche recule en visant", lunette.nearClip, 0.5);
+  // Deux secondes pour rejoindre la cible : c'est `_zoomInSeconds`.
+  for (let i = 0; i < 200; i++) lunette.update(0.01);
+  check("et deux secondes suffisent a y arriver",
+        Number(lunette.fov.toFixed(2)), Number(lunette.entryFOV.toFixed(2)));
+  // Puis on zoome A LA MAIN, cinquante degres par seconde, borne a 10.
+  lunette.update(0.2, 1);
+  check("la commande resserre a 50 degres par seconde",
+        Number(lunette.targetFOV.toFixed(2)), Number((lunette.entryFOV - 10).toFixed(2)));
+  for (let i = 0; i < 400; i++) lunette.update(0.05, 1);
+  check("et ne depasse pas le minimum", lunette.targetFOV, TELESCOPE.minFOV);
+  for (let i = 0; i < 400; i++) lunette.update(0.05, -1);
+  check("ni le maximum dans l'autre sens", lunette.targetFOV, TELESCOPE.maxFOV);
+  lunette.toggle();
+  for (let i = 0; i < 400; i++) lunette.update(0.05);
+  check("en sortant, on revient au champ de la camera",
+        Number(lunette.fov.toFixed(3)), TELESCOPE.restFOV);
+  check("le grossissement est celui du repos sur le minimum",
+        lunette.magnification, 7);
 }
 
 report();
