@@ -101,6 +101,12 @@ def run_repli(url):
     est bien celle qu'on a posee. Les replis sont un chemin garde par CLAUDE.md
     (« la page doit rester ouvrable sans le build ») : le voici garde pour de
     bon.
+
+    SA LIMITE, ET ELLE EST REELLE. Sans donnees, des branches entieres de la
+    boucle ne s'executent pas — il n'y a ni secteur, ni decor, ni sonde. Ce
+    mode a laisse passer un `ambientStep is not defined` que le mode complet a
+    trouve : l'appel vit dans une branche qui demande un secteur. Il attrape ce
+    qui casse au DEMARRAGE, pas ce qui casse en jouant.
     """
     from playwright.sync_api import sync_playwright
 

@@ -81,7 +81,7 @@ import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
-import { loadLighting, LightField } from "./lights.js";
+import { loadLighting, LightField, ambientTarget, ambientStep } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels, markCrushing } from "./sand.js";
