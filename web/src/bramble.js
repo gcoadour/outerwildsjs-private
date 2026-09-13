@@ -17,6 +17,9 @@
 //   distance d'echappement 300, rayon d'habitat 1200,
 //   rayon de detection du bruit 200
 
+// @lit NoiseSensor, AnglerfishController
+// Les predateurs et ce qu'ils entendent.
+
 export const FISH = {
   acceleration: 2,
   investigateSpeed: 15,

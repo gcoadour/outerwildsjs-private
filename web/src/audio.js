@@ -605,7 +605,7 @@ export class AudioField {
 /**
  * Les coquilles sonores : deux `AudioShell` dans la scene.
  *
- * @lit AudioShell, FadeInAudioOnAwake
+ * @lit AudioShell, FadeInAudioOnAwake, OWAudioSource
  *
  * `OnTriggerEnter` teste le tag `PlayerCameraDetector` — c'est l'OREILLE qu'on
  * guette, pas le corps — et fait fondre sa source en UNE seconde ; sortir la

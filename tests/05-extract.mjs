@@ -894,6 +894,35 @@ const signaux = signalVolumes(gp);
 check("des zones de signal sont posees", signaux.length > 0, true);
 check("dont des zones sombres", signaux.some((z) => z.kind === "dark"), true);
 
+// La fin de la queue (docs/55-attaches.md).
+check("quatorze objets s'alignent sur un corps designe",
+      (gp.placed.AlignWithTargetBody || []).length, 14);
+check("et tous savent lequel",
+      (gp.placed.AlignWithTargetBody || []).every((c) => !!c.fields._targetBody), true);
+check("neuf corps heritent d'un champ", (gp.placed.FieldInheritor || []).length, 9);
+const clignotants = (gp.placed.BlinkingRenderer || []);
+check("deux clignotants", clignotants.length, 2);
+// Les deux serialisent leur rythme, et PAS a la meme valeur : un clignotement
+// plus rapide dit quelque chose de plus urgent.
+check("et ils ne battent pas au meme rythme",
+      new Set(clignotants.map((c) => c.fields._offSeconds)).size, 2);
+check("aucun n'a de duree finie",
+      clignotants.every((c) => (c.fields._duration ?? -1) < 0), true);
+const nodes = (gp.placed.BrokenNode || []);
+check("trois noeuds casses", nodes.length, 3);
+check("tous sur le satellite casse",
+      nodes.every((n) => n.body === "BrokenSatellite_Body"), true);
+check("et tous reparent vers le meme materiau vert",
+      new Set(nodes.map((n) => n.fields._repairedMaterial.name)).size, 1);
+check("une trappe", (gp.placed.HatchController || []).length, 1);
+// Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build :
+// c'est le meme cas que `_probePrefab`. L'invariant garde ce vide.
+const remous = (gp.placed.WaterEffectVolume || []);
+check("un volume d'eclaboussure", remous.length, 1);
+check("et aucun de ses trois prefabs n'est resolu",
+      ["_largeSplashPrefab", "_medSplashPrefab", "_smallSplashPrefab"]
+        .filter((k) => remous[0].fields[k]).length, 0);
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");

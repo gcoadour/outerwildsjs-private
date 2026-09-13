@@ -20,6 +20,9 @@
 // soleil etant lui en inverse du carre, ses satellites retrouvent le
 // v = sqrt(mu/r) keplerien : leurs vitesses decroissent bien en 1/sqrt(r).
 
+// @lit OWRigidbody, InitialMotion, InitialVelocity
+// Les corps mobiles et leur mouvement de depart.
+
 import { fieldStrength } from "./gravity.js";
 
 const UP = [0, 1, 0];

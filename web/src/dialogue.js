@@ -10,6 +10,9 @@
 // donc les noeuds vus, et cet ensemble survit a la supernova comme au
 // rechargement de la page.
 
+// @lit Conversation, CharacterDialogueTree
+// Les quatorze conversations du build et leurs arbres.
+
 const STORAGE_KEY = "outerwildsjs.knowledge";
 
 export async function loadDialogue() {

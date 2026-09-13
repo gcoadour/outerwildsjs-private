@@ -100,7 +100,11 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // Ce qui pilote la lumiere GLOBALE et les coquilles sonores
                 // (docs/54-lumiere.md).
                 "AmbientLightManager", "ExternalLightController", "FadeLight",
-                "DayNightTracker", "AudioShell", "FadeInAudioOnAwake"];
+                "DayNightTracker", "AudioShell", "FadeInAudioOnAwake",
+                // La fin de la queue : ce qui suit un autre corps, et ce qui
+                // clignote (docs/55-attaches.md).
+                "AlignWithTargetBody", "BlinkingRenderer", "BrokenNode",
+                "HatchController", "WaterEffectVolume"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.

@@ -4,6 +4,9 @@
 // Quatre systemes que le portage n'avait jamais regardes, un exemplaire de
 // chacun dans la scene.
 
+// @lit MarshmallowStick, ShipComputerCamera, RemoteFlightConsole
+// L'ordinateur de bord, la lampe et la guimauve.
+
 /**
  * Ordinateur de bord.
  *

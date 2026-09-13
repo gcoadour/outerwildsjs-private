@@ -32,6 +32,9 @@ import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
+import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
+         blinkingRenderers, Blinker, brokenNodes, waterEffects,
+         BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, activeZones, winnersByLayer, clipOf,
@@ -3471,6 +3474,65 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("dedans, silence", shellGain(1, 5), 0);
   check("a mi-fondu, la moitie", shellGain(1, 0.5), 0.5);
   check("et en sortant, ca remonte", shellGain(0, 0.5), 0.5);
+
+  // --- ce qui suit un autre corps, et ce qui clignote (docs/55) -----------
+  //
+  // `AlignWithTargetBody` : le haut d'une meduse n'est pas donne par la
+  // gravite, mais par un corps DESIGNE — et sans aucune condition
+  // (`CheckAlignmentRequirements` rend vrai, toujours).
+  check("la direction va vers la cible",
+        alignmentDirection([0, 0, 0], [0, 10, 0]).join(","), "0,1,0");
+  check("et elle est normalisee",
+        Number(Math.hypot(...alignmentDirection([1, 2, 3], [4, 8, 15])).toFixed(6)), 1);
+  check("cible confondue : on garde un haut par defaut",
+        alignmentDirection([5, 5, 5], [5, 5, 5]).join(","), "0,1,0");
+
+  // `FieldInheritor` : les champs herites s'ADDITIONNENT.
+  check("sans champ, aucune acceleration", inheritedAcceleration([]).join(","), "0,0,0");
+  check("deux champs s'ajoutent",
+        inheritedAcceleration([[1, 0, 0], [0, 2, 0]]).join(","), "1,2,0");
+  check("et un champ nul ne casse rien",
+        inheritedAcceleration([[1, 0, 0], null]).join(","), "1,0,0");
+
+  // Les clignotants : les deux instances ne battent PAS au meme rythme.
+  const clign = blinkingRenderers({ placed: { BlinkingRenderer: [
+    { name: "UpdateIcon", position: [0, 0, 0],
+      fields: { _onSeconds: 1, _offSeconds: 1, _duration: -1 } },
+    { name: "ComputerUpdated", position: [0, 0, 0],
+      fields: { _onSeconds: 1, _offSeconds: 0.5, _duration: -1 } },
+  ] } });
+  check("deux clignotants", clign.length, 2);
+  check("et ils ne battent pas pareil",
+        `${clign[0].off},${clign[1].off}`, "1,0.5");
+  check("le constructeur, lui, dit un et un", `${BLINK.on},${BLINK.off}`, "1,1");
+  const bat = new Blinker(clign[1]);
+  bat.activate(0);
+  check("au depart, visible", bat.visible, true);
+  bat.update(1.1);
+  check("apres une seconde allumee, eteint", bat.visible, false);
+  bat.update(1.7);
+  check("et rallume apres un demi-seconde", bat.visible, true);
+  // Un `_duration` positif eteint le composant au bout du compte.
+  const bref = new Blinker({ on: 1, off: 1, duration: 2 });
+  bref.activate(0);
+  bref.update(3);
+  check("un clignotant a duree finit par s'arreter", bref.done, true);
+
+  // Les trois noeuds du satellite : la reparation SE VOIT.
+  const casses = brokenNodes({ placed: { BrokenNode: [
+    { name: "BrokenNode", position: [0, 0, 0], body: "BrokenSatellite_Body",
+      fields: { _repairedMaterial: { name: "GreenSelfIllumMat" } } },
+  ] } });
+  check("le noeud sait de quoi il aura l'air repare",
+        casses[0].repairedMaterial, "GreenSelfIllumMat");
+
+  // Les eclaboussures : les trois pointeurs ne sont resolus par rien dans le
+  // build. L'invariant garde ce vide, pour que personne ne les cherche.
+  const remous = waterEffects({ placed: { WaterEffectVolume: [
+    { name: "OceanFluid", position: [0, 0, 0], body: "GiantsDeep_Body", fields: {} },
+  ] } });
+  check("trois tailles d'eclaboussure sont prevues", remous[0].splashes.length, 3);
+  check("et aucune n'est resolue", remous[0].splashes.filter(Boolean).length, 0);
 }
 
 report();

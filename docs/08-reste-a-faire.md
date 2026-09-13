@@ -112,6 +112,8 @@ portage.
 | bruit du joueur | proportionnel à la poussée, et lancer une sonde **s'entend** |
 | mort par écrasement | le sable montant, seule surface du build qui écrase |
 | lumière globale | elle **fond**, se coupe dans une zone sombre et sur la carte |
+| attaches | 14 alignements sur un corps désigné, 9 héritiers de champ |
+| réparation visible | un nœud réparé devient vert |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -220,7 +222,7 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
   pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
   est écrit dans le ciel.
-- **30 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
+- **27 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
   compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
   de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
   **commentaires** avant de compter, et c'est un commentaire qui avait caché

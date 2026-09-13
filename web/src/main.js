@@ -69,6 +69,11 @@ import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable } from "./gamepad.js";
 import { SpinField, sunElevation } from "./spin.js";
 import { directionalFields, polarFields } from "./gravity.js";
+// @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
+// Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
+// `_isTonemappingActive` faux par defaut du manager ; les decalcomanies passent
+// par `applyDecals` (docs/46-migration-lots.md, lot 2).
+
 import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
