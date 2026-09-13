@@ -122,7 +122,7 @@ export class Player {
     this.fluid = null;    // volume de fluide traverse, ou null
     this.jetpack = false; // le sac dorsal pousse-t-il ? (c'est lui qui brule)
     this.tumble = 0;      // temps restant de desequilibre, en secondes
-    this.wasUp = false;   // front de touche du saut
+    this.wasJump = false;   // front de touche du saut
     this.mass = this.c.mass;
     this.body = null;     // agregat Havok, si physique active
     this.scene = null;
@@ -155,25 +155,29 @@ export class Player {
     // Un joueur desequilibre ne commande plus rien : c'est la punition d'un
     // atterrissage trop rapide (_tumbleDuration 1,5).
     const cmd = this.tumble > 0
-      ? { forward: 0, right: 0, up: false } : (input || {});
+      ? { forward: 0, right: 0, up: false, down: false, jump: false } : (input || {});
     this.jetpack = false;
     this.world = world;
     if (this.physics) this.stepPhysics(dt, cmd, basis, origin);
     else this.stepAnalytic(dt, bodies, cmd, basis);
-    this.wasUp = !!(input && input.up);
+    this.wasJump = !!(input && input.jump);
     this.fluid = this.applyFluid(dt, world);
     return this.field;
   }
 
   /**
-   * Saut : au sol, la touche « haut » saute sur son FRONT ; en l'air, la meme
-   * touche tenue allume le sac dorsal. C'est le partage du jeu, et le portage
-   * n'avait que la seconde moitie.
+   * Saut : sur le FRONT de la touche, et au sol.
+   *
+   * Le portage faisait sauter ET monter avec la meme touche, en commentant
+   * « c'est le partage du jeu ». Ce n'en est pas un : le build a deux canaux
+   * distincts, `Jump` (espace, `GroundInput.jump`) et `Move Up` (majuscule,
+   * `JetpackInput.thrustUp`). On peut donc sauter et pousser en meme temps,
+   * et c'est ce qui donne au decollage sa forme (docs/61-commandes.md).
    *
    * @returns true si le saut est parti.
    */
   tryJump(input, up) {
-    if (!this.grounded || !input.up || this.wasUp || this.tumble > 0) return false;
+    if (!this.grounded || !input.jump || this.wasJump || this.tumble > 0) return false;
     this.vel.x += up.x * this.c.jumpSpeed;
     this.vel.y += up.y * this.c.jumpSpeed;
     this.vel.z += up.z * this.c.jumpSpeed;
@@ -199,8 +203,12 @@ export class Player {
       a.y += (basis.fwd.y * fwd + basis.right.y * rgt) * lat;
       a.z += (basis.fwd.z * fwd + basis.right.z * rgt) * lat;
     }
-    if (input.up) { a.x += up.x * ver; a.y += up.y * ver; a.z += up.z * ver; }
-    this.jetpack = !!(fwd || rgt || input.up);
+    // `thrustUp` et `thrustDown` sont DEUX canaux — majuscule et controle — et
+    // le portage n'avait que le premier. Descendre au sac dorsal etait donc
+    // impossible : on ne pouvait que couper la poussee et tomber.
+    const vert = (input.up ? 1 : 0) - (input.down ? 1 : 0);
+    if (vert) { a.x += up.x * ver * vert; a.y += up.y * ver * vert; a.z += up.z * ver * vert; }
+    this.jetpack = !!(fwd || rgt || vert);
     return a;
   }
 

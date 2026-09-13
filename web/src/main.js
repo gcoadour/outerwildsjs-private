@@ -71,6 +71,8 @@ import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable } from "./gamepad.js";
+// Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
+import { loadCommandes } from "./input.js";
 import { SpinField, sunElevation } from "./spin.js";
 import { directionalFields, polarFields } from "./gravity.js";
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
@@ -147,6 +149,10 @@ async function boot() {
   // simplement pas au jeu — c'est le genre d'ecart qu'une capture ne trahit
   // pas, faute de point de comparaison dans l'image.
   const camerasDuBuild = await loadCameras();
+  // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
+  // prend le relais — et elle se sait repli, comme `config.js`.
+  const cmds = await loadCommandes();
+  window.__commandes = cmds;
   const reglagesCam = reglagesDuJoueur(camerasDuBuild);
   camera.fov = (reglagesCam.fov || 70) * Math.PI / 180;
   // Calque des billes de sonde : visible du joueur, pas de la sonde elle-meme.
@@ -1246,6 +1252,9 @@ async function boot() {
   // Le lacet part de l'orientation du point d'apparition : c'est elle qui
   // decide de la premiere image du jeu.
   let yaw = yaw0, pitch = 0;
+  // Le roulis vient du MEME mouvement de souris que le lacet, aiguille par la
+  // touche alt (`Swap Roll/Yaw`). Il s'accumule ici et se consomme a l'image.
+  let rollInput = 0;
   const keys = Object.create(null);
   // Un relachement attend la FIN de l'image.
   //
@@ -1256,12 +1265,38 @@ async function boot() {
   // partait jamais sur une pichenette. C'est `15_verify.py` qui l'a montre :
   // `keyboard.press()` fait les deux dans la meme milliseconde.
   const relachements = [];
+  // Les boutons de la SOURIS sont des commandes a part entiere dans l'alpha :
+  // `Lock On` est le clic gauche, `Probe` le droit, `Telescope` le milieu. Le
+  // portage n'en lisait aucun, et avait mis ces trois actions sur des lettres.
+  //
+  // Ce sont des evenements POINTEUR et non des evenements souris, et la
+  // difference n'est pas cosmetique : Babylon appelle `preventDefault()` sur
+  // `pointerdown` pour son propre pilotage de camera, et un `preventDefault`
+  // sur un evenement pointeur SUPPRIME les evenements souris de compatibilite
+  // qui devaient suivre. Un `mousedown` pose sur la fenetre ne se declenchait
+  // donc jamais — les mouvements passaient, les boutons non, et rien ne le
+  // disait. C'est `15_verify.py` qui l'a trouve : la sonde ne partait pas.
+  const souris = Object.create(null);
+  const relachementsSouris = [];
+  addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse") souris[e.button] = true;
+  });
+  addEventListener("pointerup", (e) => {
+    if (e.pointerType === "mouse") relachementsSouris.push(e.button);
+  });
+  // Le clic droit ouvre le menu contextuel du navigateur, et c'est le bouton de
+  // la sonde : sans cette ligne, lancer une sonde ouvre un menu — et le menu
+  // avale le relachement, donc la sonde ne part jamais. On le refuse partout et
+  // pas seulement sous verrou de souris : la page entiere est le jeu.
+  addEventListener("contextmenu", (e) => e.preventDefault());
   addEventListener("keydown", (e) => { keys[e.code] = true; });
   addEventListener("keyup", (e) => { relachements.push(e.code); });
   window.__keys = keys;
+  window.__souris = souris;
   /** A appeler en fin d'image : applique les relachements retenus. */
   function appliquerRelachements() {
     while (relachements.length) keys[relachements.pop()] = false;
+    while (relachementsSouris.length) souris[relachementsSouris.pop()] = false;
   }
   let interactPressed = false, optionPressed = 0;
   // La sonde ne se declenche plus a l'appui : elle se CHARGE tant qu'on tient,
@@ -1272,48 +1307,64 @@ async function boot() {
   let repairFraction = 0;
 
   /**
-   * Une commande, designee par son code clavier.
+   * Une commande, designee par son code clavier — ou par « Mouse0 » a
+   * « Mouse2 », parce que trois des canaux du build sont des boutons de
+   * souris.
    *
-   * Les boutons tactiles passent par ici avec le meme code que la touche
-   * correspondante : il n'y a donc qu'un seul jeu de commandes, et rien en
-   * aval ne sait d'ou vient l'ordre.
+   * Les boutons tactiles et ceux de la manette passent par ici avec le meme
+   * code : il n'y a donc qu'un seul jeu de commandes, et rien en aval ne sait
+   * d'ou vient l'ordre.
+   *
+   * Le test ne porte plus sur la touche mais sur le CANAL : `est("Telescope")`
+   * plutot que `code === "KeyT"`. Les touches viennent alors de
+   * `data/input.json`, et les changer ne demande pas de toucher a ce fichier.
    */
   function command(code) {
-    if (code === "KeyE") interactPressed = true;
+    const est = (canal) => {
+      const c = cmds.get(canal);
+      if (!c) return false;
+      const m = /^Mouse(\d+)$/.exec(String(code));
+      if (m) return c.pos.mouse.includes(Number(m[1]));
+      return c.pos.codes.includes(code) || c.neg.codes.includes(code);
+    };
+    if (est("Interact")) interactPressed = true;
     const m = /^Digit([1-9])$/.exec(code);
     if (m) optionPressed = parseInt(m[1], 10);
-    if (code === "KeyM") solarMap.toggle();
-    if (code === "KeyC" && solarMap.open) solarMap.recenter();
-    // La lampe : le jeu la met sur la croix directionnelle, ici sur L.
-    if (code === "KeyL") flashlight.toggle();
+    if (est("Map")) solarMap.toggle();
+    if (est("Recenter Map") && solarMap.open) solarMap.recenter();
+    // La lampe : `Flashlight`, la touche F du build — et la croix
+    // directionnelle a la manette (axe 6).
+    if (est("Flashlight")) flashlight.toggle();
     // L'ordinateur de bord ne se consulte qu'a l'interieur du vaisseau ; ce
     // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
-    if (code === "KeyN" && ship && ship.boarded) {
+    // Le build n'a pas de canal pour lui : c'est un ajout, et `AJOUTS` le dit.
+    if (est("Ship Computer") && ship && ship.boarded) {
       computer.open = !computer.open;
     }
     if (computer.open) {
       if (code === "ArrowLeft") computer.move(-1);
       if (code === "ArrowRight") computer.move(1);
       if (code === "Enter" || code === "Space") computer.select();
-      if (code === "Backspace" || code === "Escape") computer.cancel();
+      if (code === "Backspace" || est("Cancel")) computer.cancel();
     }
-    if (code === "KeyT") telescope.toggle();
-    // Consoles a camera deportee : on les prend en main a portee de la main,
-    // et on les lache de la meme touche.
-    if (code === "KeyR" && consoles.count) {
+    if (est("Telescope")) telescope.toggle();
+    // Consoles a camera deportee : `Landing Camera`, la meme touche que la
+    // photo arriere de la sonde — le build les separe par jeu de commandes,
+    // pas par touche.
+    if (est("Landing Camera") && consoles.count) {
       const c = consoles.toggle([player.pos.x + framePos[0],
                                  player.pos.y + framePos[1],
                                  player.pos.z + framePos[2]]);
       console.log(c ? `console prise : ${c.name}` : "console lachee");
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
-    if (code === "KeyB" && marshmallow.eat()) {
+    if (est("Marshmallow") && marshmallow.eat()) {
       console.log(`guimauve mangee (${marshmallow.eaten})`);
     }
     // GUIMode fait tourner ses quatre modes sur une touche de debogage
-    if (code === "KeyG") console.log("mode d'affichage :", guiMode.cycle());
+    if (est("Display Mode")) console.log("mode d'affichage :", guiMode.cycle());
     // Le menu des reglages, comme dans le jeu, met le temps en pause
-    if (code === "Escape" && settingsUI) {
+    if (est("Pause") && settingsUI) {
       settings.open = !settings.open;
       settingsUI.render();
     }
@@ -1334,6 +1385,11 @@ async function boot() {
     }
   }
   addEventListener("keydown", (e) => command(e.code));
+  // Trois canaux du build sont des boutons de souris — `Lock On` a gauche,
+  // `Probe` a droite, `Telescope` au milieu — et le portage n'en lisait aucun.
+  addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse") command(`Mouse${e.button}`);
+  });
 
   /**
    * Deplacement du regard, en pixels.
@@ -1354,6 +1410,14 @@ async function boot() {
     const w = Math.max(320, (window.innerWidth || 1280));
     const k = (TURN / w) * (telescope && telescope.active
       ? (player.c.telescopeTurnScalar ?? 0.5) : (player.c.suitTurnScalar ?? 1));
+    // `Swap Roll/Yaw` : le build n'a pas d'axe de roulis. `JetpackInput.roll` et
+    // `JetpackInput.yaw` sont construits sur le MEME canal (`yaw`), et la touche
+    // alt choisit lequel des deux recoit le mouvement. Le portage avait invente
+    // une paire Q/Z — or Q est le canal `Cancel` du build.
+    if (cmds && cmds.held("Swap Roll/Yaw", { keys })) {
+      rollInput += dx * k * gain * Math.abs(f);
+      return;
+    }
     yaw += dx * k * gain * Math.abs(f);
     pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * k * gain * f));
   }
@@ -1374,8 +1438,15 @@ async function boot() {
   // commande, elle produit les memes axes et les memes codes. Le build decrit
   // une manette entiere (`XboxInput`) et les invites portent deja le bouton
   // attendu, avec son icone — c'etait la derniere entree decrite et jamais lue.
-  const pad = new GamepadControls({ onKey: command,
-                                    onLook: (dx, dy) => look(dx, dy, 1) });
+  // Les boutons TENUS de la manette : ils rejoignent l'etat du clavier et de la
+  // souris, de sorte que `cmds.held(...)` reponde pareil d'ou que vienne
+  // l'ordre. Sans cela, la gachette de sonde ne pourrait pas se charger.
+  const padHeld = new Set();
+  const pad = new GamepadControls({
+    onKey: command,
+    onLook: (dx, dy) => look(dx, dy, 1),
+    onHold: (codes) => { padHeld.clear(); for (const c of codes) padHeld.add(c); },
+  });
   window.__pad = pad;
   addEventListener("gamepadconnected", (e) => {
     console.log("manette branchee :", e.gamepad && e.gamepad.id);
@@ -1457,15 +1528,39 @@ async function boot() {
     // mais elle ne multiplie plus rien ; elle sert au bruit qu'on fait, ce qui
     // est un choix assume de ce portage. En echange, le roulis apparait : la
     // manette et le clavier le prevoyaient, le vaisseau n'avait pas d'axe.
+    //
+    // Les canaux sont ceux du build : `Move X` (a/d), `Move Z` (w/s),
+    // `Move Up` (majuscule) et `Move Down` (controle) pour le sac dorsal,
+    // `Jump` (espace) pour le saut. Le portage mettait le saut ET la poussee
+    // verticale sur l'espace, n'avait pas de descente, et donnait la majuscule
+    // a un accelerateur que le build n'a pas.
+    // L'etat des commandes, toutes sources confondues. Sans manette tenue on
+    // passe les objets tels quels — c'est le cas courant, et il ne copie rien.
+    let etatCmd = { keys, mouse: souris };
+    if (padHeld.size) {
+      etatCmd = { keys: { ...keys }, mouse: { ...souris } };
+      for (const c of padHeld) {
+        const mm = /^Mouse(\d+)$/.exec(c);
+        if (mm) etatCmd.mouse[Number(mm[1])] = true;
+        else etatCmd.keys[c] = true;
+      }
+    }
+    const roulis = rollInput;
+    rollInput = 0;
     const input = death.dead
-      ? { forward: 0, right: 0, up: false, roll: 0, loud: false } : {
-        forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward + gp.forward),
-        right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right + gp.right),
-        up: keys.Space || ax.up || gp.up,
-        // Q et Z : E sert deja a interagir, et le roulis a besoin d'une paire
-        // libre. La manette prend le cinquieme axe quand elle en a un.
-        roll: axis((keys.KeyZ ? 1 : 0) - (keys.KeyQ ? 1 : 0) + (gp.roll || 0)),
-        loud: keys.ShiftLeft || keys.ShiftRight || ax.boost || gp.boost,
+      ? { forward: 0, right: 0, up: false, down: false, jump: false,
+          roll: 0, loud: false } : {
+        forward: axis(cmds.axis("Move Z", etatCmd) + ax.forward + gp.forward),
+        right: axis(cmds.axis("Move X", etatCmd) + ax.right + gp.right),
+        up: cmds.held("Move Up", etatCmd) || ax.up || gp.up,
+        down: cmds.held("Move Down", etatCmd) || ax.down || gp.down,
+        jump: cmds.held("Jump", etatCmd) || ax.jump || gp.jump,
+        // Le roulis n'a pas d'axe propre : c'est le lacet, aiguille par alt.
+        roll: axis(roulis * 4 + (gp.roll || 0)),
+        // « loud » n'est plus une touche : le build n'a pas d'accelerateur, et
+        // le bruit se mesure a la poussee. On le garde a faux, et le calcul de
+        // bruit prend la fraction reelle.
+        loud: false,
       };
     // 1. avance des orbites et des rotations propres, puis re-expression dans
     //    le repere du corps ancre — qui tourne desormais avec lui
@@ -1646,7 +1741,7 @@ async function boot() {
         const abimee = avarie.deadParts.length || avarie.integrity < avarie.total;
         const en_cours = shipRepairs.find((r) => !r.done) || null;
         if (abimee && en_cours) {
-          if (keys.KeyH) en_cours.press(); else en_cours.release();
+          if (cmds.held("Interact", etatCmd)) en_cours.press(); else en_cours.release();
           if (en_cours.update(dt)) {
             const piece = avarie.repair();
             if (piece) console.log(`reparation : ${piece} remise en etat`);
@@ -1743,7 +1838,7 @@ async function boot() {
       const noeud = training.nodes.find((r) => !r.done &&
         r.inRange(restingPoint(playerW, decalageDuCorps(r.volume.body, anchorPos))));
       if (noeud) {
-        if (keys.KeyH) noeud.press(); else noeud.release();
+        if (cmds.held("Interact", etatCmd)) noeud.press(); else noeud.release();
         noeud.update(dt);
       }
       if (training.update()) {
@@ -2095,10 +2190,13 @@ async function boot() {
     //
     // Le telescope se zoome A LA MAIN (`OWInput.GetAxis(zoomIn/zoomOut)`, 50
     // degres par seconde) entre 10 et 60 degres, et il ENTRE a 33,33 — pas au
-    // plus etroit, comme le portage le faisait. Les touches R et F portent
-    // l'axe, faute d'en avoir une paire libre plus naturelle.
+    // plus etroit, comme le portage le faisait. Les touches sont celles du
+    // build : `Zoom In` et `Zoom Out` sont majuscule et controle, les MEMES
+    // que la montee et la descente au sac dorsal. Le portage avait pris R et F
+    // « faute d'en avoir une paire libre plus naturelle » — la paire existait.
     const zoomAxe = telescope.active
-      ? ((keys.KeyR ? 1 : 0) - (keys.KeyF ? 1 : 0)) : 0;
+      ? ((cmds.held("Zoom In", etatCmd) ? 1 : 0)
+         - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
     camera.fov = telescope.update(dt, zoomAxe);
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
@@ -2113,7 +2211,8 @@ async function boot() {
     // est ouverte, la touche porte le zoom : les deux ne peuvent pas servir
     // ensemble, et le build non plus ne les melange pas (`_telescopeInputs`
     // n'a pas la sonde).
-    const probeHeld = !!keys.KeyF && !telescope.active;
+    const probeHeld = (cmds.held("Probe", etatCmd) || !!ax.probe)
+      && !telescope.active;
     // La sonde se RAMASSE (docs/46, lot 7) : `ExpeditionGear` la debloque, dans
     // la cabine du vaisseau. Sans elle, la touche ne lance rien — c'est la
     // progression du build, et le portage donnait tout au premier instant.
@@ -2156,7 +2255,7 @@ async function boot() {
     const champ = player.field;
     probes.update(dt,
       { launch: probeHeld && !!equipment.probe, retrieve: probeHeld,
-        alt: !!keys.KeyR && !consoles.count },
+        alt: cmds.held("Alt Probe", etatCmd) && !consoles.count },
       { pos: [player.pos.x, player.pos.y, player.pos.z],
         forward: [fwd.x, fwd.y, fwd.z],
         playerForward: [fwd.x, fwd.y, fwd.z],
@@ -2197,7 +2296,7 @@ async function boot() {
     // La touche `altProbe` (R dans le build) montre l'arriere : c'est la seule
     // vue utile une fois la sonde plantee.
     probeCam.update(guiMode.hidden ? null : (remoteView || probes.last),
-                    !remoteView && !!keys.KeyR && !consoles.count);
+                    !remoteView && cmds.held("Alt Probe", etatCmd) && !consoles.count);
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {

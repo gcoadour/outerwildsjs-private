@@ -1,0 +1,263 @@
+// Les commandes du jeu — celles du build, pas celles du portage.
+//
+// Le portage avait choisi ses touches, et personne n'avait regarde celles de
+// l'alpha : elles sont dans l'`InputManager`, un reglage de projet range dans
+// `mainData`, et ni ce fichier ni la classe 13 n'etaient lus
+// ([`docs/61`](../../docs/61-commandes.md)).
+//
+// Vingt-deux canaux (`InputChannels`), chacun decline en trois axes selon la
+// source — clavier/souris, manette PC, manette Mac. Les classes `*Input` les
+// assemblent ensuite en jeux de commandes par mode de jeu : `GroundInput`,
+// `JetpackInput`, `ShipInput`, `MapInput`… Un meme canal sert donc plusieurs
+// actions, et c'est voulu :
+//
+//   Probe            lancer, photographier et rappeler la sonde
+//   Move Up          monter au sac dorsal, ET zoomer a la lunette
+//   Alt Probe        la photo arriere, ET la camera d'atterrissage
+//   Interact         parler, ET declencher le pilote automatique
+//   Jump             sauter, ET accorder sa vitesse au referentiel
+//
+// Ce qui suit ne touche ni au DOM ni a Babylon : `tests/09-jeu.mjs` l'eprouve
+// sans navigateur.
+//
+// @lit InputChannels, InputCommand, InputChannel, InputInitializer, OWInput
+// @lit GroundInput, JetpackInput, ShipInput, MapInput, PlayerCameraInput
+// @lit TelescopeInput, InterfaceInput, ProbeInput, ReferenceFrameInput
+// @lit ConversationInput, ComputerInput, SatelliteInput, XboxInput
+
+/**
+ * Le repli : les liaisons du build, telles que `data/input.json` les rend.
+ *
+ * Elles sont ecrites ici parce que la page doit rester jouable sans le build,
+ * et non parce qu'on les a devinees — chacune est verifiee par
+ * `tests/05-extract.mjs` contre l'`InputManager`. Le jour ou l'une des deux
+ * bouge sans l'autre, le test le dit.
+ */
+export const COMMANDES = {
+  "Move X": { keys: ["a", "d", "j", "l"], neg: ["a", "j"], pos: ["d", "l"], pad: { axis: 0 } },
+  "Move Z": { neg: ["s", "k"], pos: ["w", "i"], pad: { axis: 1, invert: true } },
+  "Move Up": { pos: ["left shift", "right shift"], pad: { axis: 9 } },
+  "Move Down": { pos: ["left ctrl", "right ctrl"], pad: { axis: 8 } },
+  Yaw: { mouse: 0, pad: { axis: 3 } },
+  Pitch: { mouse: 1, pad: { axis: 4, invert: true } },
+  "Zoom In": { pos: ["left shift", "right shift"], pad: { axis: 9 } },
+  "Zoom Out": { pos: ["left ctrl", "right ctrl"], pad: { axis: 8 } },
+  Interact: { pos: ["e", "u"], pad: { button: 2 } },
+  Cancel: { pos: ["q", "o"], pad: { button: 1 } },
+  Jump: { pos: ["space"], pad: { button: 0 } },
+  Flashlight: { pos: ["f", "h"], pad: { axis: 6 } },
+  Telescope: { pos: ["mouse 2"], pad: { button: 9 } },
+  "Lock On": { pos: ["mouse 0"], pad: { button: 4 } },
+  Probe: { pos: ["mouse 1"], pad: { button: 5 } },
+  "Alt Probe": { pos: ["r", "y"], pad: { button: 3 } },
+  "Match Velocity": { pos: ["space"], pad: { button: 0 } },
+  Autopilot: { pos: ["e", "u"], pad: { button: 2 } },
+  "Landing Camera": { pos: ["r", "y"], pad: { button: 3 } },
+  "Swap Roll/Yaw": { pos: ["left alt", "right alt"], pad: { button: 8 } },
+  Map: { pos: ["enter", "return"], pad: { button: 6 } },
+  Pause: { pos: ["escape"], pad: { button: 7 } },
+};
+
+/**
+ * Ce que le portage ajoute, faute d'equivalent dans le build.
+ *
+ * Quatre choses seulement, et elles sont nommees ici plutot que dispersees
+ * dans `main.js` : l'ordinateur de bord se consulte a l'interieur du vaisseau,
+ * que ce portage n'a pas ; la guimauve se mange au feu de camp ; le mode
+ * d'affichage est un outil de mise au point ; recentrer la carte n'a pas de
+ * canal parce que le build recentre autrement. Aucune n'est dans l'alpha, et
+ * on ne pretend pas le contraire.
+ */
+export const AJOUTS = {
+  "Ship Computer": { pos: ["n"] },
+  Marshmallow: { pos: ["b"] },
+  "Display Mode": { pos: ["g"] },
+  "Recenter Map": { pos: ["c"] },
+};
+
+/**
+ * Le nom Unity d'une touche vers le `code` du navigateur.
+ *
+ * Unity nomme les touches par leur CARACTERE (« a », « space », « left
+ * shift ») ; le navigateur les nomme par leur PLACE (`KeyA`, `Space`,
+ * `ShiftLeft`). Les deux se correspondent exactement pour ce dont le jeu se
+ * sert, et la place vaut mieux que le caractere : elle survit a un clavier
+ * azerty, ou `KeyA` reste sous l'index gauche.
+ *
+ * @returns un `code` de clavier, `{ mouse: n }`, `{ pad: n }`, ou null
+ */
+export function codeUnity(nom) {
+  const n = String(nom || "").trim().toLowerCase();
+  if (!n) return null;
+  let m = /^mouse (\d+)$/.exec(n);
+  // Unity et le DOM ne numerotent PAS les boutons de souris pareil : Unity
+  // compte gauche, DROIT, milieu ; le navigateur compte gauche, MILIEU, droit.
+  // Prendre le numero tel quel mettait la sonde sur la molette et la lunette
+  // sur le clic droit — et c'est le controle en navigateur qui l'a dit, parce
+  // qu'aucun test sans navigateur n'appuie sur un vrai bouton.
+  if (m) return { mouse: { 0: 0, 1: 2, 2: 1 }[Number(m[1])] ?? Number(m[1]) };
+  m = /^joystick button (\d+)$/.exec(n);
+  if (m) return { pad: Number(m[1]) };
+  if (/^[a-z]$/.test(n)) return `Key${n.toUpperCase()}`;
+  if (/^[0-9]$/.test(n)) return `Digit${n}`;
+  const table = {
+    space: "Space", escape: "Escape", tab: "Tab", backspace: "Backspace",
+    // « return » est la grande touche, « enter » celle du pave numerique.
+    // Unity les distingue et le build lie les DEUX au canal `Map`.
+    return: "Enter", enter: "NumpadEnter",
+    "left shift": "ShiftLeft", "right shift": "ShiftRight",
+    "left ctrl": "ControlLeft", "right ctrl": "ControlRight",
+    "left alt": "AltLeft", "right alt": "AltRight",
+    up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
+  };
+  return table[n] || null;
+}
+
+/** Les liaisons d'un canal, rangees par nature. */
+function ranger(noms) {
+  const out = { codes: [], mouse: [], pad: [] };
+  for (const nom of noms || []) {
+    const c = codeUnity(nom);
+    if (!c) continue;
+    if (typeof c === "string") out.codes.push(c);
+    else if (c.mouse !== undefined) out.mouse.push(c.mouse);
+    else out.pad.push(c.pad);
+  }
+  return out;
+}
+
+/**
+ * Les canaux du build, lisibles par le moteur.
+ *
+ * `data/input.json` quand il est la, la table de repli sinon — et le repli se
+ * sait repli, comme `config.js`.
+ */
+export class Commandes {
+  /** @param data  le contenu de `data/input.json`, ou null */
+  constructor(data = null) {
+    this.fallback = !data || !data.channels;
+    this.canaux = new Map();
+    const source = this.fallback ? null : data.channels;
+    for (const [nom, def] of Object.entries(COMMANDES)) {
+      // La liaison de manette est NORMALISEE des la table : sans quoi le repli
+      // ecrit `{axis: 9}` la ou le build donne `{axis: 9, invert: false}`, et
+      // l'invariant de `tests/05-extract.mjs` qui compare les deux tombe sur
+      // une difference de forme plutot que de fond.
+      const normPad = (p) => (!p ? null
+        : p.axis !== undefined ? { axis: p.axis, invert: !!p.invert }
+        : { button: p.button });
+      let neg = def.neg || [], pos = def.pos || [], pad = normPad(def.pad);
+      if (source && source[nom]) {
+        const k = source[nom].Key, pc = source[nom].PC;
+        if (k && k.kind === "buttons") { neg = k.neg; pos = k.pos; }
+        if (pc && pc.kind === "padAxis") pad = normPad({ axis: pc.axis, invert: pc.invert });
+        else if (pc && pc.kind === "buttons") {
+          const b = ranger(pc.pos).pad;
+          if (b.length) pad = { button: b[0] };
+        }
+      }
+      this.canaux.set(nom, { nom, neg: ranger(neg), pos: ranger(pos), pad,
+                             mouseLook: def.mouse ?? null });
+    }
+    for (const [nom, def] of Object.entries(AJOUTS)) {
+      this.canaux.set(nom, { nom, neg: ranger([]), pos: ranger(def.pos),
+                             pad: null, mouseLook: null, ajout: true });
+    }
+    this.fixedTimestep = (data && data.fixedTimestep) || 0.016;
+    this.tags = (data && data.tags) || [];
+    this.layers = (data && data.layers) || {};
+  }
+
+  get(nom) { return this.canaux.get(nom) || null; }
+
+  /**
+   * Le canal est-il tenu ?
+   *
+   * @param etat  { keys, mouse, pad } — `keys[code]`, `mouse[bouton]`,
+   *              `pad(bouton)`. Chacun est facultatif.
+   */
+  held(nom, etat = {}) {
+    const c = this.get(nom);
+    if (!c) return false;
+    const k = etat.keys || {}, s = etat.mouse || {}, p = etat.pad || null;
+    for (const code of c.pos.codes) if (k[code]) return true;
+    for (const b of c.pos.mouse) if (s[b]) return true;
+    for (const b of c.pos.pad) if (p && p(b)) return true;
+    if (p && c.pad && c.pad.button !== undefined && p(c.pad.button)) return true;
+    return false;
+  }
+
+  /**
+   * L'axe d'un canal a boutons : −1, 0 ou +1.
+   *
+   * Les axes du build ont `gravity` et `sensitivity` a 1000 avec `snap` : au
+   * clavier ils atteignent leur borne en une milliseconde, et une valeur
+   * intermediaire ne se voit pas. On rend donc l'entier, et la manette apporte
+   * l'analogique par son propre axe.
+   */
+  axis(nom, etat = {}) {
+    const c = this.get(nom);
+    if (!c) return 0;
+    const k = etat.keys || {}, s = etat.mouse || {};
+    let v = 0;
+    for (const code of c.pos.codes) if (k[code]) v += 1;
+    for (const b of c.pos.mouse) if (s[b]) v += 1;
+    for (const code of c.neg.codes) if (k[code]) v -= 1;
+    for (const b of c.neg.mouse) if (s[b]) v -= 1;
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
+  }
+
+  /** Le numero d'axe de manette d'un canal, ou null. */
+  padAxis(nom) {
+    const c = this.get(nom);
+    return c && c.pad && c.pad.axis !== undefined ? c.pad : null;
+  }
+
+  /** Le numero de bouton de manette d'un canal, ou null. */
+  padButton(nom) {
+    const c = this.get(nom);
+    return c && c.pad && c.pad.button !== undefined ? c.pad.button : null;
+  }
+
+  /**
+   * De quoi ecrire une invite : « clic droit », « Maj », « E »…
+   *
+   * Le build affiche l'icone de manette (`ScreenPrompt`) ; au clavier il n'y a
+   * rien a copier, et ce libelle est donc du portage. Il rend la PREMIERE
+   * liaison, celle qu'on montre a quelqu'un qui apprend.
+   */
+  label(nom) {
+    const c = this.get(nom);
+    if (!c) return "";
+    if (c.pos.mouse.length) {
+      // Numerotation du DOM : 0 gauche, 1 milieu, 2 droit.
+      return { 0: "clic gauche", 1: "clic milieu", 2: "clic droit" }[c.pos.mouse[0]]
+        || `souris ${c.pos.mouse[0]}`;
+    }
+    const code = c.pos.codes[0];
+    if (!code) return "";
+    const jolis = { Space: "Espace", Escape: "Echap", Enter: "Entree",
+                    ShiftLeft: "Maj", ShiftRight: "Maj droite",
+                    ControlLeft: "Ctrl", ControlRight: "Ctrl droite",
+                    AltLeft: "Alt", AltRight: "Alt droite" };
+    if (jolis[code]) return jolis[code];
+    const m = /^Key([A-Z])$/.exec(code);
+    return m ? m[1] : code;
+  }
+}
+
+/**
+ * Charge `data/input.json`. Absent, on retombe sur la table mesuree.
+ *
+ * Meme forme que les autres chargeurs du moteur : le Service Worker sert le
+ * fichier depuis l'OPFS quand l'extraction a eu lieu, et rend 404 sinon.
+ */
+export async function loadCommandes(fetcher = fetch) {
+  try {
+    const r = await fetcher("data/input.json");
+    if (!r || !r.ok) return new Commandes(null);
+    return new Commandes(await r.json());
+  } catch (e) {
+    return new Commandes(null);
+  }
+}

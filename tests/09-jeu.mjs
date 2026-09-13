@@ -62,6 +62,7 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock } from "../web/src/gear.js";
 import { Interactables } from "../web/src/interact.js";
+import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          launchSpeed, launchPitch, orbitalSpeed, launchWindowLength,
          tracksHorizon, horizonAim, impendingCollision, lanternRange,
@@ -1236,11 +1237,28 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     for (let k = 0; k <= 15; k++) b.push({ pressed: k === i, value: k === i ? 1 : 0 });
     return { axes: [0, 0, 0, 0], buttons: b };
   };
-  check("B interagit", padEdges(press(1)).codes.join(","), "KeyE");
-  check("Back ouvre la carte", padEdges(press(8)).codes.join(","), "KeyM");
-  check("A pousse vers le haut", padState(press(0)).up, true);
-  check("la gachette droite accelere",
-        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 0, 1] }).boost, true);
+  //
+  // Ces quatre lignes gardaient la disposition que le PORTAGE avait inventee.
+  // Celle du build est dans l'`InputManager` (docs/61-commandes.md), et quatre
+  // de ses six boutons ne tombaient pas au meme endroit.
+  check("A saute", padState(press(0)).jump, true);
+  check("B annule", padEdges(press(1)).codes.join(","), "KeyQ");
+  check("X interagit", padEdges(press(2)).codes.join(","), "KeyE");
+  check("Y prend la vue arriere", padEdges(press(3)).codes.join(","), "KeyR");
+  check("LB vise un referentiel", padEdges(press(4)).codes.join(","), "Mouse0");
+  check("RB lance la sonde", padEdges(press(5)).codes.join(","), "Mouse2");
+  check("Back ouvre la carte", padEdges(press(8)).codes.join(","), "Enter");
+  check("Start met en pause", padEdges(press(9)).codes.join(","), "Escape");
+  // Les gachettes montent et descendent : `Move Up` est l'axe 9 d'Unity, la
+  // gachette DROITE, et `Move Down` l'axe 8, la gauche. Le portage montait au
+  // bouton A — qui est le saut — et accelerait a la gachette droite, avec un
+  // accelerateur que le build n'a pas.
+  check("la gachette droite monte",
+        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 0, 1] }).up, true);
+  check("la gachette gauche descend",
+        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 1, 0] }).down, true);
+  check("et il n'y a plus d'accelerateur",
+        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 1, 1] }).boost, false);
 
   // Seuls les FRONTS comptent : un bouton tenu ouvrirait puis fermerait la
   // carte a chaque image.
@@ -1249,7 +1267,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         padEdges(press(8), first.state).codes.length, 0);
   check("relache puis repris : un nouveau front",
         padEdges(press(8), padEdges(press(0), first.state).state).codes.join(","),
-        "KeyM");
+        "Enter");
   check("chaque bouton porte le nom du build", PAD_BUTTONS[5].build, "RightBumper");
 }
 
@@ -1389,7 +1407,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Saut : sur le FRONT de la touche, et une seule fois.
   const q = new Player({}, [0, 251.7, 0]);
   for (let i = 0; i < 60; i++) q.update(1 / 60, corps, rien, vertical, null);
-  q.update(1 / 60, corps, { forward: 0, right: 0, up: true }, vertical, null);
+  // `Jump` et `Move Up` sont DEUX canaux du build : l'espace saute, la
+  // majuscule pousse. Le portage les avait sur la meme touche.
+  q.update(1 / 60, corps, { forward: 0, right: 0, jump: true }, vertical, null);
   check("le saut part a _jumpSpeed", round(q.vel.y, 1), 5.8);
   check("... et quitte le sol", q.grounded, false);
 
@@ -3873,6 +3893,87 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         Number(rapide.pos[2].toFixed(2)), 79.85);
   check("l'angle entre deux directions opposees vaut cent quatre-vingts",
         Math.round(angleEntre([0, 0, 1], [0, 0, -1])), 180);
+
+  // --- les commandes du build (docs/61) ---
+  //
+  // Elles vivent dans l'`InputManager` de `mainData`, que le portage ne lisait
+  // pas : ses touches etaient les siennes. Ce qui suit garde la TRADUCTION —
+  // le nom Unity vers le code du navigateur — et le comportement des canaux ;
+  // les liaisons elles-memes sont gardees contre le build par
+  // `tests/05-extract.mjs`.
+  check("une lettre devient une place", codeUnity("a"), "KeyA");
+  check("et la place survit a un azerty", codeUnity("q"), "KeyQ");
+  check("l'espace", codeUnity("space"), "Space");
+  check("la majuscule gauche", codeUnity("left shift"), "ShiftLeft");
+  check("le controle droit", codeUnity("right ctrl"), "ControlRight");
+  // « return » est la grande touche, « enter » celle du pave numerique. Unity
+  // les distingue, et le build lie les DEUX a la carte.
+  check("return est la grande touche", codeUnity("return"), "Enter");
+  check("enter est celle du pave", codeUnity("enter"), "NumpadEnter");
+  // Unity compte gauche, DROIT, milieu ; le DOM compte gauche, MILIEU, droit.
+  // La traduction croise donc 1 et 2, et c'est le navigateur qui l'a appris au
+  // portage : `mouse 1` mettait la sonde sur la molette.
+  check("le clic droit d'Unity est le bouton 2 du DOM", codeUnity("mouse 1").mouse, 2);
+  check("son clic du milieu est le bouton 1", codeUnity("mouse 2").mouse, 1);
+  check("et le gauche ne bouge pas", codeUnity("mouse 0").mouse, 0);
+  check("un bouton de manette", codeUnity("joystick button 5").pad, 5);
+  check("et ce qu'on ne connait pas ne devient rien", codeUnity("§"), null);
+
+  const cmd = new Commandes(null);
+  check("sans data/input.json, on se sait repli", cmd.fallback, true);
+  check("vingt-deux canaux du build", Object.keys(COMMANDES).length, 22);
+  check("et quatre ajouts nommes", Object.keys(AJOUTS).length, 4);
+  // Les trois boutons de souris, que le portage n'avait pas.
+  check("viser un referentiel est le clic GAUCHE",
+        cmd.get("Lock On").pos.mouse[0], 0);
+  check("la sonde est le clic DROIT", cmd.get("Probe").pos.mouse[0], 2);
+  check("la lunette est le clic du MILIEU", cmd.get("Telescope").pos.mouse[0], 1);
+  check("le clic droit tient la sonde",
+        cmd.held("Probe", { mouse: { 2: true } }), true);
+  check("et le gauche ne la tient pas",
+        cmd.held("Probe", { mouse: { 0: true } }), false);
+  // Les axes de deplacement : a/d et w/s, avec leurs suppleants j/l et k/i.
+  check("d va a droite", cmd.axis("Move X", { keys: { KeyD: true } }), 1);
+  check("a va a gauche", cmd.axis("Move X", { keys: { KeyA: true } }), -1);
+  check("l aussi, c'est le suppleant", cmd.axis("Move X", { keys: { KeyL: true } }), 1);
+  check("w avance", cmd.axis("Move Z", { keys: { KeyW: true } }), 1);
+  check("les deux a la fois s'annulent",
+        cmd.axis("Move Z", { keys: { KeyW: true, KeyS: true } }), 0);
+  // Le sac dorsal monte a la MAJUSCULE et descend au CONTROLE ; l'espace saute.
+  check("la majuscule monte", cmd.held("Move Up", { keys: { ShiftLeft: true } }), true);
+  check("le controle descend", cmd.held("Move Down", { keys: { ControlLeft: true } }), true);
+  check("l'espace saute", cmd.held("Jump", { keys: { Space: true } }), true);
+  check("et l'espace ne monte pas", cmd.held("Move Up", { keys: { Space: true } }), false);
+  // La lunette zoome avec les MEMES touches que le sac dorsal : c'est le build
+  // qui les partage, par jeu de commandes.
+  check("zoomer, c'est monter", cmd.held("Zoom In", { keys: { ShiftLeft: true } }), true);
+  // Interagir et le pilote automatique partagent E, comme dans le build.
+  check("E interagit", cmd.held("Interact", { keys: { KeyE: true } }), true);
+  check("et pilote", cmd.held("Autopilot", { keys: { KeyE: true } }), true);
+  check("Q annule", cmd.held("Cancel", { keys: { KeyQ: true } }), true);
+  check("la carte est sur entree", cmd.held("Map", { keys: { Enter: true } }), true);
+  // La manette : les numeros du build, traduits.
+  check("la sonde est au bouton 5", cmd.padButton("Probe"), 5);
+  check("la carte au bouton 6", cmd.padButton("Map"), 6);
+  check("et monter est un AXE", cmd.padAxis("Move Up").axis, 9);
+  // Les libelles d'invite.
+  check("l'invite de la sonde", cmd.label("Probe"), "clic droit");
+  check("et celle de la lunette", cmd.label("Telescope"), "clic milieu");
+  check("celle du saut", cmd.label("Jump"), "Espace");
+  check("celle du sac dorsal", cmd.label("Move Up"), "Maj");
+  check("et celle de l'interaction", cmd.label("Interact"), "E");
+  // Un canal absent ne fait rien plutot que d'exploser.
+  check("un canal inconnu ne tient rien", cmd.held("Inexistant", {}), false);
+  check("et son axe vaut zero", cmd.axis("Inexistant", {}), 0);
+  // Avec des donnees, ce sont ELLES qui gagnent.
+  const cmd2 = new Commandes({ channels: {
+    Probe: { Key: { kind: "buttons", neg: [], pos: ["z"] },
+             PC: { kind: "buttons", neg: [], pos: ["joystick button 7"] } } } });
+  check("avec data/input.json, on ne se sait plus repli", cmd2.fallback, false);
+  check("et la liaison vient du fichier", cmd2.get("Probe").pos.codes[0], "KeyZ");
+  check("la manette aussi", cmd2.padButton("Probe"), 7);
+  check("les canaux absents du fichier gardent la table",
+        cmd2.get("Jump").pos.codes[0], "Space");
 }
 
 report();

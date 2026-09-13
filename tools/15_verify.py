@@ -354,8 +354,10 @@ def run(url, heavy, profil=None, zip_path=None):
                }"""),
                ["OW Dialogue", "OW Helmet", "OW Menu", "OW Name"])
 
-        # les invites de la carte, de priorite 2, doivent evincer les autres
-        page.keyboard.press("KeyM")
+        # les invites de la carte, de priorite 2, doivent evincer les autres.
+        # La carte est sur ENTREE dans le build (canal `Map`), pas sur M
+        # (docs/61-commandes.md).
+        page.keyboard.press("Enter")
         page.wait_for_timeout(1200)
         rep.eq("le tri par priorite evince les invites de reacteur",
                page.evaluate("() => [...document.querySelectorAll("
@@ -366,7 +368,7 @@ def run(url, heavy, profil=None, zip_path=None):
                   page.evaluate("() => Math.abs(window.__map.focal[0]) > 1000"),
                   page.evaluate("() => Math.round(window.__map.focal[0])"), "!= 0")
         page.evaluate("() => window.__map.recenter()")
-        page.keyboard.press("KeyM")
+        page.keyboard.press("Enter")
         page.wait_for_timeout(600)
 
         # --- reglages ----------------------------------------------------------
@@ -625,7 +627,9 @@ def run(url, heavy, profil=None, zip_path=None):
                       fuel1 >= carburant0 - 0.01, round(fuel1, 3),
                       f">= {round(carburant0, 3)}")
 
-            # Saut : la touche « haut » saute au sol, elle pousse en l'air.
+            # Saut : l'espace saute (`Jump`), la majuscule pousse (`Move Up`).
+            # Ce sont DEUX canaux du build, et le portage les avait sur une
+            # seule touche (docs/61-commandes.md).
             page.keyboard.press("Space")
             page.wait_for_timeout(120)
             rep.eq("le saut quitte le sol",
@@ -713,9 +717,12 @@ def run(url, heavy, profil=None, zip_path=None):
         # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
         # geste avant de mesurer.
         def sonde_geste(duree_ms, attente_ms=4000):
-            page.keyboard.down("KeyF")
+            # Le bouton DROIT : `InputChannels.probe` est `mouse 1`, et les
+            # trois statiques d'`OWInput` qui lancent, photographient et
+            # rappellent sont construites dessus.
+            page.mouse.down(button="right")
             page.wait_for_timeout(duree_ms)
-            page.keyboard.up("KeyF")
+            page.mouse.up(button="right")
             page.wait_for_timeout(attente_ms)
 
         def etat_sonde():
@@ -735,9 +742,28 @@ def run(url, heavy, profil=None, zip_path=None):
         rep.eq("sans la sonde, la touche ne lance rien", etat_sonde()["cams"], [])
         page.evaluate("() => window.__lots.equipment.pickUp(window.__lots.pickups"
                       ".find(p => p.probe))")
+        # La FENETRE DE TIR : tant que `KnowsHowProbesWork` est faux, le build
+        # exige DEUX CENTS metres de degage devant soi — c'est le garde-fou du
+        # premier lancement, qui refuse de laisser la sonde partir dans un mur
+        # ou elle ne montrerait rien. Debout au village, il refuse.
+        #
+        # Le savoir est PERSISTANT : une fois appris, il l'est pour le profil.
+        # On le remet a faux avant de mesurer, sinon ce controle ne passe qu'a
+        # la premiere execution sur un profil neuf — et un test qui ne passe
+        # qu'une fois est un test qui ment la seconde.
+        rep.eq("on ignore encore comment marchent les sondes",
+               page.evaluate("""() => { const d = window.__pdata;
+                 d.knowsHowProbesWork = false; d.save();
+                 return d.knows('knowsHowProbesWork'); }"""),
+               False)
+        sonde_geste(120)
+        rep.eq("et la fenetre de deux cents metres refuse le tir",
+               etat_sonde()["launched"], 0)
+        # Une fois le geste appris, cinq metres suffisent.
+        page.evaluate("() => window.__pdata.learn('knowsHowProbesWork')")
         sonde_geste(120)
         etat = etat_sonde()
-        rep.eq("une fois ramassee, elle part", etat["launched"], 1)
+        rep.eq("une fois le geste appris, elle part", etat["launched"], 1)
         rep.eq("et il n'y en a qu'UNE", etat["active"], 1)
         rep.eq("la sonde allume sa camera", etat["cams"], ["cam", "probeCam"])
         rep.eq("cadre de la vue de sonde",
@@ -753,14 +779,14 @@ def run(url, heavy, profil=None, zip_path=None):
         # de jeu demandent plusieurs secondes de montre. On tient donc jusqu'a
         # ce que ca arrive plutot que de parier sur un delai — le chiffre, lui,
         # est garde par `tests/09-jeu.mjs`.
-        page.keyboard.down("KeyF")
+        page.mouse.down(button="right")
         try:
             page.wait_for_function("() => window.__tools.probes.active === 0",
                                    timeout=60000)
         except Exception:
             pass
         finally:
-            page.keyboard.up("KeyF")
+            page.mouse.up(button="right")
         page.wait_for_timeout(2000)
         apres = etat_sonde()
         rep.eq("maintenir le bouton rappelle la sonde", apres["active"], 0)
@@ -770,6 +796,42 @@ def run(url, heavy, profil=None, zip_path=None):
         rep.eq("et la vue se referme", apres["cams"], ["cam"])
         rep.eq("le cadre aussi",
                page.evaluate("() => document.querySelector('.ow-probeview').hidden"), True)
+
+        # --- les commandes du build (docs/61-commandes.md) ----------------------
+        #
+        # Elles viennent de l'`InputManager` de `mainData`, extrait en
+        # `data/input.json`. Ce qui se verifie ICI et nulle part ailleurs, c'est
+        # qu'un VRAI bouton de souris arrive : Babylon appelle `preventDefault()`
+        # sur `pointerdown`, ce qui supprime les evenements souris de
+        # compatibilite, et un `mousedown` pose sur la fenetre ne se declenche
+        # jamais. Aucun test sans navigateur ne peut le voir.
+        rep.eq("les liaisons viennent du build, pas du repli",
+               page.evaluate("() => window.__commandes.fallback"), False)
+        rep.eq("vingt-deux canaux",
+               page.evaluate("() => [...window.__commandes.canaux.keys()]"
+                             ".filter(n => !window.__commandes.get(n).ajout).length"), 22)
+        rep.eq("le pas de physique du jeu",
+               page.evaluate("() => window.__commandes.fixedTimestep"), 0.016)
+        # La lunette est le clic du MILIEU, et c'est un vrai clic.
+        page.mouse.move(640, 360)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(600)
+        rep.eq("le clic du milieu ouvre la lunette",
+               page.evaluate("() => window.__tools.telescope.active"), True)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(600)
+        rep.eq("et la referme",
+               page.evaluate("() => window.__tools.telescope.active"), False)
+        # La lampe est sur F, pas sur L.
+        allumee = page.evaluate("() => window.__consoles.flashlight.on")
+        page.keyboard.press("KeyF")
+        page.wait_for_timeout(300)
+        rep.eq("F allume la lampe",
+               page.evaluate("() => window.__consoles.flashlight.on"), not allumee)
+        page.keyboard.press("KeyF")
+        page.wait_for_timeout(300)
 
         # --- coupure passe-bas des emetteurs -------------------------------------
         rep.at_least("sources reliees a un emetteur",
@@ -797,13 +859,14 @@ def run(url, heavy, profil=None, zip_path=None):
           t.onLook = (dx) => { tourne += dx; };
 
           // manche gauche pousse a fond vers l'avant : axe sature, et le cran
-          // de course s'allume comme si Maj etait tenue
+          // de course MONTE, depuis que l'accelerateur a disparu : le build
+          // n'en a pas, et la majuscule y est `Move Up` (docs/61-commandes.md)
           send('.tc-zone-move', 'pointerdown', 200, 500, 1);
           send('.tc-zone-move', 'pointermove', 200, 400, 1);
           const avant = +t.axes.forward.toFixed(2);
-          const course = t.axes.boost;
+          const course = t.axes.up;
           send('.tc-zone-move', 'pointerup', 200, 400, 1);
-          const relache = t.axes.forward, apresCourse = t.axes.boost;
+          const relache = t.axes.forward, apresCourse = t.axes.up;
 
           // manche droit tenu a fond : la camera tourne SANS que le doigt
           // bouge encore — c'est une vitesse, en pixels par seconde
@@ -857,9 +920,9 @@ def run(url, heavy, profil=None, zip_path=None):
                   pouceGauche, pouceDroit};
         }""")
         rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
-        rep.eq("a fond devant : le cran de course prend", tactile["course"], True)
+        rep.eq("a fond devant : le cran de course fait MONTER", tactile["course"], True)
         rep.eq("manche relache : axe a zero", tactile["relache"], 0)
-        rep.eq("manche relache : course finie", tactile["apresCourse"], False)
+        rep.eq("manche relache : la montee s'arrete", tactile["apresCourse"], False)
         rep.eq("un manche par pouce", tactile["manches"], 2)
         rep.eq("empreinte sous chaque pouce", tactile["empreintes"], 2)
         rep.eq("glisser au manche droit garde son effet direct",
@@ -876,14 +939,17 @@ def run(url, heavy, profil=None, zip_path=None):
                "tc-zone-move" in tactile["pouceGauche"], True)
         rep.eq("le pouce droit atteint sa zone",
                "tc-zone-look" in tactile["pouceDroit"], True)
+        # La disposition suit les canaux du build : plus d'accelerateur (il
+        # n'existe pas), une DESCENTE au sac dorsal (elle existe et manquait),
+        # et le saut a sa propre place — `Jump` et `Move Up` sont deux canaux.
         rep.eq("la manette en vol", tactile["enVol"],
-               ["Telescope", "Sonde", "Carte du systeme", "Ordinateur de bord",
-                "Affichage", "Menu", "Monter", "Accelerer", "Lampe",
-                "Interagir, parler"])
+               ["Telescope", "Sonde", "Carte du systeme", "Lampe",
+                "Ordinateur de bord", "Affichage", "Menu",
+                "Monter", "Descendre", "Sauter", "Interagir, parler"])
         rep.eq("un menu la remplace par la croix et les deux reponses",
                tactile["enMenu"],
                ["Haut", "Gauche", "Droite", "Bas", "Valider", "Retour"])
-        rep.eq("boutons tactiles en tout", tactile["boutons"], 18)
+        rep.eq("boutons tactiles en tout", tactile["boutons"], 19)
 
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------

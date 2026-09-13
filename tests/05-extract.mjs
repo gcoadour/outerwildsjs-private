@@ -29,6 +29,8 @@ import { extractSky } from "../web/src/pipeline/extract/sky.js";
 import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { extractPrefabs, mergePrefabs } from "../web/src/pipeline/extract/prefabs.js";
+import { extractInput } from "../web/src/pipeline/extract/input.js";
+import { Commandes, COMMANDES } from "../web/src/input.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -1031,6 +1033,59 @@ check("et il ignore ses collisions une demi-seconde",
 check("la supernova lointaine disparait de la carte",
       prefabs.hideInMapView.includes("DistantSupernova"), true);
 
+// A11 : les COMMANDES. Elles sont dans l'`InputManager` de `mainData`, un
+// reglage de projet qu'aucun composant ne porte — et dont `unity41-types.json`
+// n'avait pas la structure. Les touches du portage etaient donc les siennes
+// (docs/61-commandes.md).
+//
+// Le controle qui compte est le DERNIER : la table de repli de `web/src/input.js`
+// doit dire exactement ce que le build dit. Sans lui, les deux derivent en
+// silence et la page sans build ne se joue plus comme la page avec.
+const inputCtx = new ExtractContext(env, u, "mainData", engineTypes);
+const inp = extractInput(inputCtx);
+check("soixante-six axes", inp.axisCount, 66);
+check("regroupes en vingt-deux canaux", Object.keys(inp.channels).length, 22);
+check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
+// Zero, et ce n'est pas un oubli : chaque corps porte son champ.
+check("la gravite de Unity est nulle", (inp.gravity || []).join(","), "0,0,0");
+check("sept iterations de solveur", inp.solverIterations, 7);
+check("dix-huit balises", inp.tags.length, 18);
+check("et le collider que l'ancrage epargne en est une",
+      inp.tags.includes("ProbeDetector"), true);
+check("le calque que le scan de sonde prend",
+      Object.values(inp.layers).includes("BasicEffectVolume"), true);
+// Les trois boutons de souris, que le portage n'avait pas lus.
+check("la sonde est le clic droit",
+      inp.channels.Probe.Key.pos.join(","), "mouse 1");
+check("la lunette le clic du milieu",
+      inp.channels.Telescope.Key.pos.join(","), "mouse 2");
+check("viser un referentiel, le clic gauche",
+      inp.channels["Lock On"].Key.pos.join(","), "mouse 0");
+// Le saut et la montee sont DEUX canaux, sur deux touches.
+check("le saut est l'espace", inp.channels.Jump.Key.pos.join(","), "space");
+check("monter est la majuscule",
+      inp.channels["Move Up"].Key.pos.join(","), "left shift,right shift");
+check("descendre est le controle",
+      inp.channels["Move Down"].Key.pos.join(","), "left ctrl,right ctrl");
+// La manette : les numeros d'Unity, ceux que `gamepad.js` traduit.
+check("la sonde est au bouton 5 de la manette",
+      inp.channels.Probe.PC.pos.join(","), "joystick button 5");
+check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
+
+// L'invariant central : la table de repli DIT ce que le build dit.
+{
+  const vivant = new Commandes(inp);
+  const repli = new Commandes(null);
+  const ecarts = [];
+  for (const nom of Object.keys(COMMANDES)) {
+    const a = vivant.get(nom), b = repli.get(nom);
+    const cle = (c) => `${c.pos.codes.join("|")}/${c.pos.mouse.join("|")}`
+      + `/${c.neg.codes.join("|")}/${JSON.stringify(c.pad)}`;
+    if (cle(a) !== cle(b)) ecarts.push(`${nom}: ${cle(a)} != ${cle(b)}`);
+  }
+  check("la table de repli est celle du build", ecarts.join(" ; "), "");
+}
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");
@@ -1046,7 +1101,8 @@ console.log("     mainData:", mscene.node_count, "noeuds,",
 for (const [label, obj] of [["scene", scene], ["composants", comps],
                             ["solaire", solar], ["gameplay", gp],
                             ["audio", audio], ["lumieres", lighting],
-                            ["mainData", mscene], ["prefabriques", prefabs]]) {
+                            ["mainData", mscene], ["prefabriques", prefabs],
+                            ["commandes", inp]]) {
   let ok = true;
   try { JSON.stringify(obj); } catch { ok = false; }
   check(`${label} serialisable en JSON`, ok, true);

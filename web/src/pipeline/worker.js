@@ -27,6 +27,7 @@ import { extractSky } from "./extract/sky.js";
 import { extractTextureAnimators } from "./extract/texanim.js";
 import { extractCameras } from "./extract/camera.js";
 import { extractPrefabs, mergePrefabs } from "./extract/prefabs.js";
+import { extractInput } from "./extract/input.js";
 import { exportSubtree, findRoots } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
@@ -356,6 +357,12 @@ async function run(blob, options) {
   phase("maindata", "Scene de demarrage (mainData)…");
   try {
     const mctx = new ExtractContext(env, universe, "mainData", engineTypes);
+    // Les COMMANDES du jeu, et le pas de physique. Aucun composant ne les
+    // porte : ce sont des reglages de projet, et Unity 4 les range ici
+    // (docs/61-commandes.md).
+    const input = extractInput(mctx);
+    await writeFile("data/input.json", JSON.stringify(input));
+    summary["canaux de commande"] = Object.keys(input.channels).length;
     const mscene = extractScene(mctx);
     await writeFile("data/scene/maindata.json", JSON.stringify(mscene));
     const mcomps = extractComponents(mctx);
