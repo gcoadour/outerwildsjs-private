@@ -42,6 +42,21 @@ const f = (v, n = 4) => (typeof v === "number" ? round(v, n) : null);
  * pas — il refait l'effet, il ne transpose pas le shader. Ce qui compte est le
  * REGLAGE, et c'est lui qu'on garde.
  */
+/**
+ * Le nom du GameObject qu'un PPtr de Transform designe.
+ *
+ * Un `$ref` brut ne sert a rien au moteur : celui-ci rattache par NOM, comme
+ * partout ailleurs dans ce portage. On resout donc ici.
+ */
+function nomDuTransform(ctx, ptr) {
+  if (!ptr || !ptr.pathId) return null;
+  const o = ctx.env.deref(ptr, ctx.sceneObj);
+  const v = o && ctx.readEngine(o);
+  const gid = v && v.m_GameObject ? v.m_GameObject.pathId : 0;
+  const go = gid && ctx.gameObjects.get(gid);
+  return go ? go.m_Name : null;
+}
+
 const EFFETS = {
   BloomAndLensFlares: (x) => ({
     // tweakMode 0 = simple, 1 = avance ; screenBlendMode 0 = Screen, 1 = Add.
@@ -106,8 +121,15 @@ const EFFETS = {
     white: f(x.white),
     adaptionSpeed: f(x.adaptionSpeed),
   }),
+  // Les impostures de planete, et ce que la mesure en dit : sur les CINQ
+  // cameras, deux n'ont pas de plan (`HourglassCam`, `GasGiantCam`) et une
+  // troisieme vise un `HomePlanet_graybox`. Le systeme est a moitie cable dans
+  // cette alpha, et c'est le build qui le dit (docs/56-impostures.md).
   LODCameraSnapshot: (x) => ({
     interval: f(x.snapshotInterval ?? x._snapshotInterval),
+    firstSnapshot: f(x._firstSnapshotTime),
+    planet: (x._planet && x._planet.name) || null,
+    plane: null,      // rempli par `extractCameras`, qui a le contexte
   }),
 };
 
@@ -142,7 +164,11 @@ export function extractCameras(ctx) {
         const champs = ctx.scriptFields(c);
         if (!champs) { inconnus.set(cls, (inconnus.get(cls) || 0) + 1); continue; }
         // LandingCam porte DEUX Tonemapping : on garde une liste, pas un champ.
-        (effets[cls] ||= []).push(EFFETS[cls](ctx.plain(champs)));
+        const lu = EFFETS[cls](ctx.plain(champs));
+        // `LODCameraSnapshot` designe son plan par un pointeur : on le resout
+        // en nom, seule cle que le moteur sache rattacher.
+        if (cls === "LODCameraSnapshot") lu.plane = nomDuTransform(ctx, champs._planeTransform);
+        (effets[cls] ||= []).push(lu);
       } else if (ROLES[cls]) roles.push(ROLES[cls]);
       else autres.push(cls);
     }

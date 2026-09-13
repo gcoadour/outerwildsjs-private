@@ -753,11 +753,25 @@ check("son grain a la force 4", parNom.get("LandingCam").effects.NoiseAndGrain[0
 check("la camera du satellite est monochrome",
       parNom.get("SatelliteCamera").effects.NoiseEffect[0].monochrome, true);
 
-// Les cinq impostures de planete : `_snapshotInterval` vaut 1 partout.
+// Les cinq impostures de planete : `_snapshotInterval` vaut 1 partout — mais
+// le systeme est A MOITIE CABLE, et c'est le build qui le dit
+// (docs/56-impostures.md).
 const lods = cams.cameras.filter((c) => c.effects.LODCameraSnapshot);
 check("cinq cameras d'imposture", lods.length, 5);
 check("toutes a une image par seconde",
       lods.filter((c) => c.effects.LODCameraSnapshot[0].interval === 1).length, 5);
+const snaps = lods.map((c) => c.effects.LODCameraSnapshot[0]);
+check("deux d'entre elles n'ont AUCUN plan",
+      snaps.filter((s) => !s.plane).length, 2);
+check("une n'a meme pas de planete", snaps.filter((s) => !s.planet).length, 1);
+check("et l'une des trois cablees vise une boite grise",
+      snaps.filter((s) => /graybox/i.test(s.planet || "")).length, 1);
+// Les premiers rendus sont DECALES, pour ne pas rendre les trois la meme image.
+check("les premiers rendus sont decales",
+      new Set(snaps.map((s) => s.firstSnapshot)).size, 3);
+check("les trois plans cables portent leur nom",
+      snaps.filter((s) => s.plane).map((s) => s.plane).sort().join(","),
+      "LODPlane_BrittleHollow,LODPlane_DB,LODPlane_TimberHearth");
 
 // Le controleur ne serialise RIEN : ses constantes viennent du constructeur.
 // L'invariant garde cette absence, exactement comme pour les seuils de la

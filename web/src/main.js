@@ -78,6 +78,7 @@ import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
+import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
@@ -516,6 +517,39 @@ async function boot() {
       sky.readBasis(sky.shell, BABYLON);
       console.log(`ciel : voute rattachee`);
     }
+    // Les trois plans d'imposture : on les rattache par nom, et on leur donne
+    // une VRAIE texture de rendu plutot que le `*LODMaterial` de remplissage
+    // que le glTF leur a laisse.
+    for (const imp of impostures) {
+      if (!imp.data.wired || impostersVifs.some((v) => v.imposture === imp)) continue;
+      const plan = entry.meshes.find((m) => m.name === imp.data.plane);
+      if (!plan) continue;
+      // Une camera par imposture, qui ne rend QUE sur commande : c'est ce que
+      // fait `Awake` en eteignant la sienne.
+      const cam = new BABYLON.FreeCamera(`imposteur_${imp.data.plane}`,
+                                         BABYLON.Vector3.Zero(), scene);
+      cam.minZ = 1;
+      cam.maxZ = 200000;
+      cam.fov = 60 * Math.PI / 180;
+      const texture = new BABYLON.RenderTargetTexture(`imposteur_${imp.data.plane}`,
+        IMPOSTER_SIZE, scene, false);
+      // `refreshRate = 0` : Babylon ne rafraichit plus tout seul, et c'est nous
+      // qui declenchons — une fois par seconde, comme `_snapshotInterval`.
+      texture.refreshRate = 0;
+      texture.activeCamera = cam;
+      scene.customRenderTargets.push(texture);
+      if (plan.material) {
+        const m = plan.material.clone(`${plan.material.name}_imposteur`);
+        if (m) {
+          m.diffuseTexture = texture;
+          if ("emissiveTexture" in m) m.emissiveTexture = texture;
+          plan.material = m;
+        }
+      }
+      impostersVifs.push({ imposture: imp, plan, texture, cam });
+      console.log(`imposture : ${imp.data.plane} <- ${imp.data.planet}`);
+    }
+
     // Les nuages : dix visages sur vingt-quatre maillages homonymes.
     //
     // `CloudTextureController.Awake` ecrit `renderer.material.mainTexture`, et
@@ -984,6 +1018,13 @@ async function boot() {
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
   // navigateur et que le rendu ne s'eprouve pas du tout.
+  // Les impostures de planete (docs/56-impostures.md). Les trois plans cables
+  // sont dans la geometrie et leur renderer est ACTIF : sans ce lecteur, le
+  // portage colle trois quads plats par-dessus les vraies planetes.
+  const impostures = planetImposters(camerasDuBuild).map((d) => new Imposter(d));
+  const impostersVifs = [];      // { imposture, plan, texture, cam }
+  window.__impostures = { impostures, vifs: impostersVifs };
+
   const fx = new CameraEffects(reglagesCam);
   const postfx = new PostFX(BABYLON, camera, engine, reglagesCam);
   window.__fx = { fx, postfx, reglagesCam };
@@ -2391,6 +2432,31 @@ async function boot() {
     // Le sable suit la boucle et rien d'autre : il repart de son niveau initial
     // a chaque redemarrage, comme dans le jeu.
     if (sand.count) sand.update(loop.elapsed);
+
+    // Les impostures : un rendu par seconde, et le plan s'efface des que la
+    // vraie geometrie du corps est chargee — le build n'a pas ce test parce
+    // qu'il n'a jamais les deux, ce portage peut les avoir.
+    for (const v of impostersVifs) {
+      const reel = !!entryForBody(geo, v.imposture.data.planet);
+      v.plan.setEnabled(v.imposture.visible(reel));
+      if (reel || !v.imposture.due(now)) continue;
+      // `TakeSnapshot` : derriere le plan, a la distance de la planete, et on
+      // regarde le plan. La distance se mesure une fois, comme dans `Start`.
+      const p = v.plan.getAbsolutePosition();
+      const avant = v.plan.getDirection(new BABYLON.Vector3(0, 0, 1));
+      if (v.distance == null) {
+        const e = entryForBody(geo, v.imposture.data.planet);
+        const c = e ? e.data.position : null;
+        v.distance = c ? Math.hypot(p.x - c[0], p.y - c[1], p.z - c[2]) : 1000;
+      }
+      const q = v.imposture.cameraPosition([p.x, p.y, p.z],
+                                           [avant.x, avant.y, avant.z], v.distance);
+      v.cam.position.set(q[0], q[1], q[2]);
+      v.cam.setTarget(p);
+      v.texture.refreshRate = 1;   // un rendu, puis Babylon repasse a zero
+      v.texture.resetRefreshCounter();
+      v.texture.refreshRate = 0;
+    }
 
     // L'interrupteur du regard. La position de l'interrupteur BOUGE — il est
     // pose sur une jumelle, qui orbite — donc on la ramene au repere courant a

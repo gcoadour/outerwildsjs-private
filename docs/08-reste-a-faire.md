@@ -114,6 +114,7 @@ portage.
 | lumière globale | elle **fond**, se coupe dans une zone sombre et sur la carte |
 | attaches | 14 alignements sur un corps désigné, 9 héritiers de champ |
 | réparation visible | un nœud réparé devient vert |
+| impostures de planète | les 3 câblées rendues à 1 Hz, effacées si le réel est là |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -233,11 +234,12 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   la moitié des entrées est à une seule instance.
   `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
   de ce qui reste.
-- **Les impostures de planète** (`LODCameraSnapshot` ×5, `_snapshotInterval` 1)
-  restent ouvertes : le jeu affiche un système entier parce que les planètes
-  lointaines sont des textures rafraîchies une fois par seconde. Le portage a
-  résolu le même problème autrement — sphères et secteurs — ce qui est
-  légitime, mais le ciel n'y ressemble pas.
+- ~~**Les impostures de planète**~~ **Fermé** ([`56`](56-impostures.md)), et la
+  mesure a démenti la page : sur les cinq caméras, **deux n'ont aucun plan** et
+  une troisième vise un `HomePlanet_graybox`. Le système est un chantier de
+  l'alpha, pas une technique aboutie. Surtout, les trois plans câblés étaient
+  **dans la géométrie, renderer actif, à la position de leur planète** : le
+  portage collait trois quads plats par-dessus les vraies planètes.
 - **11,1 Mo de Babylon** sur les 66 du démarrage
   ([`27-poids.md`](27-poids.md)) : les réduire demande une étape de
   construction, que le dépôt n'a pas. C'est un choix de projet, pas une

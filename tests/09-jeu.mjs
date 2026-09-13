@@ -32,6 +32,7 @@ import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
+import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
          BLINK } from "../web/src/attachments.js";
@@ -3533,6 +3534,52 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   ] } });
   check("trois tailles d'eclaboussure sont prevues", remous[0].splashes.length, 3);
   check("et aucune n'est resolue", remous[0].splashes.filter(Boolean).length, 0);
+
+  // --- les impostures de planete (docs/56) --------------------------------
+  //
+  // Deux des cinq n'ont PAS de plan, et une troisieme vise une boite grise.
+  // C'est un chantier de l'alpha, pas une technique aboutie a rattraper.
+  const imps = planetImposters({ cameras: [
+    { name: "LODCam_BrittleHollow", effects: { LODCameraSnapshot: [
+      { interval: 1, firstSnapshot: 1, planet: "BrittleHollow_Body",
+        plane: "LODPlane_BrittleHollow" }] } },
+    { name: "LODCam_TimberHearth", effects: { LODCameraSnapshot: [
+      { interval: 1, firstSnapshot: 1.6, planet: "HomePlanet_graybox",
+        plane: "LODPlane_TimberHearth" }] } },
+    { name: "GasGiantCam", effects: { LODCameraSnapshot: [
+      { interval: 1, firstSnapshot: 1, planet: "GiantsDeep_Body", plane: null }] } },
+  ] });
+  check("trois impostures lues", imps.length, 3);
+  check("deux seulement sont cablees", imps.filter((i) => i.wired).length, 2);
+  check("et l'une des deux vise une boite grise",
+        imps.filter((i) => i.graybox).length, 1);
+  check("la texture fait 256", IMPOSTER_SIZE, 256);
+
+  // Les premiers rendus sont DECALES : 1 ; 1,3 ; 1,6. Les trois ne rendent pas
+  // la meme image, ce qui etale leur cout.
+  check("les premiers rendus sont decales",
+        new Set(imps.map((i) => i.firstSnapshot)).size > 1, true);
+
+  const imposteur = new Imposter(imps[0]);
+  check("avant l'heure, rien", imposteur.due(0.5), false);
+  check("a l'heure, un rendu", imposteur.due(1.1), true);
+  check("et pas deux de suite", imposteur.due(1.2), false);
+  check("puis un par seconde", imposteur.due(2.1), true);
+  // Le build avance `_nextSnapshotTime` d'un intervalle, et non depuis le
+  // dernier rendu : une image sautee ne decale pas les suivantes.
+  const saute = new Imposter({ interval: 1, firstSnapshot: 1 });
+  saute.due(5);
+  check("apres une longue absence, le rythme reprend sans derive",
+        saute.next, 2);
+  check("et il rattrape image par image", (saute.due(5), saute.next), 3);
+
+  // Le plan ne se montre que si la vraie geometrie n'est PAS la.
+  check("sans la vraie planete, l'imposture se voit", imposteur.visible(false), true);
+  check("avec elle, elle s'efface", imposteur.visible(true), false);
+
+  // La camera se met DERRIERE le plan, a la distance de la planete.
+  check("la camera d'imposture est derriere le plan",
+        imposteur.cameraPosition([0, 0, 0], [0, 0, 1], 500).join(","), "0,0,500");
 }
 
 report();
