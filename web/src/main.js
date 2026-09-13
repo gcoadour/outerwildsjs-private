@@ -87,7 +87,7 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
-         gameSectorAt } from "./volumes.js";
+         gameSectorAt, signalVolumes, signalZoneAt } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment,
          ZeroGTraining } from "./gear.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
@@ -355,6 +355,9 @@ async function boot() {
   // (docs/45-recensement-mesure.md).
   // Le seul `Surface` du build qui declare ecraser est le collider de
   // `RisingSand` : c'est lui qui porte la mort par compression (docs/53).
+  // Les zones sombres et les brouilleurs : extraits depuis longtemps, lus par
+  // personne. Les premieres coupent l'ambiance globale (docs/54-lumiere.md).
+  const zonesSignal = signalVolumes(gameplay);
   const sand = new SandLevels(markCrushing(sandColumns(gameplay), gameplay),
                               sandFunnels(gameplay));
   window.__sand = sand;
@@ -1857,15 +1860,28 @@ async function boot() {
       if (ship) ship.thrustLimit = limite;
       // L'eclairage ambiant suit `_ambientLightRange`, mesure depuis le centre
       // du secteur courant.
+      //
+      // `AmbientLightManager.Update` part du NOIR et ne prend l'ambiance du
+      // secteur qu'a trois conditions : aucune zone sans soleil, un secteur
+      // majeur actif, et la carte fermee. Puis il y FOND, a `deltaTime` du
+      // chemin restant — une grotte s'assombrit, elle ne s'eteint pas.
       const sec = sectorState.secteur;
+      const zoneSombre = zonesSignal.length
+        ? signalZoneAt(zonesSignal, "dark", playerW,
+                       (z) => decalageDuCorps(z.body, anchorPos))
+        : null;
+      let vise = 0;
       if (sec) {
         const d = Math.hypot(sec.position[0] - anchorPos[0] - player.pos.x,
                              sec.position[1] - anchorPos[1] - player.pos.y,
                              sec.position[2] - anchorPos[2] - player.pos.z);
-        ambient.intensity = ambientIntensity(d, sec.lightRange);
+        vise = ambientIntensity(d, sec.lightRange);
       } else {
-        ambient.intensity = ambientIntensity(0, 0);
+        vise = ambientIntensity(0, 0);
       }
+      ambient.intensity = ambientStep(ambient.intensity,
+        ambientTarget(vise, { sunless: !!zoneSombre, inMajorSector: !!sec,
+                              onMapCamera: !!solarMap.open }), dt);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
       meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));

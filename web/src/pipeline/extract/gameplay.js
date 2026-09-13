@@ -96,7 +96,11 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // qui porte la mort par compression : le sable montant
                 // (docs/53-joueur.md).
                 "Surface", "PlayerCompressionSensor", "PlayerNoiseMaker",
-                "PlayerState", "FirstPersonManipulator"];
+                "PlayerState", "FirstPersonManipulator",
+                // Ce qui pilote la lumiere GLOBALE et les coquilles sonores
+                // (docs/54-lumiere.md).
+                "AmbientLightManager", "ExternalLightController", "FadeLight",
+                "DayNightTracker", "AudioShell", "FadeInAudioOnAwake"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -134,7 +138,7 @@ const WANT_VOLUME = new RegExp([
   "|PlayerAttachPoint|LODCameraSnapshot",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
-  "|GazeSwitch|MuseumEntryway|Surface)$",
+  "|GazeSwitch|MuseumEntryway|Surface|AudioShell)$",
 ].join(""), "i");
 
 /**

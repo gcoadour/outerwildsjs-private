@@ -29,6 +29,9 @@ import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
 import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
          COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
+import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
+         FadeLight, DayNightTracker } from "../web/src/lights.js";
+import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, activeZones, winnersByLayer, clipOf,
@@ -3415,6 +3418,59 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("mourir se retient", etat.dead, true);
   etat.reset();
   check("et la remise a zero le rend vivant", etat.dead, false);
+
+  // --- ce qui pilote la lumiere GLOBALE (docs/54) -------------------------
+  //
+  // `AmbientLightManager` part du NOIR et ne prend l'ambiance du secteur qu'a
+  // trois conditions. Le portage n'en posait aucune.
+  check("dans un secteur, a la lumiere, on garde l'ambiance",
+        ambientTarget(0.3, {}), 0.3);
+  check("dans une zone sans soleil, noir", ambientTarget(0.3, { sunless: true }), 0);
+  check("hors secteur majeur, noir", ambientTarget(0.3, { inMajorSector: false }), 0);
+  check("et sur la carte, noir aussi", ambientTarget(0.3, { onMapCamera: true }), 0);
+  // Le fondu est en `deltaTime` : a soixante images, un soixantieme du chemin.
+  check("le fondu ne fait qu'un soixantieme par image",
+        Number(ambientStep(0, 1, 1 / 60).toFixed(6)), Number((1 / 60).toFixed(6)));
+  check("et il ne depasse jamais la cible", ambientStep(0, 1, 5), 1);
+  let amb = 0.35;
+  for (let i = 0; i < 60; i++) amb = ambientStep(amb, 0, 1 / 60);
+  check("une seconde de grotte assombrit sans eteindre", amb > 0.1 && amb < 0.2, true);
+
+  // Les phares du vaisseau : 600 par defaut, et le secteur ne peut que reduire.
+  check("hors secteur, six cents", shiplightRange(100, false), SHIPLIGHT_RANGE);
+  check("dans un secteur qui limite, la limite", shiplightRange(100, true), 100);
+  check("un secteur sans limite ne rallonge pas", shiplightRange(0, true), SHIPLIGHT_RANGE);
+  check("et un secteur plus large non plus", shiplightRange(5000, true), SHIPLIGHT_RANGE);
+
+  // Une lumiere qui fond repart de la ou elle EN EST, pas de son origine.
+  const lampe = new FadeLight(1);
+  lampe.fadeIntensity(0, 2, 0);
+  lampe.update(1);
+  check("a mi-fondu, la moitie", lampe.intensity, 0.5);
+  lampe.fadeIntensity(1, 2, 1);
+  lampe.update(2);
+  check("un second fondu repart de la valeur courante", lampe.intensity, 0.75);
+  lampe.update(3);
+  check("et atteint sa cible", lampe.intensity, 1);
+  check("puis s'arrete", lampe.fading, false);
+
+  // Le jour et la nuit : ce sont les TRANSITIONS qui manquaient.
+  const cycle = new DayNightTracker(false);
+  check("au depart, ni lever ni coucher",
+        `${cycle.sunrise},${cycle.sunset}`, "false,false");
+  cycle.update(true);
+  check("le lever s'annonce une fois", cycle.sunrise, true);
+  cycle.update(true);
+  check("et pas deux", cycle.sunrise, false);
+  cycle.update(false);
+  check("le coucher aussi", cycle.sunset, true);
+
+  // Les coquilles sonores : c'est l'OREILLE qu'on guette, et le fondu dure une
+  // seconde.
+  check("hors coquille, plein volume", shellGain(0, 5), 1);
+  check("dedans, silence", shellGain(1, 5), 0);
+  check("a mi-fondu, la moitie", shellGain(1, 0.5), 0.5);
+  check("et en sortant, ca remonte", shellGain(0, 0.5), 0.5);
 }
 
 report();

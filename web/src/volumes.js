@@ -360,6 +360,27 @@ export function signalVolumes(gameplay) {
 }
 
 /**
+ * La zone de signal qui contient un point, par genre.
+ *
+ * `signalVolumes` etait extrait depuis longtemps et LU PAR PERSONNE — la
+ * troisieme fois que ce depot rencontre ce cas (docs/35, docs/47). Les zones
+ * sombres commandent l'ambiance globale (`AmbientLightManager` coupe tout dans
+ * une zone sans soleil), les brouilleurs coupent le signal du telescope.
+ *
+ * @param point  position MONDE
+ * @param offset fonction qui rend le decalage du corps porteur
+ */
+export function signalZoneAt(zones, kind, point, offset = () => [0, 0, 0]) {
+  for (const z of zones) {
+    if (z.kind !== kind || !z.volume) continue;
+    const d = offset(z);
+    if (insideVolume(z.volume, [point[0] - d[0], point[1] - d[1], point[2] - d[2]],
+                     z.position, z.rotation)) return z;
+  }
+  return null;
+}
+
+/**
  * Les neuf emetteurs de rayonnement : huit feux de camp et l'etoile.
  *
  * `magnitude` vaut 100 partout ; ce qui change est la portee et la courbe. Les

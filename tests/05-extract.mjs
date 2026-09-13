@@ -10,6 +10,7 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
+import { signalVolumes } from "../web/src/volumes.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
          zeroGFields, gameSectors, probePrompts,
          radiationEmitters } from "../web/src/volumes.js";
@@ -879,6 +880,19 @@ check("un capteur de compression", (gp.placed.PlayerCompressionSensor || []).len
 check("un bruiteur de joueur", (gp.placed.PlayerNoiseMaker || []).length, 1);
 check("un etat de joueur", (gp.placed.PlayerState || []).length, 1);
 check("et un manipulateur", (gp.placed.FirstPersonManipulator || []).length, 1);
+
+// Ce qui pilote la lumiere GLOBALE (docs/54-lumiere.md).
+check("un gestionnaire d'ambiance", (gp.placed.AmbientLightManager || []).length, 1);
+check("deux phares exterieurs", (gp.placed.ExternalLightController || []).length, 2);
+check("une lumiere a fondu", (gp.placed.FadeLight || []).length, 1);
+check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length, 1);
+// Les coquilles sonores, et les zones sombres qui n'etaient lues par personne.
+const coques = (gp.placed.AudioShell || []);
+check("deux coquilles sonores", coques.length, 2);
+check("et toutes deux ont une forme", coques.every((c) => !!c.volume), true);
+const signaux = signalVolumes(gp);
+check("des zones de signal sont posees", signaux.length > 0, true);
+check("dont des zones sombres", signaux.some((z) => z.kind === "dark"), true);
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
