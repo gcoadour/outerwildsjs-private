@@ -114,9 +114,9 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
 | Composants posés **hors** de `level0` | 37 classes, 61 instances — les préfabriqués, dont la sonde entière ([`docs/60`](docs/60-sonde.md)) |
-| Logique de jeu, sans le build | **1 223** vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg, référentiels déclarés, décor vivant, son d'événement, équipement, **la sonde**, **les commandes du build**, **la visée d'un référentiel** |
-| Extracteurs sur le build | **349** vérifications (`tests/05-extract.mjs`) |
-| En navigateur, avec le build | **131** contrôles (`tools/15_verify.py --profil`) |
+| Logique de jeu, sans le build | **1 248** vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg, référentiels déclarés, décor vivant, son d'événement, équipement, **la sonde**, **les commandes du build**, **la visée d'un référentiel**, **ce qu'on tient en main** |
+| Extracteurs sur le build | **360** vérifications (`tests/05-extract.mjs`) |
+| En navigateur, avec le build | **140** contrôles (`tools/15_verify.py --profil`) |
 | En navigateur, sans le build | 13 contrôles (`tools/15_verify.py --repli`) |
 
 Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips

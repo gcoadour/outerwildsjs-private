@@ -102,7 +102,22 @@ function patterns(text) {
   for (const m of text.matchAll(/\/((?:[^/\\\n[]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([gimsuy]*)/g)) {
     // Un commentaire `// ...` ouvre un faux motif a chaque ligne : on le saute.
     if (m[1].startsWith("/") || m[1].startsWith("*")) continue;
-    try { out.push(new RegExp(m[1], m[2].replace(/[gy]/g, ""))); } catch { /* pas un motif */ }
+    let re;
+    try { re = new RegExp(m[1], m[2].replace(/[gy]/g, "")); } catch { continue; }
+    // Un motif qui attrape TOUT n'attrape rien.
+    //
+    // `geometry.js` lit les marqueurs d'un nom de clip par `/^[~!]*/`, qui
+    // reussit sur n'importe quelle chaine — y compris vide. Compte comme
+    // lecteur, il faisait passer le recensement a 100 % du jour au lendemain :
+    // quinze classes sans lecteur devenaient zero, sans qu'une ligne de moteur
+    // ait ete ecrite pour elles. C'est la meme faute que le commentaire de
+    // docs/47 et la traduction de docs/50, commise une troisieme fois — par
+    // l'outil, et en sa faveur.
+    //
+    // Le test est double : un motif ne doit reconnaitre ni la chaine vide, ni
+    // un nom de classe qui n'existe pas.
+    if (re.test("") || re.test("ZzQxKw_aucune_classe_9")) continue;
+    out.push(re);
   }
   return out;
 }

@@ -86,6 +86,11 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
 import { LockOn, aimedFrame, canFlyTo } from "./tracker.js";
+// Ce que le joueur TIENT : le baton a guimauve et la lunette pendent sous
+// `PlayerCamera` dans le build, et l'export ne partait que des corps celestes
+// (docs/64-mains.md).
+import { MarshmallowStick as BatonGuimauve, thermTime,
+         STICK_LIGHTS } from "./held.js";
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep } from "./lights.js";
@@ -807,6 +812,95 @@ async function boot() {
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   const flashlight = new Flashlight(BABYLON, scene);
   const marshmallow = new Marshmallow();
+  // L'etat du baton : sorti ou range, ce qui se joue, ou en est l'aiguille.
+  const baton = new BatonGuimauve();
+  // Les deux objets tenus, une fois charges : { racine, groupes, lumieres }.
+  const enMain = new Map();
+
+  /**
+   * Charge un objet tenu et l'accroche a la camera.
+   *
+   * Sa transformation LOCALE dans le glTF est deja celle qui le place devant
+   * l'oeil — c'est celle qu'il avait sous `PlayerCamera` — donc on ne la touche
+   * pas. Seule la rotation de repere du chargeur est reprise, comme pour les
+   * corps celestes (`geometry.js`).
+   */
+  async function chargerEnMain(fichier, nom) {
+    try {
+      const res = await BABYLON.SceneLoader.ImportMeshAsync(
+        "", "data/gltf/", fichier, scene);
+      const racine = new BABYLON.TransformNode(`main_${nom}`, scene);
+      racine.parent = camera;
+      racine.rotation.y = Math.PI;
+      for (const m of res.meshes) if (!m.parent) m.parent = racine;
+      const groupes = res.animationGroups || [];
+      for (const g of groupes) g.stop();
+      // Le glTF n'emporte pas de lumieres : l'exporteur n'ecrit que de la
+      // geometrie. Les deux du baton sont posees ici, aux valeurs du
+      // prefabrique, et elles partent eteintes comme dans le build.
+      const lumieres = (res.lights || []).slice();
+      if (nom === "marshmallowstick") {
+        for (const d of STICK_LIGHTS) {
+          const l = new BABYLON.PointLight(
+            `main_${d.name}`,
+            new BABYLON.Vector3(d.position[0], d.position[1], -d.position[2]), scene);
+          l.range = d.range;
+          l.intensity = d.intensity;
+          l.parent = racine;
+          lumieres.push(l);
+        }
+      }
+      for (const l of lumieres) l.setEnabled(false);
+      const parNom = new Map();
+      for (const g of groupes) parNom.set(g.name.replace(/^[~!]+/, "").split("|").pop(), g);
+      enMain.set(nom, { racine, groupes, parNom, lumieres, meshes: res.meshes });
+      console.log(`en main : ${nom} (${res.meshes.length} maillages,`
+        + ` ${groupes.length} clips)`);
+      return true;
+    } catch (e) {
+      // Sans le build, ces fichiers n'existent pas : la page reste jouable.
+      return false;
+    }
+  }
+
+  /**
+   * Le baton, image par image : le clip qui doit tourner, les lumieres, et la
+   * POSE du thermometre.
+   *
+   * `Therm` ne se joue pas : `MarshmallowStick.Update` lui met une vitesse de
+   * zero et choisit son instant a la main. Ici on met le groupe en pause a
+   * l'image voulue, ce qui est la meme chose dite avec l'API de Babylon.
+   */
+  function syncBaton(objet, etat, chaleur) {
+    for (const l of objet.lumieres) l.setEnabled(etat.lights);
+    // On ne CACHE pas le baton quand il se range : `PutBack` le sort du champ
+    // tout seul, et l'effacer d'un coup couperait l'animation qu'on vient
+    // d'ajouter. Le build n'eteint que le rendu de la guimauve et de sa flamme
+    // (`Marshmallow.SetRenderer`), et c'est ce qu'on fait ici.
+    for (const m of objet.meshes) {
+      if (/marshmallowmodel|flame/i.test(m.name)) m.setEnabled(etat.out && etat.flame);
+    }
+    const voulu = etat.clip;
+    for (const [nom, g] of objet.parNom) {
+      if (nom === "Therm") continue;
+      if (nom === voulu) { if (!g.isPlaying) g.play(nom === "idle"); }
+      else if (g.isPlaying) g.stop();
+    }
+    const therm = objet.parNom.get("Therm");
+    if (therm && etat.canTherm) {
+      const duree = (therm.to - therm.from) / 60 || 1;
+      const image = therm.from + thermTime(chaleur, duree) * 60;
+      // `goToFrame` reveille le groupe : ne l'appeler que si l'aiguille bouge
+      // VRAIMENT. Sans ce garde, on repositionne quatre clips a chaque image
+      // pour une chaleur qui ne change pas, et un rendu logiciel le sent.
+      if (objet.thermFrame === undefined || Math.abs(objet.thermFrame - image) > 0.01) {
+        objet.thermFrame = image;
+        if (!therm.isStarted) therm.play(false);
+        therm.pause();
+        therm.goToFrame(image);
+      }
+    } else if (therm && therm.isPlaying) { therm.stop(); objet.thermFrame = undefined; }
+  }
   const computerEl = document.getElementById("computer");
   // --- mixage par piste et emetteurs de signal ---
   const mixer = new AudioMixer();
@@ -823,6 +917,11 @@ async function boot() {
   window.__audioMix = { mixer, transmitters };
 
   window.__consoles = { computer, flashlight, marshmallow };
+  window.__mains = { baton, enMain };
+  // Le chargement ne bloque pas le demarrage : ces deux objets pesent quelques
+  // dizaines de kilo-octets, et la page doit s'ouvrir sans eux.
+  chargerEnMain("marshmallowstick.gltf", "marshmallowstick");
+  chargerEnMain("telescopegui.gltf", "telescopegui");
 
   window.__gui = { guiMode, readout, minimap, settings, applySettings };
 
@@ -1318,6 +1417,8 @@ async function boot() {
   // Les trois fronts de vol : viser, s'accorder, piloter. Ils sont poses par
   // `command()` et consommes par la boucle, comme `interactPressed`.
   let lockPressed = false, matchPressed = false, autoPressed = false;
+  // La guimauve mangee dans cette image : le baton s'en sert pour se ranger.
+  let mangeCetteImage = false;
   const lockOn = new LockOn();
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
@@ -1382,7 +1483,17 @@ async function boot() {
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
     if (est("Marshmallow") && marshmallow.eat()) {
+      // `MarshmallowStick.Update` range le baton TOUT SEUL une fois la
+      // guimauve mangee : on lui passe le fait, pas l'ordre.
+      mangeCetteImage = true;
       console.log(`guimauve mangee (${marshmallow.eaten})`);
+    }
+    // Sortir ou ranger le baton : `ToggleStick`. Le build n'a pas de canal pour
+    // lui — c'est le tutoriel du feu de camp qui l'appelle — et le portage lui
+    // donne la meme touche que manger, en appui long ? Non : une touche a part,
+    // et `AJOUTS` la nomme.
+    if (est("Stick")) {
+      console.log(baton.toggle() ? "baton sorti" : "baton range");
     }
     // GUIMode fait tourner ses quatre modes sur une touche de debogage
     if (est("Display Mode")) console.log("mode d'affichage :", guiMode.cycle());
@@ -2231,6 +2342,12 @@ async function boot() {
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
     camera.minZ = telescope.nearClip;
+    // La lunette a un corps et un verre dans le build : on les montre quand
+    // elle sert, et le portage ne montrait rien.
+    {
+      const lunette = enMain.get("telescopegui");
+      if (lunette) for (const m of lunette.meshes) m.setEnabled(telescope.active);
+    }
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
     }
@@ -2396,10 +2513,24 @@ async function boot() {
     if (star0) night = sunElevation(star0.position, [up.x, up.y, up.z]) < 0;
     // La guimauve ne cuit plus sur commande mais au-dessus des braises : la
     // chaleur vient du HeatSource le plus proche.
+    let chaleurBaton = 0;
     if (heat.length) {
       const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z]);
+      chaleurBaton = h;
       marshmallow.held = h > 0 || marshmallow.toast > 0;
       marshmallow.update(dt, h);
+    }
+    // Le baton a guimauve, tel que le build le joue : deux clips a la queue au
+    // reveil, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
+    // chaleur — vitesse zero, pose choisie a la main (docs/64-mains.md).
+    {
+      const objet = enMain.get("marshmallowstick");
+      const enCours = objet
+        ? objet.groupes.some((g) => g.isPlaying && !g.name.includes("Therm")) : false;
+      baton.update(dt, { eaten: mangeCetteImage, heat: chaleurBaton,
+                         playing: enCours });
+      mangeCetteImage = false;
+      if (objet) syncBaton(objet, baton, chaleurBaton);
     }
     if (!(ship && ship.boarded)) computer.open = false;
     if (computerEl) {

@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`64-mains.md`](64-mains.md) — **ce qu'on tient dans la main : le bâton à guimauve, sa lunette, et un thermomètre qui est une pose d'animation**
 - [`63-boucles.md`](63-boucles.md) — **ce qui boucle et ce qui ne boucle pas : le portage jouait seize clips en boucle, le build en boucle treize**
 - [`62-visee.md`](62-visee.md) — **viser un référentiel du regard, s'accorder à sa vitesse, y aller : les trois canaux de vol que rien ne pilotait**
 - [`61-commandes.md`](61-commandes.md) — **les commandes du jeu, lues dans l'`InputManager` : le portage avait inventé ses touches, et sa manette était fausse quatre fois sur six**

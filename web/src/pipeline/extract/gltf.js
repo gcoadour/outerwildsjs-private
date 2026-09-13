@@ -18,6 +18,20 @@ const ARRAY_BUFFER = 34962, ELEMENT_ARRAY_BUFFER = 34963;
 const FLOAT = 5126, UNSIGNED_INT = 5125, UNSIGNED_SHORT = 5123;
 
 /** Racines exportees par defaut : les corps du systeme solaire. */
+/**
+ * Ce que le joueur TIENT.
+ *
+ * L'export part des corps celestes, et ces deux-la pendent sous
+ * `PlayerCamera` : ils ne sortaient donc jamais. Le baton a guimauve porte les
+ * quatre seuls clips du build qui ne bouclent pas
+ * ([`docs/63`](../../../docs/63-boucles.md)), et la lunette a un corps et un
+ * verre que le portage remplacait par un champ de vision.
+ *
+ * Leur transformation LOCALE est celle qui les place devant l'oeil : on la
+ * garde telle quelle, et le moteur n'a qu'a les accrocher a la camera.
+ */
+export const HELD_ROOTS = ["MarshmallowStick", "TelescopeGUI"];
+
 export const DEFAULT_ROOTS = [
   "Sun_Body", "HourglassTwins_Pivot", "TimberHearth_Pivot", "BrittleHollow_Pivot",
   "GiantsDeep_Pivot", "DarkBramble_Pivot", "QuantumMoon_Body", "Comet_Pivot",

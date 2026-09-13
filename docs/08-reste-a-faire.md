@@ -120,11 +120,12 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **131/131**, la sonde, les commandes et la visée ([`62`](62-visee.md)) |
+| vérification avec le build | **140/140**, la sonde, les commandes, la visée et les mains ([`64`](64-mains.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
 | boucles d'animation | 13 clips bouclent, 4 s'arrêtent — la règle d'Unity en deux étages ([`63`](63-boucles.md)) |
+| objets tenus en main | le bâton à guimauve et la lunette, exportés et animés ([`64`](64-mains.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
@@ -206,12 +207,6 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   opaque quand elle est transparente. Les nuages, eux, ont désormais un
   lecteur : 24 `CloudTextureController`, dix textures distinctes.
 - **Une partie jouée**, tout simplement.
-
-### 2 bis. Ce que le portage n'exporte pas, et dont on connaît l'adresse
-
-| | où | |
-|---|---|---|
-| le **bâton à guimauve** | `Player_Body / PlayerCamera / MarshmallowStick` | quatre clips en `WrapMode.Once` : `idle`, `PullOut`, `PutBack`, `Therm`. L'export part des corps célestes, et le bâton pend sous la caméra ([`63`](63-boucles.md)) |
 
 ### 3. Ce qui reste techniquement ouvert
 

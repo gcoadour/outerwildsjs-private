@@ -28,7 +28,7 @@ import { extractTextureAnimators } from "./extract/texanim.js";
 import { extractCameras } from "./extract/camera.js";
 import { extractPrefabs, mergePrefabs } from "./extract/prefabs.js";
 import { extractInput } from "./extract/input.js";
-import { exportSubtree, findRoots } from "./extract/gltf.js";
+import { exportSubtree, findRoots, HELD_ROOTS } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
 
@@ -394,6 +394,23 @@ async function run(blob, options) {
       channels += res.stats.channels;
     }
     summary["corps en glTF"] = roots.length;
+
+    // Ce que le joueur tient : le baton a guimauve et la lunette. Ils pendent
+    // sous `PlayerCamera`, donc aucun sous-arbre de corps celeste ne les
+    // contient, donc le portage ne les avait jamais (docs/64-mains.md).
+    for (const root of findRoots(ctx, HELD_ROOTS)) {
+      const label = root.name.toLowerCase();
+      const res = exportSubtree(ctx, root.gid, label, {
+        emitImage, maxTexture: options.maxTexture || 512,
+      });
+      if (!res) continue;
+      await writeFile(`data/gltf/${label}.gltf`, JSON.stringify(res.gltf));
+      await writeFile(`data/gltf/${label}.bin`, res.bin);
+      await drainImages("data/gltf");
+      animations += res.stats.animations;
+      channels += res.stats.channels;
+      summary["objets en main"] = (summary["objets en main"] || 0) + 1;
+    }
     summary.animations = animations;
     summary["canaux d'animation"] = channels;
   }

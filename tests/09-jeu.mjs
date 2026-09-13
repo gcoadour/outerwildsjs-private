@@ -33,7 +33,9 @@ import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
-import { clipLoops, WRAP } from "../web/src/pipeline/extract/gltf.js";
+import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
+import { MarshmallowStick as Baton, thermTime, THERM_HEAT_SPAN,
+         STICK_CLIPS, STICK_LIGHTS } from "../web/src/held.js";
 import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo, matchedVelocity,
          LOCK_NEAR, BRACKET_RATE } from "../web/src/tracker.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
@@ -3925,7 +3927,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const cmd = new Commandes(null);
   check("sans data/input.json, on se sait repli", cmd.fallback, true);
   check("vingt-deux canaux du build", Object.keys(COMMANDES).length, 22);
-  check("et quatre ajouts nommes", Object.keys(AJOUTS).length, 4);
+  check("et cinq ajouts nommes", Object.keys(AJOUTS).length, 5);
+  check("dont sortir le baton, qui n'a pas de canal dans l'alpha",
+        !!AJOUTS.Stick, true);
   // Les trois boutons de souris, que le portage n'avait pas.
   check("viser un referentiel est le clic GAUCHE",
         cmd.get("Lock On").pos.mouse[0], 0);
@@ -4065,6 +4069,49 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
                     m_MuscleClip: { m_LoopBlend: false } }), false);
   check("un muscle absent vaut boucle",
         clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT }), true);
+
+  // --- ce qu'on tient dans la main (docs/64) ---
+  check("deux objets en main", HELD_ROOTS.length, 2);
+  check("le baton a quatre clips", STICK_CLIPS.length, 4);
+  check("et deux lumieres", STICK_LIGHTS.length, 2);
+  check("la lampe de la guimauve porte a 1,21",
+        STICK_LIGHTS[0].range, 1.21);
+  check("celle du thermometre est courte et vive",
+        `${STICK_LIGHTS[1].range},${STICK_LIGHTS[1].intensity}`, "0.16,2");
+  // Le thermometre est une POSE d'animation : quarante unites de chaleur
+  // parcourent le clip entier, et au-dela on reste sur la derniere image.
+  check("quarante unites parcourent le clip", THERM_HEAT_SPAN, 40);
+  check("froid, l'aiguille est au depart", thermTime(0), 0);
+  check("a mi-chaleur, a mi-course", thermTime(20), 0.5);
+  check("brulant, elle bute", thermTime(400), 1);
+  check("et un froid negatif ne la renverse pas", thermTime(-5), 0);
+  // Le baton est DEHORS au premier instant : `Awake` met deux clips a la queue.
+  const baton = new Baton();
+  check("le baton commence dehors", baton.out, true);
+  check("et sort avant d'attendre", baton.clip, "PullOut");
+  baton.update(0.016, { playing: false });
+  check("le clip fini, il attend", baton.clip, "idle");
+  baton.toggle();
+  check("le ranger le range", baton.out, false);
+  check("et joue PutBack", baton.clip, "PutBack");
+  check("les lumieres s'eteignent", baton.lights, false);
+  check("le thermometre se coupe", baton.canTherm, false);
+  check("et la guimauve se remet a neuf",
+        baton.events.includes("ResetMarshmallow"), true);
+  baton.toggle();
+  check("le ressortir le ressort", baton.out, true);
+  check("les lumieres reviennent", baton.lights, true);
+  // Manger range le baton TOUT SEUL.
+  const mange = new Baton();
+  mange.update(0.016, { eaten: true });
+  check("manger range le baton", mange.out, false);
+  check("il s'en souvient", mange.putAwayOnce, true);
+  // La flamme ne se voit que baton dehors et animation finie.
+  const flamme = new Baton();
+  flamme.update(0.016, { playing: true });
+  check("pas de flamme pendant la sortie", flamme.flame, false);
+  flamme.update(0.016, { playing: false });
+  check("mais une fois sorti, oui", flamme.flame, true);
 }
 
 report();

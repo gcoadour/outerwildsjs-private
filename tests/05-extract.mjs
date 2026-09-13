@@ -30,7 +30,8 @@ import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { extractPrefabs, mergePrefabs } from "../web/src/pipeline/extract/prefabs.js";
 import { extractInput } from "../web/src/pipeline/extract/input.js";
-import { clipLoops } from "../web/src/pipeline/extract/gltf.js";
+import { clipLoops, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
+import { STICK_LIGHTS, THERM_HEAT_SPAN } from "../web/src/held.js";
 import { Commandes, COMMANDES } from "../web/src/input.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
@@ -1109,6 +1110,38 @@ check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
   // muscle porte `m_LoopBlend`.
   check("les neuf Mecanim bouclent",
         mecanim.filter((v) => clipLoops(v, 0)).length, 9);
+}
+
+// A13 : ce qu'on tient dans la main. Les deux objets pendent sous
+// `PlayerCamera`, et leurs deux lumieres ne passent pas par le glTF : elles
+// sont ecrites dans `held.js`, et cet invariant les compare au build
+// (docs/64-mains.md).
+{
+  const racines = new Set(HELD_ROOTS);
+  const trouvees = [];
+  for (const [gid, go] of ctx.gameObjects) {
+    if (racines.has(go.m_Name)) trouvees.push(go.m_Name);
+  }
+  check("les deux objets en main sont dans la scene",
+        trouvees.sort().join(","), "MarshmallowStick,TelescopeGUI");
+  const lampes = new Map();
+  for (const [gid, go] of ctx.gameObjects) {
+    if (!/^(MallowLight|ThermLight)$/.test(go.m_Name)) continue;
+    for (const o of ctx.componentsOf(gid, ["Light"])) {
+      const v = ctx.readEngine(o);
+      if (v) lampes.set(go.m_Name, v);
+    }
+  }
+  check("les deux lumieres du baton", lampes.size, 2);
+  for (const d of STICK_LIGHTS) {
+    const v = lampes.get(d.name);
+    check(`${d.name} est ponctuelle`, v.m_Type, 2);
+    check(`${d.name} part eteinte`, !!v.m_Enabled, false);
+    check(`portee de ${d.name}`, Number(v.m_Range.toFixed(3)), d.range);
+    check(`intensite de ${d.name}`, Number(v.m_Intensity.toFixed(3)), d.intensity);
+  }
+  // La chaleur qui parcourt le clip du thermometre : `GetHeatLevel() / 40f`.
+  check("quarante unites de chaleur", THERM_HEAT_SPAN, 40);
 }
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur

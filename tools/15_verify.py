@@ -568,10 +568,17 @@ def run(url, heavy, profil=None, zip_path=None):
         # On attend d'etre pose, puis on marche une seconde. Le joueur apparait
         # en l'air : sans appui, il n'y a pas de marche a mesurer, et le
         # controle le dit plutot que d'echouer sur un temps d'attente.
+        #
+        # Le delai est genereux, et il le faut : le temps SIMULE d'une image est
+        # plafonne a 0,05 s, et un rendu logiciel qui tient une image par
+        # seconde avance donc vingt fois moins vite qu'une montre. Depuis que le
+        # baton a guimauve est dans la main — huit maillages plein cadre, que
+        # swiftshader remplit pixel par pixel — la chute prend plusieurs
+        # dizaines de secondes de montre (docs/64-mains.md).
         pose = True
         try:
             page.wait_for_function("window.__player && window.__player.grounded",
-                                   timeout=30000)
+                                   timeout=180000)
         except Exception:
             pose = False
         rep.eq("le joueur finit par se poser", pose, True)
@@ -730,7 +737,7 @@ def run(url, heavy, profil=None, zip_path=None):
         # frappe entiere tombe entre deux images, comme dans Unity qui latche
         # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
         # geste avant de mesurer.
-        def sonde_geste(duree_ms, attente_ms=4000):
+        def sonde_geste(duree_ms, attente_ms=9000):
             # Le bouton DROIT : `InputChannels.probe` est `mouse 1`, et les
             # trois statiques d'`OWInput` qui lancent, photographient et
             # rappellent sont construites dessus.
@@ -846,6 +853,41 @@ def run(url, heavy, profil=None, zip_path=None):
                page.evaluate("() => window.__consoles.flashlight.on"), not allumee)
         page.keyboard.press("KeyF")
         page.wait_for_timeout(300)
+
+        # --- ce qu'on tient dans la main (docs/64-mains.md) ---------------------
+        #
+        # Le baton a guimauve et la lunette pendent sous `PlayerCamera` dans le
+        # build : l'export partait des corps celestes, et aucun des deux n'etait
+        # porte. Le baton porte les quatre seuls clips qui ne bouclent pas.
+        mains = page.evaluate("""() => {
+          const m = window.__mains, b = m.baton;
+          const objet = m.enMain.get('marshmallowstick');
+          return { charges: [...m.enMain.keys()].sort(),
+                   dehors: b.out, clip: b.clip,
+                   clips: objet ? [...objet.parNom.keys()].sort() : [],
+                   lumieres: objet ? objet.lumieres.length : 0,
+                   maillages: objet ? objet.meshes.length : 0 };
+        }""")
+        rep.eq("les deux objets en main sont charges", mains["charges"],
+               ["marshmallowstick", "telescopegui"])
+        rep.eq("le baton porte ses quatre clips", mains["clips"],
+               ["PullOut", "PutBack", "Therm", "idle"])
+        # Le glTF n'emporte pas de lumieres : ces deux-la sont posees par le
+        # moteur, aux valeurs du prefabrique (`STICK_LIGHTS`).
+        rep.eq("et ses deux lumieres", mains["lumieres"], 2)
+        rep.at_least("avec de la geometrie", mains["maillages"], 5)
+        rep.eq("le baton commence dehors", mains["dehors"], True)
+        # `V` le range, et le build joue alors `PutBack`.
+        page.keyboard.press("KeyV")
+        page.wait_for_timeout(600)
+        range_ = page.evaluate("""() => { const b = window.__mains.baton;
+          return { dehors: b.out, clip: b.clip, lumieres: b.lights }; }""")
+        rep.eq("V range le baton", range_["dehors"], False)
+        rep.eq("et joue PutBack", range_["clip"], "PutBack")
+        rep.eq("les lumieres s'eteignent", range_["lumieres"], False)
+        page.keyboard.press("KeyV")
+        page.wait_for_timeout(600)
+        rep.eq("V le ressort", page.evaluate("() => window.__mains.baton.out"), True)
 
         # --- viser un referentiel (docs/62-visee.md) ----------------------------
         #
