@@ -18,6 +18,10 @@ import { Telescope, TELESCOPE } from "../web/src/tools.js";
 import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
+import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
+         roastPrompts, roastBroken, helmetSettings, HELMET_LAG, HELMET_LAG_CTOR,
+         HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
+         ROAST_DISTANCE } from "../web/src/helmet.js";
 import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
          landingPadSensors, museumEntryways, smoothStep,
          ELEVATOR } from "../web/src/tower.js";
@@ -3259,6 +3263,82 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   ] } });
   check("une entree de musee", musee.length, 1);
   check("et elle sort par son axe X", musee[0].exitDirection.join(","), "1,0,0");
+
+  // --- le casque, l'alarme, les voyants (docs/52) --------------------------
+  //
+  // Encore une fois la scene contredit le constructeur, et c'est elle qui
+  // gagne : le casque traine a 0,05 la ou le code pose 0,1.
+  check("l'instance traine a 0,05", HELMET_LAG, 0.05);
+  check("et le constructeur disait 0,1", HELMET_LAG_CTOR, 0.1);
+  check("sans scene, on prend le repli", helmetSettings({}).lag, HELMET_LAG);
+  check("et il se sait repli", helmetSettings({}).declared, false);
+  check("avec elle, la valeur du build",
+        helmetSettings({ placed: { HUDHelmet: [{ fields: { _helmetLagSpeed: 0.05 } }] } }).lag,
+        0.05);
+
+  const casque = new Helmet();
+  check("au depart, il est range", casque.state, SUIT.OFF);
+  casque.suitUp();
+  for (let i = 0; i < 300; i++) casque.update(1 / 60);
+  check("une fois enfile, il est porte", casque.worn, true);
+  check("et il est pose a zero", Number(casque.y.toFixed(6)), 0);
+  // Il traine derriere le regard, en sens INVERSE et d'un dixieme de l'ecart.
+  casque.update(1 / 60, 1, 0, 10);
+  check("un premier pas ne fait qu'un vingtieme du chemin",
+        Number(casque.x.toFixed(6)), Number((HELMET_AMPLITUDE * HELMET_LAG).toFixed(6)));
+  check("et il part a l'oppose du regard", casque.x < 0, true);
+  for (let i = 0; i < 300; i++) casque.update(1 / 60, 1, 0, 10);
+  check("au bout, il rejoint sa cible",
+        Number(casque.x.toFixed(5)), Number(HELMET_AMPLITUDE.toFixed(5)));
+  // L'axe vertical est bride dans la bande d'angles qu'on ne peut pas atteindre.
+  const bride = new Helmet();
+  bride.suitUp();
+  for (let i = 0; i < 300; i++) bride.update(1 / 60);
+  for (let i = 0; i < 60; i++) bride.update(1 / 60, 0, 1, 150);
+  check("dans la bande morte, le casque ne suit pas le regard vertical",
+        Number(bride.y.toFixed(6)), 0);
+  for (let i = 0; i < 300; i++) bride.update(1 / 60, 0, 1, 10);
+  check("hors de la bande, il suit", bride.y < 0, true);
+
+  // L'alarme : trente pour cent, et les deux transitions.
+  const alarme = new Alarme();
+  check("le seuil est a trente pour cent", ALARM_THRESHOLD, 0.3);
+  check("a quarante pour cent, rien", alarme.update(0.4), false);
+  check("a trente pile, elle part", alarme.update(0.3), true);
+  check("et elle le dit une fois", alarme.turnedOn, true);
+  check("puis ne le redit plus", (alarme.update(0.2), alarme.turnedOn), false);
+  check("au-dessus du seuil, elle se coupe", alarme.update(0.31), false);
+  check("et le dit une fois", alarme.turnedOff, true);
+
+  // Les voyants : le premier en continu, les autres ENSEMBLE a la demi-seconde.
+  const voyants = new DamageDisplay();
+  check("la periode est la demi-seconde", BLINK_PERIOD, 0.5);
+  const a0 = voyants.update(0, true, [true, true]);
+  check("le voyant general est allume des le moindre degat", a0[0], true);
+  check("les autres commencent eteints", a0.slice(1).join(","), "false,false");
+  const a1 = voyants.update(0.6, true, [true, true]);
+  check("et clignotent ENSEMBLE", a1.slice(1).join(","), "true,true");
+  check("une piece saine ne clignote jamais",
+        voyants.update(1.2, true, [false, true]).slice(1).join(","), "false,false");
+  check("sans degat, le voyant general s'eteint",
+        voyants.update(1.8, false, [])[0], false);
+
+  // Les notifications : une seule a la fois, et elle s'efface.
+  const notes = new Notifications();
+  check("au depart, rien", notes.update(0), null);
+  notes.display("sonde genee", 3, 0);
+  check("elle s'affiche", notes.update(1), "sonde genee");
+  notes.display("autre chose", 3, 1);
+  check("une nouvelle remplace l'ancienne", notes.update(2), "autre chose");
+  check("et elle s'efface au bout de sa duree", notes.update(4.1), null);
+
+  // Les huit invites de la guimauve : quatre unites, et toutes la portent.
+  const guimauves = roastPrompts({ placed: { RoastPromptEvent: [
+    { name: "RoastPromptEvent", position: [0, 0, 0], fields: { _roastDistance: 4 } },
+  ] } });
+  check("la distance est celle de la scene", guimauves[0].distance, ROAST_DISTANCE);
+  check("a trois unites, on grille encore", roastBroken(3, guimauves[0]), false);
+  check("a cinq, le grillage s'arrete", roastBroken(5, guimauves[0]), true);
 }
 
 report();

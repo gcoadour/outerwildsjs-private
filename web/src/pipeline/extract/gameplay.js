@@ -85,7 +85,13 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // les trois capteurs qui decident si l'on est POSE, et l'entree
                 // du musee qui se rejoue apres une pause (docs/51-tour.md).
                 "LaunchTerminal", "LaunchElevatorController",
-                "LandingPadManager", "MuseumEntryway"];
+                "LandingPadManager", "MuseumEntryway",
+                // Le lot « interface » de docs/44, pour ce qui n'est pas une
+                // question de mise en page : le casque qui traine, l'alarme a
+                // trente pour cent, les voyants qui clignotent, les huit
+                // invites de la guimauve (docs/52-casque.md).
+                "RoastPromptEvent", "MarshmallowStick", "HUDHelmet",
+                "MasterAlarm", "HUDDamageDisplay", "NotificationManager"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.

@@ -145,6 +145,11 @@ export class ResourceHUD {
     if (res.oxygen < low) warn.push("low oxygen");
     if (res.health < low) warn.push("low health");
     if (res.fuel < low) warn.push("low fuel");
+    // `MasterAlarm` : sous trente pour cent de coque, le vaisseau crie. Le
+    // portage affichait un chiffre et rien d'autre (docs/52-casque.md).
+    if (this.alarm) warn.push("hull breach");
+    // Et la notification en cours, qui s'efface toute seule.
+    if (this.notice) warn.push(this.notice);
     this.warnings.textContent = warn.join("\n");
 
     // OnInstantDamage fixe la vignette a plein puis la laisse s'effacer en une
@@ -152,6 +157,12 @@ export class ResourceHUD {
     const a = this.exposed ? 1 : Math.max(0, (this.vignetteUntil - now) / this.r.vignetteFade);
     this.vignette.style.opacity = String(a);
   }
+
+  /** `MasterAlarm.TurnOnAlarm` / `TurnOffAlarm`, vus de l'ecran. */
+  setAlarm(on) { this.alarm = !!on; }
+
+  /** La notification en cours, ou null. */
+  setNotice(texte) { this.notice = texte || null; }
 
   /** Encaisse un coup : la vignette rouge s'allume puis s'estompe. */
   damage(now) { this.vignetteUntil = now + this.r.vignetteFade; }

@@ -847,6 +847,22 @@ check("et tous avec le meme son de contact",
 check("un gestionnaire de pads", (gp.placed.LandingPadManager || []).length, 1);
 check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
 
+// Le casque, l'alarme, les voyants, les invites de guimauve (docs/52-casque.md).
+const roasts = (gp.placed.RoastPromptEvent || []);
+check("huit invites de guimauve", roasts.length, 8);
+check("toutes a quatre unites",
+      roasts.every((r) => r.fields._roastDistance === 4), true);
+const casqueB = (gp.placed.HUDHelmet || []);
+check("un casque", casqueB.length, 1);
+// La scene CONTREDIT le constructeur (0,1), comme la course de l'ascenseur.
+check("qui traine a 0,05 et non 0,1",
+      Number(casqueB[0].fields._helmetLagSpeed.toFixed(2)), 0.05);
+check("une alarme generale", (gp.placed.MasterAlarm || []).length, 1);
+check("posee sur le vaisseau", (gp.placed.MasterAlarm || [])[0].body, "Ship_Body");
+check("un afficheur de degats", (gp.placed.HUDDamageDisplay || []).length, 1);
+check("un gestionnaire de notifications", (gp.placed.NotificationManager || []).length, 1);
+check("et un baton a guimauve", (gp.placed.MarshmallowStick || []).length, 1);
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");

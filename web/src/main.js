@@ -55,6 +55,8 @@ import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds } from "./gaze.js";
 import { elevators, Elevator, LaunchTerminal, landingPadSensors,
          museumEntryways } from "./tower.js";
+import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
+         roastPrompts, roastBroken } from "./helmet.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
@@ -394,6 +396,15 @@ async function boot() {
   const capteursPad = landingPadSensors(gameplay);
   const museeEntrees = museumEntryways(gameplay);
   window.__tour = { ascenseurs, terminal, capteursPad, museeEntrees };
+  // Le casque qui traine derriere le regard, l'alarme a trente pour cent, les
+  // voyants qui clignotent, les notifications qui s'effacent, et les huit
+  // invites de la guimauve (docs/52-casque.md).
+  const casque = new Helmet(helmetSettings(gameplay).lag);
+  const alarme = new MasterAlarm();
+  const voyants = new DamageDisplay();
+  const notifications = new Notifications();
+  const invitesGuimauve = roastPrompts(gameplay);
+  window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
   const decalNames = new Set([
     ...((gameplay.placed || {}).DS_DecalsMeshRenderer || []).map((c) => c.name),
     ...((gameplay.placed || {}).DS_Decals || []).map((c) => c.name)]);
@@ -2344,6 +2355,27 @@ async function boot() {
       }
     }
     for (const p of portes) p.update(now);
+    // Le casque suit le regard avec un vingtieme de retard, et seulement quand
+    // on le porte. `pitch` est le tangage en angles d'Euler d'Unity : la bande
+    // [70, 280] est celle qu'on ne peut pas atteindre, et le suivi vertical y
+    // est bride.
+    if (equipment.suit && !casque.worn && casque.state !== 0) casque.suitUp();
+    if (!equipment.suit && casque.worn) casque.removeSuit();
+    {
+      const euler = ((-pitch * 180 / Math.PI) % 360 + 360) % 360;
+      casque.update(dt, input.right || 0, 0, euler);
+    }
+    // L'alarme generale : sous trente pour cent de coque, et pas avant.
+    if (ship) {
+      const frac = ship.damage.total > 0 ? ship.damage.integrity / ship.damage.total : 1;
+      const crie = alarme.update(frac);
+      if (resHUD) resHUD.setAlarm(crie);
+      voyants.update(now, ship.damage.integrity < ship.damage.total,
+                     Object.values(ship.damage.parts).map((p) => p.dead));
+    }
+    const avis = notifications.update(now);
+    if (resHUD) resHUD.setNotice(avis);
+
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
     for (const a of ascenseurs) a.update(now);
 
