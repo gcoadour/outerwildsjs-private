@@ -63,14 +63,28 @@ page :
 | sans le build | **1 055** vérifications (`tests/09-jeu.mjs` et les huit autres) |
 | sur le build | **303** vérifications (`tests/05-extract.mjs` surtout) |
 | en navigateur, **sans** le build | **13** contrôles (`15_verify.py --repli`) |
-| en navigateur, avec le build | `15_verify.py --profil` |
+| en navigateur, avec le build | **112** contrôles (`15_verify.py --profil`) |
 | le pipeline se charge | 37 modules |
 | le moteur se **compile** | 66 modules |
 
-Les deux dernières lignes sont nouvelles. `check-modules.mjs` ne couvrait que le
-pipeline : une faute de syntaxe dans `main.js` n'était attrapée par rien, et une
-erreur d'**exécution** dans `boot()` attendait qu'un humain ouvre la page. Les
-deux sont gardées maintenant, et la seconde tourne sans les 289 Mo.
+Les lignes « compile » et « sans le build » sont nouvelles. `check-modules.mjs`
+ne couvrait que le pipeline : une faute de syntaxe dans `main.js` n'était
+attrapée par rien, et une erreur d'**exécution** dans `boot()` attendait qu'un
+humain ouvre la page. Les deux sont gardées maintenant, et la seconde tourne
+sans les 289 Mo.
+
+> **Et ce filet a servi tout de suite.** Un `import` que cette série croyait
+> avoir ajouté ne l'avait pas été : le remplacement n'avait pas trouvé son
+> ancre, et n'avait rien dit. Le module compilait, les 1 055 vérifications
+> passaient, et `ambientStep is not defined` ne se levait qu'une fois le joueur
+> dans un secteur — où il **abortait chaque image**, faisant échouer cinq
+> contrôles sans rapport apparent. Les 112 du navigateur l'ont trouvé à la
+> première exécution, et le comparatif avec l'état d'avant a montré que les cinq
+> n'en faisaient qu'un.
+>
+> Le mode `--repli`, lui, ne l'avait **pas** vu : sans données il n'y a pas de
+> secteur, donc pas d'appel. Il attrape ce qui casse au démarrage, pas ce qui
+> casse en jouant, et sa docstring le dit.
 
 ## Les outils
 

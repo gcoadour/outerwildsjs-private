@@ -120,6 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
+| vérification avec le build | **112/112**, mesurée après la série ([`59`](59-etat.md)) |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
