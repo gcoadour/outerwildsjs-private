@@ -53,6 +53,8 @@ import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds } from "./gaze.js";
+import { elevators, Elevator, LaunchTerminal, landingPadSensors,
+         museumEntryways } from "./tower.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
@@ -384,6 +386,14 @@ async function boot() {
   const regards = gazeSwitches(gameplay).map((d) => new GazeSwitch(d));
   const portes = energyGates(gameplay).map((d) => new EnergyGate(d));
   window.__regard = { regards, portes };
+  // La tour de lancement : le terminal refuse tant qu'on ne sait pas les
+  // codes, puis l'ascenseur monte de 31,5 unites en cinq secondes
+  // (docs/51-tour.md).
+  const ascenseurs = elevators(gameplay).map((d) => new Elevator(d));
+  const terminal = new LaunchTerminal();
+  const capteursPad = landingPadSensors(gameplay);
+  const museeEntrees = museumEntryways(gameplay);
+  window.__tour = { ascenseurs, terminal, capteursPad, museeEntrees };
   const decalNames = new Set([
     ...((gameplay.placed || {}).DS_DecalsMeshRenderer || []).map((c) => c.name),
     ...((gameplay.placed || {}).DS_Decals || []).map((c) => c.name)]);
@@ -612,6 +622,11 @@ async function boot() {
                       // la piece touchee — la plus proche du point d'impact, et
                       // non celle que designe une normale.
                       engineComponents(gameplay));
+      // Les trois capteurs de pad, en offsets du repere du vaisseau : c'est
+      // par eux que le build decide si l'on est POSE, et non par un contact.
+      if (ship.setPadSensors(capteursPad, spawnWorld)) {
+        console.log(`vaisseau : ${capteursPad.length} capteurs de pad`);
+      }
       // Le vaisseau porte desormais son orientation : sans la poser une
       // premiere fois, son « haut » serait celui du repere de travail et non
       // la verticale locale, et sa poussee verticale partirait de travers.
@@ -1029,7 +1044,11 @@ async function boot() {
   dialogue.onEnd = (convo) => {
     const kind = convo && convo.controller && convo.controller.kind;
     if (kind !== "CuratorConvoController") return;
-    if (pdata.learn("knowsLaunchCodes")) console.log("codes de lancement appris");
+    if (pdata.learn("knowsLaunchCodes")) {
+      // `LaunchTerminal.OnLearnLaunchCodes` : c'est la connaissance qui pose
+      // l'invite, et non l'inverse.
+      console.log(`codes de lancement appris — terminal :${terminal.learnCodes()}`);
+    }
   };
   window.__respawn = respawn;
 
@@ -2325,6 +2344,8 @@ async function boot() {
       }
     }
     for (const p of portes) p.update(now);
+    // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
+    for (const a of ascenseurs) a.update(now);
 
     // Les pivots de tornade culbutent, lentement et chacun a son rythme.
     if (tornades.count) tornades.update(dt);

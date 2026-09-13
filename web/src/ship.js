@@ -27,6 +27,7 @@
 
 import { dominantField } from "./gravity.js";
 import { ShipDamage } from "./shipdamage.js";
+import { landedOn } from "./tower.js";
 import { frameFriction } from "./player.js";
 import { spawnPoints, nearestTo } from "./start.js";
 
@@ -295,6 +296,65 @@ export class Ship {
    * reel. La sphere analytique reste le repli, et le filet de securite qui
    * empeche de tomber au centre de la planete.
    */
+  /**
+   * Les trois capteurs de pad, exprimes dans le repere du vaisseau.
+   *
+   * `LandingPadSensor` x3, spheres de rayon 0,5, posees sur `Ship_Body` : deux
+   * en bas et ecartees — les pieds —, une haute et centree. Leurs offsets se
+   * calculent une fois, depuis les positions extraites et celle du vaisseau.
+   */
+  setPadSensors(sensors, shipWorldPos) {
+    this.padSensors = (sensors || [])
+      .filter((s) => s.position && shipWorldPos)
+      .map((s) => ({
+        offset: [s.position[0] - shipWorldPos[0], s.position[1] - shipWorldPos[1],
+                 s.position[2] - shipWorldPos[2]],
+        radius: (s.volume && s.volume.radius) || 0.5,
+        sound: s.touchdownSound || null,
+      }));
+    return this.padSensors.length;
+  }
+
+  /**
+   * `LandingPadManager.Update` : pose si les TROIS capteurs touchent, et
+   * touchent le meme corps.
+   *
+   * Le portage declarait « pose » au premier contact de son rayon vers le bas.
+   * Un vaisseau a cheval sur un rebord etait donc pose, et un vaisseau sur le
+   * flanc aussi. Trois capteurs et un seul corps font la difference entre
+   * « quelque chose est sous moi » et « je suis pose ».
+   *
+   * Le build compare des `OWRigidbody` ; ce portage n'en a pas sous la main au
+   * point de contact, et compare donc le corps dont la SURFACE est la plus
+   * proche du point touche. C'est la meme question, posee autrement, et c'est
+   * dit.
+   */
+  padLanding(bodies, basis) {
+    if (!this.padSensors || !this.padSensors.length || !this.probe || !basis) return null;
+    const contacts = [];
+    for (const s of this.padSensors) {
+      const o = s.offset;
+      const p = [
+        this.pos.x + o[0] * basis.right.x + o[1] * basis.up.x + o[2] * basis.fwd.x,
+        this.pos.y + o[0] * basis.right.y + o[1] * basis.up.y + o[2] * basis.fwd.y,
+        this.pos.z + o[0] * basis.right.z + o[1] * basis.up.z + o[2] * basis.fwd.z,
+      ];
+      const bas = [-basis.up.x, -basis.up.y, -basis.up.z];
+      const hit = this.probe(p, bas, s.radius * 4);
+      if (!hit || hit.distance > s.radius * 2) { contacts.push(null); continue; }
+      let best = null, bestD = Infinity;
+      for (const b of bodies) {
+        const d = Math.abs(Math.hypot(hit.point[0] - b.position[0],
+                                      hit.point[1] - b.position[1],
+                                      hit.point[2] - b.position[2])
+                           - (b.gravity.upperSurfaceRadius || 0));
+        if (d < bestD) { bestD = d; best = b.name; }
+      }
+      contacts.push(best);
+    }
+    return landedOn(contacts);
+  }
+
   resolveGround(dt, bodies, basis) {
     this.landed = false;
     for (const b of bodies) {
@@ -323,6 +383,10 @@ export class Ship {
 
   /** Pose le vaisseau sur un point de contact, avec les degats correspondants. */
   contact(dt, point, n, basis) {
+    // Ou etait le vaisseau AVANT d'etre pose sur le contact : c'est par rapport
+    // a cette position-la que le point d'impact a un sens. Le lire apres
+    // l'avoir deplace donnait un vecteur nul, et donc toujours la meme piece.
+    const avant = [this.pos.x, this.pos.y, this.pos.z];
     this.pos.x = point[0]; this.pos.y = point[1]; this.pos.z = point[2];
     const vn = this.vel.x * n[0] + this.vel.y * n[1] + this.vel.z * n[2];
     if (vn < 0) {
@@ -334,7 +398,15 @@ export class Ship {
         -(n[0] * basis.up.x + n[1] * basis.up.y + n[2] * basis.up.z),
         -(n[0] * basis.fwd.x + n[1] * basis.fwd.y + n[2] * basis.fwd.z),
       ] : null;
-      this.lastHit = this.damage.impact(-vn, local);
+      // Le POINT d'impact, dans le repere du vaisseau : c'est lui qui designe
+      // la piece touchee dans le build, et non la normale (docs/49-queue.md).
+      const rel = [point[0] - avant[0], point[1] - avant[1], point[2] - avant[2]];
+      const pLocal = basis ? [
+        rel[0] * basis.right.x + rel[1] * basis.right.y + rel[2] * basis.right.z,
+        rel[0] * basis.up.x + rel[1] * basis.up.y + rel[2] * basis.up.z,
+        rel[0] * basis.fwd.x + rel[1] * basis.fwd.y + rel[2] * basis.fwd.z,
+      ] : null;
+      this.lastHit = this.damage.impact(-vn, local, pLocal);
       this.vel.x -= vn * n[0]; this.vel.y -= vn * n[1]; this.vel.z -= vn * n[2];
     }
     // Le frottement au sol etait applique PAR IMAGE : a 30 im/s le vaisseau

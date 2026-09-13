@@ -828,6 +828,25 @@ check("mais la distance d'activation n'est pas dans la scene",
 check("une toile", (gp.placed.GazeWebAnimator || []).length, 1);
 check("et une porte d'energie", (gp.placed.EnergyGate || []).length, 1);
 
+// La tour de lancement (docs/51-tour.md).
+const asc = (gp.placed.Elevator || []);
+check("un ascenseur", asc.length, 1);
+check("sur Timber Hearth", asc[0].body, "TimberHearth_Body");
+// La scene CONTREDIT le constructeur (10 et 3), et c'est le seul endroit de
+// la serie ou cela arrive : l'invariant garde la valeur de la scene.
+check("sa course fait 31,5 unites", asc[0].fields._trackHeight, 31.5);
+check("et dure cinq secondes", asc[0].fields._liftDuration, 5);
+check("un terminal de lancement", (gp.placed.LaunchTerminal || []).length, 1);
+check("et son controleur d'ascenseur", (gp.placed.LaunchElevatorController || []).length, 1);
+const pads = (gp.placed.LandingPadSensor || []);
+check("trois capteurs de pad", pads.length, 3);
+check("tous sur le vaisseau", pads.every((s) => s.body === "Ship_Body"), true);
+check("tous de rayon un demi", pads.every((s) => s.volume && s.volume.radius === 0.5), true);
+check("et tous avec le meme son de contact",
+      new Set(pads.map((s) => s.fields._touchdownSound.name)).size, 1);
+check("un gestionnaire de pads", (gp.placed.LandingPadManager || []).length, 1);
+check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
+
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");

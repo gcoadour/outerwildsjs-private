@@ -18,6 +18,9 @@ import { Telescope, TELESCOPE } from "../web/src/tools.js";
 import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
+import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
+         landingPadSensors, museumEntryways, smoothStep,
+         ELEVATOR } from "../web/src/tower.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels } from "../web/src/sand.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
@@ -3180,6 +3183,82 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a mi-fondu, a moitie", porte.alpha, 0.5);
   porte.update(1);
   check("puis elle disparait", porte.alpha, 0);
+
+  // --- la tour de lancement (docs/51) -------------------------------------
+  //
+  // La scene CONTREDIT le constructeur — 31,5 et 5 contre 10 et 3 — et c'est
+  // elle qui gagne. C'est le seul endroit de la serie ou cela arrive, et
+  // l'invariant garde les deux.
+  const asc = elevators({ placed: { Elevator: [
+    { name: "Elevator", position: [0, 0, 0], body: "TimberHearth_Body",
+      fields: { _trackHeight: 31.5, _liftDuration: 5,
+                _elevatorStartClip: { name: "elevatorstart" },
+                _elevatorStopClip: { name: "elevatorstop" } } },
+  ] } });
+  check("un ascenseur", asc.length, 1);
+  check("la scene dit 31,5 unites", asc[0].trackHeight, 31.5);
+  check("et le constructeur disait 10", ELEVATOR.trackHeight, 10);
+  check("la scene dit cinq secondes", asc[0].liftDuration, 5);
+  check("et le constructeur disait trois", ELEVATOR.liftDuration, 3);
+
+  const cab = new Cabine(asc[0]);
+  check("au depart, les commandes sont fermees", cab.pressInteract(0), false);
+  check("et la cabine est en bas", cab.fraction, 0);
+  cab.activateControls();
+  check("`ActivateLaunchTower` les ouvre", cab.pressInteract(0), true);
+  cab.update(2.5);
+  // `SmoothStep` et non une rampe : a mi-parcours, exactement la moitie, mais
+  // le depart et l'arrivee sont adoucis.
+  check("a mi-course, la moitie", cab.fraction, 0.5);
+  check("le son, lui, est deja plein", cab.volume, 1);
+  check("mais il ne l'etait pas au depart", smoothStep(0.01) * 10 < 1, true);
+  cab.update(0.5 * 5);
+  check("un quart de temps ne fait pas un quart de course",
+        smoothStep(0.25) !== 0.25, true);
+  cab.update(5);
+  check("au bout, elle est en haut", cab.fraction, 1);
+  check("et elle annonce son arrivee", cab.arrived, true);
+  check("soit 31,5 unites plus haut", cab.height, 31.5);
+  cab.update(6);
+  check("puis elle se tait", cab.arrived, false);
+  // `ReturnToStart` redescend sans basculer le sens.
+  cab.returnToStart(6);
+  cab.update(11);
+  check("et elle redescend", cab.fraction, 0);
+
+  // Le terminal ne verrouille pas : il REFUSE.
+  const term = new LaunchTerminal();
+  check("sans les codes, il refuse", term.pressInteract(false), "refuse");
+  check("et il peut refuser encore", term.pressInteract(false), "refuse");
+  check("l'invite vient de la connaissance", term.learnCodes(), " Enter Launch Codes");
+  check("avec les codes, il actionne", term.pressInteract(true), "activate");
+  check("et une seule fois", term.pressInteract(true), null);
+
+  // Les pads : les trois capteurs, et le MEME corps.
+  check("les trois touchent le meme corps",
+        landedOn(["TimberHearth_Body", "TimberHearth_Body", "TimberHearth_Body"]),
+        "TimberHearth_Body");
+  check("un seul capteur en l'air suffit a ne pas etre pose",
+        landedOn(["TimberHearth_Body", null, "TimberHearth_Body"]), null);
+  check("a cheval sur deux corps, pas pose non plus",
+        landedOn(["TimberHearth_Body", "Moon_Body", "TimberHearth_Body"]), null);
+  check("et aucun capteur du tout n'est pas un atterrissage", landedOn([]), null);
+
+  const pads = landingPadSensors({ placed: { LandingPadSensor: [
+    { name: "SurfaceSensor", position: [0, 0, 0], body: "Ship_Body",
+      volume: { shape: "sphere", radius: 0.5, center: [0, 0, 0] },
+      fields: { _touchdownSound: { name: "podland_thud_hiss" } } },
+  ] } });
+  check("le capteur porte son son de contact", pads[0].touchdownSound, "podland_thud_hiss");
+  check("et son rayon", pads[0].volume.radius, 0.5);
+
+  // L'entree du musee, et sa direction de sortie.
+  const musee = museumEntryways({ placed: { MuseumEntryway: [
+    { name: "MuseumEntryway", position: [0, 0, 0], body: "TimberHearth_Body",
+      fields: { _localExitDirection: { x: 1, y: 0, z: 0 } } },
+  ] } });
+  check("une entree de musee", musee.length, 1);
+  check("et elle sort par son axe X", musee[0].exitDirection.join(","), "1,0,0");
 }
 
 report();

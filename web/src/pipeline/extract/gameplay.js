@@ -79,7 +79,13 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // On allume en REGARDANT : une mecanique entiere de Dark
                 // Bramble, sans invite ni touche, que rien ne signalait
                 // (docs/50-regard.md).
-                "GazeSwitch", "GazeWebAnimator", "EnergyGate"];
+                "GazeSwitch", "GazeWebAnimator", "EnergyGate",
+                // La tour de lancement et ce qui va avec : le terminal qui
+                // refuse, l'ascenseur qui monte de 31,5 unites en 5 secondes,
+                // les trois capteurs qui decident si l'on est POSE, et l'entree
+                // du musee qui se rejoue apres une pause (docs/51-tour.md).
+                "LaunchTerminal", "LaunchElevatorController",
+                "LandingPadManager", "MuseumEntryway"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -117,7 +123,7 @@ const WANT_VOLUME = new RegExp([
   "|PlayerAttachPoint|LODCameraSnapshot",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
-  "|GazeSwitch)$",
+  "|GazeSwitch|MuseumEntryway)$",
 ].join(""), "i");
 
 /**
