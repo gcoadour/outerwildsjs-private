@@ -91,7 +91,12 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // trente pour cent, les voyants qui clignotent, les huit
                 // invites de la guimauve (docs/52-casque.md).
                 "RoastPromptEvent", "MarshmallowStick", "HUDHelmet",
-                "MasterAlarm", "HUDDamageDisplay", "NotificationManager"];
+                "MasterAlarm", "HUDDamageDisplay", "NotificationManager",
+                // La seule surface du build qui declare ECRASER, et c'est elle
+                // qui porte la mort par compression : le sable montant
+                // (docs/53-joueur.md).
+                "Surface", "PlayerCompressionSensor", "PlayerNoiseMaker",
+                "PlayerState", "FirstPersonManipulator"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -129,7 +134,7 @@ const WANT_VOLUME = new RegExp([
   "|PlayerAttachPoint|LODCameraSnapshot",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
-  "|GazeSwitch|MuseumEntryway)$",
+  "|GazeSwitch|MuseumEntryway|Surface)$",
 ].join(""), "i");
 
 /**

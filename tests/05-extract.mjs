@@ -9,7 +9,7 @@ import { extractCameras } from "../web/src/pipeline/extract/camera.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
-import { sandColumns, sandFunnels, funnelActive } from "../web/src/sand.js";
+import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
          zeroGFields, gameSectors, probePrompts,
          radiationEmitters } from "../web/src/volumes.js";
@@ -862,6 +862,23 @@ check("posee sur le vaisseau", (gp.placed.MasterAlarm || [])[0].body, "Ship_Body
 check("un afficheur de degats", (gp.placed.HUDDamageDisplay || []).length, 1);
 check("un gestionnaire de notifications", (gp.placed.NotificationManager || []).length, 1);
 check("et un baton a guimauve", (gp.placed.MarshmallowStick || []).length, 1);
+
+// La seule surface du build qui declare ECRASER (docs/53-joueur.md).
+const surfaces = (gp.placed.Surface || []);
+check("une seule surface declaree", surfaces.length, 1);
+check("elle ecrase", !!surfaces[0].fields._allowCompression, true);
+check("elle est sur une jumelle", surfaces[0].body, "Twin01_Body");
+check("et son rayon est de trente", surfaces[0].volume.radius, 30);
+// Le rattachement doit designer le sable qui MONTE, pas celui qui se vide.
+const colonnesB = markCrushing(sandColumns(gp), gp);
+check("le sable qui monte ecrase",
+      colonnesB.find((c) => c.name === "RisingSand").crushes, true);
+check("celui qui se vide, non",
+      colonnesB.find((c) => c.name === "DrainingSand").crushes, false);
+check("un capteur de compression", (gp.placed.PlayerCompressionSensor || []).length, 1);
+check("un bruiteur de joueur", (gp.placed.PlayerNoiseMaker || []).length, 1);
+check("un etat de joueur", (gp.placed.PlayerState || []).length, 1);
+check("et un manipulateur", (gp.placed.FirstPersonManipulator || []).length, 1);
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.

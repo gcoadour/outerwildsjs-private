@@ -57,6 +57,8 @@ import { elevators, Elevator, LaunchTerminal, landingPadSensors,
          museumEntryways } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          roastPrompts, roastBroken } from "./helmet.js";
+import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
+         PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
@@ -74,7 +76,7 @@ import { PostFX, effetsSecondaires } from "./postfx.js";
 import { loadLighting, LightField } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
-import { SandLevels, sandColumns, sandFunnels } from "./sand.js";
+import { SandLevels, sandColumns, sandFunnels, markCrushing } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
@@ -351,7 +353,10 @@ async function boot() {
   // Le sable des jumelles : deux spheres qu'on met a l'echelle et un entonnoir,
   // menes par la minute de boucle. Rien de tout cela n'etait lu
   // (docs/45-recensement-mesure.md).
-  const sand = new SandLevels(sandColumns(gameplay), sandFunnels(gameplay));
+  // Le seul `Surface` du build qui declare ecraser est le collider de
+  // `RisingSand` : c'est lui qui porte la mort par compression (docs/53).
+  const sand = new SandLevels(markCrushing(sandColumns(gameplay), gameplay),
+                              sandFunnels(gameplay));
   window.__sand = sand;
   // Six volumes de destruction et dix-huit de reparation, poses dans la scene
   // et jamais lus : c'est le jeu qui dit ou l'on meurt, pas un seuil du portage.
@@ -405,6 +410,12 @@ async function boot() {
   const notifications = new Notifications();
   const invitesGuimauve = roastPrompts(gameplay);
   window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
+  // Ce que le joueur porte en plus de son corps (docs/53-joueur.md) : l'etat,
+  // le bruit qu'il fait, et le capteur qui le tue s'il reste coince.
+  const etatJoueur = new PlayerState();
+  const compression = new CompressionSensor();
+  let dernierLancement = -100;      // `_initLaunchTime`, du constructeur
+  window.__joueur = { etatJoueur, compression, portee: INTERACT_RANGE };
   const decalNames = new Set([
     ...((gameplay.placed || {}).DS_DecalsMeshRenderer || []).map((c) => c.name),
     ...((gameplay.placed || {}).DS_Decals || []).map((c) => c.name)]);
@@ -1876,14 +1887,23 @@ async function boot() {
     // Le bruit n'est plus un booleen tire des commandes : c'est un champ. Le
     // joueur y met ce qu'il fait, et le champ audio ce qui joue reellement — un
     // predateur va donc vers ce qu'il entend, pas vers le joueur par principe.
-    const noisy = !!(input.forward || input.right || input.up || player.grounded === false);
+    // `PlayerNoiseMaker.Update` : le bruit est PROPORTIONNEL a la poussee, et
+    // lancer une sonde fait un COUP de cinq qui retombe en une seconde. Le
+    // portage rendait un booleen a 1 ou 0,7 et ignorait la sonde — on pouvait
+    // en lancer une au nez d'un predateur sans qu'il l'entende.
+    const fractionPoussee = player.jetpack
+      ? (input.loud ? 1 : 0.7) * (input.forward || input.right || input.up ? 1 : 0)
+      : (input.forward || input.right ? 0.3 : 0);
     const playerWorld = { x: player.pos.x + anchorPos[0],
                           y: player.pos.y + anchorPos[1],
                           z: player.pos.z + anchorPos[2] };
     noise.clear();
-    if (noisy) {
+    const bruit = playerNoise(fractionPoussee, now, dernierLancement);
+    if (bruit > 0) {
+      // Les volumes du build vont jusqu'a 10 ; le champ du portage travaille
+      // sur 0 a 1. On rapporte, plutot que de changer l'echelle du champ.
       noise.add([playerWorld.x, playerWorld.y, playerWorld.z],
-                (player.jetpack || input.loud) ? 1 : 0.7);
+                Math.min(1, bruit / NOISE.thrust));
     }
     if (audioMap.length) {
       for (const e of audio.emitters()) noise.add(e.position, e.level, e.radius);
@@ -1985,6 +2005,9 @@ async function boot() {
     }
     if (probeFired) {
       probes.launch(player.pos, fwd);
+      // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
+      // d'un coup, qui retombe en une seconde.
+      dernierLancement = now;
       // ProbeLauncher accorde ce savoir dans le build
       if (pdata.learn("knowsHowProbesWork")) console.log("fonctionnement des sondes appris");
       probeFired = false;
@@ -2187,6 +2210,20 @@ async function boot() {
     // Elles passent toutes par le meme handler, qui ne retient que la
     // premiere : mourir asphyxie pendant que l'onde de choc arrive reste une
     // seule mort, avec une seule cause affichee.
+    // `PlayerCompressionSensor` : coince contre une surface qui ecrase pendant
+    // cinq pas de physique — un dixieme de seconde —, on meurt broye. Le
+    // portage n'avait pas cette mort ; la surface qui ecrase est ici celle d'un
+    // volume de destruction que l'on touche sans pouvoir en sortir.
+    // Etre SOUS la surface du sable montant, c'est y avoir ete pousse : hors
+    // d'un coincement, sa montee vous repousse. C'est exactement la situation
+    // que `PlayerCompressionSensor` guette.
+    const avale = sand.count
+      ? sand.swallows([player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                       player.pos.z + anchorPos[2]])
+      : null;
+    if (compression.update(dt, !!avale, !!player.attached)) {
+      death.kill("ecrasement");
+    }
     if (resources.dead) death.kill("asphyxie");
     if (loop.dead) death.kill(loop.deathCause || "supernova");
     // Devore : un predateur de Dark Bramble qui atteint sa proie.

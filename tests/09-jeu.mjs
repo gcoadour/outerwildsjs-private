@@ -26,7 +26,9 @@ import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
          landingPadSensors, museumEntryways, smoothStep,
          ELEVATOR } from "../web/src/tower.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
-         sandColumns, sandFunnels } from "../web/src/sand.js";
+         sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
+import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
+         COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, activeZones, winnersByLayer, clipOf,
@@ -3339,6 +3341,80 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la distance est celle de la scene", guimauves[0].distance, ROAST_DISTANCE);
   check("a trois unites, on grille encore", roastBroken(3, guimauves[0]), false);
   check("a cinq, le grillage s'arrete", roastBroken(5, guimauves[0]), true);
+
+  // --- ce que le joueur porte en plus de son corps (docs/53) --------------
+  //
+  // La portee d'interaction : dix unites, le rayon de
+  // `FirstPersonManipulator`. Le portage exigeait d'etre a la portee du
+  // RECEPTEUR — deux ou trois unites, qui sont la taille de sa cible.
+  check("on vise a dix unites", INTERACT_RANGE, 10);
+
+  // Le bruit : proportionnel a la poussee, plus un COUP au lancement de sonde.
+  check("au repos, aucun bruit", playerNoise(0, 100), 0);
+  check("a pleine poussee, cinq", playerNoise(1, 100), NOISE.thrust);
+  check("a mi-poussee, la moitie", playerNoise(0.5, 100), NOISE.thrust / 2);
+  check("lancer une sonde fait cinq d'un coup", playerNoise(0, 100, 100), NOISE.launch);
+  check("qui retombe de moitie en un demi-seconde",
+        playerNoise(0, 100.5, 100), NOISE.launch / 2);
+  check("et a disparu au bout d'une seconde", playerNoise(0, 101, 100), 0);
+  check("les deux s'ajoutent", playerNoise(1, 100, 100), NOISE.thrust + NOISE.launch);
+
+  // L'ecrasement : cinq PAS de physique, pas cinq secondes.
+  check("cinq pas de grace", COMPRESSION_GRACE, 5);
+  const broyeur = new CompressionSensor();
+  for (let i = 0; i < 5; i++) broyeur.update(0.02, true);
+  check("cinq pas ne suffisent pas", broyeur.crushed, false);
+  broyeur.update(0.02, true);
+  check("le sixieme, si", broyeur.crushed, true);
+  const attache = new CompressionSensor();
+  for (let i = 0; i < 20; i++) attache.update(0.02, true, true);
+  check("attache a un point, on ne se fait pas broyer", attache.crushed, false);
+  const sorti = new CompressionSensor();
+  for (let i = 0; i < 5; i++) sorti.update(0.02, true);
+  sorti.update(0.02, false);
+  for (let i = 0; i < 5; i++) sorti.update(0.02, true);
+  check("et sortir remet le compte a zero", sorti.crushed, false);
+
+  // La surface qui ecrase : UNE dans tout le build, et c'est le sable MONTANT.
+  const colonnes = markCrushing(sandColumns({ placed: { SandLevelController: [
+    { name: "RisingSand", position: [0, 0, 0],
+      fields: { _initScale: 60, _finalScale: 290 } },
+    { name: "DrainingSand", position: [1000, 0, 0],
+      fields: { _initScale: 300, _finalScale: 66 } },
+  ] } }), { placed: { Surface: [
+    { name: "Collider", position: [0, 0, 0], fields: { _allowCompression: true },
+      volume: { shape: "sphere", radius: 30, center: [0, 0, 0] } },
+  ] } });
+  check("le sable qui monte ecrase", colonnes[0].crushes, true);
+  check("celui qui se vide, non", colonnes[1].crushes, false);
+  check("et le rayon vient du collider", colonnes[0].radius, 30);
+
+  // Le rayon suit l'echelle, en PROPORTION : le multiplier tel quel donnait
+  // 1 800 unites, et la sphere avalait la planete des la premiere image.
+  const faux2 = { name: "RisingSand", position: { x: 0, y: 0, z: 0 },
+    scaling: { x: 60, y: 60, z: 60, set(a, b, c) { this.x = a; this.y = b; this.z = c; } },
+    getAbsolutePosition() { return this.position; } };
+  const niveaux = new SandLevels([colonnes[0]]);
+  niveaux.attach([faux2]);
+  niveaux.update(0);
+  check("au depart, le sable n'avale pas a quarante unites",
+        niveaux.swallows([40, 0, 0]), null);
+  check("ni meme a trente", niveaux.swallows([30, 0, 0]), null);
+  check("mais bien a vingt", !!niveaux.swallows([20, 0, 0]), true);
+  niveaux.update(17 * 60);
+  check("a la dix-septieme minute, il avale a quarante",
+        !!niveaux.swallows([40, 0, 0]), true);
+  check("et son rayon a atteint 145", !!niveaux.swallows([144, 0, 0]), true);
+  check("mais pas au-dela", niveaux.swallows([146, 0, 0]), null);
+
+  // L'etat du joueur : quatre drapeaux, et la mort qui ne se defait pas seule.
+  const etat = new PlayerState();
+  check("au depart, il est dehors et vivant",
+        `${etat.insideShip},${etat.dead}`, "false,false");
+  etat.die();
+  check("mourir se retient", etat.dead, true);
+  etat.reset();
+  check("et la remise a zero le rend vivant", etat.dead, false);
 }
 
 report();

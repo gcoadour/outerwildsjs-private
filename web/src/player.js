@@ -427,3 +427,102 @@ export class Player {
     return this.grounded;
   }
 }
+
+// --- ce que le joueur porte en plus de son corps ---------------------------
+//
+// @lit PlayerState, PlayerNoiseMaker, FirstPersonManipulator
+// @lit PlayerCompressionSensor, SurfaceSensor
+// Quatre classes de docs/44 §7 restees sans lecteur, et trois d'entre elles
+// portent un NOMBRE que le portage avait remplace par une invention
+// (docs/53-joueur.md).
+
+/**
+ * La portee d'interaction : `FirstPersonManipulator.LateUpdate` lance un rayon
+ * de DIX unites depuis la camera, et observe l'`InteractReceiver` touche.
+ *
+ * Le portage exigeait d'etre a la portee du RECEPTEUR — deux ou trois unites,
+ * qui sont la taille de son volume. Ce sont deux choses differentes : le volume
+ * dit la taille de la cible, le rayon dit de combien loin on peut la viser.
+ */
+export const INTERACT_RANGE = 10;
+
+/** Les quatre etats que `PlayerState` tient, et rien d'autre. */
+export class PlayerState {
+  constructor() {
+    this.insideShip = false;
+    this.inShipProximity = false;
+    this.atFlightConsole = false;
+    this.dead = false;
+  }
+
+  /** `OnPlayerDeath` : la mort est le seul etat qui ne se defait pas seul. */
+  die() { this.dead = true; }
+  reset() {
+    this.insideShip = this.inShipProximity = this.atFlightConsole = false;
+    this.dead = false;
+  }
+}
+
+/** Volumes sonores du constructeur de `PlayerNoiseMaker`. */
+export const NOISE = { thrust: 5, launch: 5, launchFade: 1 };
+
+/**
+ * Le bruit que fait le joueur, et que les predateurs entendent.
+ *
+ * `PlayerNoiseMaker.Update`, en deux termes :
+ *
+ *     bruit = fractionDePoussee x 5
+ *           + (1 - clamp01((t - instantDeLancement) / 1)) x 5
+ *
+ * Le premier est continu et proportionnel : pousser doucement fait moins de
+ * bruit que pousser a fond. Le second est un COUP : lancer une sonde fait cinq
+ * d'un seul trait, qui retombe en une seconde.
+ *
+ * Le portage rendait un booleen — 1 en poussant, 0,7 sinon — et n'avait pas du
+ * tout le coup de la sonde. On pouvait donc lancer une sonde au nez d'un
+ * predateur sans qu'il l'entende.
+ */
+export function playerNoise(thrustFraction, t, lastLaunchTime = -100, cfg = NOISE) {
+  const pousse = Math.max(0, Math.min(1, thrustFraction)) * cfg.thrust;
+  const u = Math.max(0, Math.min(1, (t - lastLaunchTime) / (cfg.launchFade || 1)));
+  return pousse + (1 - u) * cfg.launch;
+}
+
+/** `_graceFrames` du constructeur de `PlayerCompressionSensor`. */
+export const COMPRESSION_GRACE = 5;
+
+/**
+ * La mort par ECRASEMENT, que le portage n'avait pas.
+ *
+ * `PlayerCompressionSensor.FixedUpdate` : tant qu'on touche une surface qui
+ * declare ecraser (`Surface.GetAllowCompression`) et qu'on n'est pas attache a
+ * un point, un compte court. Passe cinq pas de physique, on meurt — de la
+ * `DeathType` par defaut, et le build l'annonce en clair :
+ * « Death by compression :( ».
+ *
+ * Cinq PAS, pas cinq secondes : a un cinquantieme de seconde le pas, cela fait
+ * un dixieme de seconde. C'est immediat, et c'est voulu — ce n'est pas une
+ * usure, c'est un broyage.
+ */
+export class CompressionSensor {
+  constructor(graceFrames = COMPRESSION_GRACE, step = FIXED_STEP) {
+    this.graceFrames = graceFrames;
+    this.step = step;
+    this.elapsed = 0;
+    this.crushed = false;
+  }
+
+  /**
+   * @param dt
+   * @param compressing touche-t-on une surface qui ecrase
+   * @param attached    est-on attache a un point (un ascenseur, par exemple)
+   */
+  update(dt, compressing, attached = false) {
+    if (!compressing || attached) { this.elapsed = 0; return false; }
+    this.elapsed += dt;
+    if (this.elapsed > this.step * this.graceFrames) this.crushed = true;
+    return this.crushed;
+  }
+
+  reset() { this.elapsed = 0; this.crushed = false; }
+}
