@@ -3,7 +3,9 @@
 
 const SINGLETONS = ["PlayerResources", "JetpackThrusterModel", "ShipThrusterModel",
                     "ThrusterModel", "ShipDamageController", "PlayerCharacterController",
-                    "Autopilot", "ShipBody", "PlayerBody"];
+                    // `_loopDurationInMinutes` vaut 18 dans la scene, et le
+                    // portage avait ecrit 20 de memoire (docs/88-boucle.md).
+                    "Autopilot", "ShipBody", "PlayerBody", "TimeLoop"];
 const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "OWAudioSource", "Conversation", "AudioTransmitter", "SpawnPoint",
                 "QuantumMoon", "QuantumOrbit", "QuantumFogBoundary", "FogVolume",
@@ -40,6 +42,15 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // §4 les volumes et zones de jeu.
                 "InteractZone", "SuitBarrier", "SuitRemovalVolume", "HazardVolume",
                 "DarkZone", "InterferenceVolume", "ZeroGField", "ZeroGSector",
+                // `SunlessZone` eteint l'ambiance globale, et le portage
+                // prenait `DarkZone` pour elle : deux classes, deux evenements,
+                // deux usages. `EntrywayTrigger` est leur forme reelle — un
+                // SEUIL qu'on franchit dans un sens (docs/83-seuils.md).
+                "SunlessZone", "EntrywayTrigger",
+                // La sphere de l'observatoire qui remet la simulation a zero :
+                // armee au premier tour, elle n'attend que les codes de
+                // lancement (docs/91-remise-a-zero.md).
+                "ResetSimulationTrigger",
                 "MajorSector", "ProbePromptTrigger", "TelescopePromptTrigger",
                 "RadiationEmitter",
                 // §5 le son reactif : le jeu repond a ce qu'on FAIT.
@@ -110,7 +121,24 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "ThrusterParticleController",
                 // Le volume compose et ses declencheurs enfants : une entree,
                 // une sortie, quel que soit le nombre d'enfants traverses.
-                "CompoundTriggerVolume", "ChildTriggerVolume", "SandstormVolume"];
+                "CompoundTriggerVolume", "ChildTriggerVolume", "SandstormVolume",
+                // Ce qui bouge quand on ne le regarde PAS (docs/71-quantique.md).
+                // La statue et le parent des objets planaires etaient dans la
+                // scene depuis toujours ; aucun des deux n'etait extrait, donc
+                // le recensement ne les comptait ni lus ni non lus — ils
+                // n'etaient simplement pas la.
+                "QuantumStatue", "MakeChildrenPlanarQuantum",
+                // La sonde ancienne : UNE instance, et son `FixedUpdate` tient
+                // en une ligne — cinquante d'acceleration locale vers l'avant,
+                // pour toujours (docs/75-chaleur.md).
+                "AncientProbeController",
+                // La zone de proximite du vaisseau : l'affichage des avaries
+                // ne s'allume QUE dedans (docs/76-proximite.md).
+                "ShipProximityVolume",
+                // Le vaisseau miniature de l'observatoire : sa piste, son
+                // crash, et l'enfant qui compte les deux (docs/78-modele.md).
+                "ModelShipLandingSpot", "ModelShipCrashBehavior",
+                "RocketKidConvoController"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -142,13 +170,19 @@ const PLACED_PATTERNS = [
  */
 const WANT_VOLUME = new RegExp([
   "forcefield|fluid|ocean|oxygen|heatsource|zone|volume",
-  "|^(ZeroGField|ZeroGSector|MajorSector|SuitBarrier|ProbePromptTrigger",
+  // `PlanetoidSector` manquait, et c'est ce trou qui a fait inventer au
+  // portage un « horizon x 1,5 » : la sphere de declenchement du secteur
+  // etait la, mesuree dans la scene, et l'extraction ne la sortait pas
+  // (docs/82-secteur-majeur.md).
+  "|^(PlanetoidSector|ZeroGField|ZeroGSector|MajorSector|SuitBarrier",
+  "|ProbePromptTrigger",
   "|TelescopePromptTrigger|AncientTeleporter|AncientTeleportReceiver",
   "|RadiationEmitter|DerelictWarp|GearPickup|LandingPadSensor",
-  "|PlayerAttachPoint|LODCameraSnapshot",
+  "|PlayerAttachPoint|LODCameraSnapshot|SunlessZone|EntrywayTrigger",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
-  "|GazeSwitch|MuseumEntryway|Surface|AudioShell)$",
+  "|GazeSwitch|MuseumEntryway|Surface|AudioShell|ResetSimulationTrigger",
+  "|LaunchTerminal|LaunchElevatorController)$",
 ].join(""), "i");
 
 /**
@@ -158,7 +192,12 @@ const WANT_VOLUME = new RegExp([
  * quelle direction on regarde au premier instant. La position seule etait
  * extraite, et le portage tournait donc la tete au hasard (docs/38-depart.md).
  */
-const WANT_ROTATION = /spawnpoint/i;
+// `ShipBody` s'y ajoute : les capteurs de pad sont ses enfants, et ramener
+// leur position dans SON repere demande sa pose de repos (docs/89-pose.md).
+const WANT_ROTATION = /^(spawnpoint|shipbody)$/i;
+
+/** Composants dont le PARENT designe ce qu'ils commandent. */
+const WANT_PARENTS = /^EntrywayTrigger$/i;
 
 /**
  * La position MONDE du GameObject qu'un PPtr de composant designe.
@@ -210,6 +249,17 @@ export function extractGameplay(ctx) {
     // plutot que « le corps, c'est moi ».
     if (body) entry.body = body;
 
+    // L'ORIENTATION se pose AVANT le tri : un singleton en a besoin aussi, et
+    // le `continue` qui suit la lui refusait. `ShipBody` en est le cas : ses
+    // capteurs de pad sont ses enfants, et ramener leurs positions dans son
+    // repere demande sa pose de repos. Le champ manquait sans que rien ne le
+    // dise — l'offset sortait en coordonnees MONDE, et les jambes du vaisseau
+    // se retrouvaient devant lui (docs/89-pose.md).
+    if (WANT_ROTATION.test(cls)) {
+      const [, rot] = ctx.world(gid);
+      entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+    }
+
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;
     if (!PLACED.includes(cls) && !PLACED_PATTERNS.some((p) => p.test(cls))) continue;
     if (!PLACED.includes(cls)) discovered[cls] = (discovered[cls] || 0) + 1;
@@ -219,10 +269,19 @@ export function extractGameplay(ctx) {
     if (WANT_VOLUME.test(cls)) {
       const vol = ctx.volumeOf(gid);
       if (vol) entry.volume = vol;
+      if (!entry.rotation) {
+        const [, rot] = ctx.world(gid);
+        entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+      }
     }
-    if (WANT_VOLUME.test(cls) || WANT_ROTATION.test(cls)) {
-      const [, rot] = ctx.world(gid);
-      entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+
+    // A QUI ce seuil appartient. `OWEffectVolume.Awake` prend ses
+    // `EntrywayTrigger` par `GetComponentsInChildren` : le lien est dans la
+    // HIERARCHIE, pas dans un champ, et le nom du corps porteur ne suffit pas
+    // — Timber Hearth porte les deux grottes, le musee et six autres seuils.
+    if (WANT_PARENTS.test(cls)) {
+      const chain = ctx.ancestors(gid).filter(Boolean);
+      if (chain.length) entry.parents = chain;
     }
 
     // Reference vers un corps : on remplace le pointeur par son nom.
@@ -284,6 +343,21 @@ export function extractGameplay(ctx) {
                               ["_upThruster", "up"], ["_downThruster", "down"]]) {
         entry.nozzles[dir] = positionDuComposant(ctx, brut[k]);
       }
+    }
+    // Ce qui bouge quand on ne le regarde pas : ces deux classes agissent sur
+    // leur DESCENDANCE, pas sur leurs champs — et `MakeChildrenPlanarQuantum`
+    // n'a aucun champ du tout (docs/71-quantique.md).
+    if (cls === "MakeChildrenPlanarQuantum" || cls === "QuantumStatue") {
+      entry.children = ctx.childrenOf(gid);
+    }
+    // La sonde ancienne designe son corps par pointeur, et c'est SUR ce corps
+    // que l'acceleration s'applique — pas sur le controleur.
+    if (cls === "AncientProbeController") {
+      const brut = ctx.scriptFields(obj) || {};
+      const info = ctx.ownerInfo(brut._probeBody);
+      if (info) entry.probeBody = info;
+      const [, rot] = ctx.world(gid);
+      entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
     }
     (placed[cls] ||= []).push(entry);
   }

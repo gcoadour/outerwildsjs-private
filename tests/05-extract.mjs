@@ -10,17 +10,25 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
-import { signalVolumes } from "../web/src/volumes.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
-         zeroGFields, gameSectors, probePrompts,
+         zeroGFields, probePrompts,
          radiationEmitters } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.js";
+import { majorSectors, activeMajorSector } from "../web/src/sectors.js";
+import { directionalFields } from "../web/src/gravity.js";
+import { sunlessZones, entrywayTriggers } from "../web/src/entryways.js";
+import { ambienceZones } from "../web/src/ambience.js";
 import { billboards, talkingFaces, thrusterNozzles, particleBursts,
          meteorLaunchers, teleporters, warps } from "../web/src/decor.js";
 import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
 import { gearPickups, suitVolumes, interactZones, attachPoints, lockOnTargets,
          ZeroGTraining } from "../web/src/gear.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
+import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
+import { heatSources } from "../web/src/consoles.js";
+import { shipProximity } from "../web/src/helmet.js";
+import { modelLandingSpots, modelShipBody,
+         rocketKids } from "../web/src/modelship.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
@@ -28,6 +36,11 @@ import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
 import { extractSky } from "../web/src/pipeline/extract/sky.js";
 import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
+import { extractPrefabs, mergePrefabs } from "../web/src/pipeline/extract/prefabs.js";
+import { extractInput } from "../web/src/pipeline/extract/input.js";
+import { clipLoops, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
+import { STICK_LIGHTS, THERM_HEAT_SPAN } from "../web/src/held.js";
+import { Commandes, COMMANDES } from "../web/src/input.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -77,6 +90,82 @@ const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
 check("objets lisibles", n("ReadableObject"), 34);
 check("points d'apparition", n("SpawnPoint"), 16);
+
+// Ce qui bouge quand on ne le regarde pas (docs/71-quantique.md). Ni la statue
+// ni le parent des objets planaires n'etaient extraits : ils etaient dans la
+// scene depuis toujours, et le recensement ne les comptait meme pas.
+{
+  const planaires = planarQuantumObjects(gp);
+  check("cinq objets planaires quantiques", planaires.length, 5);
+  check("tous sur la lune quantique",
+        planaires.every((o) => o.body === "QuantumMoon_Body"), true);
+  check("trois pins", planaires.filter((o) => o.name === "Pine_Thick").length, 3);
+  check("une cabane", planaires.filter((o) => o.name === "QuantumCabin").length, 1);
+  check("un panneau", planaires.filter((o) => o.name === "Sign01").length, 1);
+  // Ils sont POSES sur la lune : leur hauteur locale est celle de sa surface.
+  check("et tous a la surface, entre 18 et 22 unites du centre",
+        planaires.every((o) => o.local[1] > 18 && o.local[1] < 22), true);
+  const statues = quantumStatues(gp);
+  check("une statue quantique", statues.length, 1);
+  check("avec un morceau", statues[0].parts.length, 1);
+  check("qui est la tete ancienne", statues[0].parts[0], "AncientHeadStatue");
+  check("cent unites de verrou", statues[0].maxLockRange, 100);
+  // AUCUNE des deux n'est sensible a la lumiere : la loi de la lampe est
+  // portee, et son entree est vide. Le build le dit, pas le portage.
+  check("et elle n'est pas sensible a la lumiere", statues[0].lightSensitive, false);
+}
+
+// La chaleur des feux de camp (docs/75-chaleur.md). `heatSources` cherchait des
+// classes dont le NOM contient « heat » : il n'y en a AUCUNE dans ce build, la
+// liste etait vide, et la guimauve ne chauffait jamais.
+{
+  const emet = radiationEmitters(gp);
+  check("neuf emetteurs de rayonnement", emet.length, 9);
+  check("dont huit feux de camp", emet.filter((e) => e.type === 1).length, 8);
+  check("et l'etoile", emet.filter((e) => e.type === 0).length, 1);
+  check("le motif ne trouve aucune classe thermique",
+        heatSources(gp).length, 0);
+  const feux = heatSources(gp, emet);
+  check("les huit feux sont la chaleur du jeu", feux.length, 8);
+  // Tous portent la MEME courbe : cent jusqu'a dix unites, zero a quarante-cinq.
+  check("tous a magnitude cent", feux.every((f) => f.heat === 100), true);
+  check("et tous a la meme courbe",
+        new Set(emet.filter((e) => e.type === 1)
+          .map((e) => JSON.stringify(e.curve))).size, 1);
+  // La sonde ancienne : une, et elle n'etait pas extraite.
+  const anc = (gp.placed.AncientProbeController || []);
+  check("une sonde ancienne", anc.length, 1);
+  check("posee sur son propre corps", anc[0].body, "AncientProbe_Body");
+  check("avec son orientation", Array.isArray(anc[0].rotation), true);
+  // Les quatre invites de sonde, et leur regard.
+  const inv = probePrompts(gp);
+  check("cinq invites en tout", inv.length, 5);
+  check("quatre pour la sonde", inv.filter((i) => i.kind === "probe").length, 4);
+  check("toutes a quarante-cinq degres",
+        inv.filter((i) => i.kind === "probe").every((i) => i.minAngle === 45), true);
+  check("toutes sur la premiere jumelle",
+        inv.filter((i) => i.kind === "probe").every((i) => i.body === "Twin01_Body"),
+        true);
+  // La zone de proximite du vaisseau : treize unites, et les voyants d'avarie
+  // ne parlent que dedans (docs/76-proximite.md).
+  const zp = shipProximity(gp);
+  check("une zone de proximite du vaisseau", zp.length, 1);
+  check("de treize unites", zp[0].volume.radius, 13);
+  check("posee sur le vaisseau", zp[0].body, "Ship_Body");
+  // Le vaisseau miniature et l'enfant qui compte (docs/78-modele.md).
+  check("trois pistes pour le modele reduit", modelLandingSpots(gp).length, 3);
+  check("toutes deux a Timber Hearth",
+        modelLandingSpots(gp).every((p) => p.body === "TimberHearth_Body"), true);
+  const mod = modelShipBody(gp);
+  check("un vaisseau miniature", mod !== null, true);
+  check("avec son son de crash", mod.crashSound, "ModelShipCrash_Explosion");
+  const kid = rocketKids(gp);
+  check("un enfant aux fusees", kid.length, 1);
+  // Les TROIS arbres sont resolus : c'est ce qui rend la selection possible.
+  check("et ses trois arbres, tous resolus",
+        Object.values(kid[0].trees).every((t) => t !== null), true);
+  check("et tous differents", new Set(Object.values(kid[0].trees)).size, 3);
+}
 
 // Le point d'apparition ne dit pas seulement OU l'on nait, mais dans quelle
 // direction on regarde : son axe Z. Seule la position etait extraite, et le
@@ -359,6 +448,34 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   // seul `.wav`, il ne s'executait jamais.
   check("le worker a de quoi reencoder", (parExt.wav ?? 0) > 0, true);
 
+  // --- les zones d'ambiance et leurs seuils (docs/84-ambiance.md) --------
+  //
+  // Six des dix-sept n'ont AUCUN collider. L'extraction leur en fabriquait un
+  // en prenant la premiere boite d'enfant trouvee : la grotte aux quatre
+  // portes se reduisait a une porte de onze metres.
+  check("volumes d'ambiance", audio.volumes.length, 17);
+  check("dont six sans forme propre",
+        audio.volumes.filter((v) => !v.volume).map((v) => v.name).sort().join(","),
+        "CaveVolume,CaveVolume01,CaveVolume02,Hatch,MuseumVolume,MusicVolume");
+  check("tous portent leur corps",
+        audio.volumes.every((v) => !!v.body), true);
+  // Deux `MusicVolume`, sur deux corps : l'un a une sphere, l'autre des portes.
+  const musiques = audio.volumes.filter((v) => v.name === "MusicVolume");
+  check("deux zones nommees MusicVolume", musiques.length, 2);
+  check("et elles ne sont pas sur le meme corps",
+        new Set(musiques.map((v) => v.body)).size, 2);
+  const jointes = ambienceZones(audio, entrywayTriggers(gp));
+  check("zones d'ambiance retenues", jointes.length, 17);
+  check("et les six sans forme ont toutes des portes",
+        jointes.filter((z) => !z.volume).every((z) => z.entryways.length > 0), true);
+  check("quatorze seuils servent une zone sonore",
+        jointes.reduce((a, z) => a + z.entryways.length, 0), 14);
+  check("la grotte aux quatre portes les a toutes les quatre",
+        jointes.find((z) => z.name === "CaveVolume01").entryways.length, 4);
+  check("et la musique de la cite enterree en a cinq",
+        jointes.find((z) => z.name === "MusicVolume" && !z.volume)
+          .entryways.length, 5);
+
   // Les sons d'evenement : qui les porte, et avec quelle loi.
   const ev = eventAudio(audio);
   check("emetteurs de son d'evenement", ev.count, 22);
@@ -500,13 +617,115 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   const zg = zeroGFields(gp);
   check("champs d'apesanteur", zg.length, 4);
   check("dont un sans forme, qui vit de ses declencheurs",
-        zg.filter((f) => !f.volume && f.entryways).length, 1);
-  const secteurs = gameSectors(gp);
-  check("secteurs de jeu", secteurs.length, 3);
-  check("tous limitent la poussee a vingt",
-        secteurs.every((x) => x.thrustLimit === 20), true);
-  check("aucun ne limite la lampe du joueur",
-        secteurs.every((x) => x.flashlightLimit === null), true);
+        zg.filter((f) => !f.volume && f.entryways.length).length, 1);
+  // La chambre du village : une seule porte, et le portage l'ecartait
+  // (docs/85-chambre.md).
+  const chambre = zg.find((f) => !f.volume);
+  check("la chambre en apesanteur a une porte", chambre.entryways.length, 1);
+  check("et elle est sur Timber Hearth", chambre.body, "TimberHearth_Body");
+  // Le seul champ directionnel commande par des seuils : la station meteo.
+  const dirs = directionalFields(gp);
+  const parSeuils = dirs.filter((f) => f.byEntryways);
+  check("un seul champ directionnel par seuils",
+        parSeuils.map((f) => f.name).join(","), "Field_WeatherStation");
+  check("et il n'a pas de forme a lui", parSeuils[0].volume, undefined);
+  // Les secteurs MAJEURS : sept PlanetoidSector, deux ZeroGSector, un
+  // MajorSector nu (docs/82-secteur-majeur.md).
+  const secteurs = majorSectors(gp);
+  check("secteurs majeurs", secteurs.length, 10);
+  check("sept portent la minicarte, trois non",
+        secteurs.filter((x) => x.useMinimap).length, 7);
+  // La poussee : vingt partout SAUF deux — la premiere jumelle en autorise
+  // dix fois plus, Giant's Deep n'en limite aucune.
+  check("la poussee est bridee a vingt dans huit secteurs",
+        secteurs.filter((x) => x.thrustLimit === 20).length, 8);
+  check("la premiere jumelle autorise deux cents",
+        secteurs.find((x) => x.name === "Sector_HT_1").thrustLimit, 200);
+  check("Giant's Deep n'en limite aucune",
+        secteurs.find((x) => x.name === "Sector_GD").thrustLimit, null);
+  // LA LAMPE. Un seul secteur la bride, et le portage lui passait
+  // `_ambientLightRange` : il bridait la lampe partout, avec le mauvais
+  // nombre, et laissait passer le seul endroit ou le build la bride vraiment.
+  check("un seul secteur bride la lampe du joueur",
+        secteurs.filter((x) => x.flashlightLimit !== null).map((x) => x.name)
+          .join(","), "Sector_HT_2");
+  check("... et il la bride a vingt",
+        secteurs.find((x) => x.name === "Sector_HT_2").flashlightLimit, 20);
+  check("tous portent un declencheur spherique",
+        secteurs.every((x) => x.volume && x.volume.shape === "sphere" &&
+                              x.volume.radius > 0), true);
+  // La minicarte suit la CLASSE : les trois qui ne sont pas des
+  // PlanetoidSector ne la portent pas, et ce sont les trois endroits ou l'on
+  // ne sait plus ou l'on est.
+  check("secteurs sans minicarte",
+        secteurs.filter((x) => !x.useMinimap).map((x) => x.name).sort().join(","),
+        "Sector_DB,Sector_Derelict,Sector_QuantumMoon");
+  // Le declencheur n'est PAS l'horizon : le portage prenait `horizon x 1,5`.
+  const th = secteurs.find((x) => x.name === "Sector_TH");
+  check("Timber Hearth : 200 d'horizon", th.horizon, 200);
+  check("... et 1000 de declencheur", th.volume.radius, 1000);
+  check("aucun declencheur n'egale son horizon",
+        secteurs.some((x) => x.horizon && x.volume.radius === x.horizon), false);
+  check("l'epave bride les phares a cent",
+        secteurs.find((x) => x.name === "Sector_Derelict").shiplightLimit, 100);
+  // `CalculateActiveMajorSector` sur la scene au repos. Le secteur de la lune
+  // est EMBOITE dans celui de Timber Hearth (son centre est a 450 unites du
+  // sien, pour un declencheur de 1000) : c'est le cas ou les deux regles
+  // possibles se departagent, et celle du build retient le plus proche.
+  const lune = secteurs.find((x) => x.name === "Sector_Moon");
+  check("au centre du secteur de la lune, c'est lui qui est actif",
+        activeMajorSector(secteurs, lune.position).name, "Sector_Moon");
+  check("et la minicarte s'y allume", activeMajorSector(secteurs, lune.position)
+        .useMinimap, true);
+  const lq = secteurs.find((x) => x.name === "Sector_QuantumMoon");
+  check("sur la lune quantique, la minicarte s'eteint",
+        activeMajorSector(secteurs, lq.position).useMinimap, false);
+  check("loin de tout, aucun secteur majeur",
+        activeMajorSector(secteurs, [0, 100000, 0]), null);
+  // La TEINTE, lue pour la premiere fois : `_ambientLight` est une
+  // enumeration. Quatre secteurs en bleu de nuit, l'ocean en vert, cinq noirs.
+  check("secteurs en bleu de nuit",
+        secteurs.filter((x) => x.ambient === 1).length, 4);
+  check("un seul secteur vert",
+        secteurs.filter((x) => x.ambient === 2).map((x) => x.name).join(","),
+        "Sector_GD");
+  check("et cinq qui n'eclairent rien",
+        secteurs.filter((x) => !x.ambient).length, 5);
+  // Dark Bramble a la plus grande portee d'ambiance du systeme ET la couleur
+  // noire : lire `_ambientLightRange` seul ne pouvait pas le dire.
+  check("Dark Bramble : 1200 de portee pour du noir",
+        [secteurs.find((x) => x.name === "Sector_DB").lightRange,
+         secteurs.find((x) => x.name === "Sector_DB").ambient].join(","), "1200,0");
+
+  // --- les seuils et les zones sans soleil (docs/83-seuils.md) ------------
+  const seuils = entrywayTriggers(gp);
+  check("seuils poses dans la scene", seuils.length, 18);
+  check("tous ont une boite", seuils.every((t) => t.volume &&
+        t.volume.shape === "box"), true);
+  check("et une direction de sortie unitaire",
+        seuils.every((t) => Math.abs(Math.hypot(...t.exit) - 1) < 1e-6), true);
+  const sz = sunlessZones(gp);
+  check("zones sans soleil", sz.length, 5);
+  // Le portage prenait `DarkZone` pour elles : il y en a UNE, sur un
+  // declencheur d'invite de lampe.
+  check("zones sombres, qui sont autre chose",
+        (gp.placed.DarkZone || []).length, 1);
+  check("les grottes n'ont pas de forme, elles ont des portes",
+        sz.filter((z) => !z.volume).length, 4);
+  check("la membrane corrosive, elle, est une sphere",
+        sz.find((z) => z.name === "CorrosiveMembrane").volume.radius, 205);
+  check("portes des zones sans soleil",
+        sz.reduce((a, z) => a + z.entryways.length, 0), 8);
+  check("la grande grotte de la jumelle en a quatre",
+        sz.find((z) => z.name === "CaveVolume01").entryways.map((t) => t.name)
+          .sort().join(","), "CityEntryway,PodEntryway,QuantumEntryway,TowerEntryway");
+  // Les six portes des deux grottes de la jumelle sortent vers +Y : elles sont
+  // au plafond, et sortir c'est monter. Les deux autres zones n'ont pas cette
+  // forme — le toit du musee sort en +X, la grotte de Timber Hearth en -Z.
+  check("directions de sortie des huit portes",
+        sz.flatMap((z) => z.entryways).map((t) => t.exit.join(",")).sort()
+          .join(" | "),
+        "0,0,-1 | 0,1,0 | 0,1,0 | 0,1,0 | 0,1,0 | 0,1,0 | 0,1,0 | 1,0,0");
 
   check("zones d'interaction", interactZones(gp).length, 7);
   check("trois fenetres de vue distinctes",
@@ -921,6 +1140,24 @@ check("et un manipulateur", (gp.placed.FirstPersonManipulator || []).length, 1);
 
 // Ce qui pilote la lumiere GLOBALE (docs/54-lumiere.md).
 check("un gestionnaire d'ambiance", (gp.placed.AmbientLightManager || []).length, 1);
+// La boucle : dix-huit minutes, lues sur `SolarSystemRoot` et non devinees
+// (docs/88-boucle.md). Le portage avait ecrit vingt.
+check("la duree de boucle vient du build",
+      gp.singletons.TimeLoop.fields._loopDurationInMinutes, 18);
+// La sphere de l'observatoire qui remet la simulation a zero : une seule, et
+// elle a une forme (docs/91-remise-a-zero.md).
+const raz = (gp.placed.ResetSimulationTrigger || []);
+check("une sphere de remise a zero", raz.length, 1);
+check("et elle mesure 5,196", raz[0].volume.radius, 5.196);
+check("elle est posee sur Timber Hearth", raz[0].body, "TimberHearth_Body");
+// La tour de lancement : trois objets dans `LaunchZone` (docs/92-tour.md).
+check("une borne de lancement", (gp.placed.LaunchTerminal || []).length, 1);
+check("et elle a sa forme",
+      (gp.placed.LaunchTerminal || [])[0].volume.radius, 0.42);
+check("un declencheur d'en haut",
+      (gp.placed.LaunchElevatorController || []).length, 1);
+check("de dix unites",
+      (gp.placed.LaunchElevatorController || [])[0].volume.radius, 10);
 check("deux phares exterieurs", (gp.placed.ExternalLightController || []).length, 2);
 check("une lumiere a fondu", (gp.placed.FadeLight || []).length, 1);
 check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length, 1);
@@ -928,9 +1165,12 @@ check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length
 const coques = (gp.placed.AudioShell || []);
 check("deux coquilles sonores", coques.length, 2);
 check("et toutes deux ont une forme", coques.every((c) => !!c.volume), true);
-const signaux = signalVolumes(gp);
-check("des zones de signal sont posees", signaux.length > 0, true);
-check("dont des zones sombres", signaux.some((z) => z.kind === "dark"), true);
+// Le brouillage est INERTE dans cette alpha : un volume pose, un detecteur
+// sans aucune instance, et un `GetInterference` que personne n'appelle. On
+// garde la mesure — c'est elle qui dit qu'il n'y a rien a brancher.
+check("un seul volume brouilleur", (gp.placed.InterferenceVolume || []).length, 1);
+check("et aucun detecteur pour le lire",
+      (gp.placed.InterferenceDetector || []).length, 0);
 
 // La fin de la queue (docs/55-attaches.md).
 check("quatorze objets s'alignent sur un corps designe",
@@ -966,13 +1206,178 @@ check("et les six sont a des places distinctes",
 check("un volume compose", (gp.placed.CompoundTriggerVolume || []).length, 1);
 check("et quatre declencheurs enfants", (gp.placed.ChildTriggerVolume || []).length, 4);
 check("une tempete de sable", (gp.placed.SandstormVolume || []).length, 1);
-// Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build :
-// c'est le meme cas que `_probePrefab`. L'invariant garde ce vide.
+// Les trois prefabs d'eclaboussure ne sont resolus par RIEN dans le build.
+//
+// Cette ligne disait « c'est le meme cas que `_probePrefab` », et c'etait faux :
+// `_probePrefab` vise `sharedassets1.assets:2295` et s'y resout parfaitement
+// (docs/60-sonde.md). Deux champs vides ne sont pas le meme cas parce qu'ils
+// sont vides ; celui-ci l'est, et le controle ci-dessous le mesure — l'autre ne
+// l'etait pas, et personne ne l'avait mesure. L'invariant garde ce vide-CI.
 const remous = (gp.placed.WaterEffectVolume || []);
 check("un volume d'eclaboussure", remous.length, 1);
 check("et aucun de ses trois prefabs n'est resolu",
       ["_largeSplashPrefab", "_medSplashPrefab", "_smallSplashPrefab"]
         .filter((k) => remous[0].fields[k]).length, 0);
+
+// A10 : les prefabriques. Le recensement ne lisait que `level0`, et l'alpha
+// range dans `sharedassets1.assets` et `resources.assets` tout ce qu'elle
+// instancie en cours de partie — la sonde entiere, et neuf effets a duree de
+// vie. C'est la moitie du jeu que le denominateur ignorait (docs/60-sonde.md).
+console.time("prefabriques");
+const prefabs = mergePrefabs(["sharedassets1.assets", "resources.assets"]
+  .map((f) => extractPrefabs(new ExtractContext(env, u, f, engineTypes))));
+console.timeEnd("prefabriques");
+check("le prefabrique de sonde est la", !!prefabs.probe, true);
+// Neuf et non dix : `ProbeMesh` ne porte QUE de la geometrie, et
+// l'extracteur ne retient un noeud que s'il a quelque chose a dire.
+check("et il a neuf noeuds qui portent quelque chose",
+      Object.keys(prefabs.probe.nodes).length, 9);
+const noeud = (n) => prefabs.probe.nodes[n] || {};
+// La lanterne : une lumiere PONCTUELLE de portee 50, eteinte. Ces deux
+// nombres sont tout le systeme — `ProbeLantern.Awake` lit `light.range` pour
+// s'en faire un maximum, puis remonte de zero en deux secondes.
+check("la lanterne est ponctuelle", noeud("Lantern").light.type, 2);
+check("sa portee est de cinquante", noeud("Lantern").light.range, 50);
+check("et elle part eteinte", noeud("Lantern").light.enabled, false);
+// Les deux cameras, a quatre-vingt-dix degres, et leurs projecteurs.
+check("la camera avant voit a quatre-vingt-dix", noeud("ForwardCamera").camera.fov, 90);
+check("la camera arriere aussi", noeud("RearCamera").camera.fov, 90);
+check("les deux partent eteintes",
+      [noeud("ForwardCamera").camera.enabled, noeud("RearCamera").camera.enabled]
+        .filter(Boolean).length, 0);
+check("le projecteur avant porte a six cents", noeud("ForwardCamera").light.range, 600);
+check("et l'arriere brille a un demi", noeud("RearCamera").light.intensity, 0.5);
+// Les trois spheres : le collider, les detecteurs, le volume de scan.
+check("le collider de la sonde fait 0,45", noeud("Collider").volume.radius, 0.45);
+check("ses detecteurs 0,75", noeud("Detectors").volume.radius, 0.75);
+check("et son volume de scan trente", noeud("ScanVolume").volume.radius, 30);
+// Le marqueur de carte : le QUATORZIEME du build, et il n'est pas dans level0.
+check("la sonde porte un marqueur de carte",
+      prefabs.probe.nodes.SurveyorProbe.scripts.MapMarker._label, "Probe");
+// Les dix effets a duree de vie, chacun la sienne.
+check("dix effets se detruisent seuls",
+      Object.keys(prefabs.selfDestruct).length, 10);
+check("l'explosion tient une seconde", prefabs.selfDestruct.Explosion_Fiery_Med, 1);
+check("l'extinction des etoiles lointaines huit",
+      prefabs.selfDestruct.DistantStarsExplosion, 8);
+check("et une eclaboussure cinq", prefabs.selfDestruct.Splash_Large, 5);
+// Le meteore : son explosion coute CINQUANTE, la ou le constructeur en pose
+// vingt. L'instance dement sa propre valeur par defaut.
+check("le meteore explose au contact",
+      prefabs.touchExplosive.MoltenMeteor.damage, 50);
+check("et il ignore ses collisions une demi-seconde",
+      prefabs.ignoreInitialCollisions.MoltenMeteor, 0.5);
+check("la supernova lointaine disparait de la carte",
+      prefabs.hideInMapView.includes("DistantSupernova"), true);
+
+// A11 : les COMMANDES. Elles sont dans l'`InputManager` de `mainData`, un
+// reglage de projet qu'aucun composant ne porte — et dont `unity41-types.json`
+// n'avait pas la structure. Les touches du portage etaient donc les siennes
+// (docs/61-commandes.md).
+//
+// Le controle qui compte est le DERNIER : la table de repli de `web/src/input.js`
+// doit dire exactement ce que le build dit. Sans lui, les deux derivent en
+// silence et la page sans build ne se joue plus comme la page avec.
+const inputCtx = new ExtractContext(env, u, "mainData", engineTypes);
+const inp = extractInput(inputCtx);
+check("soixante-six axes", inp.axisCount, 66);
+check("regroupes en vingt-deux canaux", Object.keys(inp.channels).length, 22);
+check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
+// Zero, et ce n'est pas un oubli : chaque corps porte son champ.
+check("la gravite de Unity est nulle", (inp.gravity || []).join(","), "0,0,0");
+check("sept iterations de solveur", inp.solverIterations, 7);
+check("dix-huit balises", inp.tags.length, 18);
+check("et le collider que l'ancrage epargne en est une",
+      inp.tags.includes("ProbeDetector"), true);
+check("le calque que le scan de sonde prend",
+      Object.values(inp.layers).includes("BasicEffectVolume"), true);
+// Les trois boutons de souris, que le portage n'avait pas lus.
+check("la sonde est le clic droit",
+      inp.channels.Probe.Key.pos.join(","), "mouse 1");
+check("la lunette le clic du milieu",
+      inp.channels.Telescope.Key.pos.join(","), "mouse 2");
+check("viser un referentiel, le clic gauche",
+      inp.channels["Lock On"].Key.pos.join(","), "mouse 0");
+// Le saut et la montee sont DEUX canaux, sur deux touches.
+check("le saut est l'espace", inp.channels.Jump.Key.pos.join(","), "space");
+check("monter est la majuscule",
+      inp.channels["Move Up"].Key.pos.join(","), "left shift,right shift");
+check("descendre est le controle",
+      inp.channels["Move Down"].Key.pos.join(","), "left ctrl,right ctrl");
+// La manette : les numeros d'Unity, ceux que `gamepad.js` traduit.
+check("la sonde est au bouton 5 de la manette",
+      inp.channels.Probe.PC.pos.join(","), "joystick button 5");
+check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
+
+// L'invariant central : la table de repli DIT ce que le build dit.
+{
+  const vivant = new Commandes(inp);
+  const repli = new Commandes(null);
+  const ecarts = [];
+  for (const nom of Object.keys(COMMANDES)) {
+    const a = vivant.get(nom), b = repli.get(nom);
+    const cle = (c) => `${c.pos.codes.join("|")}/${c.pos.mouse.join("|")}`
+      + `/${c.neg.codes.join("|")}/${JSON.stringify(c.pad)}`;
+    if (cle(a) !== cle(b)) ecarts.push(`${nom}: ${cle(a)} != ${cle(b)}`);
+  }
+  check("la table de repli est celle du build", ecarts.join(" ; "), "");
+}
+
+// A12 : ce qui BOUCLE et ce qui ne boucle pas. Le portage jouait tout en
+// boucle ; le build ne le fait pas (docs/63-boucles.md).
+{
+  const legacy = [], mecanim = [], sansBoucle = [];
+  for (const o of env.objects({ type: "AnimationClip" })) {
+    const v = ctx.readEngine(o);
+    if (!v) continue;
+    (v.m_AnimationType === 2 ? mecanim : legacy).push(v);
+    // Les dix-neuf composants `Animation` du build sont en `WrapMode.Default` :
+    // un clip en `Default` retombe donc sur `Once`.
+    if (!clipLoops(v, 0)) sansBoucle.push(v.m_Name);
+  }
+  check("seize clips d'animation", legacy.length + mecanim.length, 16);
+  check("sept legacy", legacy.length, 7);
+  check("neuf Mecanim", mecanim.length, 9);
+  check("quatre ne bouclent pas", sansBoucle.length, 4);
+  check("et ce sont ceux du baton a guimauve",
+        [...sansBoucle].sort().join(","), "PullOut,PutBack,Therm,idle");
+  // Les neuf Mecanim bouclent : ce sont des inactivites, et leur entete de
+  // muscle porte `m_LoopBlend`.
+  check("les neuf Mecanim bouclent",
+        mecanim.filter((v) => clipLoops(v, 0)).length, 9);
+}
+
+// A13 : ce qu'on tient dans la main. Les deux objets pendent sous
+// `PlayerCamera`, et leurs deux lumieres ne passent pas par le glTF : elles
+// sont ecrites dans `held.js`, et cet invariant les compare au build
+// (docs/64-mains.md).
+{
+  const racines = new Set(HELD_ROOTS);
+  const trouvees = [];
+  for (const [gid, go] of ctx.gameObjects) {
+    if (racines.has(go.m_Name)) trouvees.push(go.m_Name);
+  }
+  check("les deux objets en main sont dans la scene",
+        trouvees.sort().join(","), "MarshmallowStick,TelescopeGUI");
+  const lampes = new Map();
+  for (const [gid, go] of ctx.gameObjects) {
+    if (!/^(MallowLight|ThermLight)$/.test(go.m_Name)) continue;
+    for (const o of ctx.componentsOf(gid, ["Light"])) {
+      const v = ctx.readEngine(o);
+      if (v) lampes.set(go.m_Name, v);
+    }
+  }
+  check("les deux lumieres du baton", lampes.size, 2);
+  for (const d of STICK_LIGHTS) {
+    const v = lampes.get(d.name);
+    check(`${d.name} est ponctuelle`, v.m_Type, 2);
+    check(`${d.name} part eteinte`, !!v.m_Enabled, false);
+    check(`portee de ${d.name}`, Number(v.m_Range.toFixed(3)), d.range);
+    check(`intensite de ${d.name}`, Number(v.m_Intensity.toFixed(3)), d.intensity);
+  }
+  // La chaleur qui parcourt le clip du thermometre : `GetHeatLevel() / 40f`.
+  check("quarante unites de chaleur", THERM_HEAT_SPAN, 40);
+}
 
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
@@ -989,7 +1394,8 @@ console.log("     mainData:", mscene.node_count, "noeuds,",
 for (const [label, obj] of [["scene", scene], ["composants", comps],
                             ["solaire", solar], ["gameplay", gp],
                             ["audio", audio], ["lumieres", lighting],
-                            ["mainData", mscene]]) {
+                            ["mainData", mscene], ["prefabriques", prefabs],
+                            ["commandes", inp]]) {
   let ok = true;
   try { JSON.stringify(obj); } catch { ok = false; }
   check(`${label} serialisable en JSON`, ok, true);

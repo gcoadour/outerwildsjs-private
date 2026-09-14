@@ -359,6 +359,124 @@ export function warps(gameplay) {
   });
 }
 
+/**
+ * Les trois passages, et ce qu'ils font au corps qui les traverse.
+ *
+ * @lit DerelictWarp
+ *
+ * LE RESEAU. Trois volumes, et un seul aller-retour :
+ *
+ *   DarkBrambleShortcut   sur Timber Hearth, sphere de 50  -> Dark Bramble
+ *   WarpVolume            sur Dark Bramble, sphere de 60   -> l'epave
+ *   WarpVolume            sur l'epave, sphere de 550, SUR LA SORTIE -> Dark Bramble
+ *
+ * Le troisieme porte `_warpOnExit` : on ne quitte pas la dimension de l'epave
+ * en entrant quelque part, mais en SORTANT de sa sphere. C'est ce qui la rend
+ * close — elle n'a pas de porte, elle a un bord.
+ *
+ * LE DELAI. `_warpDuration` vaut 6 dans le constructeur, et `Update` deplace le
+ * corps a la MOITIE : trois secondes apres etre entre, au milieu de l'eclair de
+ * brouillard que `StartFogFlash` allume. On ne disparait pas a l'instant ou l'on
+ * touche le volume — on s'enfonce, le brouillard monte, et on est ailleurs.
+ *
+ * Une sortie, elle, est immediate : `OnTriggerExit` deplace sans attendre.
+ *
+ * LA SECONDE D'APRES-ARRIVEE. Les deux declencheurs refusent d'agir tant que
+ * `Time.time <= _arrivalTime + 1`. Sans cela, arriver DANS le volume jumeau
+ * renverrait aussitot d'ou l'on vient, sans fin.
+ *
+ * ET ON ARRIVE EN MOUVEMENT : dix unites par seconde le long de l'axe qui va du
+ * point d'arrivee au centre du passage — vers le centre quand on entre dans
+ * l'epave, en s'en eloignant sinon. On ne se materialise pas immobile.
+ *
+ * DEUX ARGUMENTS MORTS DANS LE BUILD. `WarpBody` calcule une rotation
+ * (`FromToRotation`) et une vitesse projetee, les passe a `ReceiveWarpedBody`…
+ * qui ne lit ni l'une ni l'autre. Le portage ne les reproduit donc pas, et le
+ * dit ici : c'est une mesure sur l'IL, pas un raccourci.
+ */
+export const WARP = { duration: 6, arrivalGuard: 1, exitSpeed: 10 };
+
+export class DerelictWarps {
+  constructor(list = [], cfg = WARP) {
+    this.warps = list.map((w) => ({ data: w, arrivedAt: -Infinity, since: null }));
+    this.cfg = cfg;
+    this.events = [];
+    // Le jumeau, par nom ET par corps : deux `WarpVolume` portent le meme nom.
+    for (const w of this.warps) {
+      const s = w.data.sister;
+      w.jumeau = s
+        ? this.warps.find((o) => o.data.name === s.name && o.data.body === s.body)
+        : null;
+    }
+  }
+
+  get count() { return this.warps.length; }
+
+  /** Le passage le plus proche dont le volume contient le point, ou null. */
+  at(worldPoint, shiftOf = null) {
+    for (const w of this.warps) {
+      if (!w.data.volume) continue;
+      const d = shiftOf ? (shiftOf(w.data) || [0, 0, 0]) : [0, 0, 0];
+      const p = [worldPoint[0] - d[0], worldPoint[1] - d[1], worldPoint[2] - d[2]];
+      if (insideVolume(w.data, p)) return w;
+    }
+    return null;
+  }
+
+  /**
+   * @returns {{warp, arrival:number[], velocity:number[]}|null} le depart,
+   *   quand il a lieu — donc trois secondes apres l'entree, ou tout de suite
+   *   sur une sortie.
+   */
+  update(dt, now, worldPoint, shiftOf = null) {
+    const dedans = this.at(worldPoint, shiftOf);
+    for (const w of this.warps) {
+      const ici = w === dedans;
+      const garde = now <= w.arrivedAt + this.cfg.arrivalGuard;
+      if (w.data.onExit) {
+        // Sur la SORTIE : c'est le passage de dedans a dehors qui compte.
+        if (w.etait && !ici && !garde) { w.etait = ici; return this.partir(w, now, shiftOf); }
+        w.etait = ici;
+        continue;
+      }
+      w.etait = ici;
+      if (ici && w.since === null && !garde) w.since = now;
+      if (!ici) w.since = null;
+      if (w.since !== null && now - w.since >= this.cfg.duration / 2) {
+        w.since = null;
+        return this.partir(w, now, shiftOf);
+      }
+    }
+    return null;
+  }
+
+  /** Le jumeau recoit : `ReceiveWarpedBody`. */
+  partir(w, now, shiftOf = null) {
+    const j = w.jumeau;
+    if (!j) return null;
+    const d = shiftOf ? (shiftOf(j.data) || [0, 0, 0]) : [0, 0, 0];
+    const centre = [j.data.position[0] + d[0], j.data.position[1] + d[1],
+                    j.data.position[2] + d[2]];
+    const local = qrot(j.data.rotation || [0, 0, 0, 1], j.data.arrivalLocal || [0, 0, 0]);
+    const arrival = [centre[0] + local[0], centre[1] + local[1], centre[2] + local[2]];
+    const vers = normalize([centre[0] - arrival[0], centre[1] - arrival[1],
+                            centre[2] - arrival[2]]);
+    const signe = j.data.onExit ? 1 : -1;
+    j.arrivedAt = now;
+    j.since = null;
+    j.etait = true;
+    this.events.push(j.data.onExit ? "EnterDerelictZone" : "ExitDerelictZone");
+    return {
+      warp: w.data, receiver: j.data, arrival,
+      velocity: [vers[0] * this.cfg.exitSpeed * signe,
+                 vers[1] * this.cfg.exitSpeed * signe,
+                 vers[2] * this.cfg.exitSpeed * signe],
+    };
+  }
+
+  drain() { const e = this.events; this.events = []; return e; }
+}
+
 // --- le rattachement a la geometrie chargee --------------------------------
 
 /** Produit de deux quaternions [x, y, z, w], dans l'ordre d'Unity : a puis b. */
@@ -681,4 +799,104 @@ export function axisAngle(axis, degrees) {
   const h = (degrees * Math.PI / 180) / 2;
   const s = Math.sin(h) / l;
   return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(h)];
+}
+
+// --- les meteores de Brittle Hollow (docs/68-lois.md) -------------------------
+//
+// `meteorLaunchers` etait ecrit, eprouve, et appele par PERSONNE. Quatre
+// lanceurs, un meteore toutes les cinq a vingt secondes, entre cent et deux
+// cents d'elan, et cinquante de degats au contact — c'est ce qui creuse Brittle
+// Hollow pendant qu'on la visite.
+//
+// @lit MeteorLauncher, TouchExplosive, IgnoreInitialCollisions
+
+/**
+ * Ce que le prefabrique `MoltenMeteor` porte, mesure dans
+ * `sharedassets1.assets` (docs/60-sonde.md) : `TouchExplosive._contactDamage`
+ * vaut CINQUANTE — le constructeur en pose vingt, et l'instance le dement — et
+ * `IgnoreInitialCollisions._ignoreDuration` une demi-seconde, le temps que le
+ * meteore quitte son lanceur.
+ */
+export const METEOR = { damage: 50, ignoreSeconds: 0.5, life: 60 };
+
+/**
+ * Un lanceur, et son horloge.
+ *
+ * `Update` : quand `Time.time > _lastLaunchTime + _launchDelay`, on lance et on
+ * TIRE UN NOUVEAU DELAI entre `_minInterval` et `_maxInterval`. Le delai n'est
+ * donc pas une periode : deux lanceurs ne se synchronisent jamais, et le meme
+ * lanceur ne bat pas deux fois pareil.
+ */
+export class MeteorLaunchers {
+  /** @param rng tirage dans [0, 1[, injecte pour que le test soit reproductible */
+  constructor(list = [], rng = Math.random) {
+    this.rng = rng;
+    this.launchers = list.map((d) => ({
+      data: d, last: 0,
+      delay: d.minInterval + rng() * (d.maxInterval - d.minInterval),
+    }));
+    this.meteors = [];
+    this.launched = 0;
+  }
+
+  /** @returns les meteores nes de ce pas */
+  update(dt, now, cfg = METEOR) {
+    const nes = [];
+    for (const l of this.launchers) {
+      if (now <= l.last + l.delay) continue;
+      l.last = now;
+      l.delay = l.data.minInterval + this.rng() * (l.data.maxInterval - l.data.minInterval);
+      const v = l.data.minSpeed + this.rng() * (l.data.maxSpeed - l.data.minSpeed);
+      const d = l.data.direction;
+      const n = Math.hypot(d[0], d[1], d[2]) || 1;
+      const m = {
+        from: l.data.name,
+        pos: [...l.data.position],
+        vel: [d[0] / n * v, d[1] / n * v, d[2] / n * v],
+        radius: l.data.radius, age: 0, damage: cfg.damage,
+      };
+      this.meteors.push(m);
+      nes.push(m);
+      this.launched += 1;
+    }
+    return nes;
+  }
+
+  /**
+   * Avance les meteores. Le champ dominant les infléchit, comme la sonde — ils
+   * retombent donc sur la planete qui les a craches.
+   */
+  step(dt, field = null, cfg = METEOR) {
+    for (const m of this.meteors) {
+      if (field) {
+        m.vel[0] += field.dir.x * field.magnitude * dt;
+        m.vel[1] += field.dir.y * field.magnitude * dt;
+        m.vel[2] += field.dir.z * field.magnitude * dt;
+      }
+      m.pos[0] += m.vel[0] * dt;
+      m.pos[1] += m.vel[1] * dt;
+      m.pos[2] += m.vel[2] * dt;
+      m.age += dt;
+    }
+    this.meteors = this.meteors.filter((m) => m.age < cfg.life);
+    return this.meteors;
+  }
+
+  /**
+   * Qui se prend un meteore ?
+   *
+   * `IgnoreInitialCollisions` epargne la premiere demi-seconde : sans elle le
+   * meteore explose sur son propre lanceur.
+   */
+  hits(point, rayon = 1, cfg = METEOR) {
+    for (const m of this.meteors) {
+      if (m.age < cfg.ignoreSeconds) continue;
+      const d = Math.hypot(m.pos[0] - point[0], m.pos[1] - point[1], m.pos[2] - point[2]);
+      if (d <= m.radius + rayon) return m;
+    }
+    return null;
+  }
+
+  /** Retire un meteore qui a touche : il explose et disparait. */
+  consume(m) { this.meteors = this.meteors.filter((x) => x !== m); }
 }

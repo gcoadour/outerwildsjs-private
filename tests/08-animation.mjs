@@ -111,8 +111,11 @@ const add = (type, pathId, value) => {
 // ses cles telles quelles, tangentes comprises.
 add("AnimationClip", 101, { m_Name: "Stargazing", m_AnimationType: 2, ...clip });
 const key = (time, v, s) => ({ time, value: v, inSlope: s, outSlope: s });
+// `m_WrapMode: 2` — Loop. Sans lui ce clip legacy serait en `Default`, le
+// composant aussi, et Unity retomberait sur `Once` : le nom porterait alors le
+// marqueur « ! » (docs/63-boucles.md). Les deux cas sont eprouves plus bas.
 add("AnimationClip", 102, {
-  m_Name: "Default Idle", m_AnimationType: 1,
+  m_Name: "Default Idle", m_AnimationType: 1, m_WrapMode: 2,
   m_PositionCurves: [{ path: "Bone_JNT/Tip", curve: { m_Curve: [
     key(0, { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 0 }),
     key(1, { x: 0, y: 2, z: 3 }, { x: 0, y: 1, z: 1 })] } }],
@@ -158,6 +161,10 @@ check("os Mecanim non resolus (monde fabrique)", out.stats.unresolvedBones, 0);
 const byName = new Map(out.gltf.animations.map((a) => [a.name, a]));
 check("clip par defaut du controleur", byName.has("Villager|Default Idle"), true);
 check("clip non demarre, prefixe", byName.has("~Villager|Stargazing"), true);
+// Ce qui boucle n'a pas de marqueur, et le dit aussi dans `extras`.
+check("un clip en Loop n'a pas de marqueur",
+      byName.get("Villager|Default Idle").extras.loop, true);
+check("aucun clip de ce monde ne s'arrete", out.stats.onceClips, 0);
 
 // Le clip Mecanim vise l'os par son nom, resolu via la table de l'Avatar.
 const mecanim = byName.get("~Villager|Stargazing");
@@ -211,6 +218,9 @@ const ctx = new ExtractContext(env, u, "level0", engineTypes);
 
 let animations = 0, channels = 0, cubic = 0, linear = 0, unresolved = 0;
 let quaternions = 0, worstNorm = 0, badTimes = 0, badTargets = 0, badCubic = 0;
+// Ce qui ne BOUCLE pas. Le portage jouait tout en boucle (docs/63-boucles.md).
+let once = 0;
+const sansBoucle = [];
 
 console.time("animations");
 for (const root of findRoots(ctx)) {
@@ -221,6 +231,10 @@ for (const root of findRoots(ctx)) {
   if (!res) continue;
   const { gltf, stats } = res;
   animations += stats.animations;
+  once += stats.onceClips || 0;
+  for (const a of gltf.animations || []) {
+    if (a.extras && a.extras.loop === false) sansBoucle.push(a.name);
+  }
   channels += stats.channels;
   cubic += stats.cubic;
   linear += stats.linear;
@@ -276,4 +290,23 @@ check("canaux vises hors du fichier", badTargets, 0);
 check("echantillonneurs mal dimensionnes", badCubic, 0);
 check("temps d'echantillonnage valides", badTimes, 0);
 check("quaternions unitaires a 1e-3", worstNorm < 1e-3, true);
+
+// Ce qui ne boucle pas — et le chiffre est ZERO, mesure et explique.
+//
+// Le build a bien quatre clips legacy en `WrapMode.Once` : `idle`, `PullOut`,
+// `PutBack` et `Therm`. Les quatre sont sur `MarshmallowStick`, un enfant de
+// `PlayerCamera` — le baton qu'on tient a la main. Aucun sous-arbre de corps
+// celeste ne le contient, donc aucun ne l'exporte, et les 34 clips qui sortent
+// d'ici bouclent tous legitimement (docs/63-boucles.md).
+//
+// C'est un zero MESURE et non un zero calcule : `tests/05-extract.mjs` compte
+// les quatre du cote du build, et cette ligne dit qu'aucun n'arrive jusqu'au
+// glTF. Le jour ou le baton sera exporte, les deux bougeront ensemble.
+console.log(`     sans boucle : ${sansBoucle.join(", ") || "(aucun)"}`);
+check("aucun clip exporte ne s'arrete", once, 0);
+check("et le compte est le meme des deux cotes", sansBoucle.length, once);
+// Le marqueur du nom et `extras` disent la MEME chose : le moteur lit le nom
+// (Babylon le rend toujours), un humain lit `extras`.
+check("chaque clip sans boucle porte le marqueur",
+      sansBoucle.filter((n) => !/^[~]?!/.test(n)).length, 0);
 report();

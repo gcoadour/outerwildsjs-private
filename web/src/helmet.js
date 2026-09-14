@@ -146,12 +146,30 @@ export class MasterAlarm {
 }
 
 /**
+ * La zone de proximite du vaisseau : une sphere de treize unites.
+ *
+ * `HUDDamageDisplay` s'ALLUME sur `EnterShipProximity` et s'eteint — icones
+ * comprises — sur `ExitShipProximity`. Le tableau de bord des avaries n'est
+ * donc pas un affichage permanent : il ne parle que quand on est assez pres du
+ * vaisseau pour y faire quelque chose (docs/76-proximite.md).
+ */
+export function shipProximity(gameplay) {
+  return ((gameplay.placed || {}).ShipProximityVolume || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position,
+    volume: c.volume || null,
+  }));
+}
+
+/**
  * Les voyants de degats du tableau de bord.
  *
  * Le premier voyant est allume EN CONTINU des qu'il y a le moindre degat ; les
  * suivants CLIGNOTENT a la demi-seconde, un par piece abimee. Le clignotement
  * est global — tous ensemble —, ce qui se voit : un tableau de bord ou chaque
  * voyant bat a son rythme serait un sapin de Noel.
+ *
+ * ET IL NE PARLE QUE DE PRES. `TurnOffIcons` a la sortie de la zone de
+ * proximite : loin du vaisseau, aucun voyant, pas meme le general.
  */
 export class DamageDisplay {
   constructor(period = BLINK_PERIOD) {
@@ -166,8 +184,12 @@ export class DamageDisplay {
    * @param parts   un booleen par piece
    * @returns un booleen par voyant, le premier etant le voyant general
    */
-  update(t, damaged, parts = []) {
+  update(t, damaged, parts = [], nearShip = true) {
     if (t > this.last + this.period) { this.last = t; this.blinkOn = !this.blinkOn; }
+    // `OnExitShipProximity` appelle `TurnOffIcons` : c'est une extinction, pas
+    // une mise en pause. Le clignotement continue de battre pour que revenir
+    // ne le rattrape pas a contretemps.
+    if (!nearShip) return [false, ...parts.map(() => false)];
     return [!!damaged, ...parts.map((p) => !!p && this.blinkOn)];
   }
 }
@@ -209,6 +231,45 @@ export function roastPrompts(gameplay) {
     body: c.body || null,
     distance: (c.fields || {})._roastDistance ?? ROAST_DISTANCE,
   }));
+}
+
+/**
+ * Le grillage commence par une INTERACTION, et le baton sort tout seul.
+ *
+ * `RoastPromptEvent.OnPressInteract` annonce `BeginRoasting` — que
+ * `MarshmallowStick` ecoute pour SORTIR le baton — puis se met a surveiller la
+ * distance. Des qu'on depasse `_roastDistance`, il annonce `StopRoasting`, et
+ * le baton se range.
+ *
+ * Le portage sortait le baton sur une touche a lui (docs/64), faute d'avoir vu
+ * le declencheur. Il est la, et il tient en deux evenements : on s'approche du
+ * feu, on appuie, le baton sort ; on s'eloigne, il se range.
+ *
+ * L'etat `checkDist` compte : tant qu'il est faux, appuyer ANNONCE ; une fois
+ * vrai, appuyer ne re-annonce plus. On ne ressort pas un baton deja sorti.
+ */
+export class RoastPrompt {
+  constructor(prompt = null) {
+    this.prompt = prompt;
+    this.checkDist = false;
+  }
+
+  /** @returns {"BeginRoasting"|null} */
+  press() {
+    if (this.checkDist) return null;
+    this.checkDist = true;
+    return "BeginRoasting";
+  }
+
+  /** @returns {"StopRoasting"|null} */
+  update(distance) {
+    if (!this.checkDist) return null;
+    if (!roastBroken(distance, this.prompt)) return null;
+    this.checkDist = false;
+    return "StopRoasting";
+  }
+
+  reset() { this.checkDist = false; }
 }
 
 /** S'est-on trop eloigne du feu pour continuer a griller ? */

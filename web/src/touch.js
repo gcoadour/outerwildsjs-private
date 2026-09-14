@@ -152,11 +152,18 @@ export async function goLandscape(el = document.documentElement) {
 
 // Gachettes, le long du bord haut : ce qui s'utilise entre deux manoeuvres.
 // Les deux premieres sont a gauche, les deux autres a droite.
+//
+// Les codes sont ceux du BUILD depuis docs/61-commandes.md : la lunette est le
+// clic du milieu, la sonde le clic droit, la carte la touche entree, la lampe
+// la touche F. Un ecran tactile n'a pas de souris — c'est justement pourquoi
+// cette couche existe : elle produit le code, pas le geste.
 const SHOULDERS = [
-  { tag: "L1", code: "KeyT", label: "lunette", title: "Telescope" },
-  { tag: "L2", code: "KeyF", label: "sonde", title: "Sonde" },
-  { tag: "R1", code: "KeyM", label: "carte", title: "Carte du systeme" },
-  { tag: "R2", code: "KeyN", label: "bord", title: "Ordinateur de bord" },
+  { tag: "L1", code: "Mouse1", label: "lunette", title: "Telescope" },
+  // La sonde se CHARGE : elle est tenue, comme les deux poussees verticales.
+  { tag: "L2", code: "Mouse2", key: "probe", label: "sonde", title: "Sonde",
+    hold: true },
+  { tag: "R1", code: "Enter", label: "carte", title: "Carte du systeme" },
+  { tag: "R2", code: "KeyF", label: "lampe", title: "Lampe" },
 ];
 
 // Losange d'action, aux places d'une manette : Y en haut, X a gauche, B a
@@ -169,12 +176,18 @@ const SHOULDERS = [
 // tenir « accelerer » et viser. Le cran de course du manche gauche l'allume
 // aussi, le temps qu'il dure.
 // Les autres envoient leur code une fois, comme une frappe.
+//
+// L'accelerateur a disparu : le build n'en a pas. Sa place revient a la
+// DESCENTE au sac dorsal (`Move Down`), qui existe et que le portage n'avait
+// pas — on ne pouvait que couper la poussee et tomber. Et le saut prend une
+// place a lui, parce que `Jump` et `Move Up` sont deux canaux distincts.
 const FACE = [
-  { slot: "y", key: "up", code: "Space", label: "▲", tag: "monter",
+  { slot: "y", key: "up", code: "ShiftLeft", label: "▲", tag: "monter",
     title: "Monter", hold: true },
-  { slot: "x", key: "boost", code: "ShiftLeft", label: "»", tag: "vite",
-    title: "Accelerer", toggle: true, cls: "tc-boost" },
-  { slot: "b", code: "KeyL", label: "☀", tag: "lampe", title: "Lampe" },
+  { slot: "x", key: "down", code: "ControlLeft", label: "▼", tag: "descendre",
+    title: "Descendre", hold: true },
+  { slot: "b", key: "jump", code: "Space", label: "⤒", tag: "sauter",
+    title: "Sauter", hold: true },
   { slot: "a", code: "KeyE", label: "E", tag: "agir", title: "Interagir, parler",
     cls: "tc-act" },
 ];
@@ -182,6 +195,7 @@ const FACE = [
 // Boutons du milieu, ceux qu'une manette met entre ses deux manches : ce qui ne
 // sert qu'entre deux vols.
 const CENTER = [
+  { code: "KeyN", label: "bord", title: "Ordinateur de bord" },
   { code: "KeyG", label: "vue", title: "Affichage" },
   { code: "Escape", label: "menu", title: "Menu" },
 ];
@@ -208,7 +222,7 @@ const CONFIRM = [
 const MAP_KEYS = [
   { slot: "a", code: "KeyC", label: "◎", tag: "centrer", title: "Centrer",
     cls: "tc-m-ok" },
-  { slot: "b", code: "KeyM", label: "✕", tag: "fermer", title: "Fermer",
+  { slot: "b", code: "Enter", label: "✕", tag: "fermer", title: "Fermer",
     cls: "tc-m-back" },
 ];
 
@@ -285,8 +299,9 @@ export class TouchControls {
     this.onKey = opts.onKey || (() => {});
     this.onLook = opts.onLook || (() => {});
     this.enabled = false;
-    this.axes = { forward: 0, right: 0, up: false, boost: false };
-    this.held = { up: false, boost: false };
+    this.axes = { forward: 0, right: 0, up: false, down: false, jump: false,
+                  probe: false, boost: false };
+    this.held = { up: false, down: false, jump: false, probe: false };
     this.sprint = false;
     this.context = { menu: false, map: false };
     this.buttons = [];
@@ -323,9 +338,14 @@ export class TouchControls {
     this.axes.forward = 0;
     this.axes.right = 0;
     this.held.up = false;
-    this.held.boost = false;
+    this.held.down = false;
+    this.held.jump = false;
+    this.held.probe = false;
     this.sprint = false;
     this.axes.up = false;
+    this.axes.down = false;
+    this.axes.jump = false;
+    this.axes.probe = false;
     this.axes.boost = false;
     for (const b of this.buttons) b.classList.remove("tc-on");
     this.liveZones();
@@ -565,9 +585,17 @@ export class TouchControls {
    * aussi quand c'est le manche qui l'a demande.
    */
   syncHold() {
-    this.axes.up = this.held.up;
-    this.axes.boost = this.held.boost || this.sprint;
-    if (this.boostBtn) this.boostBtn.classList.toggle("tc-on", this.axes.boost);
+    // Le cran de course du manche gauche MONTE : c'est ce que la majuscule fait
+    // dans le build, et l'accelerateur qu'il allumait avant n'existe pas.
+    this.axes.up = this.held.up || this.sprint;
+    this.axes.down = this.held.down;
+    this.axes.jump = this.held.jump;
+    this.axes.probe = this.held.probe;
+    // Le cran de course du manche gauche n'accelere plus rien : le build n'a
+    // pas d'accelerateur. Il monte, ce qui est le geste le plus utile a garder
+    // sous le pouce qui pousse deja.
+    this.axes.boost = false;
+    if (this.boostBtn) this.boostBtn.classList.toggle("tc-on", this.axes.up);
   }
 
   button(parent, spec) {

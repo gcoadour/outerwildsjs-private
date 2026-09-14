@@ -51,6 +51,7 @@ export function alignedBodies(gameplay) {
  * `AttachOnAwake` (docs/46, lot 1). La loi est posee et gardee quand meme,
  * parce que ce qui bouge seul ne passe pas par la hierarchie.
  */
+// @vide aucun `FieldInheritor` ne bouge seul : ce decor est enfant du glTF de son corps (docs/68)
 export function inheritedAcceleration(fields) {
   const a = [0, 0, 0];
   for (const f of fields || []) {

@@ -254,27 +254,15 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
   //   - le clip est vise par `_clip`, et l'`AudioSource` de l'objet est
   //     serialisee SANS clip. Chercher le fichier par GameObject rendait les
   //     dix-sept volumes muets ;
-  //   - la forme n'est pas sur l'objet du volume mais sur ses ENFANTS, qui
-  //     portent les `EntrywayTrigger` auxquels il s'abonne. Six volumes sur
-  //     dix-sept n'avaient donc aucune portee.
+  //   - six volumes sur dix-sept n'ont PAS de collider : leur forme est celle
+  //     des `EntrywayTrigger` poses sous eux. La premiere correction a pris la
+  //     premiere boite d'enfant trouvee et l'a servie comme contenance : la
+  //     grotte aux quatre portes se reduisait a UNE porte de onze metres, et
+  //     les trois autres disparaissaient. C'etait une paraphrase, et un test
+  //     l'a benie (« six volumes ont enfin une portee »). Le volume n'est donc
+  //     plus invente ici : on emet ce que l'objet porte, et le moteur joint les
+  //     seuils par la hierarchie (docs/84-ambiance.md).
   const volumes = [];
-  const scene = ctx.env.get(ctx.sceneFile);
-
-  /** Formes des declencheurs poses sous un objet, la premiere qui en a une. */
-  function volumeSousEnfants(gid) {
-    const t = ctx.transformOf.get(gid);
-    if (!t || !t.m_Children) return null;
-    for (const ptr of t.m_Children) {
-      const o = ctx.env.deref(ptr, scene);
-      if (!o) continue;
-      const child = ctx.readEngine(o);
-      const cgid = child && child.m_GameObject ? child.m_GameObject.pathId : 0;
-      if (!cgid) continue;
-      const v = ctx.volumeOf(cgid);
-      if (v) return v;
-    }
-    return null;
-  }
 
   for (const { obj, cls } of ctx.behaviours(["AudioVolume", "DayNightAudioVolume"])) {
     const f = ctx.scriptFields(obj);
@@ -293,9 +281,14 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
       randomize: !!f._randomizePlayhead,
       pauseOnFadeOut: !!f._pauseOnFadeOut,
     };
-    const vol = ctx.volumeOf(gid) || volumeSousEnfants(gid);
+    const vol = ctx.volumeOf(gid);
     if (vol) e.volume = vol;
     else bump("volume d'ambiance sans forme");
+    // Le corps porteur : les positions extraites sont celles de la scene au
+    // repos et les corps orbitent. Sans lui, une boite de porte de dix metres
+    // s'echappe en une fraction de seconde (docs/46).
+    const body = ctx.bodyOf(gid);
+    if (body) e.body = body;
     if (cls === "DayNightAudioVolume") {
       e.dayWindow = f._dayWindow ?? 200;
       e.usePlayerPosition = !!f._usePlayerPosition;

@@ -64,13 +64,21 @@ async function loadFile(BABYLON, scene, file) {
   for (const m of res.meshes) {
     if (!m.parent) m.parent = container;
   }
-  // Les clips Mecanim decodes sortent nommes « Objet|Clip ». Ceux prefixes
-  // « ~ » sont les etats que le controleur Unity ne joue pas par defaut : les
-  // demarrer aussi ferait se disputer deux clips sur les memes os. Le
-  // chargeur glTF n'en lance qu'un seul de son cote, d'où l'arret prealable.
+  // Les clips decodes sortent nommes « Objet|Clip », avec deux marqueurs devant.
+  //
+  //   ~   l'etat que le controleur Unity ne joue PAS par defaut : le demarrer
+  //       aussi ferait se disputer deux clips sur les memes os
+  //   !   le clip qui ne BOUCLE pas (`WrapMode.Once`)
+  //
+  // Le portage jouait tout en boucle. Quatre des sept clips legacy du build
+  // sont en `Once` — dont `PullOut` et `PutBack`, qu'une boucle fait sortir et
+  // rentrer sans fin (docs/63-boucles.md). Le chargeur glTF en lance un de son
+  // cote, d'ou l'arret prealable.
   for (const g of res.animationGroups || []) {
     g.stop();
-    if (!g.name.startsWith("~")) g.play(true);
+    const marqueurs = /^[~!]*/.exec(g.name)[0];
+    if (marqueurs.includes("~")) continue;
+    g.play(!marqueurs.includes("!"));
   }
   const meshes = res.meshes.filter((m) => m.getTotalVertices() > 0);
   // index des noeuds par nom de GameObject : l'exporteur conserve les noms,
@@ -211,16 +219,6 @@ export function bootFiles(homeBodyName) {
   return [...new Set(files.filter(Boolean))];
 }
 
-/**
- * Charge tous les fichiers d'un coup. Conserve pour les outils hors jeu
- * (`gltf-viewer.html`) et pour les mesures avant/apres.
- */
-export async function loadGeometry(BABYLON, scene, files = BODY_FILES) {
-  const store = new GeometryStore(BABYLON, scene);
-  await store.load(files);
-  return store.entries;
-}
-
 /** Noeud d'un corps precis dans un lot (ex. "TimberHearth_Body"), ou null. */
 export function findBodyNode(entry, bodyName) {
   return (entry && entry.nodes && entry.nodes.get(bodyName)) || null;
@@ -245,18 +243,6 @@ export function meshesForBody(entry, bodyName, excludeRoots = []) {
   }
   const list = sub.filter((m) => m.getTotalVertices() > 0 && !excluded.has(m));
   return list.length ? list : (entry ? entry.meshes : []);
-}
-
-/** Centre geometrique mesure d'un lot, en coordonnees monde de la scene. */
-export function measureCenter(BABYLON, entry) {
-  const cs = entry.meshes.map((m) => {
-    m.computeWorldMatrix(true);
-    return m.getBoundingInfo().boundingBox.centerWorld;
-  });
-  if (!cs.length) return null;
-  const c = cs.reduce((a, v) => a.add(v), BABYLON.Vector3.Zero()).scale(1 / cs.length);
-  entry.center = c;
-  return c;
 }
 
 /**

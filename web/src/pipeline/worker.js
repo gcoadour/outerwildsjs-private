@@ -26,7 +26,9 @@ import { extractLighting } from "./extract/lighting.js";
 import { extractSky } from "./extract/sky.js";
 import { extractTextureAnimators } from "./extract/texanim.js";
 import { extractCameras } from "./extract/camera.js";
-import { exportSubtree, findRoots } from "./extract/gltf.js";
+import { extractPrefabs, mergePrefabs } from "./extract/prefabs.js";
+import { extractInput } from "./extract/input.js";
+import { exportSubtree, findRoots, HELD_ROOTS } from "./extract/gltf.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
 
@@ -327,11 +329,40 @@ async function run(blob, options) {
   // Le worker chargeait bien les cinq fichiers, mais l'ExtractContext etait
   // construit sur `level0` seul : les 989 objets de mainData ne sortaient
   // jamais. C'est ce qui explique les rendus V-Fog restes introuvables
+  // Les prefabriques : ce que le build INSTANCIE en cours de partie, et que le
+  // portage n'avait jamais lu parce qu'il ne lisait que `level0`. La sonde y
+  // est en entier (docs/60-sonde.md).
+  phase("prefabriques", "Prefabriques : la sonde, les effets…");
+  try {
+    const parts = [];
+    for (const f of ["sharedassets1.assets", "resources.assets"]) {
+      const pctx = new ExtractContext(env, universe, f, engineTypes);
+      parts.push(extractPrefabs(pctx));
+    }
+    const prefabs = mergePrefabs(parts);
+    await writeFile("data/prefabs.json", JSON.stringify(prefabs));
+    summary["noeuds de la sonde"] = prefabs.probe
+      ? Object.keys(prefabs.probe.nodes).length : 0;
+    summary["effets a duree de vie"] = Object.keys(prefabs.selfDestruct).length;
+  } catch (e) {
+    // Comme pour `mainData` : le monde jouable est deja ecrit, et le moteur
+    // sait se passer de `data/prefabs.json` — il retombe sur les constantes de
+    // `probe.js`, qui sont celles du build.
+    console.warn("prefabriques non extraits :", e && e.message);
+    summary["noeuds de la sonde"] = 0;
+  }
+
   // (docs/20-shaders-jeu.md) et l'absence de menu principal (docs/28-hud.md).
   // On l'inventorie donc, avant de decider quoi en porter.
   phase("maindata", "Scene de demarrage (mainData)…");
   try {
     const mctx = new ExtractContext(env, universe, "mainData", engineTypes);
+    // Les COMMANDES du jeu, et le pas de physique. Aucun composant ne les
+    // porte : ce sont des reglages de projet, et Unity 4 les range ici
+    // (docs/61-commandes.md).
+    const input = extractInput(mctx);
+    await writeFile("data/input.json", JSON.stringify(input));
+    summary["canaux de commande"] = Object.keys(input.channels).length;
     const mscene = extractScene(mctx);
     await writeFile("data/scene/maindata.json", JSON.stringify(mscene));
     const mcomps = extractComponents(mctx);
@@ -363,6 +394,23 @@ async function run(blob, options) {
       channels += res.stats.channels;
     }
     summary["corps en glTF"] = roots.length;
+
+    // Ce que le joueur tient : le baton a guimauve et la lunette. Ils pendent
+    // sous `PlayerCamera`, donc aucun sous-arbre de corps celeste ne les
+    // contient, donc le portage ne les avait jamais (docs/64-mains.md).
+    for (const root of findRoots(ctx, HELD_ROOTS)) {
+      const label = root.name.toLowerCase();
+      const res = exportSubtree(ctx, root.gid, label, {
+        emitImage, maxTexture: options.maxTexture || 512,
+      });
+      if (!res) continue;
+      await writeFile(`data/gltf/${label}.gltf`, JSON.stringify(res.gltf));
+      await writeFile(`data/gltf/${label}.bin`, res.bin);
+      await drainImages("data/gltf");
+      animations += res.stats.animations;
+      channels += res.stats.channels;
+      summary["objets en main"] = (summary["objets en main"] || 0) + 1;
+    }
     summary.animations = animations;
     summary["canaux d'animation"] = channels;
   }

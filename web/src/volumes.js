@@ -40,6 +40,7 @@
 
 import { insideVolume } from "./gravity.js";
 import { restingPoint } from "./frames.js";
+import { entrywayTriggers, attachEntryways } from "./entryways.js";
 
 /** Les cinq valeurs de `DeathType`, lues dans l'assembly. */
 export const DEATH_TYPES = ["Default", "Impact", "Asphyxiation", "Energy", "Supernova"];
@@ -252,10 +253,14 @@ export class Hazards {
  *
  * Un des quatre (`ZeroGZone/ZeroGChamber`) prend sa forme de ses declencheurs
  * d'entree (`_useEntrywayTriggers`) et non d'un collider : il n'a donc pas de
- * volume, et c'est vrai du build, pas un defaut d'extraction.
+ * volume, et c'est vrai du build, pas un defaut d'extraction. Le portage
+ * l'ECARTAIT pour autant — `zeroGAt` saute les champs sans forme — et la chambre
+ * en apesanteur du village ne donnait aucune apesanteur. Ses seuils lui sont
+ * maintenant joints (docs/85-chambre.md).
  */
 export function zeroGFields(gameplay) {
-  return ((gameplay.placed || {}).ZeroGField || []).map((c) => {
+  const seuils = entrywayTriggers(gameplay);
+  return attachEntryways(((gameplay.placed || {}).ZeroGField || []).map((c) => {
     const f = c.fields || {};
     return {
       name: c.name, body: c.body || null, position: c.position,
@@ -265,58 +270,20 @@ export function zeroGFields(gameplay) {
       alignmentPriority: f._alignmentPriority ?? 0,
       overridePriority: f._overridePriority ?? 0,
     };
-  });
-}
-
-/** Est-on en apesanteur declaree ? Rend le champ, ou null. */
-export function zeroGAt(fields, worldPoint, shiftOf = null) {
-  let best = null;
-  for (const f of fields) {
-    if (!f.volume) continue;
-    const p = shiftOf ? restingPoint(worldPoint, shiftOf(f)) : worldPoint;
-    if (!insideVolume(f, p)) continue;
-    if (!best || f.overridePriority > best.overridePriority) best = f;
-  }
-  return best;
+  }), seuils);
 }
 
 /**
- * Les secteurs de jeu : `ZeroGSector` x2 et `MajorSector` x1.
+ * Est-on en apesanteur declaree ? Rend le champ, ou null.
  *
- * Ce ne sont pas les `PlanetoidSector` que le portage lit deja pour son budget
- * de rendu : ce sont des reglages de JEU attaches a un lieu. Dark Bramble
- * limite la poussee a 20 et pose une lumiere ambiante jusqu'a 1 200 unites ; la
- * dimension abandonnee limite en plus la portee des phares du vaisseau a 100.
- * `_flashlightRangeLimit` est nul partout : la lampe du joueur garde sa portee.
+ * @param actives champs ou l'on se trouve deja — `zonesAround` les etablit,
+ *   contenance et seuils confondus. La contenance seule ne suffisait pas : la
+ *   chambre du village n'a pas de forme.
  */
-export function gameSectors(gameplay) {
-  const placed = gameplay.placed || {};
-  const map = (list, kind) => (list || []).map((c) => {
-    const f = c.fields || {};
-    return {
-      kind, name: c.name, body: c.body || null, position: c.position,
-      rotation: c.rotation || null, volume: c.volume || null,
-      sector: f._sectorName ?? null,
-      ambient: f._ambientLight ?? 0,
-      ambientRange: f._ambientLightRange ?? 0,
-      thrustLimit: f._thrustLimit ?? null,
-      flashlightLimit: f._flashlightRangeLimit ?? null,
-      shiplightLimit: f._shiplightRangeLimit ?? null,
-      probePrompt: !!f._triggersShipProbePrompt,
-    };
-  });
-  return [...map(placed.ZeroGSector, "zerog"), ...map(placed.MajorSector, "major")];
-}
-
-/** Le secteur de jeu ou l'on se trouve : le plus petit qui contient le point. */
-export function gameSectorAt(sectors, worldPoint, shiftOf = null) {
+export function strongestZeroG(actives) {
   let best = null;
-  for (const s of sectors) {
-    if (!s.volume) continue;
-    const p = shiftOf ? restingPoint(worldPoint, shiftOf(s)) : worldPoint;
-    if (!insideVolume(s, p)) continue;
-    const r = s.volume.radius || Infinity;
-    if (!best || r < (best.volume.radius || Infinity)) best = s;
+  for (const f of actives) {
+    if (!best || f.overridePriority > best.overridePriority) best = f;
   }
   return best;
 }
@@ -348,37 +315,48 @@ export function probePrompts(gameplay) {
   return out;
 }
 
-/** Les zones sans lumiere (`DarkZone`) et les brouilleurs (`InterferenceVolume`). */
-export function signalVolumes(gameplay) {
-  const placed = gameplay.placed || {};
-  const map = (list, kind) => (list || []).map((c) => ({
-    kind, name: c.name, body: c.body || null, position: c.position,
-    rotation: c.rotation || null, volume: c.volume || null,
-    strength: (c.fields || {})._interferenceStrength ?? 1,
-  }));
-  return [...map(placed.DarkZone, "dark"), ...map(placed.InterferenceVolume, "interference")];
+/**
+ * L'invite de sonde se montre-t-elle ?
+ *
+ * `ProbePromptTrigger.Update` cache l'invite a chaque image et ne la remontre
+ * que si l'angle entre l'avant de la CAMERA et la direction de regard du
+ * declencheur, exprimee en monde, est SOUS `_minGazeAngle`.
+ *
+ * L'angle se compare tel quel, et non a sa moitie : ce n'est pas un cone de
+ * vue comme `_viewingWindow` (docs/46, lot 4), c'est un ecart maximal. A
+ * quarante-cinq degres, la fenetre fait donc quatre-vingt-dix de large.
+ *
+ * @param avantCamera direction du regard, normalisee
+ * @param regardMonde direction de regard du declencheur, en monde
+ */
+export function promptFaced(prompt, avantCamera, regardMonde) {
+  if (!prompt || !prompt.gaze || !regardMonde) return true;
+  const la = Math.hypot(avantCamera[0], avantCamera[1], avantCamera[2]) || 1;
+  const lb = Math.hypot(regardMonde[0], regardMonde[1], regardMonde[2]) || 1;
+  const cos = (avantCamera[0] * regardMonde[0] + avantCamera[1] * regardMonde[1]
+             + avantCamera[2] * regardMonde[2]) / (la * lb);
+  const angle = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+  return angle < (prompt.minAngle ?? 45);
 }
 
 /**
- * La zone de signal qui contient un point, par genre.
+ * LES ZONES DE SIGNAL, RETIREES.
  *
- * `signalVolumes` etait extrait depuis longtemps et LU PAR PERSONNE — la
- * troisieme fois que ce depot rencontre ce cas (docs/35, docs/47). Les zones
- * sombres commandent l'ambiance globale (`AmbientLightManager` coupe tout dans
- * une zone sans soleil), les brouilleurs coupent le signal du telescope.
+ * `signalVolumes` rendait deux familles : les `DarkZone` et les
+ * `InterferenceVolume`. Les deux moities sont tombees pour deux raisons
+ * differentes, et c'est la mesure qui a tranche chacune (docs/83-seuils.md) :
  *
- * @param point  position MONDE
- * @param offset fonction qui rend le decalage du corps porteur
+ * - la zone sombre n'est pas une contenance mais un SEUIL — `DarkZone.Awake`
+ *   s'abonne a son `EntrywayTrigger` et ne teste jamais si l'on est dedans.
+ *   Elle vit maintenant dans `entryways.js`, avec ses evenements.
+ * - le brouillage est INERTE dans cette alpha : la scene pose un
+ *   `InterferenceVolume` (force 1, sur le volume musical de la cite enterree),
+ *   mais `InterferenceDetector` n'a AUCUNE instance, et son `GetInterference`
+ *   n'est appele par personne dans l'assembly. Il n'y a rien a brancher.
+ *
+ * Le volume reste extrait : `recensement.mjs` le comptera desormais parmi les
+ * classes extraites que rien ne lit, ce qui est la verite.
  */
-export function signalZoneAt(zones, kind, point, offset = () => [0, 0, 0]) {
-  for (const z of zones) {
-    if (z.kind !== kind || !z.volume) continue;
-    const d = offset(z);
-    if (insideVolume(z.volume, [point[0] - d[0], point[1] - d[1], point[2] - d[2]],
-                     z.position, z.rotation)) return z;
-  }
-  return null;
-}
 
 /**
  * Les neuf emetteurs de rayonnement : huit feux de camp et l'etoile.
@@ -495,4 +473,77 @@ export function sandstormVolumes(gameplay) {
   return ((gameplay.placed || {}).SandstormVolume || []).map((c) => ({
     name: c.name, body: c.body || null, position: c.position, volume: c.volume || null,
   }));
+}
+
+/**
+ * Les cylindres du volume compose, corps par corps.
+ *
+ * `SandstormVolume` n'a PAS de collider a lui : `ctx.volumeOf` rend vide, et le
+ * portage aurait pu en conclure que la tempete n'a pas de forme. Sa forme est
+ * celle de ses ENFANTS — quatre capsules qui se chevauchent, de 31,6 a 21,4 de
+ * rayon et de 440 a 298 de haut, le long de l'entonnoir de sable entre les
+ * jumelles.
+ *
+ * C'est exactement ce pour quoi `CompoundTriggerVolume` existe : quatre formes,
+ * une entree, une sortie.
+ */
+export function childTriggers(gameplay, body = null) {
+  return ((gameplay.placed || {}).ChildTriggerVolume || [])
+    .filter((c) => !body || c.body === body)
+    .map((c, i) => ({
+      id: `${c.body || "?"}#${i}`,
+      name: c.name, body: c.body || null,
+      position: c.position, rotation: c.rotation || null,
+      volume: c.volume || null,
+    }));
+}
+
+/**
+ * La tempete de sable : quatre cylindres, un compte, deux evenements.
+ *
+ * `ScreenEffectController` tient `_sandstormCount` et joue ses particules tant
+ * qu'il est positif — un compte, pas un booleen, parce que rien n'interdit
+ * plusieurs tempetes. Le portage n'avait ni l'un ni l'autre.
+ */
+export class Sandstorm {
+  constructor(volumes = [], cylindres = []) {
+    this.volumes = volumes;
+    this.cylindres = cylindres;
+    this.trigger = new CompoundTrigger();
+    this.count = 0;
+  }
+
+  get active() { return this.count > 0; }
+  get inside() { return this.trigger.inside > 0; }
+
+  /**
+   * @param worldPoint position du joueur, en coordonnees monde
+   * @param shiftOf    decalage du corps porteur depuis la scene au repos
+   * @returns {"enter"|"exit"|null}
+   */
+  update(worldPoint, shiftOf = null, actif = true) {
+    if (!this.volumes.length || !this.cylindres.length) return null;
+    // L'ENTONNOIR N'EST PAS TOUJOURS LA. Il pousse a une minute donnee de la
+    // boucle et se retire a une autre (`funnelActive`) : traverser l'endroit
+    // ou il SERA ne doit pas lever de tempete. Le portage levait la tempete
+    // sur la seule geometrie du volume, qui, elle, ne bouge pas.
+    let dedans = false;
+    if (!actif) {
+      const avant = this.trigger.contains("joueur");
+      if (avant) { this.trigger.exitChild("joueur"); this.count--; return "exit"; }
+      return null;
+    }
+    for (const c of this.cylindres) {
+      if (!c.volume) continue;
+      const d = shiftOf ? (shiftOf(c) || [0, 0, 0]) : [0, 0, 0];
+      const p = [worldPoint[0] - d[0], worldPoint[1] - d[1], worldPoint[2] - d[2]];
+      if (insideVolume(c, p)) { dedans = true; break; }
+    }
+    // Un seul corps suit — le joueur. `OnEntry` ne teste que le tag
+    // `PlayerDetector` : un vaisseau qui traverse ne declenche rien.
+    const avant = this.trigger.contains("joueur");
+    if (dedans && !avant) { this.trigger.enterChild("joueur"); this.count++; return "enter"; }
+    if (!dedans && avant) { this.trigger.exitChild("joueur"); this.count--; return "exit"; }
+    return null;
+  }
 }

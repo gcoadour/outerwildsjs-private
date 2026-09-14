@@ -113,7 +113,11 @@ OW_BUILD=/chemin/vers/OuterWilds_Alpha_1_2_Data node scripts/run-tests.mjs
 | Maillages décodés | 1 569, 929 529 sommets, concordants avec UnityPy |
 | Clips d'animation décodés | flux Mecanim et courbes legacy, mêmes valeurs que le décodeur Python |
 | Pipeline complet dans Chromium | 70 s, mêmes chiffres que le pipeline Python |
-| Logique de jeu, sans le build | 731 vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg, référentiels déclarés, décor vivant, son d'événement, équipement |
+| Composants posés **hors** de `level0` | 37 classes, 61 instances — les préfabriqués, dont la sonde entière ([`docs/60`](docs/60-sonde.md)) |
+| Logique de jeu, sans le build | **1 892** vérifications : mort et flashback, supernova, dégâts par pièce, LOD, éviction, courbes de particules, manches tactiles et manette, rotation propre, champs de force, fluides, occlusion quantique, conteneur Ogg, référentiels déclarés, décor vivant, son d'événement, équipement, **la sonde**, **les commandes du build**, **la visée d'un référentiel**, **ce qu'on tient en main**, **les attaches et les météores enfin appelées**, **s'asseoir**, **les modes d'entrée**, **le quantique**, **la poussière de vitesse**, **les passages**, **les phares du vaisseau**, **la chaleur des feux**, **les sons d'interface**, **le vaisseau miniature**, **perdre la gravité**, **les invites du sac**, **l'invulnérabilité du premier tour**, **le secteur majeur actif**, **les seuils et les zones sans soleil**, **les zones sonores et leurs portes**, **la chambre en apesanteur**, **les annonces de mode du build**, **le mode atterrissage**, **la boucle mesurée**, **ce que « posé » veut dire**, **la remise à zéro de la simulation**, **la tour de lancement**, **les deux sensibilités**, **les deux tables de manette** |
+| Extracteurs sur le build | **445** vérifications (`tests/05-extract.mjs`) |
+| En navigateur, avec le build | **328** contrôles (`tools/15_verify.py --profil`) |
+| En navigateur, sans le build | 13 contrôles (`tools/15_verify.py --repli`) |
 
 Ce qui peut se vérifier sans le jeu l'est sans lui : le décodage des clips
 d'animation s'éprouve sur un flux fabriqué, l'export glTF sur un monde de

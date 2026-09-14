@@ -18,6 +18,20 @@ const ARRAY_BUFFER = 34962, ELEMENT_ARRAY_BUFFER = 34963;
 const FLOAT = 5126, UNSIGNED_INT = 5125, UNSIGNED_SHORT = 5123;
 
 /** Racines exportees par defaut : les corps du systeme solaire. */
+/**
+ * Ce que le joueur TIENT.
+ *
+ * L'export part des corps celestes, et ces deux-la pendent sous
+ * `PlayerCamera` : ils ne sortaient donc jamais. Le baton a guimauve porte les
+ * quatre seuls clips du build qui ne bouclent pas
+ * ([`docs/63`](../../../docs/63-boucles.md)), et la lunette a un corps et un
+ * verre que le portage remplacait par un champ de vision.
+ *
+ * Leur transformation LOCALE est celle qui les place devant l'oeil : on la
+ * garde telle quelle, et le moteur n'a qu'a les accrocher a la camera.
+ */
+export const HELD_ROOTS = ["MarshmallowStick", "TelescopeGUI"];
+
 export const DEFAULT_ROOTS = [
   "Sun_Body", "HourglassTwins_Pivot", "TimberHearth_Pivot", "BrittleHollow_Pivot",
   "GiantsDeep_Pivot", "DarkBramble_Pivot", "QuantumMoon_Body", "Comet_Pivot",
@@ -179,6 +193,35 @@ function unswizzleNormal(img) {
 }
 
 // --- animations -------------------------------------------------------------
+
+/**
+ * `WrapMode` d'Unity : 0 Default, 1 Once, 2 Loop, 4 PingPong, 8 ClampForever.
+ */
+export const WRAP = { DEFAULT: 0, ONCE: 1, LOOP: 2, PINGPONG: 4, CLAMP: 8 };
+
+/**
+ * Un clip BOUCLE-t-il ?
+ *
+ * Deux familles, deux reponses, et le portage n'en donnait qu'une — « oui » —
+ * pour tout le monde.
+ *
+ * - **legacy** (`m_AnimationType == 1`) : le `m_WrapMode` du clip. En
+ *   `Default`, celui du composant `Animation` ; en `Default` la aussi, Unity
+ *   retombe sur `Once`. Le build a sept clips legacy : trois en `Loop`, quatre
+ *   en `Once` (`idle`, `PullOut`, `PutBack`, `Therm`).
+ * - **Mecanim** (`m_AnimationType == 2`) : le clip ne porte pas la reponse, son
+ *   entete de muscle si — `m_LoopBlend`. Les neuf du build l'ont a `true` : ce
+ *   sont des inactivites, et elles bouclent.
+ */
+export function clipLoops(clip, componentWrap = WRAP.DEFAULT) {
+  if (clip.m_AnimationType === 2) {
+    const m = clip.m_MuscleClip;
+    return !m || m.m_LoopBlend !== false;
+  }
+  let w = clip.m_WrapMode ?? WRAP.DEFAULT;
+  if (w === WRAP.DEFAULT) w = componentWrap ?? WRAP.DEFAULT;
+  return w === WRAP.LOOP || w === WRAP.PINGPONG;
+}
 //
 // La conversion de repere est la meme que pour les noeuds, mais les valeurs
 // arrivent sous deux formes : structures {x, y, z[, w]} pour les clips legacy,
@@ -241,7 +284,7 @@ export function exportSubtree(ctx, rootGid, label, {
   const sceneFile = env.get(ctx.sceneFile);
   const g = new GltfBuilder();
   const stats = { nodes: 0, meshes: 0, skipped: 0, skins: 0, incompleteSkins: 0,
-                  animations: 0, channels: 0, cubic: 0, linear: 0,
+                  animations: 0, onceClips: 0, channels: 0, cubic: 0, linear: 0,
                   mecanimClips: 0, emptyMecanimClips: 0, unresolvedBones: 0,
                   unresolvedPaths: 0, compressedClips: 0, noCollide: 0 };
 
@@ -301,10 +344,15 @@ export function exportSubtree(ctx, rootGid, label, {
   // celui qui joue par defaut ; les autres sortent quand meme, mais prefixes,
   // pour que le moteur ne les superpose pas sur les memes os.
   const animOf = new Map();
+  // Le `m_WrapMode` du COMPOSANT : un clip en `Default` (0) s'en remet a lui,
+  // et lui en `Default` s'en remet a `Once`. C'est la regle d'Unity, et les
+  // dix-neuf composants `Animation` du build sont tous en `Default`.
+  const cmpWrap = new Map();
   for (const type of ["Animation", "Animator"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
       const d = ctx.readEngine(o);
       if (!d || !d.m_GameObject) continue;
+      if (type === "Animation") cmpWrap.set(d.m_GameObject.pathId, d.m_WrapMode ?? 0);
       const refs = [];
       // composant Animation : m_Animation designe le clip par defaut ; a
       // defaut, on retient le premier de m_Animations
@@ -696,9 +744,22 @@ export function exportSubtree(ctx, rootGid, label, {
         // « Objet|Clip » pour le clip par defaut, prefixe « ~ » pour les autres :
         // le moteur ne demarre que les premiers, sans quoi deux clips se
         // disputeraient les memes os (voir web/src/geometry.js).
+        //
+        // Et un second marqueur, « ! », pour ce qui ne BOUCLE PAS. Le portage
+        // jouait tout en boucle, et quatre des sept clips legacy du build sont
+        // en `WrapMode.Once` — dont `PullOut` et `PutBack`, qu'une boucle fait
+        // sortir et rentrer sans fin (docs/63-boucles.md).
         const nm = `${ctx.name(gid) || "node"}|${clip.m_Name || "clip"}`;
-        g.animations.push({ name: ref.isDefault ? nm : `~${nm}`, samplers, channels });
+        const boucle = clipLoops(clip, cmpWrap.get(gid));
+        g.animations.push({
+          name: `${ref.isDefault ? "" : "~"}${boucle ? "" : "!"}${nm}`,
+          samplers, channels,
+          // `extras` par-dessus le nom : le nom est la voie sure — Babylon le
+          // rend toujours — et `extras` la voie lisible, pour qui ouvre le glTF.
+          extras: { loop: boucle },
+        });
         stats.animations++;
+        if (!boucle) stats.onceClips++;
         stats.channels += channels.length;
       }
     }

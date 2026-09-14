@@ -149,6 +149,24 @@ export class GazeSwitch {
  * Rend des vitesses en degres par seconde plutot que de tourner quoi que ce
  * soit : c'est ce qui permet de l'eprouver sans navigateur.
  */
+/** L'unique `GazeWebAnimator` du build, et les deux anneaux qu'il commande. */
+export function webAnimators(gameplay) {
+  return ((gameplay.placed || {}).GazeWebAnimator || []).map((c) => {
+    const t = c.targets || {};
+    return {
+      name: c.name, body: c.body || null, position: c.position,
+      // Les deux anneaux sont designes par POINTEUR, et leurs objets portent
+      // des noms propres — `innerWeb` et `outerWeb` — ce qui suffit a les
+      // retrouver dans le glTF.
+      inner: (t._innerWeb && t._innerWeb.name) || null,
+      outer: (t._outerWeb && t._outerWeb.name) || null,
+      // L'interrupteur qui les commande est pose sur le MEME objet : c'est le
+      // volume de regard lui-meme.
+      gazeSwitch: (t._gazeSwitch && t._gazeSwitch.name) || null,
+    };
+  });
+}
+
 export function webSpeeds(gazeFraction, chargeFraction, cfg = WEB) {
   return {
     outer: cfg.outer * gazeFraction ** 3 + cfg.outer * chargeFraction ** 3,

@@ -19,25 +19,30 @@ import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
 import { buildOrbits, advance, currentPosition, period,
          frameVelocity } from "./orbits.js";
-import { loadGameplay } from "./config.js";
+import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
+import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
+         ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
-         heatSources, heatAt, remoteConsoles, RemoteConsoles } from "./consoles.js";
+         heatSources, heatAt, remoteConsoles, RemoteConsoles,
+         eatMarshmallowHeals, flashlightPromptVisible,
+         jetpackPrompts } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
-import { Ship, shipSpawn } from "./ship.js";
-import { startPose, walkToShip, horizonBasis, EYE_HEIGHT } from "./start.js";
-import { loadAudioMap, AudioField, AudioMixer, signalStrength } from "./audio.js";
+import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
+import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT } from "./start.js";
+import { loadAudioMap, AudioField, AudioMixer, signalStrength,
+         audioShells, AudioShells } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
-import { TimeLoop } from "./timeloop.js";
+import { TimeLoop, ResetTrigger } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
 import { PlayerDeathHandler, FlashbackOverlay, deathCamera,
          DEATH_SOUNDS } from "./death.js";
@@ -45,30 +50,48 @@ import { MeshLOD, Evictor, lodThresholds, colliderLODs, ColliderLODs } from "./l
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
 import { QuantumMoon, quantumHosts, bodyOccluder,
          alignToObserver } from "./quantum.js";
+import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
+         statueParts, planarCandidate, slopeOK,
+         QUANTIQUE } from "./quantumobj.js";
 import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
-import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
+import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
+         activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
-         webSpeeds } from "./gaze.js";
-import { elevators, Elevator, LaunchTerminal, landingPadSensors,
+         webSpeeds, webAlpha, webAnimators } from "./gaze.js";
+import { elevators, Elevator, LaunchTerminal, launchTerminals,
+         elevatorControllers, RETURN_ABOVE, landingPadSensors,
          museumEntryways } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
-         roastPrompts, roastBroken } from "./helmet.js";
+         roastPrompts, roastBroken, shipProximity,
+         RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
-import { Telescope, ProbeLauncher, ProbeCamera } from "./tools.js";
+import { Telescope, ProbeCamera, SoundWave, WAVE,
+         telescopeScale, zoomArrowFraction } from "./tools.js";
+// La sonde entiere vient du prefabrique `sharedassets1.assets:2295`, que le
+// recensement ne voyait pas : il ne lisait que `level0` (docs/60-sonde.md).
+import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
+         probeReadout, selfDestructed } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
-import { GamepadControls, padAvailable } from "./gamepad.js";
-import { SpinField, sunElevation } from "./spin.js";
-import { directionalFields, polarFields } from "./gravity.js";
+import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
+// Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
+import { loadCommandes } from "./input.js";
+import { Modes, annonceDe } from "./modes.js";
+import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
+import { MODELE, ModelLandingSpot, RocketKid, crashes,
+         modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
+import { SpinField, sunElevation, spinPeriod } from "./spin.js";
+import { directionalFields, polarFields, insideVolume,
+         dominantField } from "./gravity.js";
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
 // Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
 // `_isTonemappingActive` faux par defaut du manager ; les decalcomanies passent
@@ -79,27 +102,51 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
+import { LockOn, aimedFrame, canFlyTo, matchedVelocity,
+         ancientProbeAcceleration } from "./tracker.js";
+// Six classes du build, ecrites et jamais appelees jusqu'ici : le module
+// existait, ses quarante verifications passaient, et aucun module du moteur ne
+// l'importait (docs/68-lois.md).
+import { alignedBodies, alignmentDirection, fieldInheritors, blinkingRenderers,
+         Blinker, brokenNodes, waterEffects } from "./attachments.js";
+// Ce que le joueur TIENT : le baton a guimauve et la lunette pendent sous
+// `PlayerCamera` dans le build, et l'export ne partait que des corps celestes
+// (docs/64-mains.md).
+import { MarshmallowStick as BatonGuimauve, thermTime,
+         STICK_LIGHTS } from "./held.js";
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
-import { loadLighting, LightField, ambientTarget, ambientStep } from "./lights.js";
+import { loadLighting, LightField, ambientTarget, ambientStep,
+         shiplightRange, SHIPLIGHT_RANGE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
-import { SandLevels, sandColumns, sandFunnels, markCrushing } from "./sand.js";
+import { SandLevels, sandColumns, sandFunnels, markCrushing,
+         funnelActive } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
-import { referenceFrames, DeclaredFrames, restingPoint } from "./frames.js";
+import { referenceFrames, DeclaredFrames, restingPoint,
+         autopilotDistances, attachTarget,
+         matchInitialVelocity } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
+         warps, DerelictWarps,
+         meteorLaunchers, MeteorLaunchers, METEOR,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
-         qrot as qrotDecor } from "./decor.js";
-import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
-         gameSectorAt, signalVolumes, signalZoneAt } from "./volumes.js";
-import { gearPickups, suitVolumes, suitVolumeStep, Equipment,
-         ZeroGTraining } from "./gear.js";
+         qrot as qrotDecor, lookRotation } from "./decor.js";
+import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
+         sandstormVolumes,
+         childTriggers, Sandstorm, radiationEmitters, probePrompts,
+         promptFaced } from "./volumes.js";
+import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
+         ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
+         LOCK_ON } from "./gear.js";
+import { AttachPoints, snapDuration, snapDegrees, turnFraction,
+         FieldAlignment, FIELD_ALIGN } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
-         TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO } from "./reactaudio.js";
+         TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO,
+         UISounds } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
@@ -112,6 +159,10 @@ async function boot() {
   const data = await loadSolarSystem();
   // charge avant le calcul du point d'apparition, qui s'appuie dessus
   const gameplay = await loadGameplay();
+  // §P Les prefabriques, et les dix delais de `SelfDestruct` qu'ils portent.
+  const prefabs = await loadPrefabs();
+  // `DistantSupernova` : cinq secondes, et c'est le build qui le dit.
+  const dureeSupernova = (prefabs.selfDestruct || {}).DistantSupernova ?? 1;
   const resources = new Resources(
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
@@ -143,6 +194,17 @@ async function boot() {
   // simplement pas au jeu — c'est le genre d'ecart qu'une capture ne trahit
   // pas, faute de point de comparaison dans l'image.
   const camerasDuBuild = await loadCameras();
+  // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
+  // prend le relais — et elle se sait repli, comme `config.js`.
+  const cmds = await loadCommandes();
+  // §K Le jeu de commandes actif. `OWInput` en echange l'ensemble a chaque
+  // changement de mode, et tout ce qui lit une touche passe par lui
+  // (docs/70-modes.md).
+  const modes = new Modes();
+  cmds.setModes(modes);
+  window.__modes = modes;
+  window.__cmds = cmds;
+  window.__commandes = cmds;
   const reglagesCam = reglagesDuJoueur(camerasDuBuild);
   camera.fov = (reglagesCam.fov || 70) * Math.PI / 180;
   // Calque des billes de sonde : visible du joueur, pas de la sonde elle-meme.
@@ -175,6 +237,37 @@ async function boot() {
   // C'est de la que vient le cycle jour/nuit, absent jusqu'ici.
   const spins = new SpinField(bodies);
   window.__spin = spins;
+
+  /**
+   * La vitesse avec laquelle un corps se reveille : `MatchInitialMotion`.
+   *
+   * `AttachOnAwake` decide du porteur en posant une petite sphere et en
+   * regardant ce qu'elle touche ; `attachTarget` pose la meme question au
+   * systeme charge. Le rayon de controle vaut 1 sur trente des trente-quatre
+   * instances du build, mais le point de depart du joueur est a hauteur d'oeil
+   * au-dessus du sol : on elargit a la hauteur d'oeil, faute de collider.
+   *
+   * @param point position, dans le repere ANCRE
+   */
+  function vitesseDeDepart(point, ignoreAngular = false) {
+    const monde = [point[0] + framePos[0], point[1] + framePos[1],
+                   point[2] + framePos[2]];
+    const porteur = attachTarget(monde, EYE_HEIGHT + 2, bodies);
+    if (!porteur) return [0, 0, 0];
+    const s = spins.spin(porteur);
+    // Dans le repere ancre, la vitesse du porteur est nulle quand c'est lui
+    // l'ancre. Le terme tangentiel, lui, ne l'est jamais : l'ancre ne tourne
+    // pas avec la planete (docs/73-passages.md).
+    const v = porteur === anchorBody ? [0, 0, 0]
+      : [porteur.velocity ? porteur.velocity[0] : 0,
+         porteur.velocity ? porteur.velocity[1] : 0,
+         porteur.velocity ? porteur.velocity[2] : 0];
+    return matchInitialVelocity(
+      { velocity: v, position: porteur.position,
+        angularVelocity: s ? [s.axis[0] * s.rate, s.axis[1] * s.rate,
+                              s.axis[2] * s.rate] : null },
+      monde, { ignoreAngular });
+  }
 
   /** Exprime toutes les positions dans le repere du corps ancre. */
   function reframe(anchor) {
@@ -225,6 +318,7 @@ async function boot() {
 
   // Position du vaisseau dans la scene AU REPOS, pour ramener ce qu'il porte.
   const shipRest = ((gameplay.singletons || {}).ShipBody || {}).position || null;
+  const shipRestRot = ((gameplay.singletons || {}).ShipBody || {}).rotation || null;
 
   // Depart : au point d'apparition du joueur, celui que le build pose.
   //
@@ -293,6 +387,15 @@ async function boot() {
   const dialogue = new DialogueSystem(await loadDialogue());
   const pdata = new PlayerData();
   window.__pdata = pdata;
+  // §V La boucle qui commence est la suivante : `OnStartOfTimeLoop` la recoit
+  // deja incrementee dans le build. Au tout premier demarrage, `loopCount`
+  // vaut zero et la boucle qui s'ouvre est donc la premiere.
+  pdata.startOfTimeLoop(pdata.loopCount + 1);
+  resources.invulnerable = pdata.isInvulnerable;
+  if (resources.invulnerable) {
+    console.log("premier tour : les degats ne portent pas tant qu'on n'a pas "
+      + "les codes, et jusqu'a ce qu'on monte dans le vaisseau");
+  }
 
   // Nom de secteur (Sector.SectorName) correspondant a un corps.
   const SECTOR_OF = {
@@ -310,7 +413,8 @@ async function boot() {
   if (audioMap.length) await audio.init();
   // Dix-sept zones d'ambiance : ce ne sont pas des sources de plus, ce sont des
   // couches qui s'arbitrent par priorite (web/src/ambience.js).
-  const ambience = new AmbienceMixer(ambienceZones({ volumes: await loadAmbience() }));
+  const ambience = new AmbienceMixer(
+    ambienceZones({ volumes: await loadAmbience() }, entrywayTriggers(gameplay)));
   window.__ambience = ambience;
 
   const particleMap = await loadParticleMap();
@@ -363,9 +467,6 @@ async function boot() {
   // (docs/45-recensement-mesure.md).
   // Le seul `Surface` du build qui declare ecraser est le collider de
   // `RisingSand` : c'est lui qui porte la mort par compression (docs/53).
-  // Les zones sombres et les brouilleurs : extraits depuis longtemps, lus par
-  // personne. Les premieres coupent l'ambiance globale (docs/54-lumiere.md).
-  const zonesSignal = signalVolumes(gameplay);
   const sand = new SandLevels(markCrushing(sandColumns(gameplay), gameplay),
                               sandFunnels(gameplay));
   window.__sand = sand;
@@ -402,16 +503,121 @@ async function boot() {
   // On allume en REGARDANT (docs/50-regard.md) : trois secondes de regard fixe,
   // a moins de quatre unites et dix degres, et la porte d'energie s'efface.
   const regards = gazeSwitches(gameplay).map((d) => new GazeSwitch(d));
+  // §M LA TOILE. `GazeWebAnimator` fait tourner deux anneaux en sens INVERSE,
+  // au cube des fractions : la toile s'anime a mesure qu'on la fixe, et
+  // s'efface en deux secondes une fois la charge pleine. Le portage avait la
+  // loi, ecrite et eprouvee (docs/50) — et il ne faisait tourner personne.
+  const toiles = webAnimators(gameplay);
+
+  // §N LES COQUILLES SONORES. Deux dans le build, concentriques sur Giant's
+  // Deep : l'ocean a 498 unites, la membrane corrosive a 205. Chacune etouffe
+  // la source posee sur le MEME objet — `GetComponent`, pas une recherche — et
+  // c'est la position qui les apparie ici, faute d'un autre lien.
+  const coquilles = audioMap.length
+    ? new AudioShells(audioShells(gameplay), audioMap) : null;
+  if (coquilles) {
+    console.log(`${coquilles.count} coquilles sonores, `
+      + `${coquilles.paired} appariees a leur source`);
+  }
+  window.__coquilles = coquilles;
+
+  // §M LA TEMPETE DE SABLE. `SandstormVolume` n'a pas de collider a lui : sa
+  // forme est celle de ses ENFANTS — quatre capsules qui se chevauchent le long
+  // de l'entonnoir de sable entre les jumelles. C'est exactement ce pour quoi
+  // `CompoundTriggerVolume` existe : quatre formes, UNE entree, UNE sortie.
+  //
+  // `ScreenEffectController` joue ses particules tant que le compte est
+  // positif ; le portage n'avait ni le compte ni les particules.
+  const tempetes = sandstormVolumes(gameplay);
+  const tempete = new Sandstorm(tempetes,
+    tempetes.length ? childTriggers(gameplay, tempetes[0].body) : []);
+  window.__tempete = tempete;
+  let psSable = null;
+  function systemeSable() {
+    if (psSable !== null) return psSable;
+    try {
+      const ps = new BABYLON.ParticleSystem("sandstorm", 600, scene);
+      const t = new BABYLON.DynamicTexture("sandTex", 8, scene, false);
+      const c2 = t.getContext();
+      c2.fillStyle = "#d9b477";
+      c2.beginPath(); c2.arc(4, 4, 3, 0, 6.284); c2.fill();
+      t.update();
+      ps.particleTexture = t;
+      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+      ps.emitter = camera;
+      ps.minEmitBox = new BABYLON.Vector3(-8, -8, -8);
+      ps.maxEmitBox = new BABYLON.Vector3(8, 8, 8);
+      ps.minLifeTime = 0.4; ps.maxLifeTime = 1.2;
+      ps.minSize = 0.05; ps.maxSize = 0.25;
+      ps.minEmitPower = 4; ps.maxEmitPower = 14;
+      ps.color1 = new BABYLON.Color4(0.85, 0.72, 0.47, 0.5);
+      ps.color2 = new BABYLON.Color4(0.72, 0.6, 0.4, 0.35);
+      ps.colorDead = new BABYLON.Color4(0.7, 0.6, 0.4, 0);
+      ps.emitRate = 0;
+      ps.start();
+      psSable = ps;
+    } catch (e) { psSable = false; }
+    return psSable;
+  }
+
+  // §M LA POUSSIERE DE VITESSE, et son rendu.
+  //
+  // `MotionDust` est un systeme de particules pose SUR la camera : il ne seme
+  // rien sous trente unites par seconde, et au-dela le debit monte pendant que
+  // la duree de vie diminue. Les traits sont alignes sur le deplacement — le
+  // build fait un `LookAt` sur la direction du mouvement.
+  //
+  // La texture est fabriquee ici plutot que lue dans `data/` : ce lot ne
+  // dispose pas de celle du build, et un point blanc etire suffit a porter la
+  // loi, qui est une loi de DEBIT et de DUREE, pas de dessin.
+  let poussiere = { emitting: false };
+  let psPoussiere = null;
+  function systemePoussiere() {
+    if (psPoussiere !== null) return psPoussiere;
+    try {
+      const ps = new BABYLON.ParticleSystem("motionDust", 400, scene);
+      const dt2 = new BABYLON.DynamicTexture("dustTex", 8, scene, false);
+      const ctx = dt2.getContext();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(3, 0, 2, 8);
+      dt2.update();
+      ps.particleTexture = dt2;
+      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+      ps.emitter = camera;
+      // Une boite autour du joueur : le build seme dans un volume qui suit la
+      // camera, et non depuis un point.
+      ps.minEmitBox = new BABYLON.Vector3(-20, -20, -20);
+      ps.maxEmitBox = new BABYLON.Vector3(20, 20, 20);
+      ps.start();
+      psPoussiere = ps;
+    } catch (e) {
+      psPoussiere = false;   // pas de particules : on n'y revient pas
+    }
+    return psPoussiere;
+  }
   const portes = energyGates(gameplay).map((d) => new EnergyGate(d));
-  window.__regard = { regards, portes };
+  window.__regard = { regards, portes, toiles };
   // La tour de lancement : le terminal refuse tant qu'on ne sait pas les
   // codes, puis l'ascenseur monte de 31,5 unites en cinq secondes
   // (docs/51-tour.md).
-  const ascenseurs = elevators(gameplay).map((d) => new Elevator(d));
+  // `LaunchElevatorController.Start` ferme les commandes de la cabine — une
+  // ligne, et c'est elle qui fait que la tour n'est pas ouverte d'emblee. Le
+  // constructeur du portage naissait deja verrouille ; on le dit quand meme,
+  // parce que c'est le build qui le decide et non le portage.
+  const ascenseurs = elevators(gameplay).map((d) => {
+    const a = new Elevator(d);
+    a.deactivateControls();
+    return a;
+  });
   const terminal = new LaunchTerminal();
+  // La borne de lancement et le declencheur d'en haut : sans eux, les commandes
+  // de la cabine ne s'ouvrent jamais (docs/92-tour.md).
+  const bornesTour = launchTerminals(gameplay);
+  const declencheursTour = elevatorControllers(gameplay);
   const capteursPad = landingPadSensors(gameplay);
   const museeEntrees = museumEntryways(gameplay);
-  window.__tour = { ascenseurs, terminal, capteursPad, museeEntrees };
+  window.__tour = { ascenseurs, terminal, bornesTour, declencheursTour,
+                    capteursPad, museeEntrees };
   // Le casque qui traine derriere le regard, l'alarme a trente pour cent, les
   // voyants qui clignotent, les notifications qui s'effacent, et les huit
   // invites de la guimauve (docs/52-casque.md).
@@ -420,8 +626,36 @@ async function boot() {
   const voyants = new DamageDisplay();
   const notifications = new Notifications();
   const invitesGuimauve = roastPrompts(gameplay);
+  // Chacune tient son etat : appuyer une fois sort le baton, s'eloigner le range.
+  const invitesRoast = invitesGuimauve.map((d) => ({ data: d, etat: new RoastPrompt(d) }));
+  // §Q La zone de proximite du vaisseau : treize unites, et les voyants
+  // d'avarie ne parlent que dedans.
+  const zonesVaisseau = shipProximity(gameplay);
+  let presDuVaisseau = true;
+  window.__proximite = { zones: zonesVaisseau, get pres() { return presDuVaisseau; } };
+  // Une seule annonce par eloignement, pas une par image.
+  let grillageRompu = false;
   // Les six buses du vaisseau miniature : homonymes, donc pilotees par POSITION.
   const busesModele = modelShipNozzles(gameplay);
+
+  // §S LE VAISSEAU MINIATURE VOLE. Ce n'est pas un decor : c'est un petit jeu
+  // complet, avec sa console, ses trois pistes, son seuil de crash et quelqu'un
+  // qui commente. Le portage le laissait pose (docs/78-modele.md).
+  const modele = modelShipBody(gameplay);
+  const pistesModele = modelLandingSpots(gameplay).map((d) => ({
+    data: d, etat: new ModelLandingSpot(),
+  }));
+  const enfant = rocketKids(gameplay)[0] || null;
+  const compteurEnfant = new RocketKid();
+  if (modele) {
+    modele.pos = modele.position.slice();
+    modele.vel = [0, 0, 0];
+    modele.quat = [0, 0, 0, 1];
+    modele.repos = modele.position.slice();
+    modele.node = undefined;
+  }
+  window.__modele = { vaisseau: modele, pistes: pistesModele,
+                      enfant: compteurEnfant, arbres: enfant };
   window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
   // Ce que le joueur porte en plus de son corps (docs/53-joueur.md) : l'etat,
   // le bruit qu'il fait, et le capteur qui le tue s'il reste coince.
@@ -446,10 +680,27 @@ async function boot() {
   const bursts = particleBursts(gameplay).filter((b) => !b.looping)
     .map((b) => ({ b, t: new RandomTimer(b.min, b.max) }));
   const passages = new Teleporters(teleporters(gameplay));
+  // §N LES TROIS PASSAGES DE DARK BRAMBLE. Un raccourci depuis Timber Hearth,
+  // une porte vers l'epave, et un BORD pour en sortir : la dimension de l'epave
+  // n'a pas de porte de sortie, on la quitte en sortant de sa sphere.
+  const epaves = new DerelictWarps(warps(gameplay));
+  window.__epaves = epaves;
   // §4 les volumes de jeu : ce qui blesse, ce qui fait flotter, ce qui limite.
   const hazards = new Hazards(hazardVolumes(gameplay));
   const zeroGVolumes = zeroGFields(gameplay);
-  const playSectors = gameSectors(gameplay);
+  // La chambre en apesanteur du village n'a pas de forme : elle a une porte.
+  const presencesZeroG = zeroGVolumes.map((z) => new ZonePresence(z));
+  // Les secteurs MAJEURS, avec leur declencheur : c'est eux que la minicarte
+  // interroge, et eux seuls qui repondent a `GetUseMinimap`.
+  const majSecteurs = majorSectors(gameplay);
+  // Les zones sans soleil et leurs portes : `DarkZone` n'etait pas elles.
+  const zonesSansSoleil = new EffectZones(sunlessZones(gameplay));
+  // Et la zone sombre, qui est un SEUIL elle aussi : le portage la testait par
+  // contenance, et l'invite de lampe clignotait le temps de l'embrasure.
+  const zonesSombres = new EffectZones(darkZones(gameplay),
+                                       ["EnterDarkZone", "ExitDarkZone"]);
+  // Le secteur majeur actif de l'image courante, pour les controles navigateur.
+  let secteurMajeur = null;
   // §7 l'equipement se RAMASSE : le portage le donnait d'emblee.
   const pickups = gearPickups(gameplay);
   const suits = suitVolumes(gameplay);
@@ -457,15 +708,59 @@ async function boot() {
   const training = new ZeroGTraining(repairs);
   // §5 le son d'evenement : marcher, pousser, voyager, finir.
   const events = eventAudio(await loadEventAudio());
+  // §R LES HUIT SONS D'INTERFACE. Le portage n'en jouait aucun : avancer un
+  // dialogue, le finir, viser un referentiel, le relacher, allumer sa lampe —
+  // tout cela se faisait en silence (docs/77-sons.md).
+  const sonsUI = new UISounds(events);
+  window.__sonsUI = sonsUI;
+  /** Joue un son d'interface s'il existe. */
+  function bipUI(nom) {
+    const s = sonsUI.fire(nom);
+    if (s) audio.playOneShot(s.file, { volume: s.volume });
+    return !!s;
+  }
   const footsteps = new Footsteps();
   const turbulence = new Turbulence();
   const thrusterSound = new ThrusterSound();
   const travelMusic = new TravelMusic();
   const endMusic = new EndOfTimeMusic();
-  window.__lots = { declared, decor, passages, hazards, zeroGVolumes, playSectors,
-                    pickups, suits, equipment, training, events,
+  // --- ce qui suit un autre corps, et ce qui clignote (docs/55, cable en 68) ---
+  const alignes = alignedBodies(gameplay);
+  const heritiers = fieldInheritors(gameplay);
+  const clignotants = blinkingRenderers(gameplay).map((d) => ({
+    data: d, blinker: new Blinker(d), node: null,
+  }));
+  const noeudsCasses = brokenNodes(gameplay);
+  const remous = waterEffects(gameplay);
+  console.log(`attaches : ${alignes.length} alignements, ${heritiers.length} heritiers,`
+    + ` ${clignotants.length} clignotants, ${noeudsCasses.length} noeuds casses,`
+    + ` ${remous.length} volumes d'eclaboussure`);
+  window.__attaches = { alignes, heritiers, clignotants, noeudsCasses, remous };
+
+  // Les meteores de Brittle Hollow : quatre lanceurs, un tir toutes les cinq a
+  // vingt secondes, cinquante de degats au contact (docs/68-lois.md).
+  const meteores = new MeteorLaunchers(meteorLaunchers(gameplay));
+  const meteorMat = new BABYLON.StandardMaterial("meteorMat", scene);
+  meteorMat.emissiveColor = new BABYLON.Color3(1, 0.45, 0.12);
+  meteorMat.disableLighting = true;
+  const meteorMeshes = [];
+  console.log(`meteores : ${meteores.launchers.length} lanceurs`);
+  window.__meteores = meteores;
+
+  window.__lots = { declared, decor, passages, hazards, zeroGVolumes,
+                    majSecteurs, zonesSansSoleil, zonesSombres,
+                    presencesZeroG, pickups, suits, equipment, training, events,
+                    // `champsParSeuils` est declare plus BAS : un getter evite
+                    // la zone morte temporelle, le piege recurrent de ce
+                    // fichier (docs/85-chambre.md).
+                    get champsParSeuils() { return champsParSeuils; },
                     get etat() {
                       return { referentiel: declared.current && declared.current.body,
+                               secteurMajeur: secteurMajeur && secteurMajeur.name,
+                               secteurAmbiant: secteurMajeur ? secteurMajeur.ambient : null,
+                               sansSoleil: zonesSansSoleil.count,
+                               minicarteDuSecteur: !!(secteurMajeur &&
+                                                      secteurMajeur.useMinimap),
                                equipement: { combinaison: equipment.suit,
                                              sonde: equipment.probe,
                                              minicarte: equipment.minimap },
@@ -481,6 +776,17 @@ async function boot() {
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
   // dans leur volume, comme SingleFieldDetector le veut.
   const dirFields = directionalFields(gameplay);
+  // Le seul champ directionnel commande par des SEUILS : la station meteo de
+  // Brittle Hollow. Il n'a pas de collider, et le portage l'ecartait donc.
+  //
+  // On lui greffe ses portes SUR PLACE : `attachEntryways` rend des copies, et
+  // c'est l'objet de `dirFields` que `strongestDirectional` lira.
+  const champsParSeuils = [];
+  for (const f of dirFields) {
+    if (!f.byEntryways) continue;
+    f.entryways = attachEntryways([f], entrywayTriggers(gameplay))[0].entryways;
+    champsParSeuils.push(new ZonePresence(f));
+  }
   // `PolarForceField` : un seul volume, d'acceleration -10, radiale a un axe.
   // Il etait extrait et jamais lu (docs/36-audit.md §2.9).
   const polFields = polarFields(gameplay);
@@ -494,7 +800,41 @@ async function boot() {
   // `OxygenDetector` : une capsule r=0,5 h=2 portee par le joueur. Elle etait
   // extraite et jamais lue, et le test de zone restait ponctuel.
   const oxyDet = oxygenDetector(gameplay);
-  const heat = heatSources(gameplay);
+  // §P LA CHALEUR DES FEUX DE CAMP. `heatSources` cherchait des classes dont le
+  // NOM contient « heat », et il n'y en a aucune dans ce build : la liste etait
+  // VIDE, et la guimauve ne chauffait jamais (docs/75-chaleur.md).
+  //
+  // La chaleur est ailleurs, et nommee : huit `RadiationEmitter` de type 1,
+  // magnitude 100, avec une courbe qui tient jusqu'a dix unites et tombe a zero
+  // a quarante-cinq.
+  // §P Les quatre invites de sonde et l'invite de lunette, avec leur regard.
+  let invitesSonde = probePrompts(gameplay);
+  let inviteSondeVisible = false;
+  // `DestroyAllProbePromptTriggers` : une fois lancee depuis une invite, les
+  // quatre disparaissent pour de bon. Le tutoriel ne se rejoue pas.
+  let invitesDetruites = false;
+  window.__invites = { sonde: invitesSonde, detruites: false };
+  // §P LA SONDE ANCIENNE. Une seule instance, et son `FixedUpdate` tient en une
+  // ligne : `AddLocalAcceleration(forward * 50)`. Elle ne vise rien, ne
+  // s'arrete pas, et n'a pas de carburant — elle part, et c'est tout.
+  //
+  // Elle est posee pres de Giant's Deep, tournee vers l'exterieur du systeme.
+  const sondeAncienne = ((gameplay.placed || {}).AncientProbeController || [])[0]
+    ? (() => {
+        const c = gameplay.placed.AncientProbeController[0];
+        return { name: c.name, pos: c.position.slice(),
+                 rotation: c.rotation || [0, 0, 0, 1],
+                 vel: [0, 0, 0], node: undefined };
+      })()
+    : null;
+  window.__sondeAncienne = sondeAncienne;
+  const emetteurs = radiationEmitters(gameplay);
+  const heat = heatSources(gameplay, emetteurs);
+  console.log(`${heat.length} sources de chaleur, dont `
+    + `${emetteurs.filter((e) => e.type === 1).length} feux de camp`);
+  // Sonde de verification : la chaleur EXISTE, et sur un feu elle vaut cent.
+  window.__chaleur = { sources: heat,
+                       sur: heat.length ? heatAt(heat, heat[0].position) : 0 };
   const controllers = convoControllers(gameplay);
   window.__world = { lighting: placedLights, dirFields, polFields, fluids, oxygen,
                      heat, controllers };
@@ -502,6 +842,24 @@ async function boot() {
     `${dirFields.length} champs directionnels, ${polFields.length} champs polaires, ` +
     `${fluids.count} fluides, ` +
     `${oxygen.length} zones d'oxygene, ${heat.length} sources de chaleur`);
+
+  // Les impostures de planete (docs/56-impostures.md). Les trois plans cables
+  // sont dans la geometrie et leur renderer est ACTIF : sans ce lecteur, le
+  // portage colle trois quads plats par-dessus les vraies planetes.
+  //
+  // Elles se declarent ICI, avant le magasin de geometrie, et pas ou elles se
+  // lisent : le rappel de chargement les nomme, et il s'execute des le premier
+  // glTF — bien avant la ligne qui les creait cinq cents lignes plus bas. Le
+  // `const` etait donc dans sa zone morte, et CHAQUE lot de geometrie mourait
+  // sur `Cannot access 'impostures' before initialization`, en silence : le
+  // magasin attrape l'erreur et se contente d'un « glTF absent ou illisible ».
+  // Les shaders du jeu, le rattachement de la voute et celui du decor vivant ne
+  // s'appliquaient donc JAMAIS. Deux controles de `15_verify.py` le disaient —
+  // « affectations de shaders 0 », « decors vivants rattaches 0 » — et personne
+  // n'avait relie les deux zeros a la ligne d'avertissement qui les precede.
+  const impostures = planetImposters(camerasDuBuild).map((d) => new Imposter(d));
+  const impostersVifs = [];      // { imposture, plan, texture, cam }
+  window.__impostures = { impostures, vifs: impostersVifs };
 
   // Geometrie a la demande. Seuls le corps de depart et le soleil sont
   // telecharges avant la premiere image ; les autres arrivent quand on s'en
@@ -690,9 +1048,10 @@ async function boot() {
                       // la piece touchee — la plus proche du point d'impact, et
                       // non celle que designe une normale.
                       engineComponents(gameplay));
-      // Les trois capteurs de pad, en offsets du repere du vaisseau : c'est
-      // par eux que le build decide si l'on est POSE, et non par un contact.
-      if (ship.setPadSensors(capteursPad, spawnWorld)) {
+      // Les trois capteurs de pad, en offsets du repere du vaisseau. L'origine
+      // est la position de REPOS de `Ship_Body`, pas le point d'apparition :
+      // s'en tromper mettait les jambes a 171 unites de la coque.
+      if (ship.setPadSensors(capteursPad, shipRest, shipRestRot)) {
         console.log(`vaisseau : ${capteursPad.length} capteurs de pad`);
       }
       // Le vaisseau porte desormais son orientation : sans la poser une
@@ -746,6 +1105,161 @@ async function boot() {
   const qOccluder = bodyOccluder(bodies, qBody);
   window.__quantum = quantum;
 
+  // §L CE QUI BOUGE QUAND ON NE LE REGARDE PAS (docs/71-quantique.md).
+  //
+  // La lune quantique n'est pas seule : `QuantumObject` est une classe de base,
+  // et le build en pose deux descendances que le portage n'EXTRAYAIT meme pas.
+  // Cinq objets sur la lune — trois pins, une cabane, un panneau — et une tete
+  // ancienne en vitrine au musee.
+  //
+  // Les cinq ne sont poses par aucun composant : `MakeChildrenPlanarQuantum`
+  // prend ses ENFANTS au reveil et se detruit. Ce que ce composant fait n'est
+  // pas dans ses champs, il n'en a aucun.
+  const objetsQ = planarQuantumObjects(gameplay).map((d) => new ObjetQuantique(d));
+  const statuesQ = quantumStatues(gameplay);
+  window.__quantiques = { objets: objetsQ, statues: statuesQ };
+
+  /**
+   * Le noeud d'un nom donne le plus proche d'une position.
+   *
+   * Trois `Pine_Thick` portent le MEME nom sur la lune : `nodes.get(nom)` en
+   * rend un, et toujours le meme. C'est la position qui les distingue, comme
+   * pour les dix visages de nuage (docs/48) et les six buses du modele reduit.
+   *
+   * Le repere ANCRE se passe en parametre : il est recalcule a chaque image et
+   * n'existe pas ici. Le lire de cette portee-la leve, et une exception dans la
+   * boucle de rendu ne se voit pas (docs/71-quantique.md).
+   */
+  function noeudLePlusProche(entry, nom, monde, anchorPos) {
+    if (!entry || !entry.nodes) return null;
+    let best = null, bestD = Infinity;
+    for (const [n, node] of entry.nodes) {
+      if (n !== nom) continue;
+      const p = node.getAbsolutePosition
+        ? node.getAbsolutePosition() : node.position;
+      const d = (p.x + anchorPos[0] - monde[0]) ** 2
+              + (p.y + anchorPos[1] - monde[1]) ** 2
+              + (p.z + anchorPos[2] - monde[2]) ** 2;
+      if (d < bestD) { best = node; bestD = d; }
+    }
+    return best;
+  }
+
+  /**
+   * Une place tiree pour un objet quantique de la lune, ou null.
+   *
+   * Le build tire un point dans un disque de cent unites, le fait TOMBER sur le
+   * terrain par un rayon de deux cents, et refuse une pente de plus de
+   * quarante-cinq degres. Ce portage n'a pas toujours le terrain de la lune
+   * sous la main — elle n'est chargee qu'a portee — et retombe alors sur la
+   * SPHERE de rayon egal a la hauteur d'origine de l'objet : sur un corps de
+   * vingt unites de rayon, les deux se confondent a un cheveu pres, et la loi
+   * de la pente n'a rien a mordre.
+   *
+   * La condition qui compte, elle, est portee dans les deux cas : une place
+   * VISIBLE est refusee.
+   */
+  /**
+   * L'objet est-il dans le tronc de la camera active ?
+   *
+   * LE PIEGE. `QuantumObject.CheckVisibility` demande a Unity de tester des
+   * `Bounds` contre les plans du tronc ; Babylon, lui, ne sait tester que ce
+   * qui est CULLABLE — un maillage. Un `TransformNode` n'a pas d'`isInFrustum`,
+   * et `camera.isInFrustum(noeud)` leve donc a chaque image. Une exception dans
+   * la boucle de rendu ne se voit pas : tout ce qui suit dans l'image ne tourne
+   * simplement plus, et le symptome apparait trente controles plus loin, sur un
+   * `window.__visee` qui n'a jamais ete pose.
+   *
+   * `--repli` ne pouvait pas l'attraper : ce code ne tourne qu'avec le build.
+   */
+  function dansLeChamp(noeud) {
+    if (!noeud || !camera.isInFrustum) return false;
+    if (typeof noeud.isInFrustum === "function") {
+      try { return !!camera.isInFrustum(noeud); } catch (e) { /* pas cullable */ }
+    }
+    const mailles = noeud.getChildMeshes ? noeud.getChildMeshes(false) : [];
+    for (const m of mailles) {
+      if (typeof m.isInFrustum !== "function") continue;
+      try { if (camera.isInFrustum(m)) return true; } catch (e) { /* idem */ }
+    }
+    if (mailles.length) return false;
+    // Sans rien de cullable, on juge sur le POINT : c'est ce que fait le tronc,
+    // en moins fin, et cela suffit pour un objet de quelques unites.
+    const p = noeud.getAbsolutePosition ? noeud.getAbsolutePosition() : null;
+    if (!p) return false;
+    const v = p.subtract(camera.position);
+    const l = v.length();
+    if (!l) return true;
+    const cos = BABYLON.Vector3.Dot(v.scale(1 / l), camera.getForwardRay().direction);
+    return cos > Math.cos(camera.fov);
+  }
+
+  function tirerPlaceQuantique(o, anchorPos) {
+    const lune = bodies.find((b) => /quantum/i.test(b.name));
+    if (!lune || !o.node) return null;
+    const r = Math.hypot(o.local[0], o.local[1], o.local[2]) || 20;
+    let p = null;
+    // Le chemin du build : un point dans le disque de cent unites, un rayon
+    // vers le bas, et la pente qui refuse.
+    const eng = scene.getPhysicsEngine();
+    if (eng && eng.raycast) {
+      const loc = planarCandidate();
+      // Le disque du build est pose dans le plan du parent ; ici le parent est
+      // la lune, et son « haut » local est la verticale du point de depart.
+      const base = [o.local[0], o.local[1], o.local[2]];
+      const lh = Math.hypot(base[0], base[1], base[2]) || 1;
+      const haut = [base[0] / lh, base[1] / lh, base[2] / lh];
+      const e1 = Math.abs(haut[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+      const cr = [e1[1] * haut[2] - e1[2] * haut[1],
+                  e1[2] * haut[0] - e1[0] * haut[2],
+                  e1[0] * haut[1] - e1[1] * haut[0]];
+      const lc = Math.hypot(cr[0], cr[1], cr[2]) || 1;
+      const ax = [cr[0] / lc, cr[1] / lc, cr[2] / lc];
+      const az = [haut[1] * ax[2] - haut[2] * ax[1],
+                  haut[2] * ax[0] - haut[0] * ax[2],
+                  haut[0] * ax[1] - haut[1] * ax[0]];
+      const depart = [0, 1, 2].map((i) =>
+        lune.position[i] + haut[i] * (r + loc[1]) + ax[i] * loc[0] + az[i] * loc[2]);
+      try {
+        const a0 = new BABYLON.Vector3(depart[0] - anchorPos[0],
+                                       depart[1] - anchorPos[1],
+                                       depart[2] - anchorPos[2]);
+        const b0 = new BABYLON.Vector3(
+          a0.x - haut[0] * QUANTIQUE.raycastDist,
+          a0.y - haut[1] * QUANTIQUE.raycastDist,
+          a0.z - haut[2] * QUANTIQUE.raycastDist);
+        const hit = eng.raycast(a0, b0);
+        if (hit && hit.hasHit) {
+          const n = hit.hitNormalWorld || hit.hitNormal;
+          // La pente decide : au-dela de quarante-cinq degres, on retire.
+          if (!n || slopeOK([n.x, n.y, n.z], haut)) {
+            const q = hit.hitPointWorld || hit.hitPoint;
+            p = [q.x + anchorPos[0], q.y + anchorPos[1], q.z + anchorPos[2]];
+          } else return null;
+        }
+      } catch (e) { p = null; }
+    }
+    if (!p) {
+      // Sans collider sous la main — la lune n'est chargee qu'a portee — on
+      // retombe sur la SPHERE de rayon egal a la hauteur d'origine. Sur un
+      // corps de vingt unites, les deux se confondent a un cheveu pres, et la
+      // loi de la pente n'a rien a mordre.
+      const u = Math.random() * 2 - 1, a = Math.random() * 2 * Math.PI;
+      const sn = Math.sqrt(Math.max(0, 1 - u * u));
+      const dir = [sn * Math.cos(a), u, sn * Math.sin(a)];
+      p = [lune.position[0] + dir[0] * r, lune.position[1] + dir[1] * r,
+           lune.position[2] + dir[2] * r];
+    }
+    // La place est-elle visible ? On deplace le noeud pour le demander a
+    // Babylon, et on le remet si la reponse est oui.
+    const avant = o.node.getAbsolutePosition().clone();
+    o.node.setAbsolutePosition(new BABYLON.Vector3(
+      p[0] - anchorPos[0], p[1] - anchorPos[1], p[2] - anchorPos[2]));
+    const vue = dansLeChamp(o.node);
+    if (vue) { o.node.setAbsolutePosition(avant); return null; }
+    return p;
+  }
+
   // --- interface de jeu : jauges et invites ---
   const iface = await loadInterface();
   const uiRoot = document.getElementById("ui");
@@ -777,6 +1291,95 @@ async function boot() {
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   const flashlight = new Flashlight(BABYLON, scene);
   const marshmallow = new Marshmallow();
+  // L'etat du baton : sorti ou range, ce qui se joue, ou en est l'aiguille.
+  const baton = new BatonGuimauve();
+  // Les deux objets tenus, une fois charges : { racine, groupes, lumieres }.
+  const enMain = new Map();
+
+  /**
+   * Charge un objet tenu et l'accroche a la camera.
+   *
+   * Sa transformation LOCALE dans le glTF est deja celle qui le place devant
+   * l'oeil — c'est celle qu'il avait sous `PlayerCamera` — donc on ne la touche
+   * pas. Seule la rotation de repere du chargeur est reprise, comme pour les
+   * corps celestes (`geometry.js`).
+   */
+  async function chargerEnMain(fichier, nom) {
+    try {
+      const res = await BABYLON.SceneLoader.ImportMeshAsync(
+        "", "data/gltf/", fichier, scene);
+      const racine = new BABYLON.TransformNode(`main_${nom}`, scene);
+      racine.parent = camera;
+      racine.rotation.y = Math.PI;
+      for (const m of res.meshes) if (!m.parent) m.parent = racine;
+      const groupes = res.animationGroups || [];
+      for (const g of groupes) g.stop();
+      // Le glTF n'emporte pas de lumieres : l'exporteur n'ecrit que de la
+      // geometrie. Les deux du baton sont posees ici, aux valeurs du
+      // prefabrique, et elles partent eteintes comme dans le build.
+      const lumieres = (res.lights || []).slice();
+      if (nom === "marshmallowstick") {
+        for (const d of STICK_LIGHTS) {
+          const l = new BABYLON.PointLight(
+            `main_${d.name}`,
+            new BABYLON.Vector3(d.position[0], d.position[1], -d.position[2]), scene);
+          l.range = d.range;
+          l.intensity = d.intensity;
+          l.parent = racine;
+          lumieres.push(l);
+        }
+      }
+      for (const l of lumieres) l.setEnabled(false);
+      const parNom = new Map();
+      for (const g of groupes) parNom.set(g.name.replace(/^[~!]+/, "").split("|").pop(), g);
+      enMain.set(nom, { racine, groupes, parNom, lumieres, meshes: res.meshes });
+      console.log(`en main : ${nom} (${res.meshes.length} maillages,`
+        + ` ${groupes.length} clips)`);
+      return true;
+    } catch (e) {
+      // Sans le build, ces fichiers n'existent pas : la page reste jouable.
+      return false;
+    }
+  }
+
+  /**
+   * Le baton, image par image : le clip qui doit tourner, les lumieres, et la
+   * POSE du thermometre.
+   *
+   * `Therm` ne se joue pas : `MarshmallowStick.Update` lui met une vitesse de
+   * zero et choisit son instant a la main. Ici on met le groupe en pause a
+   * l'image voulue, ce qui est la meme chose dite avec l'API de Babylon.
+   */
+  function syncBaton(objet, etat, chaleur) {
+    for (const l of objet.lumieres) l.setEnabled(etat.lights);
+    // On ne CACHE pas le baton quand il se range : `PutBack` le sort du champ
+    // tout seul, et l'effacer d'un coup couperait l'animation qu'on vient
+    // d'ajouter. Le build n'eteint que le rendu de la guimauve et de sa flamme
+    // (`Marshmallow.SetRenderer`), et c'est ce qu'on fait ici.
+    for (const m of objet.meshes) {
+      if (/marshmallowmodel|flame/i.test(m.name)) m.setEnabled(etat.out && etat.flame);
+    }
+    const voulu = etat.clip;
+    for (const [nom, g] of objet.parNom) {
+      if (nom === "Therm") continue;
+      if (nom === voulu) { if (!g.isPlaying) g.play(nom === "idle"); }
+      else if (g.isPlaying) g.stop();
+    }
+    const therm = objet.parNom.get("Therm");
+    if (therm && etat.canTherm) {
+      const duree = (therm.to - therm.from) / 60 || 1;
+      const image = therm.from + thermTime(chaleur, duree) * 60;
+      // `goToFrame` reveille le groupe : ne l'appeler que si l'aiguille bouge
+      // VRAIMENT. Sans ce garde, on repositionne quatre clips a chaque image
+      // pour une chaleur qui ne change pas, et un rendu logiciel le sent.
+      if (objet.thermFrame === undefined || Math.abs(objet.thermFrame - image) > 0.01) {
+        objet.thermFrame = image;
+        if (!therm.isStarted) therm.play(false);
+        therm.pause();
+        therm.goToFrame(image);
+      }
+    } else if (therm && therm.isPlaying) { therm.stop(); objet.thermFrame = undefined; }
+  }
   const computerEl = document.getElementById("computer");
   // --- mixage par piste et emetteurs de signal ---
   const mixer = new AudioMixer();
@@ -793,6 +1396,15 @@ async function boot() {
   window.__audioMix = { mixer, transmitters };
 
   window.__consoles = { computer, flashlight, marshmallow };
+  // Sondes de verification : deux regles que le navigateur mesure a part, la
+  // ou elles sont ecrites (docs/67-annonces.md).
+  window.__soin = eatMarshmallowHeals;
+  window.__mur = suitBarrierPush;
+  window.__mains = { baton, enMain };
+  // Le chargement ne bloque pas le demarrage : ces deux objets pesent quelques
+  // dizaines de kilo-octets, et la page doit s'ouvrir sans eux.
+  chargerEnMain("marshmallowstick.gltf", "marshmallowstick");
+  chargerEnMain("telescopegui.gltf", "telescopegui");
 
   window.__gui = { guiMode, readout, minimap, settings, applySettings };
 
@@ -1013,21 +1625,62 @@ async function boot() {
   window.__bramble = { fish, thorns, noise, corruption, derelicts };
 
   // --- boucle temporelle ---
-  const loop = new TimeLoop();
+  // `TimeLoop._loopDurationInMinutes` : 18, lu dans la scene et non devine
+  // (docs/88-boucle.md). Le repli explicite porte la meme valeur.
+  const loop = new TimeLoop(
+    ((gameplay.singletons || {}).TimeLoop || {}).fields
+      ?._loopDurationInMinutes ?? undefined);
+  // `TimeLoop.Start` : la statique `_startTimeLoopOnReload` nait a VRAI, donc
+  // le tout premier chargement annonce deja `StartOfTimeLoop` et calcule la
+  // prevention. Sur une partie neuve, l'etoile n'explose donc pas tant qu'on
+  // n'a pas appris les codes de lancement — le compte a rebours tourne, la fin
+  // des temps attend (docs/88-boucle.md).
+  loop.start(pdata.knows("knowsLaunchCodes"));
+  // La sphere de l'observatoire : armee au premier tour d'une partie neuve,
+  // elle attend qu'on ait appris les codes (docs/91-remise-a-zero.md).
+  const remiseAZero = new ResetTrigger(
+    ((gameplay.placed || {}).ResetSimulationTrigger || [])[0] || null);
+  remiseAZero.startOfTimeLoop(loop.loopCount + 1, pdata.knows("knowsLaunchCodes"));
+  window.__remiseAZero = remiseAZero;
+  if (loop.preventSupernova) console.log("fin des temps suspendue : codes inconnus");
   // le compteur persiste doit etre RESTAURE au demarrage : sans cela, la
   // premiere synchronisation ecrasait la valeur sauvegardee par un zero
   loop.loopCount = pdata.loopCount || 0;
   const spawn0 = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+  // §N La PREMIERE image aussi : le joueur se reveille sur un sol qui tourne,
+  // et `MatchInitialMotion` lui en donne la vitesse. Sans cela le tout premier
+  // instant de la partie est un glissement.
+  //
+  // POSE A LA PREMIERE IMAGE, ET NON ICI. `vitesseDeDepart` lit `framePos`, qui
+  // est declare avec la boucle — l'appeler depuis `boot()` leve une erreur de
+  // zone morte temporelle, et une erreur dans `boot()` ne laisse pas de page.
+  // C'est la troisieme fois que ce depot y tombe (docs/62, docs/56, ici) : un
+  // `const` est declare avec ce qu'il decrit, pas avec ce qui le lit — et une
+  // fonction qui le lit a le droit d'etre ecrite avant, pas d'etre APPELEE
+  // avant.
+  let departAFaire = true;
+  // Le joueur est-il dans la zone brouillee de l'epave ? La carte s'y efface.
+  let dansEpave = false;
+  // §T PERDRE LA GRAVITE. Quitter un champ n'est pas seulement cesser de
+  // tomber : le jeu vous retourne, et vous prend les commandes du regard
+  // pendant qu'il le fait — a cinquante degres par seconde, moitie moins vite
+  // que le demi-tour d'un siege (docs/79-alignement.md).
+  const alignement = new FieldAlignment();
+  window.__alignement = alignement;
+  // Sonde de verification : la loi des invites de sac, telle qu'elle est.
+  window.__jetpackPrompts = jetpackPrompts;
+  // Le plein d'oxygene ne s'annonce qu'une fois par remplissage.
+  let refaitLePlein = false;
+  // L'avertissement du sac dorsal, une fois au passage a sec.
+  let sacASec = false;
+  // `_isTrainingMode` : a portee d'un noeud du satellite casse.
+  let entrainementEnCours = false;
+  // `_midairSnapshotCount` : les photos prises EN VOL depuis le tir.
+  let photosEnVol = 0;
 
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
   // navigateur et que le rendu ne s'eprouve pas du tout.
-  // Les impostures de planete (docs/56-impostures.md). Les trois plans cables
-  // sont dans la geometrie et leur renderer est ACTIF : sans ce lecteur, le
-  // portage colle trois quads plats par-dessus les vraies planetes.
-  const impostures = planetImposters(camerasDuBuild).map((d) => new Imposter(d));
-  const impostersVifs = [];      // { imposture, plan, texture, cam }
-  window.__impostures = { impostures, vifs: impostersVifs };
 
   const fx = new CameraEffects(reglagesCam);
   const postfx = new PostFX(BABYLON, camera, engine, reglagesCam);
@@ -1049,7 +1702,9 @@ async function boot() {
   window.__death = death;
 
   function respawn() {
-    loop.restart();
+    // `TimeLoop.Start` recalcule `_preventSupernova` : tant qu'on ne connait
+    // pas les codes de lancement, l'etoile n'explose pas.
+    loop.restart(pdata.knows("knowsLaunchCodes"));
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
     if (starPCS) {
@@ -1069,8 +1724,25 @@ async function boot() {
     resources.health = resources.maxHealth;
     resources.suit = resources.maxSuit;
     resources.dead = false;
+    // §V L'INVULNERABILITE DU PREMIER TOUR. `OnStartOfTimeLoop` la recalcule a
+    // chaque boucle : vraie a la PREMIERE, tant qu'on ne connait pas les codes
+    // de lancement (docs/81-invulnerable.md).
+    pdata.startOfTimeLoop(pdata.loopCount + 1);
+    resources.invulnerable = pdata.isInvulnerable;
+    if (resources.invulnerable) console.log("premier tour : les degats ne portent pas");
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
-    player.vel.x = player.vel.y = player.vel.z = 0;
+    // §N ON PART AVEC LE SOL. `MatchInitialMotion` est pose sur vingt-sept
+    // corps, `Player_Body` et `Ship_Body` compris : un corps qui se reveille
+    // prend la vitesse de son PORTEUR, terme tangentiel inclus.
+    //
+    //     v = v_porteur + omega x (p - centre_du_porteur)
+    //
+    // Le portage remettait zero. Dans le repere ancre, la vitesse du porteur
+    // est deja nulle — c'est lui l'ancre — mais le terme tangentiel ne l'est
+    // pas : l'ancre ne tourne pas avec la planete. Debarquer immobile sur un
+    // sol qui defile est precisement ce que cette classe evite.
+    const vDepart = vitesseDeDepart([spawn0.x, spawn0.y, spawn0.z]);
+    player.vel.x = vDepart[0]; player.vel.y = vDepart[1]; player.vel.z = vDepart[2];
     // Une boucle qui recommence remet TOUT a l'etat de depart, le regard
     // compris : sinon on rouvre les yeux dans la direction ou l'on est mort.
     yaw = yaw0; pitch = 0;
@@ -1132,16 +1804,140 @@ async function boot() {
   // rayon large est un repli assume, pas une valeur du build. Il ne raccourcit
   // plus le depart, qui se fait desormais au village, 471 u plus loin.
   const SHIP_REACH = 40;
+
+  // §O LES PHARES DU VAISSEAU. Le portage n'en avait aucun : `shiplightRange`
+  // etait ecrite, eprouvee, et appelee par personne.
+  //
+  // Six cents unites partout, et `min(limite du secteur, 600)` dans un secteur
+  // majeur : la dimension abandonnee les bride a CENT. Piloter dedans se fait
+  // donc a la lueur du tableau de bord, et c'est une des rares choses que le
+  // build dit explicitement d'un lieu.
+  const phares = new BABYLON.SpotLight("shiplight", BABYLON.Vector3.Zero(),
+    new BABYLON.Vector3(0, 0, 1), Math.PI / 2.6, 2, scene);
+  phares.range = SHIPLIGHT_RANGE;
+  phares.intensity = 1.1;
+  phares.setEnabled(false);
+  window.__phares = phares;
   // Portee de ramassage. Le `GearPickup` du build n'a pas de forme a lui : sa
   // zone d'interaction est un objet ENFANT (`InteractVolume`, une capsule de
   // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
   // enfants de la zone. Trois unites est donc la hauteur de cette capsule, pas
   // un nombre choisi.
   const GEAR_REACH = 3;
+
+  // §J S'ASSEOIR (docs/69-assise.md).
+  //
+  // Les quatre `PlayerAttachPoint` du build sont les quatre endroits ou le jeu
+  // prend le joueur en charge, et ils tombent exactement sur quatre zones
+  // d'interaction : « Buckle Up » au poste de pilotage, « Boot Up » a
+  // l'ordinateur de bord, « Fly Model Ship » a l'observatoire, « Activate
+  // Lift » au pied de la tour. Le portage n'en lisait aucun : `attachPoints`
+  // etait ecrit, eprouve, et appele par personne.
+  const pointsAttache = new AttachPoints(attachPoints(gameplay));
+  const siegePilotage = pointsAttache.points.find((p) => p.name === "FlightConsole")
+                     || null;
+  // Le verrouillage de camera : deux instances posees, dont celle des commandes
+  // du projecteur de l'observatoire. La classe a ete RELUE dans l'IL a cette
+  // occasion — celle du portage etait une paraphrase que rien n'appelait.
+  const verrouCamera = new CameraLock();
+  const ciblesVerrou = lockOnTargets(gameplay);
+  window.__assise = { points: pointsAttache, verrou: verrouCamera,
+                      cibles: ciblesVerrou };
+
+  /**
+   * Le repere du poste de pilotage, en coordonnees monde, cette image.
+   *
+   * `ship.quat` part de l'identite sur la scene AU REPOS : la pose du siege
+   * s'obtient donc en tournant son ecart au centre du vaisseau par ce
+   * quaternion, et en composant les deux orientations.
+   *
+   * Le repere ancre se passe en PARAMETRE : il est recalcule a chaque image, et
+   * cette fonction vit hors de la boucle. Elle le lisait de la portee de
+   * `boot()`, ou il n'existe pas — une faute qui ne se declenchait qu'en
+   * MONTANT dans le vaisseau, ce qu'aucun controle ne fait (docs/71).
+   */
+  function siegeVivant(anchorPos) {
+    if (!ship || !shipRest || !siegePilotage) return null;
+    const d = [siegePilotage.position[0] - shipRest[0],
+               siegePilotage.position[1] - shipRest[1],
+               siegePilotage.position[2] - shipRest[2]];
+    const r = quatRotate(ship.quat, d);
+    return {
+      position: [ship.pos.x + anchorPos[0] + r[0],
+                 ship.pos.y + anchorPos[1] + r[1],
+                 ship.pos.z + anchorPos[2] + r[2]],
+      rotation: quatMul(ship.quat, siegePilotage.rotation),
+    };
+  }
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   // Le champ de repos du telescope n'est pas un champ du telescope : c'est
   // celui de la camera, que `SnapToInitFieldOfView` retrouve en sortant.
   const telescope = new Telescope({ restFOV: reglagesCam.fov || 70 });
+  // L'onde de la lunette : cinq cents points, un par image, dans une boite du
+  // coin de l'ecran (docs/65-onde.md). Le trace est un canvas HTML plutot
+  // qu'un `GL.LINES` : ce que le build dessine avec `OnPostRender` est une
+  // polyligne, et un canvas en fait autant sans toucher au rendu 3D.
+  const onde = new SoundWave();
+  const ondeEl = uiRoot ? document.createElement("canvas") : null;
+  if (ondeEl) {
+    ondeEl.className = "ow-soundwave";
+    ondeEl.width = WAVE.points;
+    ondeEl.height = 64;
+    ondeEl.hidden = true;
+    uiRoot.appendChild(ondeEl);
+  }
+  const ondeCtx = ondeEl ? ondeEl.getContext("2d") : null;
+  // §P La reglette de zoom de la lunette : une barre, une fleche, et la hauteur
+  // de la fleche dit le champ. `zoomArrowFraction` etait ecrite et eprouvee.
+  const zoomEl = uiRoot ? document.createElement("div") : null;
+  if (zoomEl) {
+    zoomEl.className = "ow-zoom";
+    zoomEl.hidden = true;
+    zoomEl.innerHTML = '<i></i>';
+    uiRoot.appendChild(zoomEl);
+  }
+
+  // §L LE MARQUEUR DE SONDE (docs/71-quantique.md).
+  //
+  // `probeIcon`, `probeReadout` et `probeLabelPos` etaient ecrites, eprouvees,
+  // documentees (docs/60) — et IMPORTEES par `main.js`, ce qui leur donnait
+  // l'air branchees. `lois.mjs` les declarait vivantes pour cette seule raison,
+  // jusqu'a ce qu'il cesse de compter un import pour un appel.
+  //
+  // Le marqueur dit trois choses : ou est la sonde a l'ecran, a quelle
+  // distance, et dans quel etat — danger, ancree, ou simple reperage.
+  const marqueurEl = uiRoot ? document.createElement("div") : null;
+  if (marqueurEl) {
+    marqueurEl.className = "ow-probe-marker";
+    marqueurEl.hidden = true;
+    uiRoot.appendChild(marqueurEl);
+  }
+  // La taille du marqueur suit celle de la vignette : c'est la meme loi de
+  // distance, et le build les dimensionne ensemble.
+  const MARQUEUR = { width: 40, height: 40 };
+  /**
+   * Un point de plus, et le trace.
+   *
+   * L'echantillon vient d'une sinusoide et non du clip `ProbeLoop` que le
+   * build echantillonne : le portage joue ses sons par des elements `<audio>`
+   * et n'a donc pas leurs octets sous la main. C'est la seule liberte de ce
+   * lot, et la loi qui compte — un point par image, `(echantillon x force + 1)
+   * / 2` — est celle du build.
+   */
+  function traceOnde(force, t) {
+    onde.push(Math.sin(t * 37) * 0.8 + Math.sin(t * 11.3) * 0.2, force);
+    if (!ondeCtx) return;
+    const pts = onde.ordered();
+    ondeCtx.clearRect(0, 0, ondeEl.width, ondeEl.height);
+    ondeCtx.strokeStyle = "rgba(159, 214, 196, .85)";
+    ondeCtx.lineWidth = 1;
+    ondeCtx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const y = (1 - pts[i]) * ondeEl.height;
+      if (i === 0) ondeCtx.moveTo(i, y); else ondeCtx.lineTo(i, y);
+    }
+    ondeCtx.stroke();
+  }
   const probes = new ProbeLauncher();
   // La sonde est un appareil photo qu'on jette : sa camera embarquee occupe un
   // coin de l'ecran tant qu'elle vole.
@@ -1162,33 +1958,38 @@ async function boot() {
     onNext: () => { interactPressed = true; },
   });
 
-  // Rendu des sondes : une petite sphere emissive par sonde en vol, reutilisee
-  // d'une sonde a l'autre plutot que recreee.
+  // Rendu de la sonde : une bille emissive — le prefabrique porte un
+  // `ProbeMesh`, mais la geometrie de la sonde n'est pas dans `level0` et le
+  // portage ne charge que ce qui y est. Elle n'est jamais recreee : il n'y en a
+  // qu'UNE, et c'est le fait de jeu de docs/60.
   const PROBE_LAYER = 0x20000000;
-  const probeMeshes = [];
   const probeMat = new BABYLON.StandardMaterial("probeMat", scene);
   probeMat.emissiveColor = new BABYLON.Color3(0.6, 0.9, 1.0);
   probeMat.disableLighting = true;
+  const probeMesh = BABYLON.MeshBuilder.CreateSphere("probe",
+    { diameter: 2 * SONDE.colliderRadius, segments: 6 }, scene);
+  probeMesh.material = probeMat;
+  probeMesh.isPickable = false;
+  // La sonde ne se filme pas elle-meme : sa bille est sur un calque que la
+  // camera embarquee ne regarde pas, sans quoi elle remplirait l'image — elle
+  // est a 30 cm de l'objectif.
+  probeMesh.layerMask = PROBE_LAYER;
+  probeMesh.setEnabled(false);
+  // `ProbeLantern` : eteinte en vol, elle monte de zero a cinquante en deux
+  // secondes une fois la sonde plantee. C'est une lumiere ponctuelle du
+  // prefabrique, pas un projecteur — celui-la est sur les cameras.
+  const probeLantern = new BABYLON.PointLight("probeLantern",
+    BABYLON.Vector3.Zero(), scene);
+  probeLantern.range = 0;
+  probeLantern.intensity = 0;
   function syncProbes() {
-    for (let i = 0; i < probes.probes.length; i++) {
-      if (!probeMeshes[i]) {
-        const m = BABYLON.MeshBuilder.CreateSphere(`probe${i}`,
-          { diameter: 0.6, segments: 6 }, scene);
-        m.material = probeMat;
-        m.isPickable = false;
-        // La sonde ne se filme pas elle-meme : sa bille est sur un calque que
-        // la camera embarquee ne regarde pas, sans quoi elle remplirait
-        // l'image — elle est a 30 cm de l'objectif.
-        m.layerMask = PROBE_LAYER;
-        probeMeshes.push(m);
-      }
-      const p = probes.probes[i].pos;
-      probeMeshes[i].position.set(p[0], p[1], p[2]);
-      probeMeshes[i].setEnabled(true);
-    }
-    for (let i = probes.probes.length; i < probeMeshes.length; i++) {
-      probeMeshes[i].setEnabled(false);
-    }
+    const p = probes.last;
+    probeMesh.setEnabled(!!p);
+    if (p) probeMesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    const portee = p ? p.lantern : 0;
+    probeLantern.range = portee;
+    probeLantern.intensity = portee > 0 ? 1 : 0;
+    if (p && portee > 0) probeLantern.position.set(p.pos[0], p.pos[1], p.pos[2]);
   }
   // Le pilote automatique arrive aux distances du BUILD, et non a « rayon de
   // surface x 1,5 » : elles sont dans les neuf `MajorReferenceFrameVolume`
@@ -1198,6 +1999,16 @@ async function boot() {
   const marqueurs = mapMarkers(gameplay);
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF, marqueurs);
+  // La liste des corps visables : construite UNE fois, rafraichie en place.
+  // Elle se declare ICI, avec les corps, et non pres de son lecteur — c'est la
+  // deuxieme zone morte de ce fichier en deux lots (voir `impostures`), et le
+  // symptome est le meme : une erreur au premier usage, muette jusque-la.
+  const visables = [];
+  for (const b of bodies) {
+    visables.push({ body: b, name: b.name,
+                    position: [b.position0[0], b.position0[1], b.position0[2]],
+                    radius: (b.gravity && b.gravity.upperSurfaceRadius) || 0 });
+  }
   if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
   window.__map = solarMap;
   window.__autopilot = autopilot;
@@ -1206,7 +2017,8 @@ async function boot() {
   window.__particles = { field: particles, total: particleMap.length, live: () => particles.count,
                         active: () => particles.particles, failed: () => particles.failed };
   window.__audio = { total: audioMap.length, live: () => audio.count,
-                     playing: () => audio.playing, failed: () => audio.failed };
+                     playing: () => audio.playing, failed: () => audio.failed,
+                     ambience };
   // point d'entree de verification : oriente la camera sans passer par le
   // verrouillage de souris, pour les captures automatisees
   window.__look = (y, p) => { yaw = y; pitch = p; };
@@ -1225,57 +2037,206 @@ async function boot() {
   // Le lacet part de l'orientation du point d'apparition : c'est elle qui
   // decide de la premiere image du jeu.
   let yaw = yaw0, pitch = 0;
+  // `CenterCamera` : le recentrage n'est pas un saut, c'est une DUREE tiree
+  // d'une distance angulaire — `Sqrt(dx^2 + dy^2) / rate` — puis un SmoothStep
+  // par-dessus (docs/69-assise.md). Le meme calcul que le demi-tour du corps,
+  // au meme taux : les deux arrivent ensemble.
+  let recentrage = null;
+  // Le lacet d'ou part le demi-tour du siege. Garde separement parce que la
+  // fraction s'applique a l'ECART, et qu'un ecart se mesure depuis un depart.
+  let lacetSiege = null;
+  // Le champ que le verrouillage demande, ou null. Il ne s'ecrit pas ici :
+  // la lunette a le dernier mot sur `camera.fov`, et les deux ne se melangent
+  // pas plus dans le build que dans le portage.
+  let verrouFOV = null;
+  // Le roulis vient du MEME mouvement de souris que le lacet, aiguille par la
+  // touche alt (`Swap Roll/Yaw`). Il s'accumule ici et se consomme a l'image.
+  let rollInput = 0;
   const keys = Object.create(null);
+  // Un relachement attend la FIN de l'image.
+  //
+  // `OWInput` interroge Unity, qui latche `GetButtonDown` et `GetButtonUp` : un
+  // appui plus court qu'une image y est vu quand meme. Un objet `keys` lu a
+  // chaque image, lui, perd la frappe entiere si l'appui et le relachement
+  // tombent entre deux images — et la sonde, qui se charge en TENANT, ne
+  // partait jamais sur une pichenette. C'est `15_verify.py` qui l'a montre :
+  // `keyboard.press()` fait les deux dans la meme milliseconde.
+  const relachements = [];
+  // Les boutons de la SOURIS sont des commandes a part entiere dans l'alpha :
+  // `Lock On` est le clic gauche, `Probe` le droit, `Telescope` le milieu. Le
+  // portage n'en lisait aucun, et avait mis ces trois actions sur des lettres.
+  //
+  // Ce sont des evenements POINTEUR et non des evenements souris, et la
+  // difference n'est pas cosmetique : Babylon appelle `preventDefault()` sur
+  // `pointerdown` pour son propre pilotage de camera, et un `preventDefault`
+  // sur un evenement pointeur SUPPRIME les evenements souris de compatibilite
+  // qui devaient suivre. Un `mousedown` pose sur la fenetre ne se declenchait
+  // donc jamais — les mouvements passaient, les boutons non, et rien ne le
+  // disait. C'est `15_verify.py` qui l'a trouve : la sonde ne partait pas.
+  const souris = Object.create(null);
+  const relachementsSouris = [];
+  addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse") souris[e.button] = true;
+  });
+  addEventListener("pointerup", (e) => {
+    if (e.pointerType === "mouse") relachementsSouris.push(e.button);
+  });
+  // Le clic droit ouvre le menu contextuel du navigateur, et c'est le bouton de
+  // la sonde : sans cette ligne, lancer une sonde ouvre un menu — et le menu
+  // avale le relachement, donc la sonde ne part jamais. On le refuse partout et
+  // pas seulement sous verrou de souris : la page entiere est le jeu.
+  addEventListener("contextmenu", (e) => e.preventDefault());
   addEventListener("keydown", (e) => { keys[e.code] = true; });
-  addEventListener("keyup", (e) => { keys[e.code] = false; });
-  let interactPressed = false, optionPressed = 0, probeFired = false;
+  addEventListener("keyup", (e) => { relachements.push(e.code); });
+  window.__keys = keys;
+  window.__souris = souris;
+  /** A appeler en fin d'image : applique les relachements retenus. */
+  function appliquerRelachements() {
+    while (relachements.length) keys[relachements.pop()] = false;
+    while (relachementsSouris.length) souris[relachementsSouris.pop()] = false;
+  }
+  let interactPressed = false, optionPressed = 0;
+  // La sonde ne se declenche plus a l'appui : elle se CHARGE tant qu'on tient,
+  // et le meme bouton la rappelle quand elle est posee. C'est l'etat MAINTENU
+  // qui compte, donc `keys`, et non un drapeau leve par `command()`.
+  let probeRefusee = false;
+  // Les trois fronts de vol : viser, s'accorder, piloter. Ils sont poses par
+  // `command()` et consommes par la boucle, comme `interactPressed`.
+  let lockPressed = false, matchPressed = false, autoPressed = false;
+  // La guimauve mangee dans cette image : le baton s'en sert pour se ranger.
+  let mangeCetteImage = false;
+  // Pour ne pas repeter l'annonce du mur a chaque image ou l'on s'y appuie.
+  let murAnnonce = false;
+  const lockOn = new LockOn();
+  // La vue d'atterrissage : une camera, un regard, et des commandes qui
+  // changent de main (docs/87-atterrissage.md).
+  const atterrissage = new LandingView();
+  window.__atterrissage = atterrissage;
+  // Le regard vise par la bascule, en radians, ou null. Le build appelle
+  // `SnapToDegrees(0, -70, 140)` : lacet ZERO, tangage -70, a 140 degres par
+  // seconde. Ici le lacet du portage est absolu et non relatif au vaisseau — le
+  // remettre a zero ferait pivoter la vue au hasard — donc seul le TANGAGE est
+  // vise, et c'est lui qui porte le sens du geste : on regarde le sol.
+  let snapRegard = null;
+  // `ShipThrusterController._landingRF` : le referentiel du mode atterrissage.
+  let atterrissageCorps = null;
+  /** Vitesse du vaisseau relative au referentiel vise, ou null. */
+  function viseeVitesseRelative() {
+    if (!ship || !lockOn.current) return null;
+    const v = lockOn.current.body.velocity || [0, 0, 0];
+    return Math.hypot(ship.vel.x - v[0], ship.vel.y - v[1], ship.vel.z - v[2]);
+  }
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
 
   /**
-   * Une commande, designee par son code clavier.
+   * Une commande, designee par son code clavier — ou par « Mouse0 » a
+   * « Mouse2 », parce que trois des canaux du build sont des boutons de
+   * souris.
    *
-   * Les boutons tactiles passent par ici avec le meme code que la touche
-   * correspondante : il n'y a donc qu'un seul jeu de commandes, et rien en
-   * aval ne sait d'ou vient l'ordre.
+   * Les boutons tactiles et ceux de la manette passent par ici avec le meme
+   * code : il n'y a donc qu'un seul jeu de commandes, et rien en aval ne sait
+   * d'ou vient l'ordre.
+   *
+   * Le test ne porte plus sur la touche mais sur le CANAL : `est("Telescope")`
+   * plutot que `code === "KeyT"`. Les touches viennent alors de
+   * `data/input.json`, et les changer ne demande pas de toucher a ce fichier.
    */
   function command(code) {
-    if (code === "KeyE") interactPressed = true;
+    const est = (canal) => {
+      const c = cmds.get(canal);
+      if (!c) return false;
+      const m = /^Mouse(\d+)$/.exec(String(code));
+      if (m) return c.pos.mouse.includes(Number(m[1]));
+      return c.pos.codes.includes(code) || c.neg.codes.includes(code);
+    };
+    if (est("Interact")) interactPressed = true;
+    // `Lock On` (clic gauche), `Match Velocity` (espace) et `Autopilot` (E)
+    // sont les trois canaux de vol. Les deux derniers partagent leur touche
+    // avec le saut et l'interaction : c'est le MODE qui tranche dans le build,
+    // et ici la condition (en vol, une cible) qui joue le meme role.
+    if (est("Lock On")) lockPressed = true;
+    if (est("Match Velocity")) matchPressed = true;
+    if (est("Autopilot")) autoPressed = true;
     const m = /^Digit([1-9])$/.exec(code);
     if (m) optionPressed = parseInt(m[1], 10);
-    if (code === "KeyM") solarMap.toggle();
-    if (code === "KeyC" && solarMap.open) solarMap.recenter();
-    // La lampe : le jeu la met sur la croix directionnelle, ici sur L.
-    if (code === "KeyL") flashlight.toggle();
+    if (est("Map")) solarMap.toggle();
+    if (est("Recenter Map") && solarMap.open) solarMap.recenter();
+    // La lampe : `Flashlight`, la touche F du build — et la croix
+    // directionnelle a la manette (axe 6).
+    if (est("Flashlight")) {
+      // `UIAudioController` ecoute `TurnOnFlashlight` ET `TurnOffFlashlight`,
+      // et joue `_switch01` dans les deux cas : un interrupteur fait le meme
+      // bruit a l'aller et au retour.
+      bipUI(flashlight.toggle() ? "TurnOnFlashlight" : "TurnOffFlashlight");
+    }
     // L'ordinateur de bord ne se consulte qu'a l'interieur du vaisseau ; ce
     // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
-    if (code === "KeyN" && ship && ship.boarded) {
+    // Le build n'a pas de canal pour lui : c'est un ajout, et `AJOUTS` le dit.
+    if (est("Ship Computer") && ship && ship.boarded) {
       computer.open = !computer.open;
     }
     if (computer.open) {
       if (code === "ArrowLeft") computer.move(-1);
       if (code === "ArrowRight") computer.move(1);
       if (code === "Enter" || code === "Space") computer.select();
-      if (code === "Backspace" || code === "Escape") computer.cancel();
+      if (code === "Backspace" || est("Cancel")) computer.cancel();
     }
-    if (code === "KeyT") telescope.toggle();
-    if (code === "KeyF") probeFired = true;
-    // Consoles a camera deportee : on les prend en main a portee de la main,
-    // et on les lache de la meme touche.
-    if (code === "KeyR" && consoles.count) {
+    if (est("Telescope")) telescope.toggle();
+    // Consoles a camera deportee : `Landing Camera`, la meme touche que la
+    // photo arriere de la sonde — le build les separe par jeu de commandes,
+    // pas par touche.
+    // `FlightConsole.Update` : au poste de pilotage, `toggleLandingCam` ouvre
+    // la VUE d'atterrissage. Ailleurs le portage garde ce canal pour les
+    // consoles deportees, qui n'ont pas d'autre touche ici.
+    if (est("Landing Camera") && ship && ship.boarded) {
+      const t = atterrissage.toggle(performance.now() / 1000,
+                                    viseeVitesseRelative());
+      if (t && t.snap) {
+        // Le regard bascule des l'APPUI, la camera 0,45 s plus tard : on voit
+        // le sol arriver avant d'y etre.
+        snapRegard = t.snap[1] * Math.PI / 180;
+      }
+      // `CenterCamera(140)` : en ressortir recentre, au meme rythme.
+      if (t && t.centre) snapRegard = 0;
+      // `Autopilot.InitMatchVelocity` : au-dela de vingt unites de vitesse
+      // RELATIVE, le jeu ne vous laisse pas basculer en vue d'atterrissage sans
+      // rien faire. Le portage pose la vitesse la ou le build y va par la
+      // poussee, comme il le fait deja pour le sac dorsal.
+      if (t && t.match && lockOn.current) {
+        const vm = matchedVelocity(lockOn.current.body.velocity || [0, 0, 0]);
+        ship.vel.x = vm[0]; ship.vel.y = vm[1]; ship.vel.z = vm[2];
+        console.log("vue d'atterrissage : egalisation automatique");
+      }
+    } else if (est("Landing Camera") && consoles.count) {
       const c = consoles.toggle([player.pos.x + framePos[0],
                                  player.pos.y + framePos[1],
                                  player.pos.z + framePos[2]]);
       console.log(c ? `console prise : ${c.name}` : "console lachee");
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
-    if (code === "KeyB" && marshmallow.eat()) {
-      console.log(`guimauve mangee (${marshmallow.eaten})`);
+    if (est("Marshmallow") && marshmallow.eat()) {
+      // `MarshmallowStick.Update` range le baton TOUT SEUL une fois la
+      // guimauve mangee : on lui passe le fait, pas l'ordre.
+      mangeCetteImage = true;
+      // `PlayerResources.OnEatMarshmallow` : la sante repart au MAXIMUM. Deux
+      // lignes d'IL, et le soin du jeu — le portage comptait les guimauves
+      // sans rien en faire (docs/67-annonces.md).
+      const soigne = eatMarshmallowHeals(resources);
+      console.log(`guimauve mangee (${marshmallow.eaten})`
+        + (soigne > 0 ? `, +${soigne.toFixed(0)} de sante` : ""));
+    }
+    // Sortir ou ranger le baton : `ToggleStick`. Le build n'a pas de canal pour
+    // lui — c'est le tutoriel du feu de camp qui l'appelle — et le portage lui
+    // donne la meme touche que manger, en appui long ? Non : une touche a part,
+    // et `AJOUTS` la nomme.
+    if (est("Stick")) {
+      console.log(baton.toggle() ? "baton sorti" : "baton range");
     }
     // GUIMode fait tourner ses quatre modes sur une touche de debogage
-    if (code === "KeyG") console.log("mode d'affichage :", guiMode.cycle());
+    if (est("Display Mode")) console.log("mode d'affichage :", guiMode.cycle());
     // Le menu des reglages, comme dans le jeu, met le temps en pause
-    if (code === "Escape" && settingsUI) {
+    if (est("Pause") && settingsUI) {
       settings.open = !settings.open;
       settingsUI.render();
     }
@@ -1296,6 +2257,11 @@ async function boot() {
     }
   }
   addEventListener("keydown", (e) => command(e.code));
+  // Trois canaux du build sont des boutons de souris — `Lock On` a gauche,
+  // `Probe` a droite, `Telescope` au milieu — et le portage n'en lisait aucun.
+  addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse") command(`Mouse${e.button}`);
+  });
 
   /**
    * Deplacement du regard, en pixels.
@@ -1312,10 +2278,37 @@ async function boot() {
    */
   const TURN = (player.c.turnRate ?? 160) * Math.PI / 180;
   function look(dx, dy, gain = 1) {
-    const f = settings.lookFactor();
+    // §T `_isInputLocked` : pendant que le jeu vous retourne, il vous prend les
+    // commandes du regard. C'est le seul moment ou elles ne repondent plus, et
+    // c'est ce qui donne son poids a la perte du sol.
+    if (alignement.locked) return;
+    // La bascule de la vue d'atterrissage prend le tangage le temps du
+    // mouvement : `SnapToDegrees` ne se laisse pas interrompre.
+    if (snapRegard !== null) return;
+    // DEUX SENSIBILITES, et le portage n'en appliquait qu'une. Le menu du build
+    // en pose deux — `lookSensitivity` et `flightSensitivity` — et le second
+    // n'avait aucun effet : on reglait la sensibilite de vol, et rien ne
+    // changeait. Aux commandes du vaisseau, c'est elle qui vaut
+    // (docs/93-commandes.md).
+    const f = (ship && ship.boarded) ? settings.flightFactor()
+                                     : settings.lookFactor();
     const w = Math.max(320, (window.innerWidth || 1280));
     const k = (TURN / w) * (telescope && telescope.active
       ? (player.c.telescopeTurnScalar ?? 0.5) : (player.c.suitTurnScalar ?? 1));
+    // `Swap Roll/Yaw` : le build n'a pas d'axe de roulis. `JetpackInput.roll` et
+    // `JetpackInput.yaw` sont construits sur le MEME canal (`yaw`), et la touche
+    // alt choisit lequel des deux recoit le mouvement. Le portage avait invente
+    // une paire Q/Z — or Q est le canal `Cancel` du build.
+    // `ShipThrusterController.Update` :
+    //   isRollMode = GetButton(swap) ? !rollByDefault : rollByDefault
+    // En vue d'atterrissage le defaut s'inverse — le manche ROULE, et c'est la
+    // touche alt qui rend le lacet (docs/87-atterrissage.md).
+    const roulisDefaut = !!(ship && ship.boarded && atterrissage.rollByDefault);
+    if (rollMode(!!(cmds && cmds.held("Swap Roll/Yaw", { keys })), roulisDefaut)) {
+      // `_flipRollFactor` vaut -1 en vue d'atterrissage : le roulis s'inverse.
+      rollInput += dx * k * gain * Math.abs(f) * atterrissage.flipRollFactor;
+      return;
+    }
     yaw += dx * k * gain * Math.abs(f);
     pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * k * gain * f));
   }
@@ -1336,13 +2329,33 @@ async function boot() {
   // commande, elle produit les memes axes et les memes codes. Le build decrit
   // une manette entiere (`XboxInput`) et les invites portent deja le bouton
   // attendu, avec son icone — c'etait la derniere entree decrite et jamais lue.
-  const pad = new GamepadControls({ onKey: command,
-                                    onLook: (dx, dy) => look(dx, dy, 1) });
+  // Les boutons TENUS de la manette : ils rejoignent l'etat du clavier et de la
+  // souris, de sorte que `cmds.held(...)` reponde pareil d'ou que vienne
+  // l'ordre. Sans cela, la gachette de sonde ne pourrait pas se charger.
+  const padHeld = new Set();
+  const pad = new GamepadControls({
+    onKey: command,
+    onLook: (dx, dy) => look(dx, dy, 1),
+    onHold: (codes) => { padHeld.clear(); for (const c of codes) padHeld.add(c); },
+  });
   window.__pad = pad;
   addEventListener("gamepadconnected", (e) => {
     console.log("manette branchee :", e.gamepad && e.gamepad.id);
   });
   if (padAvailable()) console.log("manette detectee au demarrage");
+  // LES DEUX TABLES DOIVENT DIRE LA MEME CHOSE. `input.js` porte la liaison
+  // `pad` de chaque canal en numeros d'Unity, `gamepad.js` la sienne en numeros
+  // du navigateur : deux tables ecrites a la main depuis le meme
+  // `InputManager`, et rien ne les obligeait a rester d'accord. Le portage s'y
+  // est deja trompe sur quatre lignes de six (docs/61). Le desaccord se dit au
+  // demarrage plutot que de se sentir a la manette (docs/94-manette.md).
+  {
+    const desaccords = padDisagreements(cmds);
+    window.__padAccord = desaccords;
+    if (desaccords.length) {
+      console.warn("manette : les deux tables ne s'accordent pas", desaccords);
+    }
+  }
   // En paysage de telephone, le coin bas-droit revient aux boutons d'action :
   // la vue de sonde passe a gauche, sous les jauges.
   if (touch.enabled) probeCam.setViewport(0.02, 0.42, 0.26, 0.3);
@@ -1359,7 +2372,13 @@ async function boot() {
   canvas.addEventListener("click", () => {
     // Le verrouillage de souris n'a pas de sens au doigt, et le demander
     // ferait echouer la promesse a chaque tape.
-    if (!touch.enabled) canvas.requestPointerLock();
+    // La promesse peut echouer — un navigateur sans verrou de souris, une
+    // page qui n'a pas le focus, un Chromium sans tete. Sans ce `catch`, elle
+    // remonte en erreur non attrapee, et `15_verify.py` la compte comme telle.
+    if (!touch.enabled) {
+      const p = canvas.requestPointerLock();
+      if (p && p.catch) p.catch(() => {});
+    }
   });
   // le navigateur bloque l'audio tant qu'aucun geste utilisateur n'a eu lieu ;
   // au doigt, ce geste n'atteint jamais le canvas, qui est sous la couche
@@ -1382,6 +2401,42 @@ async function boot() {
       : Math.min(engine.getDeltaTime() / 1000, 0.05);
     const now = performance.now() / 1000;
 
+    // §T L'alignement sur le champ : on le perd, on le retrouve.
+    {
+      // L'ecart entre « le corps » et « le regard » se passe sous la forme du
+      // build — deux poses — et c'est le TANGAGE qui les separe ici : la pose
+      // alignee sur l'horizon, et la meme plus le tangage. Le lacet, lui, ne
+      // compte pas : le corps le suit deja.
+      const demiP = pitch / 2;
+      const t = alignement.update(!!player.field, now,
+                                  [[0, 0, 0, 1],
+                                   [Math.sin(demiP), 0, 0, Math.cos(demiP)]]);
+      if (t === "break") {
+        console.log("annonce : BreakPlayerFieldAlignment");
+        // `CenterCamera(50)` — et non les cent du siege.
+        recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
+                       duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                           FIELD_ALIGN.rate) };
+      } else if (t === "init") {
+        console.log("annonce : InitPlayerFieldAlignment");
+        // `StopSnapping()` : retrouver le sol rend les commandes TOUT DE
+        // SUITE, et interrompt le recentrage en cours.
+        recentrage = null;
+      }
+    }
+
+    // §N La vitesse de depart, une seule fois, quand le repere existe.
+    if (departAFaire) {
+      departAFaire = false;
+      const v0 = vitesseDeDepart([player.pos.x, player.pos.y, player.pos.z]);
+      player.vel.x = v0[0]; player.vel.y = v0[1]; player.vel.z = v0[2];
+      const jour = anchorBody ? spinPeriod(anchorBody) : null;
+      if (jour) {
+        console.log(`${anchorBody.name} : un tour en ${Math.round(jour)} s, `
+          + `sol a ${Math.hypot(v0[0], v0[1], v0[2]).toFixed(2)} u/s au depart`);
+      }
+    }
+
     // repere camera aligne sur la verticale locale du champ dominant
     const f = player.field;
     // `_affectsAlignment` : un champ directionnel sur 34 pousse SANS retourner
@@ -1396,9 +2451,108 @@ async function boot() {
     const hb = horizonBasis([up.x, up.y, up.z]);
     const east = new BABYLON.Vector3(hb.east[0], hb.east[1], hb.east[2]);
     const north = new BABYLON.Vector3(hb.north[0], hb.north[1], hb.north[2]);
+    // `CenterCamera(_rotationRate)` : le regard revient au centre du siege sur
+    // une DUREE, pas d'un coup. Le build recentre les deux degres ; ici le
+    // lacet du corps est deja repris par `_matchRotation`, et il ne reste que
+    // le tangage — le seul des deux que le portage tienne separement.
+    if (recentrage) {
+      const ecoule = now - recentrage.debut;
+      // `UpdateSnapping` interpole les DEUX degres sous un meme SmoothStep. Le
+      // couple est garde tel quel — le lacet en second, toujours nul ici —
+      // pour que la loi reste celle du build et non une moitie de loi.
+      const d = snapDegrees(recentrage.depart, [0, 0], ecoule, recentrage.duree);
+      pitch = d[0] * Math.PI / 180;
+      if (turnFraction(ecoule, recentrage.duree) >= 1) recentrage = null;
+    }
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
+
+    // §K CE QUI SE COMMANDE, ET QUAND (docs/70-modes.md).
+    //
+    // `OWInput` echange un ENSEMBLE de canaux actifs a chaque changement de
+    // mode, et `GetAxis` rend zero pour tout canal absent. Le portage lisait
+    // les vingt-deux canaux en permanence — ce qui n'est vrai dans aucun mode
+    // du jeu, pas meme a pied.
+    //
+    // Les transitions se lisent sur l'ETAT plutot que sur les appels : chaque
+    // bascule de mode a deja son booleen ici, et les guetter est exact la ou
+    // brancher soixante appels aurait laisse des trous. Les sorties passent
+    // d'abord, dans l'ordre inverse des entrees, pour que la case de
+    // sauvegarde d'`OWInput` se vide dans le bon ordre.
+    {
+      const etats = [
+        ["menu", !!(settings && settings.open)],
+        ["dialogue", !!dialogue.active],
+        ["carte", !!solarMap.open],
+        ["lunette", !!(telescope && telescope.active)],
+        // Les deux consoles deportees du build ne donnent PAS le meme jeu de
+        // commandes : `RemoteFlightConsole` pose celui du vaisseau miniature
+        // (huit canaux, pas de sonde ni de carte), la console du satellite en
+        // pose trois — annuler, photographier, photographier en arriere.
+        //
+        // `EnterLandingView`, la caméra d'atterrissage du vaisseau, n'a pas
+        // d'equivalent ici : ce portage n'a pas de vue d'atterrissage separee,
+        // et son canal « Landing Camera » bascule les consoles deportees. Son
+        // ensemble est donc lu, garde, et sans appelant — dit plutot qu'omis.
+        ["satellite", !!(consoles.active && !consoles.active.flight)],
+        ["modele", !!(consoles.active && consoles.active.flight)],
+        ["ordinateur", !!computer.open],
+        ["vaisseau", !!(ship && ship.boarded)],
+      ];
+      // Les transitions passent par l'ANNONCE du build quand il y en a une :
+      // `EnterMapView`, `ExitFlightConsole`… Le portage faisait deja la bonne
+      // chose sous ses propres noms ; il la dit maintenant dans celui du jeu.
+      const bascule = (nom, sens) => {
+        const dit = annonceDe(nom, sens);
+        if (dit) modes.annonce(dit);
+        else if (sens === "entre") modes.entre(nom);
+        else modes.sort(nom);
+      };
+      for (let i = etats.length - 1; i >= 0; i--) {
+        const [nom, on] = etats[i];
+        if (!on && modes.dedans.has(nom)) { modes.dedans.delete(nom); bascule(nom, "sort"); }
+      }
+      for (const [nom, on] of etats) {
+        if (on && !modes.dedans.has(nom)) { modes.dedans.add(nom); bascule(nom, "entre"); }
+      }
+      // `OnPlayerDeath` pose un ensemble VIDE : un mort ne commande rien du
+      // tout, pas meme d'ouvrir le menu. Le portage coupait deja le
+      // deplacement ; il laissait la lampe, la carte et la sonde.
+      // --- la vue d'atterrissage : son delai, son regard, son mode ---
+      //
+      // `UpdateLandingMode` : la camera ne bascule que 0,45 s apres l'appui, et
+      // c'est alors que `EnterLandingView` part. Le MODE, lui, demande en plus
+      // un referentiel vise, assez proche, et un vaisseau pas pose.
+      if (atterrissage.update(now)) modes.annonce("EnterLandingView");
+      if (snapRegard !== null) {
+        const pas = (ATTERRISSAGE.snapDegrees * Math.PI / 180) * dt;
+        const ecart = snapRegard - pitch;
+        if (Math.abs(ecart) <= pas) { pitch = snapRegard; snapRegard = null; }
+        else pitch += Math.sign(ecart) * pas;
+      }
+      const cibleAtt = lockOn.current ? lockOn.current.body : null;
+      const dAtt = cibleAtt
+        ? Math.hypot(cibleAtt.position[0] - ship.pos.x,
+                     cibleAtt.position[1] - ship.pos.y,
+                     cibleAtt.position[2] - ship.pos.z)
+        : Infinity;
+      const cadreAtt = cibleAtt
+        ? autopilotDistances(declared.frames, cibleAtt.name,
+                             (cibleAtt.gravity && cibleAtt.gravity.upperSurfaceRadius) || 0)
+        : null;
+      const modeAtt = atterrissage.updateMode(
+        { frame: cadreAtt, landed: !!(ship && ship.onPad), distance: dAtt });
+      if (modeAtt) {
+        // `ShipThrusterController.OnEnterLandingMode` retient le referentiel ;
+        // c'est lui qui sert d'axe radial a l'ecretage.
+        atterrissageCorps = modeAtt === "enter" ? cibleAtt : null;
+        console.log(modeAtt === "enter"
+          ? `mode atterrissage : ${cibleAtt.name}` : "mode atterrissage quitte");
+      }
+      if (death.dead && !modes.mort) modes.annonce("PlayerDeath");
+      else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
+    }
 
     // Un mort ne pilote plus : PlayerDeathHandler coupe les commandes le temps
     // de la sequence. Sans cela on continuait a marcher pendant son propre
@@ -1419,15 +2573,39 @@ async function boot() {
     // mais elle ne multiplie plus rien ; elle sert au bruit qu'on fait, ce qui
     // est un choix assume de ce portage. En echange, le roulis apparait : la
     // manette et le clavier le prevoyaient, le vaisseau n'avait pas d'axe.
+    //
+    // Les canaux sont ceux du build : `Move X` (a/d), `Move Z` (w/s),
+    // `Move Up` (majuscule) et `Move Down` (controle) pour le sac dorsal,
+    // `Jump` (espace) pour le saut. Le portage mettait le saut ET la poussee
+    // verticale sur l'espace, n'avait pas de descente, et donnait la majuscule
+    // a un accelerateur que le build n'a pas.
+    // L'etat des commandes, toutes sources confondues. Sans manette tenue on
+    // passe les objets tels quels — c'est le cas courant, et il ne copie rien.
+    let etatCmd = { keys, mouse: souris };
+    if (padHeld.size) {
+      etatCmd = { keys: { ...keys }, mouse: { ...souris } };
+      for (const c of padHeld) {
+        const mm = /^Mouse(\d+)$/.exec(c);
+        if (mm) etatCmd.mouse[Number(mm[1])] = true;
+        else etatCmd.keys[c] = true;
+      }
+    }
+    const roulis = rollInput;
+    rollInput = 0;
     const input = death.dead
-      ? { forward: 0, right: 0, up: false, roll: 0, loud: false } : {
-        forward: axis((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + ax.forward + gp.forward),
-        right: axis((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + ax.right + gp.right),
-        up: keys.Space || ax.up || gp.up,
-        // Q et Z : E sert deja a interagir, et le roulis a besoin d'une paire
-        // libre. La manette prend le cinquieme axe quand elle en a un.
-        roll: axis((keys.KeyZ ? 1 : 0) - (keys.KeyQ ? 1 : 0) + (gp.roll || 0)),
-        loud: keys.ShiftLeft || keys.ShiftRight || ax.boost || gp.boost,
+      ? { forward: 0, right: 0, up: false, down: false, jump: false,
+          roll: 0, loud: false } : {
+        forward: axis(cmds.axis("Move Z", etatCmd) + ax.forward + gp.forward),
+        right: axis(cmds.axis("Move X", etatCmd) + ax.right + gp.right),
+        up: cmds.held("Move Up", etatCmd) || ax.up || gp.up,
+        down: cmds.held("Move Down", etatCmd) || ax.down || gp.down,
+        jump: cmds.held("Jump", etatCmd) || ax.jump || gp.jump,
+        // Le roulis n'a pas d'axe propre : c'est le lacet, aiguille par alt.
+        roll: axis(roulis * 4 + (gp.roll || 0)),
+        // « loud » n'est plus une touche : le build n'a pas d'accelerateur, et
+        // le bruit se mesure a la poussee. On le garde a faux, et le calcul de
+        // bruit prend la fraction reelle.
+        loud: false,
       };
     // 1. avance des orbites et des rotations propres, puis re-expression dans
     //    le repere du corps ancre — qui tourne desormais avec lui
@@ -1447,14 +2625,26 @@ async function boot() {
     // §4 L'APESANTEUR DECLAREE. Quatre volumes la posent ; dans le leur, le
     // champ radial ne s'applique plus. Le point est ramene au repos du corps
     // porteur, comme tous les volumes extraits.
-    const zeroG = zeroGVolumes.length
-      ? zeroGAt(zeroGVolumes,
-                [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
-                 player.pos.z + anchorPos[2]],
-                (v) => decalageDuCorps(v.body, anchorPos))
+    const monde3 = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                    player.pos.z + anchorPos[2]];
+    const decale = (v) => decalageDuCorps(v.body, anchorPos);
+    const zeroG = presencesZeroG.length
+      ? strongestZeroG(zonesAround(presencesZeroG, monde3, decale))
       : null;
+    // Les champs par seuils : on les marque presents pour l'image, et
+    // `strongestDirectional` les compte alors sans test de forme.
+    if (champsParSeuils.length) {
+      const dedans = new Set(zonesAround(champsParSeuils, monde3, decale));
+      for (const p of champsParSeuils) p.zone.present = dedans.has(p.zone);
+    }
     const world = { directional: dirFields, polar: polFields,
                     framePos: anchorPos, fluids, zeroG,
+                    // Le referentiel du mode atterrissage, s'il y en a un :
+                    // c'est lui qui donne l'axe radial de l'ecretage.
+                    landing: atterrissageCorps
+                      ? { body: atterrissageCorps,
+                          velocity: atterrissageCorps.velocity || [0, 0, 0] }
+                      : null,
                     // Coriolis et centrifuge du repere ancre, qui TOURNE avec
                     // son corps : sans eux le sol ne defile pas sous un
                     // stationnaire (docs/36-audit.md §1.2).
@@ -1501,9 +2691,16 @@ async function boot() {
         ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
         ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2];
       }
-      for (const p of probes.probes) {
+      if (probes.last) {
+        const p = probes.last;
         p.pos[0] += shift[0]; p.pos[1] += shift[1]; p.pos[2] += shift[2];
         if (p.vel) { p.vel[0] += dv[0]; p.vel[1] += dv[1]; p.vel[2] += dv[2]; }
+        // Une sonde POSEE garde sa position d'impact : elle doit suivre le
+        // changement d'ancre comme le reste, sinon elle saute de son mur.
+        if (p.localImpact && !p.attachedTo) {
+          p.localImpact[0] += shift[0]; p.localImpact[1] += shift[1];
+          p.localImpact[2] += shift[2];
+        }
       }
       console.log(`repere : ${anchorBody.name} -> ${fb.name}, ` +
         `ecart de vitesse ${Math.hypot(...dv).toFixed(1)} u/s`);
@@ -1529,9 +2726,9 @@ async function boot() {
       colLOD.update({
         player: w(player.pos),
         ship: ship ? w(ship.pos) : null,
-        probe: probes.probes.length ? [probes.probes[0].pos[0] + anchorPos[0],
-                                       probes.probes[0].pos[1] + anchorPos[1],
-                                       probes.probes[0].pos[2] + anchorPos[2]] : null,
+        probe: probes.last ? [probes.last.pos[0] + anchorPos[0],
+                              probes.last.pos[1] + anchorPos[1],
+                              probes.last.pos[2] + anchorPos[2]] : null,
       });
       if (colLOD.changed && now - colLODAt > 2) {
         colLODAt = now;
@@ -1572,19 +2769,74 @@ async function boot() {
     }
 
     // --- vaisseau, ressources, interaction ---
+    //
+    // §R L'AIR, CALCULE ICI ET NON PLUS BAS. `RepairAudioController` interroge
+    // le detecteur d'oxygene pour choisir son clip, et la reparation a lieu
+    // AVANT le bloc qui calculait la zone : le lire de la aurait leve une
+    // erreur de zone morte temporelle, la quatrieme de ce depot
+    // (docs/77-sons.md). On calcule donc la zone une fois, ici, et le bloc
+    // d'en dessous la reutilise.
+    const zoneOxygene = oxygen.length
+      ? inOxygenZone(oxygen, [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                              player.pos.z + anchorPos[2]],
+                     oxyDet ? oxyDet.reach : 0)
+      : null;
     let focus = null;
     if (ship) {
       if (autopilot && autopilot.engaged) autopilot.update(dt);
       ship.update(dt, bodies, input, { fwd, right, up }, world);
+      // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
+      // seconde durant, et relacher annule (docs/66-allumage.md). Les trois
+      // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils
+      // s'entendent par la meme voie que les autres sons d'evenement.
+      for (const e of ship.events) {
+        if (e === "StartShipIgnition") console.log("allumage du vaisseau");
+        if (e === "CancelShipIgnition") console.log("allumage interrompu");
+        if (e === "CompleteShipIgnition") console.log("decollage");
+      }
       ship.sync(BABYLON);
       if (ship.boarded) {
-        // Le joueur voyage avec le vaisseau, et desormais dans SON repere : le
-        // poste de pilotage est trois unites au-dessus du plancher, donc le
-        // long de l'axe propre du vaisseau et non d'un « haut » de camera.
-        const a = ship.axes;
-        player.pos.x = ship.pos.x + a.up[0] * 3;
-        player.pos.y = ship.pos.y + a.up[1] * 3;
-        player.pos.z = ship.pos.z + a.up[2] * 3;
+        // Le joueur voyage avec le vaisseau — et depuis docs/69, il s'ASSIED :
+        // le poste de pilotage est un `PlayerAttachPoint`, et le portage se
+        // contentait de coller le joueur trois unites au-dessus du plancher.
+        //
+        // Le siege prend le repere VIVANT de la coque : sa pose au repos ne dit
+        // rien de l'assiette du moment, et un siege qui ne tourne pas avec son
+        // vaisseau est un siege dont on tombe des le premier tonneau.
+        const cible = siegeVivant(anchorPos);
+        if (cible && siegePilotage) {
+          siegePilotage.follow(cible);
+          const etat = pointsAttache.update(dt, now);
+          if (etat) {
+            player.pos.x = etat.position[0] - anchorPos[0];
+            player.pos.y = etat.position[1] - anchorPos[1];
+            player.pos.z = etat.position[2] - anchorPos[2];
+            // `_matchRotation` : le corps pivote vers l'avant du siege, sur la
+            // duree tiree de l'angle de depart. Le portage tient le regard en
+            // deux scalaires plutot qu'en quaternion : c'est donc le LACET que
+            // l'on mene, et l'azimut du siege se lit dans le repere d'horizon
+            // du moment — celui-la meme qui sert au point d'apparition.
+            if (etat.rotation && lacetSiege !== null) {
+              const vise = yawFor(qrotDecor(etat.rotation, [0, 0, 1]),
+                                  [up.x, up.y, up.z]);
+              if (vise !== null) {
+                // Par le plus court chemin : sans ce repli dans [-pi, pi], un
+                // siege a l'ouest se rejoint par l'est, en frolant le tour.
+                let ecart = vise - lacetSiege;
+                while (ecart > Math.PI) ecart -= 2 * Math.PI;
+                while (ecart < -Math.PI) ecart += 2 * Math.PI;
+                yaw = lacetSiege + ecart
+                    * turnFraction(now - siegePilotage.since,
+                                   siegePilotage.turnDuration);
+              }
+            }
+          }
+        } else {
+          const a = ship.axes;
+          player.pos.x = ship.pos.x + a.up[0] * 3;
+          player.pos.y = ship.pos.y + a.up[1] * 3;
+          player.pos.z = ship.pos.z + a.up[2] * 3;
+        }
         player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
@@ -1601,10 +2853,27 @@ async function boot() {
         const abimee = avarie.deadParts.length || avarie.integrity < avarie.total;
         const en_cours = shipRepairs.find((r) => !r.done) || null;
         if (abimee && en_cours) {
-          if (keys.KeyH) en_cours.press(); else en_cours.release();
+          const tenaitAvant = en_cours.holding;
+          if (cmds.held("Interact", etatCmd)) en_cours.press(); else en_cours.release();
+          // §R ON NE REPARE PAS PAREIL DANS LE VIDE. `RepairAudioController`
+          // choisit entre `_repairLoop` et `_spaceRepairLoop` selon que le
+          // detecteur d'oxygene trouve quelque chose : reparer sa coque en
+          // apesanteur ne fait pas le meme bruit que la reparer au village, et
+          // le build a enregistre les deux (docs/77-sons.md).
+          if (en_cours.holding !== tenaitAvant) {
+            const air = !!(zoneOxygene || (ship && ship.boarded));
+            const s = en_cours.holding ? sonsUI.startRepair(air) : sonsUI.stopRepair();
+            if (s) audio.playOneShot(s.file, { volume: en_cours.holding ? 0.6 : 0 });
+            console.log(`annonce : ${en_cours.holding ? "StartRepairing" : "StopRepairing"}`);
+          }
           if (en_cours.update(dt)) {
             const piece = avarie.repair();
             if (piece) console.log(`reparation : ${piece} remise en etat`);
+            // `OnFinishRepairing` : la boucle s'ARRETE net, et un coup la
+            // remplace — l'un ou l'autre selon l'air, la aussi.
+            const fin = sonsUI.finishRepair(!!(zoneOxygene || ship.boarded));
+            if (fin) audio.playOneShot(fin.file, { volume: fin.volume });
+            console.log("annonce : FinishRepairing");
             en_cours.reset();
           }
           repairFraction = en_cours.fraction;
@@ -1613,12 +2882,54 @@ async function boot() {
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
+          // ON SE LEVE AVEC LA VITESSE DU SIEGE, jamais avec zero :
+          // `SetVelocity(attachedOWRigidbody.GetPointVelocity(point))`. Sans
+          // cette ligne, quitter le poste d'un vaisseau qui file a deux cents
+          // unites par seconde vous laisse sur place, et le vaisseau part sans
+          // vous. C'est elle qui rend le fait de se lever en vol possible.
+          const leve = pointsAttache.detach([ship.vel.x, ship.vel.y, ship.vel.z]);
+          if (leve) {
+            player.vel.x = leve.velocity[0];
+            player.vel.y = leve.velocity[1];
+            player.vel.z = leve.velocity[2];
+          }
+          if (siegePilotage) siegePilotage.follow(null);
+          lacetSiege = null;
           const a = ship.axes;
           player.pos.x += a.up[0] * 4; player.pos.y += a.up[1] * 4;
           player.pos.z += a.up[2] * 4;
         } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
                    pdata.knowsLaunchCodes) {
           ship.boarded = true;
+          // `OnEnterShip` : la protection du premier tour s'arrete la. Le jeu
+          // decide qu'une fois aux commandes, on joue pour de bon.
+          if (pdata.enterShip()) {
+            resources.invulnerable = false;
+            console.log("annonce : EnterShip — les degats portent desormais");
+          }
+          // S'asseoir prend du TEMPS : la duree du demi-tour est l'angle entre
+          // l'avant du joueur et celui du siege, divise par cent degres par
+          // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
+          // et arriver de face n'en demande aucune.
+          const cible = siegeVivant(anchorPos);
+          if (cible && siegePilotage) {
+            siegePilotage.follow(cible);
+            lacetSiege = yaw;
+            const demande = pointsAttache.attach(siegePilotage, {
+              position: [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                         player.pos.z + anchorPos[2]],
+              forward: fwd,
+              rotation: lookRotation(fwd, up),
+            }, now);
+            // `_centerCamera` : le regard revient au centre du siege, a la
+            // meme vitesse que le corps — les deux arrivent ensemble.
+            if (demande && demande.centerCamera) {
+              recentrage = { debut: now,
+                             duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                                 demande.rate),
+                             depart: [pitch * 180 / Math.PI, 0] };
+            }
+          }
         }
       }
     }
@@ -1626,14 +2937,34 @@ async function boot() {
     const convo = (!ship || !ship.boarded)
       ? dialogue.nearest(player.pos, anchorPos) : null;
     if (interactPressed) {
-      if (dialogue.active) dialogue.advance();
+      if (dialogue.active) {
+        const avant = dialogue.active;
+        dialogue.advance();
+        // Deux clips differents : avancer CLIQUE, finir a son propre son.
+        bipUI(dialogue.active ? "AdvanceText" : "ExitDialogueMode");
+        if (!dialogue.active && avant) { /* la conversation s'est fermee */ }
+      }
       else if (convo) {
         // L'arbre se choisit a l'ouverture, comme le fait
         // `OnStartConversation` — et il depend de l'etat de la BOUCLE autant
         // que des connaissances, d'ou `dialogue.stateOf`.
+        //
+        // §S L'ENFANT AUX FUSEES choisit le sien autrement : il COMPTE. Cinq
+        // crashs lui valent un reproche, un atterrissage un compliment — et
+        // les crashs passent avant, donc se planter cinq fois puis reussir une
+        // fois vous vaut le reproche (docs/78-modele.md).
+        let arbre = null;
+        if (enfant && convo.name === enfant.name) {
+          const choix = compteurEnfant.tree();
+          if (choix && enfant.trees[choix]) {
+            arbre = enfant.trees[choix];
+            console.log(`enfant aux fusees : ${choix}`);
+          }
+        }
         dialogue.open({ ...convo,
-                        tree: selectTree(pdata, convo, dialogue.trees, controllers,
-                                         dialogue.stateOf(convo)) });
+                        tree: arbre || selectTree(pdata, convo, dialogue.trees,
+                                                  controllers,
+                                                  dialogue.stateOf(convo)) });
       }
     }
     if (dialogue.active && optionPressed > 0) dialogue.choose(optionPressed - 1);
@@ -1650,15 +2981,152 @@ async function boot() {
     // comportement d'avant.
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
-    const zone = oxygen.length
-      ? inOxygenZone(oxygen, playerW, oxyDet ? oxyDet.reach : 0) : null;
+
+    // LE SECTEUR MAJEUR ACTIF, une fois pour l'image.
+    //
+    // `SectorDetector` est le carrefour du build : la minicarte, la limite de
+    // poussee, l'eclairage ambiant, la portee de la lampe et celle des phares
+    // lui demandent tous la meme chose. Le portage posait cinq questions
+    // differentes — une distance ici, un « plus petit volume » la, un
+    // `horizon x 1,5` ailleurs. Il n'y en a qu'une : quels declencheurs touche-t-on
+    // (docs/82-secteur-majeur.md).
+    const secteurDe = (w) => (majSecteurs.length
+      ? activeMajorSector(majSecteurs, w, (x) => decalageDuCorps(x.body, anchorPos))
+      : null);
+    const secMaj = secteurDe(playerW);
+    secteurMajeur = secMaj;
+    // LES SEUILS : on n'y est pas « dedans », on les a franchis dans un sens.
+    //
+    // Les deux comptes se tiennent ici parce que l'invite de lampe, plus haut
+    // dans l'image, demande la zone sombre : la calculer plus bas la laissait
+    // dans sa zone morte temporelle, et le portage avait mis a la place
+    // `sectorState.secteur.sunless` — un champ qu'aucune extraction ne pose.
+    // La condition ne s'est jamais verifiee une seule fois.
+    zonesSansSoleil.update(playerW, (x) => decalageDuCorps(x.body, anchorPos));
+    zonesSombres.update(playerW, (x) => decalageDuCorps(x.body, anchorPos));
+    // `ResetSimulationTrigger.OnTriggerEnter` : entrer dans la sphere de
+    // l'observatoire une fois les codes appris remet la simulation a zero.
+    if (remiseAZero.armed && remiseAZero.volume) {
+      const dec = decalageDuCorps(remiseAZero.volume.body, anchorPos);
+      if (remiseAZero.enter(insideVolume(remiseAZero.volume,
+                                         restingPoint(playerW, dec)),
+                            pdata.knows("knowsLaunchCodes"))) {
+        loop.resetSimulation();
+        // Le build recharge la scene, et `TimeLoop.Start` annonce alors
+        // `ResumeSimulation` parce que `_startTimeLoopOnReload` vient d'etre
+        // remis a faux. Ce portage ne recharge rien : il enchaine.
+        loop.resume();
+        console.log("simulation remise a zero : la partie commence");
+      }
+    }
+
+    // §J LES DEUX POINTS D'ACCROCHAGE DE TIMBER HEARTH.
+    //
+    // « Fly Model Ship » a l'observatoire, « Activate Lift » au pied de la
+    // tour : deux zones d'interaction posees exactement sur un
+    // `PlayerAttachPoint`, et le portage ne s'y accrochait pas.
+    //
+    // Le second est le plus parlant du lot : il ne verrouille rien, ne recentre
+    // rien, ne suit aucune rotation. On est PORTE, et on regarde ou l'on veut —
+    // c'est ce que veut dire monter dans un ascenseur, et c'est exactement ce
+    // que la scene dit de ce point-la.
+    if (!ship || !ship.boarded) {
+      const assis = pointsAttache.current;
+      if (assis && assis !== siegePilotage) {
+        const etat = pointsAttache.update(dt, now,
+                                          decalageDuCorps(assis.body, anchorPos));
+        if (etat) {
+          player.pos.x = etat.position[0] - anchorPos[0];
+          player.pos.y = etat.position[1] - anchorPos[1];
+          player.pos.z = etat.position[2] - anchorPos[2];
+          player.vel.x = player.vel.y = player.vel.z = 0;
+          if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
+        }
+        if (interactPressed && !dialogue.active) {
+          // On se leve avec la vitesse du point. Une planete qui tourne en
+          // porte une, et c'est elle qu'on emporte — pas zero.
+          pointsAttache.detach([0, 0, 0]);
+        }
+      } else if (interactPressed && !dialogue.active && focus
+                 && focus.kind === "zone") {
+        const point = pointsAttache.at(focus.world);
+        if (point && point !== siegePilotage) {
+          lacetSiege = yaw;
+          const demande = pointsAttache.attach(point, {
+            position: playerW, forward: fwd, rotation: lookRotation(fwd, up),
+          }, now, decalageDuCorps(point.body, anchorPos));
+          if (demande && demande.centerCamera) {
+            recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
+                           duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                               demande.rate) };
+          }
+          console.log(`accroche : ${focus.prompt || point.name}`);
+          // `Elevator.OnPressInteract` fait DEUX choses : il accroche le
+          // joueur, et il lance la cabine. Le portage n'en faisait que la
+          // premiere, et l'ascenseur restait a quai avec quelqu'un dedans.
+          for (const a of ascenseurs) {
+            const dec2 = decalageDuCorps(a.data.body, anchorPos) || [0, 0, 0];
+            const dd = Math.hypot(a.data.position[0] + dec2[0] - playerW[0],
+                                  a.data.position[1] + dec2[1] - playerW[1],
+                                  a.data.position[2] + dec2[2] - playerW[2]);
+            if (dd < 12 && a.pressInteract(now)) {
+              console.log(a.goingToTheEnd ? "ascenseur : en haut" : "ascenseur : en bas");
+            }
+          }
+        }
+      }
+    }
+    // Les annonces du build, drainees comme celles du vaisseau.
+    for (const e of pointsAttache.drain()) console.log(`annonce : ${e}`);
+
+    // §J LE VERROUILLAGE DE CAMERA. Deux `PlayerLockOnTargeting` poses, dont
+    // celui des commandes du projecteur : s'en servir tourne le corps vers
+    // elles et RESSERRE le champ, `500 / distance` borne a vingt degres.
+    //
+    // Le corps tourne en LACET seulement, a une vitesse proportionnelle a
+    // l'ecart : l'approche est exponentielle, sans a-coup a la fin, et le
+    // tangage reste a la main pendant ce temps.
+    {
+      const surCible = consoles.active
+        ? ciblesVerrou.find((c) => Math.hypot(c.position[0] - consoles.active.position[0],
+                                              c.position[1] - consoles.active.position[1],
+                                              c.position[2] - consoles.active.position[2]) < 2)
+        : null;
+      if (surCible && !verrouCamera.locked) verrouCamera.lockOn(surCible);
+      else if (!surCible && verrouCamera.locked) verrouCamera.breakLock();
+      if (verrouCamera.locked) {
+        const dec = decalageDuCorps(surCible.body, anchorPos) || [0, 0, 0];
+        const versLa = [surCible.position[0] + dec[0] - playerW[0],
+                        surCible.position[1] + dec[1] - playerW[1],
+                        surCible.position[2] + dec[2] - playerW[2]];
+        const r = verrouCamera.update(dt, versLa, [fwd.x, fwd.y, fwd.z],
+                                      [up.x, up.y, up.z],
+                                      [right.x, right.y, right.z],
+                                      Math.hypot(versLa[0], versLa[1], versLa[2]),
+                                      reglagesCam.fov || 70);
+        if (r) { yaw += r.yaw * Math.PI / 180; verrouFOV = r.fov; }
+      } else verrouFOV = null;
+    }
+
+    const zone = zoneOxygene;
     // Le carburant etait consomme EN MARCHANT : `thrusting` valait vrai des
     // qu'une touche de deplacement etait tenue. Seul le sac dorsal brule
     // (docs/36-audit.md §1.1) — et il ne brule pas quand on pilote.
-    resources.update(dt, {
-      inSupply: !!(ship && ship.boarded) || !!zone,
-      thrusting: !!player.jetpack && !(ship && ship.boarded),
-    });
+    {
+      // §R `RefillOxygen` : le plein s'entend, et UNE SEULE FOIS — sur la
+      // transition, pas a chaque image passee dans la zone.
+      const avant = resources.oxygen;
+      resources.update(dt, {
+        inSupply: !!(ship && ship.boarded) || !!zone,
+        thrusting: !!player.jetpack && !(ship && ship.boarded),
+      });
+      if (resources.oxygen > avant && !refaitLePlein) {
+        refaitLePlein = true;
+        const s = sonsUI.refillOxygen();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        console.log("annonce : RefillOxygen");
+      } else if (resources.oxygen <= avant) refaitLePlein = false;
+    }
 
     // --- les lots de docs/44, image par image ---------------------------
     //
@@ -1686,6 +3154,22 @@ async function boot() {
         break;
       }
     }
+    // Le mur qui RECLAME la combinaison : `SuitBarrier` allume un collider tant
+    // qu'on n'en porte pas, et `InvisibleWall` n'a aucun maillage — donc aucun
+    // collider dans le portage. On repousse a la main (docs/67-annonces.md).
+    if (suits.length) {
+      const poussee = suitBarrierPush(suits, playerW, equipment,
+        (v) => decalageDuCorps(v.body, anchorPos));
+      if (poussee) {
+        player.pos.x += poussee[0];
+        player.pos.y += poussee[1];
+        player.pos.z += poussee[2];
+        if (!murAnnonce) {
+          console.log("il faut la combinaison pour aller par la");
+          murAnnonce = true;
+        }
+      } else murAnnonce = false;
+    }
     // La combinaison se REND : le volume de retour n'existe que si on l'a.
     if (suits.length && suitVolumeStep(suits, playerW, equipment,
           (v) => decalageDuCorps(v.body, anchorPos)) === "removed") {
@@ -1695,17 +3179,32 @@ async function boot() {
     }
     // L'entrainement en apesanteur : les trois noeuds du satellite casse.
     if (training.total && !(ship && ship.boarded)) {
+      // §U `OnEnterZeroGTraining` / `OnExitZeroGTraining` : etre A PORTEE d'un
+      // noeud, c'est etre en mode entrainement — et c'est ce mode, et lui
+      // seul, qui fait venir les trois invites de poussee.
       const noeud = training.nodes.find((r) => !r.done &&
         r.inRange(restingPoint(playerW, decalageDuCorps(r.volume.body, anchorPos))));
+      const dedans = !!noeud || training.nodes.some((r) =>
+        r.inRange(restingPoint(playerW, decalageDuCorps(r.volume.body, anchorPos))));
+      if (dedans !== entrainementEnCours) {
+        entrainementEnCours = dedans;
+        console.log(`annonce : ${dedans ? "EnterZeroGTraining" : "ExitZeroGTraining"}`);
+      }
       if (noeud) {
-        if (keys.KeyH) noeud.press(); else noeud.release();
+        if (cmds.held("Interact", etatCmd)) noeud.press(); else noeud.release();
         noeud.update(dt);
       }
       if (training.update()) {
         const son = (events.of("ZeroGTrainingManager") || { clips: {} })
           .clips._systemsBackOnlineClip;
         if (son) audio.playOneShot(son);
-        console.log("entrainement : systemes du satellite retablis");
+        // §V `CompleteZeroGTraining` : `PlayerData` le retient — et le remet a
+        // faux au debut de chaque boucle, contrairement aux autres savoirs qui
+        // sont ecrits sur le disque. Reparer le satellite ne se retient que
+        // pour le tour en cours.
+        pdata.completedZeroGTraining = true;
+        pdata.learn("hasCompletedTraining");
+        console.log("annonce : CompleteZeroGTraining — systemes du satellite retablis");
       }
     }
     interactPressed = false;
@@ -1738,27 +3237,63 @@ async function boot() {
       readout.update(now, !guiMode.hidden && !guiMode.capture);
     }
 
-    // --- minicarte : hors du vaisseau, dans un secteur qui la porte ---
+    // --- minicarte : le declencheur du secteur majeur, et rien d'autre ---
     if (minimap) {
-      // Minimap.AttemptActivation : hors du vaisseau, et seulement si le
-      // secteur majeur actif declare l'utiliser. Les sept secteurs du build ont
-      // tous _useMinimap a vrai, mais c'est bien le drapeau qui decide.
-      const body = player.field && player.field.body;
-      const sec = sectorState.secteur;
-      const near = body && player.field.distance <
-        (body.gravity.upperSurfaceRadius || 200) * 2;
-      // La minicarte aussi se ramasse : meme paquetage, meme drapeau.
-      minimap.setEnabled(!!near && !!(sec ? sec.useMinimap : true) &&
-                         equipment.minimap &&
-                         !(ship && ship.boarded) && !guiMode.hidden);
-      if (minimap.on) {
-        minimap.update(body.position, player.pos, {
-          ship: ship && !ship.boarded ? [ship.pos.x, ship.pos.y, ship.pos.z] : null,
-          probe: probes.probes.length ? probes.probes[probes.probes.length - 1].pos : null,
+      // Le portage demandait « suis-je a moins de deux rayons de surface du
+      // corps dominant ». Le build ne pose jamais cette question : il tient une
+      // LISTE de secteurs majeurs dont on touche la sphere de declenchement, en
+      // retient le plus proche par le centre (`CalculateActiveMajorSector`), et
+      // `AttemptActivation` interroge SA CLASSE. D'ou l'ecart qu'aucune
+      // distance n'aurait donne : la minicarte s'eteint sur la lune quantique,
+      // dont le secteur est un `MajorSector` nu (docs/82-minicarte.md).
+      if (secMaj !== minimap.sector) minimap.switchMajorSector(secMaj);
+      const enCabine = !!(ship && ship.boarded);
+      if (enCabine !== minimap.insideShip) {
+        if (enCabine) minimap.enterShip(); else minimap.exitShip();
+      }
+      // `Minimap` dit si la carte existe, `MinimapHUD` si on la voit : deux
+      // composants dans le build, deux appels ici.
+      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden,
+                                                hasMinimap: equipment.minimap }));
+      if (minimap.on && secMaj) {
+        // Tout se compare AU REPOS du secteur : c'est le seul repere ou sa
+        // position extraite ait un sens, et c'est ce que fait
+        // `InverseTransformPoint` sur un secteur enfant de sa planete.
+        const dec = decalageDuCorps(secMaj.body, anchorPos);
+        const repos = (w) => restingPoint(w, dec);
+        const monde = (x, y, z) =>
+          [x + anchorPos[0], y + anchorPos[1], z + anchorPos[2]];
+        const shipW = ship && !ship.boarded
+          ? monde(ship.pos.x, ship.pos.y, ship.pos.z) : null;
+        const probeW = probes.last
+          ? monde(probes.last.pos[0], probes.last.pos[1], probes.last.pos[2]) : null;
+        minimap.update(secMaj.position, repos(playerW), {
+          ship: shipW ? repos(shipW) : null,
+          shipSector: shipW ? secteurDe(shipW) : null,
+          probe: probeW ? repos(probeW) : null,
+          probeSector: probeW ? secteurDe(probeW) : null,
         });
       }
     }
 
+    // §P Dans quelle invite de sonde est-on, et la regarde-t-on ?
+    if (invitesSonde.length) {
+      inviteSondeVisible = false;
+      for (const inv of invitesSonde) {
+        if (!inv.volume) continue;
+        const dec = decalageDuCorps(inv.body, anchorPos) || [0, 0, 0];
+        const p = [playerW[0] - dec[0], playerW[1] - dec[1], playerW[2] - dec[2]];
+        if (!insideVolume(inv, p)) continue;
+        // La direction de regard est LOCALE : elle se tourne par l'orientation
+        // du declencheur pour valoir quelque chose en monde.
+        const monde = inv.gaze
+          ? qrotDecor(inv.rotation || [0, 0, 0, 1], inv.gaze) : null;
+        if (promptFaced(inv, [fwd.x, fwd.y, fwd.z], monde)) {
+          inviteSondeVisible = true;
+          break;
+        }
+      }
+    }
     if (prompts) {
       // Au centre : l'objet vise. InteractVolume construit son invite avec le
       // texte de la scene, d'ou le passage explicite.
@@ -1788,9 +3323,58 @@ async function boot() {
                   P("ShipPromptController._mapPrompt"),
                   P("ShipPromptController._autopilotPrompt"));
       } else {
-        left.push(P("JetpackPromptController._upThrustPrompt"),
-                  P("JetpackPromptController._horizontalThrustPrompt"));
-        left.push(P("ProbePromptController._launchPrompt"));
+        // §U LES INVITES DU SAC DORSAL N'EXISTENT QU'EN APESANTEUR, et les
+        // trois poussees qu'a l'ENTRAINEMENT. Le portage les affichait des
+        // qu'on n'etait pas dans le vaisseau — c'est-a-dire presque toujours,
+        // et donc pour rien (docs/80-invites.md).
+        {
+          const jp = jetpackPrompts({
+            inField: !!player.field, mapView: solarMap.open,
+            autopilotAllowed: true, targeted: !!lockOn.current,
+            localSpeed: Math.hypot(player.vel.x, player.vel.y, player.vel.z),
+            training: entrainementEnCours,
+          });
+          if (jp.thrust) {
+            left.push(P("JetpackPromptController._upThrustPrompt"),
+                      P("JetpackPromptController._downThrustPrompt"),
+                      P("JetpackPromptController._horizontalThrustPrompt"));
+          }
+          // L'accord de vitesse est SEUL quand il vient : le jeu ne propose
+          // qu'une chose a la fois.
+          if (jp.matchVelocity) {
+            left.push(P("JetpackPromptController._matchVelocityPrompt"));
+          }
+        }
+        // §P L'INVITE DE SONDE NE S'AFFICHE PAS PARTOUT. Les quatre
+        // `ProbePromptTrigger` du build sont poses sur la premiere jumelle, et
+        // chacun porte une DIRECTION DE REGARD : l'invite ne vient pas parce
+        // qu'on est la, mais parce qu'on regarde quelque part — le fond du
+        // canyon, le camp vu d'en haut. Le portage l'affichait en permanence,
+        // ce qui est la meme chose que ne rien dire (docs/75-chaleur.md).
+        // Une fois les quatre detruites, l'invite ne revient JAMAIS. Sans
+        // declencheur pose — un build sans ces donnees — on retombe sur
+        // l'affichage permanent du portage.
+        if (!invitesDetruites && (invitesSonde.length === 0 || inviteSondeVisible)) {
+          left.push(P("ProbePromptController._launchPrompt"));
+        }
+        // `Flashlight.CheckPromptStatus` : SEPT conditions, toutes
+        // necessaires, et la derniere est un OU — une zone sombre, ou la face
+        // nuit. Le portage n'affichait pas cette invite du tout
+        // (docs/67-annonces.md).
+        if (flashlightPromptVisible({
+          on: flashlight.on, suit: equipment.suit,
+          inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
+          attached: !!consoles.active, satelliteCam: false,
+          inDarkZone: zonesSombres.sunless,
+          onDaySide: !night,
+        })) {
+          // Le texte, lui, n'est pas extractible : `_flashlightPrompt` est un
+          // `ScreenPrompt` serialise sur l'instance, et le portage ne sait pas
+          // lire ce type-la — `composants.mjs` rend un objet vide pour tout le
+          // composant. La REGLE vient du build, le mot est du portage, et
+          // c'est dit ici plutot que passe sous silence.
+          left.push({ text: "Lampe (F)", priority: 0, button: null });
+        }
       }
       // GUIMode : le mode capture n'affiche ni le bas ni la gauche, le mode
       // masque n'affiche rien
@@ -1874,7 +3458,7 @@ async function boot() {
       if (focus) bits.push(focus.kind === "readable"
         ? `${focus.name} — texte disponible` : (focus.prompt || focus.name));
       hud2.textContent = bits.join("   ·   ");
-      solarMap.draw(player.pos, ship ? ship.pos : null);
+      solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
     }
     {
       const v = dialogue.view;
@@ -1894,20 +3478,31 @@ async function boot() {
       }
       // La limite de poussee du secteur s'applique enfin au vaisseau : 20
       // partout, 200 sur la premiere jumelle, illimitee sur Giant's Deep.
-      // Les secteurs de JEU (`ZeroGSector` x2, `MajorSector`) portent eux aussi
-      // une limite de poussee — 20 partout — et c'est la plus basse des deux
-      // qui vaut : Dark Bramble ne se traverse pas a pleine puissance
-      // (docs/46, lot 4).
-      let limite = sectors.thrustLimit;
-      const secteurJeu = playSectors.length
-        ? gameSectorAt(playSectors, playerW,
-                       (x) => decalageDuCorps(x.body, anchorPos))
-        : null;
-      if (secteurJeu && secteurJeu.thrustLimit != null) {
-        limite = limite == null ? secteurJeu.thrustLimit
-                                : Math.min(limite, secteurJeu.thrustLimit);
-      }
+      //
+      // `SectorDetector.GetThrustLimit` prend le MINIMUM sur toute la liste des
+      // secteurs touches, pas sur le seul secteur actif : l'epave est dans Dark
+      // Bramble, et la plus basse des deux limites tient quel que soit celui
+      // des deux qui est actif. Le portage minait deux listes differentes avec
+      // deux regles differentes pour arriver a peu pres la.
+      const limite = sectorThrustLimit(majSecteurs, playerW,
+                                       (x) => decalageDuCorps(x.body, anchorPos));
       if (ship) ship.thrustLimit = limite;
+      // Les phares suivent la coque et s'eteignent des qu'on la quitte.
+      if (ship) {
+        const allumes = !!ship.boarded;
+        phares.setEnabled(allumes);
+        if (allumes) {
+          const a = ship.axes;
+          phares.position.set(ship.pos.x + a.fwd[0] * 2,
+                              ship.pos.y + a.fwd[1] * 2,
+                              ship.pos.z + a.fwd[2] * 2);
+          phares.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          // `SectorDetector.GetShiplightRangeLimit` : le secteur ACTIF, et lui
+          // seul. Giant's Deep bride les phares a 200, l'epave a 100.
+          phares.range = shiplightRange(
+            secMaj ? secMaj.shiplightLimit : null, !!secMaj);
+        }
+      }
       // L'eclairage ambiant suit `_ambientLightRange`, mesure depuis le centre
       // du secteur courant.
       //
@@ -1915,23 +3510,28 @@ async function boot() {
       // secteur qu'a trois conditions : aucune zone sans soleil, un secteur
       // majeur actif, et la carte fermee. Puis il y FOND, a `deltaTime` du
       // chemin restant — une grotte s'assombrit, elle ne s'eteint pas.
-      const sec = sectorState.secteur;
-      const zoneSombre = zonesSignal.length
-        ? signalZoneAt(zonesSignal, "dark", playerW,
-                       (z) => decalageDuCorps(z.body, anchorPos))
-        : null;
+      //
+      // `_distanceToMajorSector` se mesure jusqu'au centre du secteur ACTIF, au
+      // repos : c'est la seule distance que `GetAmbientLight` regarde.
       let vise = 0;
-      if (sec) {
-        const d = Math.hypot(sec.position[0] - anchorPos[0] - player.pos.x,
-                             sec.position[1] - anchorPos[1] - player.pos.y,
-                             sec.position[2] - anchorPos[2] - player.pos.z);
-        vise = ambientIntensity(d, sec.lightRange);
+      if (secMaj) {
+        const dec = decalageDuCorps(secMaj.body, anchorPos);
+        const p = restingPoint(playerW, dec);
+        const d = Math.hypot(p[0] - secMaj.position[0], p[1] - secMaj.position[1],
+                             p[2] - secMaj.position[2]);
+        vise = ambientIntensity(d, secMaj.lightRange, secMaj.ambient);
       } else {
-        vise = ambientIntensity(0, 0);
+        vise = ambientIntensity(0, 0, 0);
       }
       ambient.intensity = ambientStep(ambient.intensity,
-        ambientTarget(vise, { sunless: !!zoneSombre, inMajorSector: !!sec,
+        ambientTarget(vise, { sunless: zonesSansSoleil.sunless,
+                              inMajorSector: !!secMaj,
                               onMapCamera: !!solarMap.open }), dt);
+      // La TEINTE du secteur, que le portage ne lisait pas : `_ambientLight`
+      // est un choix de couleur, pas un nombre. Bleu de nuit sur les mondes
+      // rocheux, vert sur Giant's Deep et Dark Bramble.
+      const teinte = ambientTint(secMaj ? secMaj.ambient : 0);
+      ambient.diffuse.set(teinte[0], teinte[1], teinte[2]);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
       meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));
@@ -1983,6 +3583,10 @@ async function boot() {
       const inside = derelicts.some((d) => Math.hypot(
         d.position[0] - playerWorld.x, d.position[1] - playerWorld.y,
         d.position[2] - playerWorld.z) < d.radius);
+      // `MapMarker.LateUpdate` efface TOUS les marqueurs dans la zone
+      // brouillee : on n'a pas de carte dans l'epave, et c'est ce qui la rend
+      // difficile a quitter.
+      dansEpave = inside;
       if (fog.setSuspended(inside)) {
         console.log(inside ? "EnterDerelictZone" : "ExitDerelictZone");
       }
@@ -2006,6 +3610,89 @@ async function boot() {
     // Les fragments sont integres dans le repere LOCAL du conteneur glTF, ou la
     // planete ne bouge pas : pas de conversion de repere a chaque pas, et le
     // decalage du floating origin reste porte par le conteneur.
+    // --- les meteores ---
+    //
+    // Ils partent de leur lanceur, retombent avec le champ dominant, et
+    // blessent au contact passe la demi-seconde d'immunite du prefabrique.
+    if (meteores.launchers.length) {
+      meteores.update(dt, now);
+      meteores.step(dt, player.field);
+      const touche = meteores.hits([player.pos.x, player.pos.y, player.pos.z], 1);
+      if (touche) {
+        meteores.consume(touche);
+        resources.damage(touche.damage);
+        console.log(`meteore : ${touche.damage} de degats`);
+      }
+      for (let i = 0; i < meteores.meteors.length; i++) {
+        if (!meteorMeshes[i]) {
+          const m = BABYLON.MeshBuilder.CreateSphere(`meteor${i}`,
+            { diameter: 2 * METEOR.damage / 25, segments: 6 }, scene);
+          m.material = meteorMat;
+          m.isPickable = false;
+          meteorMeshes.push(m);
+        }
+        const q = meteores.meteors[i].pos;
+        meteorMeshes[i].position.set(q[0], q[1], q[2]);
+        meteorMeshes[i].setEnabled(true);
+      }
+      for (let i = meteores.meteors.length; i < meteorMeshes.length; i++) {
+        meteorMeshes[i].setEnabled(false);
+      }
+    }
+
+    // --- ce qui clignote, ce qui s'aligne, ce qui est repare ---
+    //
+    // Trois lois de `attachments.js`, ecrites pour docs/55 et jamais appelees.
+    // Elles se rattachent par NOM au maillage charge, comme les nuages et les
+    // pivots de tornade — et comme eux, un nom peut manquer : un objet non
+    // rattache reste simplement sans effet.
+    for (const c of clignotants) {
+      if (!c.node) {
+        for (const e of geo) {
+          const n = e.nodes.get(c.data.name);
+          if (n) { c.node = n; c.blinker.activate(now); break; }
+        }
+        if (!c.node) continue;
+      }
+      c.node.setEnabled(c.blinker.update(now));
+    }
+    for (const a of alignes) {
+      if (a.node === undefined) {
+        a.node = null;
+        for (const e of geo) { const n = e.nodes.get(a.name); if (n) { a.node = n; break; } }
+      }
+      if (!a.node || !a.target) continue;
+      const cible = bodies.find((b) => b.name === a.target || b.bodyName === a.target);
+      if (!cible) continue;
+      // `AlignWithTargetBody` : le HAUT vise le corps designe, et non la
+      // verticale de la gravite dominante.
+      const p0 = a.node.getAbsolutePosition();
+      const dir = alignmentDirection([p0.x, p0.y, p0.z], cible.position);
+      const haut = new BABYLON.Vector3(-dir[0], -dir[1], -dir[2]);
+      a.node.rotationQuaternion = BABYLON.Quaternion.FromLookDirectionLH(
+        BABYLON.Vector3.Cross(haut, BABYLON.Axis.X).normalize(), haut);
+    }
+    // `BrokenNode.OnCompleteRepair` : le materiau change, et la reparation SE
+    // VOIT. Le portage n'a pas les materiaux du build sous la main pour ces
+    // trois noeuds ; il pose la couleur que le nom du materiau annonce.
+    if (training.total) {
+      for (const r of training.nodes) {
+        if (!r.done || r.peint) continue;
+        for (const e of geo) {
+          const n = e.nodes.get(r.name);
+          if (!n) continue;
+          for (const m of (n.getChildMeshes ? n.getChildMeshes() : [])) {
+            if (m.material && m.material.emissiveColor) {
+              m.material = m.material.clone(`${m.material.name}_repare`);
+              m.material.emissiveColor = new BABYLON.Color3(0.2, 0.9, 0.35);
+            }
+          }
+          r.peint = true;
+          break;
+        }
+      }
+    }
+
     if (crust) {
       const e = entryForBody(geo, bhBody.name);
       if (e && !crust.resolved) {
@@ -2050,42 +3737,203 @@ async function boot() {
     //
     // Le telescope se zoome A LA MAIN (`OWInput.GetAxis(zoomIn/zoomOut)`, 50
     // degres par seconde) entre 10 et 60 degres, et il ENTRE a 33,33 — pas au
-    // plus etroit, comme le portage le faisait. Les touches R et F portent
-    // l'axe, faute d'en avoir une paire libre plus naturelle.
+    // plus etroit, comme le portage le faisait. Les touches sont celles du
+    // build : `Zoom In` et `Zoom Out` sont majuscule et controle, les MEMES
+    // que la montee et la descente au sac dorsal. Le portage avait pris R et F
+    // « faute d'en avoir une paire libre plus naturelle » — la paire existait.
     const zoomAxe = telescope.active
-      ? ((keys.KeyR ? 1 : 0) - (keys.KeyF ? 1 : 0)) : 0;
+      ? ((cmds.held("Zoom In", etatCmd) ? 1 : 0)
+         - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
     camera.fov = telescope.update(dt, zoomAxe);
+    // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
+    // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
+    // image que l'assise, et la meme dependance a la cadence.
+    if (verrouFOV !== null && !telescope.active) {
+      const vise = verrouFOV * Math.PI / 180;
+      camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
+    }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
     camera.minZ = telescope.nearClip;
+    // La lunette a un corps et un verre dans le build : on les montre quand
+    // elle sert, et le portage ne montrait rien. `TelescopeGUI.LateUpdate` la
+    // fait GROSSIR avec le champ — quatre fois plus grande a soixante degres
+    // qu'a quinze — et elle se retracte a mesure qu'on resserre.
+    {
+      const lunette = enMain.get("telescopegui");
+      if (lunette) {
+        for (const m of lunette.meshes) m.setEnabled(telescope.active);
+        const k = telescopeScale(telescope.fov);
+        lunette.racine.scaling.set(k, k, k);
+      }
+    }
+    if (ondeEl) ondeEl.hidden = !telescope.active || guiMode.hidden;
+    // §P LA REGLETTE DE ZOOM. `TelescopeGUI` pose une fleche sur une reglette,
+    // dont la hauteur dit le champ courant entre le minimum et le maximum. Le
+    // portage montrait la lunette et son onde, et pas ou l'on en etait du zoom.
+    if (zoomEl) {
+      const montre = telescope.active && !guiMode.hidden;
+      zoomEl.hidden = !montre;
+      if (montre) {
+        zoomEl.style.setProperty("--fleche",
+          `${(zoomArrowFraction(telescope.fov) * 100).toFixed(1)}%`);
+      }
+    }
+
+    // §L LE MARQUEUR DE SONDE. `WorldToScreenPoint` a son origine en BAS a
+    // gauche, `GUI` en haut : d'ou la soustraction a la hauteur, et les trente
+    // pixels qui remontent l'etiquette au-dessus du point (docs/60).
+    if (marqueurEl) {
+      const s = probes.last;
+      let pose = null;
+      if (s && !guiMode.hidden) {
+        const v = BABYLON.Vector3.Project(
+          new BABYLON.Vector3(s.pos[0], s.pos[1], s.pos[2]),
+          BABYLON.Matrix.Identity(),
+          scene.getTransformMatrix(),
+          camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()));
+        // `Project` rend deja l'origine en haut a gauche et `z` la profondeur
+        // normalisee : on repasse en convention `WorldToScreenPoint` pour que
+        // la loi du build s'applique telle qu'elle est ecrite.
+        const h = engine.getRenderHeight();
+        const devant = v.z > 0 && v.z < 1;
+        pose = devant
+          ? probeLabelPos({ x: v.x, y: h - v.y, z: 1 }, h, MARQUEUR) : null;
+      }
+      if (!pose) marqueurEl.hidden = true;
+      else {
+        const d = Math.hypot(s.pos[0] - player.pos.x, s.pos[1] - player.pos.y,
+                             s.pos[2] - player.pos.z);
+        const icone = probeIcon(s.damagePerSecond || 0,
+                                s.lastContact ?? null, s.anchored);
+        marqueurEl.hidden = false;
+        marqueurEl.dataset.icon = icone;
+        marqueurEl.style.left = `${Math.round(pose.x)}px`;
+        marqueurEl.style.top = `${Math.round(pose.y)}px`;
+        marqueurEl.textContent = probeReadout(d, null, s.probeInfos || []);
+      }
+    }
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
     }
+    // La sonde : un seul bouton, comme dans le build — `launchProbe`,
+    // `takeSnapshot` et `retrieveProbe` sont trois statiques d'`OWInput`
+    // construites sur le MEME canal (`InputChannels.probe`). Quand la lunette
+    // est ouverte, la touche porte le zoom : les deux ne peuvent pas servir
+    // ensemble, et le build non plus ne les melange pas (`_telescopeInputs`
+    // n'a pas la sonde).
+    const probeHeld = (cmds.held("Probe", etatCmd) || !!ax.probe)
+      && !telescope.active;
     // La sonde se RAMASSE (docs/46, lot 7) : `ExpeditionGear` la debloque, dans
     // la cabine du vaisseau. Sans elle, la touche ne lance rien — c'est la
     // progression du build, et le portage donnait tout au premier instant.
-    if (probeFired && !equipment.probe) {
-      probeFired = false;
-      console.log("sonde : elle se ramasse d'abord, dans la cabine du vaisseau");
+    if (probeHeld && !equipment.probe && !probes.last) {
+      if (!probeRefusee) console.log("sonde : elle se ramasse d'abord, dans la cabine du vaisseau");
+      probeRefusee = true;
+    } else if (!probeHeld) {
+      probeRefusee = false;
     }
-    if (probeFired) {
-      probes.launch(player.pos, fwd);
-      // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
-      // d'un coup, qui retombe en une seconde.
-      dernierLancement = now;
-      // ProbeLauncher accorde ce savoir dans le build
-      if (pdata.learn("knowsHowProbesWork")) console.log("fonctionnement des sondes appris");
-      probeFired = false;
+    // Le poste de pilotage est le seul « dedans » que ce portage ait : il n'a
+    // pas d'interieur de vaisseau. `IsInsideShip() && !AtFlightConsole()`
+    // refuse le tir ; ici les deux vont donc ensemble, et le refus ne se
+    // declenche jamais. On le cable quand meme, plutot que de le supprimer :
+    // c'est la ligne du build, et l'interieur viendra.
+    etatJoueur.insideShip = etatJoueur.atFlightConsole = !!(ship && ship.boarded);
+    // Le lancer de rayon de la sonde : la fenetre de tir, puis l'ancrage.
+    // Havok travaille dans le repere ancre, comme `player.pos` — les deux
+    // parlent le meme espace, et rien n'a besoin d'etre reporte.
+    const rayonSonde = plugin ? (depuis, dir, portee) => {
+      const eng = scene.getPhysicsEngine();
+      if (!eng || !eng.raycast) return null;
+      try {
+        const a = new BABYLON.Vector3(depuis[0], depuis[1], depuis[2]);
+        const b = new BABYLON.Vector3(depuis[0] + dir[0] * portee,
+                                      depuis[1] + dir[1] * portee,
+                                      depuis[2] + dir[2] * portee);
+        const hit = eng.raycast(a, b);
+        if (!hit || !hit.hasHit) return null;
+        const q = hit.hitPointWorld || hit.hitPoint;
+        const n = hit.hitNormalWorld || hit.hitNormal;
+        if (!q) return null;
+        return { point: [q.x, q.y, q.z],
+                 normal: n ? [n.x, n.y, n.z] : null,
+                 // Tout ce que le portage pose est statique du point de vue de
+                 // Havok : le decor bouge par le repere, pas par un corps. Le
+                 // capteur haute vitesse est donc le seul a s'en servir.
+                 dynamic: false };
+    } catch (e) { return null; }
+    } : null;
+    const champ = player.field;
+    probes.update(dt,
+      { launch: probeHeld && !!equipment.probe, retrieve: probeHeld,
+        alt: cmds.held("Alt Probe", etatCmd) && !consoles.count },
+      { pos: [player.pos.x, player.pos.y, player.pos.z],
+        forward: [fwd.x, fwd.y, fwd.z],
+        playerForward: [fwd.x, fwd.y, fwd.z],
+        playerUp: [up.x, up.y, up.z],
+        playerVelocity: [player.vel.x, player.vel.y, player.vel.z],
+        playerPos: [player.pos.x, player.pos.y, player.pos.z],
+        knowsProbes: pdata.knows("knowsHowProbesWork"),
+        insideShip: etatJoueur.insideShip,
+        atFlightConsole: etatJoueur.atFlightConsole,
+        raycast: rayonSonde,
+        field: champ,
+        wellCenter: champ ? champ.body.position : null,
+        sectorCenter: champ ? champ.body.position : null,
+        sectorRadius: champ ? (champ.body.gravity.upperSurfaceRadius || 0) : 0,
+        sectorVelocity: [0, 0, 0] });
+    for (const e of probes.events) {
+      if (e === "LaunchProbe") {
+        // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
+        // d'un coup, qui retombe en une seconde.
+        dernierLancement = now;
+        // §Q `DestroyAllProbePromptTriggers` : lancer une sonde depuis une
+        // invite les DETRUIT TOUTES — pas seulement celle-la. Les quatre
+        // invites sont un tutoriel a usage unique : une fois qu'on a compris,
+        // le jeu ne le redit jamais. Le portage les aurait remontrees a chaque
+        // passage (docs/76-proximite.md).
+        if (invitesSonde.length && inviteSondeVisible) {
+          invitesSonde = [];
+          invitesDetruites = true;
+          inviteSondeVisible = false;
+          window.__invites.sonde = invitesSonde;
+          window.__invites.detruites = true;
+          console.log("annonce : DestroyAllProbePromptTriggers");
+        }
+      }
+      // §V LE TUTORIEL DE LA SONDE NE S'ACQUIERT PAS AU LANCEMENT.
+      //
+      // `ProbePromptController.OnProbeDestroyed` : le savoir vient quand la
+      // sonde est DETRUITE, et seulement si l'on a pris PLUS DE DEUX photos en
+      // vol d'ici la. Trois photos en l'air, puis la sonde qui meurt — voila ce
+      // que « comprendre les sondes » veut dire pour ce jeu.
+      //
+      // Le portage l'accordait au premier tir, ce qui est exactement le
+      // contraire : il suffisait d'appuyer une fois (docs/81-invulnerable.md).
+      if (e === "MidairProbeSnapshot") photosEnVol++;
+      if (e === "ProbeDestroyed" || e === "RetrieveProbe") {
+        if (photosEnVol > 2 && pdata.learn("knowsHowProbesWork")) {
+          console.log("annonce : CompleteProbeTutorial — fonctionnement des sondes appris");
+        }
+        photosEnVol = 0;
+      }
+      if (e === "ProbeLaunchAborted") console.log("tir de sonde refuse : pas de fenetre");
+      if (e === "ProbeSnapshot" && probes.lastSnapshot) {
+        console.log(`photo de sonde : ${probes.lastSnapshot.size} px`
+          + (probes.lastSnapshot.rear ? " (arriere)" : ""));
+      }
     }
-    probes.update(dt, player.field);
     syncProbes();
     // La vue deportee est la meme, avec une autre cible : une console prise en
     // main passe devant la sonde, qui n'est pas ce qu'on regarde a ce
     // moment-la.
     const remoteView = consoles.view(anchorPos,
       { ship, body: player.field && player.field.body });
-    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last));
+    // La touche `altProbe` (R dans le build) montre l'arriere : c'est la seule
+    // vue utile une fois la sonde plantee.
+    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last),
+                    !remoteView && cmds.held("Alt Probe", etatCmd) && !consoles.count);
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {
@@ -2130,6 +3978,10 @@ async function boot() {
         for (const i of t.sources || []) audio.lowPassFor(i, s);
       }
     }
+    // L'onde se trace APRES la somme des emetteurs, et non avant : c'est
+    // l'ordre de `Telescope.Update`, qui lit `_signalStrength`, dessine, puis
+    // remet a zero. Tracer plus haut dans la boucle rendrait l'image d'avant.
+    if (telescope.active) traceOnde(telescope.signalStrength, now);
 
     // --- mixage par piste ---
     //
@@ -2148,18 +4000,84 @@ async function boot() {
     // conversation : le jeu appelle TurnOff sur chacun de ces evenements.
     if (ship && ship.boarded) flashlight.forceOff();
     if (solarMap.open || dialogue.active) flashlight.forceOff();
-    flashlight.update(camera, fwd,
-      sectorState.secteur ? sectorState.secteur.lightRange || null : null);
+    // `SectorDetector.GetFlashlightRangeLimit` lit `_flashlightRangeLimit` sur
+    // le secteur actif. Le portage lui passait `_ambientLightRange`, qui est
+    // une autre grandeur pour un autre usage : la lampe se trouvait bridee a
+    // 250 sur Timber Hearth et a 750 sur Giant's Deep, alors qu'AUCUN des dix
+    // secteurs ne la bride (les dix `_flashlightRangeLimit` sont nuls).
+    flashlight.update(camera, fwd, secMaj ? secMaj.flashlightLimit : null);
     // Face nuit : la hauteur du soleil au-dessus de l'horizon local. Elle n'a
     // de sens que depuis que les corps tournent sur eux-memes — sur une planete
     // figee, la face nuit ne le devenait jamais.
     if (star0) night = sunElevation(star0.position, [up.x, up.y, up.z]) < 0;
     // La guimauve ne cuit plus sur commande mais au-dessus des braises : la
     // chaleur vient du HeatSource le plus proche.
+    let chaleurBaton = 0;
     if (heat.length) {
-      const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z]);
+      const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z],
+                       (x) => decalageDuCorps(x.body, anchorPos));
+      chaleurBaton = h;
       marshmallow.held = h > 0 || marshmallow.toast > 0;
       marshmallow.update(dt, h);
+    }
+    // §M ON NE GRILLE PAS DE LOIN. `RoastPromptEvent` coupe le grillage des
+    // qu'on s'eloigne de plus de quatre unites du feu — c'est ce qui empeche de
+    // partir la guimauve a la main et de la voir cuire en marchant. Les huit
+    // invites du build portent la distance, et toutes la meme.
+    // §U LE BATON SORT EN APPUYANT PRES DU FEU. `RoastPromptEvent` annonce
+    // `BeginRoasting`, que `MarshmallowStick` ecoute pour le sortir ; s'eloigner
+    // annonce `StopRoasting` et le range. Le portage avait une touche a lui
+    // (docs/64), faute d'avoir vu le declencheur (docs/80-invites.md).
+    if (invitesGuimauve.length) {
+      const pw = [playerWorld.x, playerWorld.y, playerWorld.z];
+      for (const inv of invitesRoast) {
+        const dec = decalageDuCorps(inv.data.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(pw[0] - inv.data.position[0] - dec[0],
+                             pw[1] - inv.data.position[1] - dec[1],
+                             pw[2] - inv.data.position[2] - dec[2]);
+        if (interactPressed && !dialogue.active && d <= inv.data.distance) {
+          if (inv.etat.press() && !baton.out) {
+            baton.toggle();
+            console.log("annonce : BeginRoasting");
+          }
+        }
+        if (inv.etat.update(d)) {
+          // `OnStopRoasting` ne range le baton QUE s'il est sorti.
+          if (baton.out) baton.toggle();
+          console.log("annonce : StopRoasting");
+        }
+      }
+    }
+    if (invitesGuimauve.length && marshmallow.toast > 0) {
+      const pw = [playerWorld.x, playerWorld.y, playerWorld.z];
+      let proche = null, best = Infinity;
+      for (const inv of invitesGuimauve) {
+        const dec = decalageDuCorps(inv.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(inv.position[0] + dec[0] - pw[0],
+                             inv.position[1] + dec[1] - pw[1],
+                             inv.position[2] + dec[2] - pw[2]);
+        if (d < best) { best = d; proche = inv; }
+      }
+      if (roastBroken(best, proche)) {
+        marshmallow.held = false;
+        chaleurBaton = 0;
+        if (!grillageRompu) {
+          grillageRompu = true;
+          console.log("grillage interrompu : trop loin du feu");
+        }
+      } else grillageRompu = false;
+    }
+    // Le baton a guimauve, tel que le build le joue : deux clips a la queue au
+    // reveil, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
+    // chaleur — vitesse zero, pose choisie a la main (docs/64-mains.md).
+    {
+      const objet = enMain.get("marshmallowstick");
+      const enCours = objet
+        ? objet.groupes.some((g) => g.isPlaying && !g.name.includes("Therm")) : false;
+      baton.update(dt, { eaten: mangeCetteImage, heat: chaleurBaton,
+                         playing: enCours });
+      mangeCetteImage = false;
+      if (objet) syncBaton(objet, baton, chaleurBaton);
     }
     if (!(ship && ship.boarded)) computer.open = false;
     if (computerEl) {
@@ -2230,6 +4148,67 @@ async function boot() {
           qnode.rotationQuaternion = new BABYLON.Quaternion(q[0], q[1], q[2], q[3]);
         } else {
           qnode.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+        }
+      }
+    }
+
+    // --- §L ce qui bouge quand on ne le regarde pas ---
+    //
+    // La regle est la meme pour les cinq objets de la lune et pour la statue du
+    // musee, et elle tient en une ligne : l'objet s'effondre a l'INSTANT ou il
+    // sort du champ de la camera active. Pas pendant qu'on le regarde, pas
+    // pendant qu'on ne le regarde pas — sur la transition.
+    //
+    // Et chaque place tiree est refusee si elle est VISIBLE : un objet
+    // quantique ne se materialise jamais sous vos yeux. C'est ce refus qui
+    // rend la mecanique credible, et c'est lui qu'un portage presse oublierait.
+    if (objetsQ.length && geo.length) {
+      for (const o of objetsQ) {
+        if (o.node === undefined) {
+          o.node = null;
+          // Trois `Pine_Thick` homonymes : on rattache par POSITION, comme les
+          // dix visages de nuage et les six buses du modele reduit.
+          for (const e of geo) {
+            const n = noeudLePlusProche(e, o.name, o.position, anchorPos);
+            if (n) { o.node = n; break; }
+          }
+        }
+        if (!o.node) continue;
+        // `Start` appelle `Collapse()` UNE FOIS : les cinq ne sont jamais la ou
+        // la scene les pose. Ce n'est pas un hasard de partie, c'est la
+        // premiere image qu'on a d'eux.
+        if (!o.brouille) {
+          o.brouille = true;
+          o.collapse(() => tirerPlaceQuantique(o, anchorPos));
+        }
+        const visible = dansLeChamp(o.node);
+        o.update(visible, () => tirerPlaceQuantique(o, anchorPos));
+        const p = o.position;
+        o.node.setAbsolutePosition(
+          new BABYLON.Vector3(p[0] - anchorPos[0], p[1] - anchorPos[1],
+                              p[2] - anchorPos[2]));
+      }
+    }
+    // La statue ne se DEPLACE pas : chacun de ses morceaux a une chance sur
+    // cinq d'etre encore la. Detourner les yeux d'une tete ancienne en
+    // vitrine, et n'en retrouver qu'un cinquieme.
+    for (const st of statuesQ) {
+      if (st.noeuds === undefined) {
+        st.noeuds = [];
+        for (const nom of st.parts) {
+          for (const e of geo) {
+            const n = e.nodes.get(nom);
+            if (n) { st.noeuds.push(n); break; }
+          }
+        }
+        st.etat = new ObjetQuantique({ name: st.name, position: st.position });
+      }
+      if (!st.noeuds.length) continue;
+      const visible = st.noeuds.some((n) => dansLeChamp(n));
+      if (st.etat.update(visible)) {
+        const tirage = statueParts(st.parts);
+        for (let i = 0; i < st.noeuds.length; i++) {
+          st.noeuds[i].setEnabled(tirage[i] ? tirage[i].visible : true);
         }
       }
     }
@@ -2404,10 +4383,18 @@ async function boot() {
         // et on le dit plutot que de le laisser croire porte.
         const [cr, cg, cb] = starField.color;
         starFlash = starFlash.filter(({ i, t }) => {
-          const u = (now - t) / 1;
+          const depuis = now - t;
           const p = starPCS.particles[i];
           if (!p) return false;
-          if (u >= 1) { p.color.set(0, 0, 0, 0); return false; }
+          // §P LA DUREE EST CELLE DU BUILD. `SelfDestruct` la porte sur le
+          // prefabrique : `DistantSupernova` vit CINQ secondes, pas une. Le
+          // portage avait choisi une seconde faute de l'avoir sous la main —
+          // et elle etait dans `data/prefabs.json` depuis docs/60.
+          if (selfDestructed(depuis, dureeSupernova)) {
+            p.color.set(0, 0, 0, 0);
+            return false;
+          }
+          const u = depuis / dureeSupernova;
           const k = u < 0.15 ? 1 + u * 20 : (1 - (u - 0.15) / 0.85) * 4;
           p.color.set(cr * k, cg * k, cb * k, 1);
           return true;
@@ -2482,6 +4469,110 @@ async function boot() {
         }
       }
     }
+    // §M LA TOILE QUI TOURNE. Deux anneaux en sens inverse, au CUBE des
+    // fractions — donc presque immobiles au debut du regard, et emportes a la
+    // fin. C'est cette acceleration qui fait qu'on sent la charge monter.
+    for (const t of toiles) {
+      if (t.noeuds === undefined) {
+        t.noeuds = { inner: null, outer: null };
+        for (const e of geo) {
+          if (!t.noeuds.inner && t.inner) t.noeuds.inner = e.nodes.get(t.inner) || null;
+          if (!t.noeuds.outer && t.outer) t.noeuds.outer = e.nodes.get(t.outer) || null;
+        }
+        t.pleinDepuis = null;
+      }
+      const g = regards.find((r) => r.data.name === t.gazeSwitch) || regards[0];
+      if (!g || (!t.noeuds.inner && !t.noeuds.outer)) continue;
+      const v = webSpeeds(g.gazeFraction || 0, g.charge || 0);
+      // Les vitesses sont en degres par seconde, et l'axe est celui de la
+      // toile : son avant local, donc l'axe Z du noeud.
+      for (const [k, n] of [["inner", t.noeuds.inner], ["outer", t.noeuds.outer]]) {
+        if (!n) continue;
+        n.rotate(BABYLON.Axis.Z, v[k] * dt * Math.PI / 180, BABYLON.Space.LOCAL);
+      }
+      // `webAlpha` : une fois la charge pleine, la toile s'efface en deux
+      // secondes et le composant s'eteint. Le build ne la remontre jamais.
+      if ((g.charge || 0) >= 1 && t.pleinDepuis === null) t.pleinDepuis = now;
+      if (t.pleinDepuis !== null) {
+        const a = webAlpha(now - t.pleinDepuis);
+        for (const n of [t.noeuds.inner, t.noeuds.outer]) {
+          if (!n) continue;
+          for (const m of (n.getChildMeshes ? n.getChildMeshes() : [])) {
+            if (m.material) { m.material.alpha = a; m.visibility = a; }
+          }
+          if (a <= 0) n.setEnabled(false);
+        }
+      }
+    }
+    // §M LE RENDU DE LA POUSSIERE. La loi a decide au bloc du suivi ; ici on ne
+    // fait que la poser sur le systeme.
+    {
+      const ps = systemePoussiere();
+      if (ps) {
+        const d = poussiere;
+        if (!d.emitting || d.alpha <= 0) ps.emitRate = 0;
+        else {
+          ps.emitRate = d.rate;
+          ps.minLifeTime = ps.maxLifeTime = d.lifetime;
+          ps.minSize = ps.maxSize = Math.max(0.05, d.size * 0.02);
+          ps.minEmitPower = ps.maxEmitPower = d.startSpeed;
+          const a = d.alpha;
+          ps.color1 = new BABYLON.Color4(0.8, 0.9, 1, a);
+          ps.color2 = new BABYLON.Color4(0.8, 0.9, 1, a * 0.6);
+          ps.colorDead = new BABYLON.Color4(0.8, 0.9, 1, 0);
+          // Les traits regardent le deplacement : la direction d'emission est
+          // l'oppose de la vitesse, vue depuis la camera qui avance.
+          const v = [player.vel.x, player.vel.y, player.vel.z];
+          const l = Math.hypot(v[0], v[1], v[2]) || 1;
+          ps.direction1 = new BABYLON.Vector3(-v[0] / l, -v[1] / l, -v[2] / l);
+          ps.direction2 = ps.direction1;
+        }
+      }
+    }
+    // §M LA TEMPETE. Une entree, une sortie, quel que soit le nombre de
+    // cylindres traverses — c'est tout l'interet du volume compose : sans le
+    // compte, passer d'un cylindre au suivant emettrait une sortie puis une
+    // entree, et l'ecran clignoterait.
+    {
+      // L'entonnoir pousse et se retire au fil de la boucle : la tempete
+      // n'existe qu'entre les deux, et son volume, lui, ne bouge pas.
+      const vivant = sand.funnels.length
+        ? sand.funnels.some((f) => funnelActive(loop.elapsed, f)) : true;
+      const ev = tempete.update([playerWorld.x, playerWorld.y, playerWorld.z],
+                                (c) => decalageDuCorps(c.body, anchorPos), vivant);
+      if (ev === "enter") console.log("annonce : EnterSandstorm");
+      if (ev === "exit") console.log("annonce : ExitSandstorm");
+      const ps = systemeSable();
+      if (ps) ps.emitRate = tempete.active ? 400 : 0;
+    }
+    // §P La sonde ancienne avance, et rien ne l'arrete. L'acceleration est
+    // LOCALE — l'avant de la sonde — et le champ dominant s'y ajoute comme
+    // pour tout le reste : elle tombe aussi.
+    if (sondeAncienne) {
+      const av = qrotDecor(sondeAncienne.rotation, [0, 0, 1]);
+      const a = ancientProbeAcceleration(av);
+      const g = dominantField(bodies, {
+        x: sondeAncienne.pos[0] - anchorPos[0],
+        y: sondeAncienne.pos[1] - anchorPos[1],
+        z: sondeAncienne.pos[2] - anchorPos[2] });
+      for (let i = 0; i < 3; i++) {
+        const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;
+        sondeAncienne.vel[i] += (a[i] + gi) * dt;
+        sondeAncienne.pos[i] += sondeAncienne.vel[i] * dt;
+      }
+      if (sondeAncienne.node === undefined) {
+        sondeAncienne.node = null;
+        for (const e of geo) {
+          const n = e.nodes.get(sondeAncienne.name);
+          if (n) { sondeAncienne.node = n; break; }
+        }
+      }
+      if (sondeAncienne.node) {
+        sondeAncienne.node.setAbsolutePosition(new BABYLON.Vector3(
+          sondeAncienne.pos[0] - anchorPos[0], sondeAncienne.pos[1] - anchorPos[1],
+          sondeAncienne.pos[2] - anchorPos[2]));
+      }
+    }
     for (const p of portes) p.update(now);
     // Le casque suit le regard avec un vingtieme de retard, et seulement quand
     // on le porte. `pitch` est le tangage en angles d'Euler d'Unity : la bande
@@ -2498,8 +4589,21 @@ async function boot() {
       const frac = ship.damage.total > 0 ? ship.damage.integrity / ship.damage.total : 1;
       const crie = alarme.update(frac);
       if (resHUD) resHUD.setAlarm(crie);
+      // `PlaySuitWarningSound` vient de `PlayerResourceGUI.Update` : c'est
+      // l'avertissement du SAC DORSAL, pas celui de la coque. Il ne se joue
+      // qu'au passage sous le seuil.
+      const sec = resources.fuel <= 0;
+      if (sec && !sacASec) bipUI("PlaySuitWarningSound");
+      sacASec = sec;
+      // La zone suit le vaisseau : elle est posee SUR lui, et il vole.
+      presDuVaisseau = zonesVaisseau.length === 0 || !!ship.boarded
+        || zonesVaisseau.some((z) => z.volume && Math.hypot(
+             playerWorld.x - ship.pos.x - anchorPos[0],
+             playerWorld.y - ship.pos.y - anchorPos[1],
+             playerWorld.z - ship.pos.z - anchorPos[2]) <= z.volume.radius);
       voyants.update(now, ship.damage.integrity < ship.damage.total,
-                     Object.values(ship.damage.parts).map((p) => p.dead));
+                     Object.values(ship.damage.parts).map((p) => p.dead),
+                     presDuVaisseau);
     }
     const avis = notifications.update(now);
     if (resHUD) resHUD.setNotice(avis);
@@ -2514,24 +4618,226 @@ async function boot() {
         const vRel = [player.vel.x, player.vel.y, player.vel.z];
         const m = relativeMotion(vRel, moi, cible.position);
         resHUD.setTracker(trackerReadout(m.distance, m.zSpeed));
+        // §M LA POUSSIERE DE VITESSE. `MotionDust` ne seme RIEN sous trente
+        // unites par seconde : en dessous, l'espace reste vide, et c'est ce qui
+        // donne son prix a la vitesse. Au-dessus, le debit monte pendant que la
+        // duree de vie DIMINUE — plus on va vite, plus il y a de traits, et
+        // plus ils sont courts (docs/58).
+        //
+        // La loi etait ecrite, eprouvee, et seulement IMPORTEE (docs/71).
+        poussiere = motionDust(Math.hypot(vRel[0], vRel[1], vRel[2]),
+                               { targeting: true, mapView: solarMap.open });
         window.__suivi = m;
-      } else resHUD.setTracker(null);
+      } else { resHUD.setTracker(null); poussiere = motionDust(0, { targeting: false }); }
     }
 
+    // --- viser un referentiel, et s'y accorder (docs/62-visee.md) ---
+    //
+    // `ReferenceFrameTracker` : la cible se REGARDE. Le portage ne la
+    // choisissait que dans la carte, et les trois canaux de vol du build ne
+    // pilotaient rien une fois lus.
+    {
+      const moi = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                   player.pos.z + anchorPos[2]];
+      // Les positions se rafraichissent EN PLACE, dans une liste construite une
+      // fois. Les recreer a chaque image donnait des objets tout neufs, et
+      // `LockOn` compare par identite — comme le build compare deux
+      // `ReferenceFrame` : re-viser la meme cible ne la relachait donc jamais,
+      // parce que ce n'etait jamais « la meme ».
+      for (const v of visables) {
+        v.position[0] = v.body.position0[0];
+        v.position[1] = v.body.position0[1];
+        v.position[2] = v.body.position0[2];
+      }
+      const vise = solarMap.open ? null : aimedFrame(visables, moi, [fwd.x, fwd.y, fwd.z]);
+      const avant = lockOn.current;
+      lockOn.update(dt, lockPressed, vise);
+      lockPressed = false;
+      if (lockOn.current !== avant) {
+        // La carte et la visee tiennent la MEME cible : viser du regard et
+        // choisir sur la carte sont deux gestes pour une seule chose.
+        solarMap.selected = lockOn.current ? lockOn.current.body : null;
+        // `_targetReferenceFrame` et `_untargetReferenceFrame` sont DEUX clips :
+        // verrouiller et lacher ne s'entendent pas pareil.
+        bipUI(lockOn.current ? "TargetReferenceFrame" : "UntargetReferenceFrame");
+        console.log(lockOn.current
+          ? `referentiel vise : ${lockOn.current.name}`
+          : "referentiel abandonne");
+      }
+      // `PlayerJetpackController.Update` : accorder sa vitesse demande une
+      // cible, du carburant, et le canal `Match Velocity` — l'espace, celui du
+      // saut. Au sol on saute ; en vol, on s'accorde.
+      // `canThrust` : du carburant ET vivant. Le portage ne testait que le
+      // carburant, et un mort accordait encore sa vitesse.
+      if (matchPressed && lockOn.current && !player.grounded
+          && resources.canThrust) {
+        const t = lockOn.current.body;
+        const v = frameVelocity(orbits, t);
+        if (v) {
+          // `Autopilot.InitMatchVelocity`. Le build y va par la POUSSEE ; ce
+          // portage pose la vitesse, et la loi le dit a l'endroit ou elle est
+          // ecrite plutot qu'ici.
+          const vm = matchedVelocity(v);
+          player.vel.x = vm[0]; player.vel.y = vm[1]; player.vel.z = vm[2];
+          console.log(`vitesse accordee a ${t.name}`);
+        }
+      }
+      matchPressed = false;
+      // `Autopilot.InitFlyToDestination` REFUSE si l'on est deja arrive : le
+      // portage engageait toujours, et le pilote partait pour zero unite.
+      if (autoPressed && autopilot && lockOn.current) {
+        const t = lockOn.current.body;
+        const d = Math.hypot(t.position[0] - player.pos.x,
+                             t.position[1] - player.pos.y,
+                             t.position[2] - player.pos.z);
+        const { arrival } = autopilotDistances(
+          declared.frames, t.name, (t.gravity && t.gravity.upperSurfaceRadius) || 0);
+        if (canFlyTo(d, arrival)) autopilot.engage(t);
+        else console.log(`pilote auto : deja arrive (${Math.round(d)} u)`);
+      }
+      autoPressed = false;
+      window.__visee = lockOn;
+    }
+
+    // --- LA TOUR DE LANCEMENT, de bout en bout (docs/92-tour.md) ---
+    //
+    // `LaunchTerminal.OnPressInteract` : avec les codes, un son affirmatif et
+    // `ActivateLaunchTower` ; sans, un son negatif et la borne se remet a
+    // disposition. Elle ne sert qu'UNE fois — le build desactive son volume
+    // d'interaction.
+    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
+      for (const b of bornesTour) {
+        const q = restingPoint(playerW, decalageDuCorps(b.body, anchorPos));
+        const d = Math.hypot(q[0] - b.position[0], q[1] - b.position[1],
+                             q[2] - b.position[2]);
+        if (d > GEAR_REACH) continue;
+        const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
+        if (r === "activate") {
+          // `LaunchElevatorController.OnActivateLaunchTower`.
+          for (const a of ascenseurs) a.activateControls();
+          bipUI("PlayAffirmativeUISound");
+          console.log("tour de lancement actionnee");
+        } else if (r === "refuse") {
+          bipUI("PlayNegativeUISound");
+          console.log("tour de lancement : codes inconnus");
+        }
+        break;
+      }
+    }
+    // `LaunchElevatorController.OnTriggerEnter` : entrer dans la sphere de dix
+    // unites alors que la cabine est en haut la renvoie en bas. Le seuil de 0,9
+    // est ce qui empeche qu'elle reparte des qu'on approche du pied de la tour.
+    for (const dcl of declencheursTour) {
+      if (!dcl.volume) continue;
+      const dec = decalageDuCorps(dcl.body, anchorPos);
+      if (!insideVolume(dcl, restingPoint(playerW, dec))) continue;
+      for (const a of ascenseurs) {
+        if (a.fraction > RETURN_ABOVE && !a.moving) a.returnToStart(now);
+      }
+    }
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
     for (const a of ascenseurs) a.update(now);
 
-    // Les six buses du vaisseau MINIATURE — celui de l'observatoire, pas celui
-    // du joueur : le champ `body` dit `ModelShip_Body`.
+    // §S LE VAISSEAU MINIATURE VOLE.
     //
-    // Le vaisseau miniature n'est PAS porte (playerdata.js le dit deja a propos
-    // de ses compteurs d'essais) : il n'y a donc aucune commande a lire, et les
-    // six buses restent eteintes. La loi est ecrite et eprouvee — la buse
-    // allumee est celle qui POUSSE, donc l'opposee au mouvement — et c'est le
-    // meme choix que pour les dix-huit bouffees de docs/46 : la mecanique
-    // existe, sa liste d'entrees est vide, et on le dit.
+    // Il se pilote depuis la console deportee de l'observatoire, avec les huit
+    // canaux que `_modelShipInputs` autorise (docs/70) : les deux axes de
+    // poussee, la montee, la descente, le tangage, le lacet — et rien d'autre,
+    // ni sonde ni carte.
+    //
+    // La poussee est celle du VRAI vaisseau, faute d'un modele a lui : le
+    // build n'en pose aucun sur `ModelShip_Body`, et c'est dit ici plutot que
+    // presente comme mesure.
+    let pousseeModele = [0, 0, 0];
+    if (modele) {
+      const auxCommandes = !!(consoles.active && consoles.active.flight);
+      if (auxCommandes) {
+        const a = {
+          fwd: quatRotate(modele.quat, [0, 0, 1]),
+          right: quatRotate(modele.quat, [1, 0, 0]),
+          up: quatRotate(modele.quat, [0, 1, 0]),
+        };
+        const ax = cmds.axis("Move X", etatCmd);
+        const az = cmds.axis("Move Z", etatCmd);
+        const mu = (cmds.held("Move Up", etatCmd) ? 1 : 0)
+                 - (cmds.held("Move Down", etatCmd) ? 1 : 0);
+        const p = (ship ? ship.thrust : 50) * 0.4;
+        pousseeModele = [
+          (a.right[0] * ax + a.fwd[0] * az + a.up[0] * mu) * p,
+          (a.right[1] * ax + a.fwd[1] * az + a.up[1] * mu) * p,
+          (a.right[2] * ax + a.fwd[2] * az + a.up[2] * mu) * p,
+        ];
+      }
+      const g = dominantField(bodies, {
+        x: modele.pos[0] - anchorPos[0], y: modele.pos[1] - anchorPos[1],
+        z: modele.pos[2] - anchorPos[2] });
+      const avant = modele.vel.slice();
+      for (let i = 0; i < 3; i++) {
+        const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;
+        modele.vel[i] += (pousseeModele[i] + gi) * dt;
+        modele.pos[i] += modele.vel[i] * dt;
+      }
+      // LE SOL. Le modele reduit n'a pas de collider a lui : on le pose sur la
+      // surface du corps dominant, et c'est l'ARRIVEE a cette surface qui donne
+      // la vitesse d'impact — la seule chose dont le seuil de crash a besoin.
+      if (g && g.body && g.body.gravity) {
+        const r = (g.body.gravity.upperSurfaceRadius || 0) + 0.6;
+        const d = [modele.pos[0] - anchorPos[0] - g.body.position[0],
+                   modele.pos[1] - anchorPos[1] - g.body.position[1],
+                   modele.pos[2] - anchorPos[2] - g.body.position[2]];
+        const l = Math.hypot(d[0], d[1], d[2]) || 1;
+        if (l < r) {
+          const impact = Math.hypot(avant[0], avant[1], avant[2]);
+          for (let i = 0; i < 3; i++) {
+            modele.pos[i] = anchorPos[i] + g.body.position[i] + d[i] / l * r;
+            modele.vel[i] = 0;
+          }
+          // `OnImpact` ne fait rien sous DIX : un contact doux n'est pas un
+          // crash, et c'est ce qui rend l'atterrissage possible.
+          if (crashes(impact)) {
+            compteurEnfant.crashed();
+            console.log(`annonce : CrashedModelShip (${impact.toFixed(1)} u/s)`);
+            if (modele.crashSound) audio.playOneShot(modele.crashSound);
+            // Il repart de sa place : le build l'y remet par son support.
+            modele.pos = modele.repos.slice();
+            modele.vel = [0, 0, 0];
+          }
+        }
+      }
+      // LES TROIS PISTES. Pose ne suffit pas : il faut etre IMMOBILE — 0,1 u/s
+      // et 0,01 rad/s — pendant deux dixiemes de seconde.
+      for (const p of pistesModele) {
+        const dec = decalageDuCorps(p.data.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(modele.pos[0] - p.data.position[0] - dec[0],
+                             modele.pos[1] - p.data.position[1] - dec[1],
+                             modele.pos[2] - p.data.position[2] - dec[2]);
+        p.etat.setInside(d < 3);
+        // La vitesse est relative a la PLANETE : sur un sol qui tourne, un
+        // modele immobile dans le monde ne l'est pas pour la piste.
+        if (p.etat.update(now, Math.hypot(...modele.vel), 0)) {
+          compteurEnfant.landed();
+          console.log("annonce : LandedModelShip");
+        }
+      }
+      if (modele.node === undefined) {
+        modele.node = null;
+        for (const e of geo) {
+          const n = e.nodes.get(modele.name);
+          if (n) { modele.node = n; break; }
+        }
+      }
+      if (modele.node) {
+        modele.node.setAbsolutePosition(new BABYLON.Vector3(
+          modele.pos[0] - anchorPos[0], modele.pos[1] - anchorPos[1],
+          modele.pos[2] - anchorPos[2]));
+      }
+    }
+    // Les six buses du vaisseau MINIATURE — celui de l'observatoire, pas celui
+    // du joueur : le champ `body` dit `ModelShip_Body`. La buse allumee est
+    // celle qui POUSSE, donc l'opposee au mouvement demande — et elle a enfin
+    // une entree a lire.
     if (busesModele.length && particles.live && particles.live.size) {
-      const etats = shipNozzles([0, 0, 0]);
+      const etats = shipNozzles(pousseeModele);
       const parPosition = new Map();
       for (const b of busesModele) parPosition.set(b.position.join(","), etats[b.direction]);
       particles.gateAt(parPosition);
@@ -2588,6 +4894,30 @@ async function boot() {
           console.log(`passage : ${parti.teleporter.name} -> ${parti.arrival}`);
         }
       }
+    }
+    // §N LES PASSAGES DE DARK BRAMBLE. Trois secondes apres etre entre, pas a
+    // l'instant : `_warpDuration` vaut 6 et `Update` deplace le corps a la
+    // MOITIE, au milieu de l'eclair de brouillard. On s'enfonce, le brouillard
+    // monte, et on est ailleurs.
+    if (epaves.count) {
+      const saut = epaves.update(dt, now,
+        [playerWorld.x, playerWorld.y, playerWorld.z],
+        (w) => decalageDuCorps(w.body, anchorPos));
+      if (saut) {
+        player.pos.x = saut.arrival[0] - anchorPos[0];
+        player.pos.y = saut.arrival[1] - anchorPos[1];
+        player.pos.z = saut.arrival[2] - anchorPos[2];
+        // ET ON ARRIVE EN MOUVEMENT : dix unites par seconde le long de l'axe
+        // du point d'arrivee vers le centre du passage. On ne se materialise
+        // pas immobile.
+        player.vel.x = saut.velocity[0];
+        player.vel.y = saut.velocity[1];
+        player.vel.z = saut.velocity[2];
+        if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
+        fx.teleport(now);
+        console.log(`epave : ${saut.warp.name} -> ${saut.receiver.name}`);
+      }
+      for (const e of epaves.drain()) console.log(`annonce : ${e}`);
     }
     // §5 LE SON D'EVENEMENT. Marcher, souffler, pousser, voyager, finir.
     if (events.count) {
@@ -2666,14 +4996,27 @@ async function boot() {
       if (cFin) audio.loopAt(cFin, vFin * mixer.volume("Music"));
     }
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
-    if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
+    if (audioMap.length) {
+      // §N LES COQUILLES SONORES. Le build teste le tag `PlayerCameraDetector` :
+      // c'est l'OREILLE qu'on guette, pas le corps. Entrer la tete dans l'ocean
+      // de Giant's Deep COUPE le bruit de l'ocean — on l'entend du dessus, et
+      // plus une fois dedans, ou le son d'immersion prend le relais.
+      const gains = coquilles
+        ? coquilles.update(dt, [camera.position.x + anchorPos[0],
+                                camera.position.y + anchorPos[1],
+                                camera.position.z + anchorPos[2]],
+                           (sh) => decalageDuCorps(sh.body, anchorPos))
+        : null;
+      audio.update(player.pos, anchorPos, mixer, gains);
+    }
     // Les ambiances suivent la position MONDE de l'auditeur, dans la meme
     // convention que les sources placees : position dans le repere ancre, plus
     // la position monde de l'ancre.
     if (ambience.count) {
       audio.setLayers(ambience.update(dt,
         [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
-         player.pos.z + anchorPos[2]], { night }), mixer);
+         player.pos.z + anchorPos[2]],
+        { night, shiftOf: (x) => decalageDuCorps(x.body, anchorPos) }), mixer);
     }
     // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
@@ -2700,6 +5043,9 @@ async function boot() {
         ? ` — orbite ${(period(orbits, anchorBody) / 60).toFixed(1)} min` : "") +
       (data.synthetic ? "  [systeme de substitution]" : "")
     );
+    // Les touches relachees pendant l'image le deviennent maintenant : une
+    // frappe plus courte qu'une image compte pour une image entiere.
+    appliquerRelachements();
   });
 }
 

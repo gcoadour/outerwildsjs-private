@@ -268,6 +268,35 @@ export class ExtractContext {
   }
 
   /**
+   * Les enfants directs d'un GameObject : nom, position locale, position monde.
+   *
+   * Le graphe de scene est descendant par les transforms, et rien n'avait
+   * encore eu besoin de le redescendre : chaque extracteur partait d'un
+   * composant et remontait. `MakeChildrenPlanarQuantum.Awake` fait exactement
+   * l'inverse — il prend ses enfants un par un, en fait des objets quantiques,
+   * et se DETRUIT. Ce que fait ce composant n'est donc pas dans ses champs
+   * (il n'en a aucun) : c'est dans sa descendance (docs/71-quantique.md).
+   */
+  childrenOf(gid) {
+    const t = this.transformOf.get(gid);
+    if (!t || !t.m_Children) return [];
+    const out = [];
+    for (const ptr of t.m_Children) {
+      const child = this.env.deref(ptr, this.sceneObj);
+      const ct = child ? this.env.read(child) : null;
+      if (!ct || !ct.m_GameObject) continue;
+      const cid = ct.m_GameObject.pathId;
+      out.push({
+        name: this.name(cid),
+        local: [ct.m_LocalPosition.x, ct.m_LocalPosition.y, ct.m_LocalPosition.z]
+          .map((v) => round(v, 4)),
+        position: this.worldPosition(cid),
+      });
+    }
+    return out;
+  }
+
+  /**
    * Objet porteur du COMPOSANT vise par un PPtr : nom, position monde, corps.
    *
    * `plain()` sait deja nommer un pointeur qui vise un GameObject, mais un

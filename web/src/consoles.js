@@ -7,6 +7,8 @@
 // @lit MarshmallowStick, ShipComputerCamera, RemoteFlightConsole
 // L'ordinateur de bord, la lampe et la guimauve.
 
+import { radiationAt } from "./volumes.js";
+
 /**
  * Ordinateur de bord.
  *
@@ -160,11 +162,31 @@ export const MIN_TOAST = 0.6;
  *
  * La guimauve grillait SUR COMMANDE : on appuyait, elle cuisait, ou qu'on soit.
  * Le feu de camp existe pourtant, et la formule du jeu prend une chaleur en
- * entree. On la lit donc la ou elle est — le composant et son volume — et la
- * guimauve ne cuit plus qu'au-dessus des braises.
+ * entree. On la lit donc la ou elle est.
+ *
+ * CETTE FONCTION NE TROUVAIT RIEN. Elle ramassait les classes dont le NOM
+ * contient « heat », et il n'y en a aucune dans ce build — pas plus qu'il n'y
+ * a de classe `HeatSource`. Elle rendait donc une liste vide, la guimauve ne
+ * chauffait jamais, et `docs/67` a bati le soin du jeu par-dessus sans que
+ * personne ne s'en apercoive : les controles posaient `toast` a la main.
+ *
+ * La chaleur du build est ailleurs, et elle est nommee : huit
+ * `RadiationEmitter` de `radiationType` 1, magnitude 100, avec une courbe qui
+ * va de 1 a dix unites a 0 a quarante-cinq. Ce sont les feux de camp — un sur
+ * la lune, deux a Timber Hearth, un sur chaque jumelle, deux sur Brittle
+ * Hollow, un sur l'asteroide en beignet (docs/75-chaleur.md).
+ *
+ * Le motif est garde pour ce qu'il pourrait trouver ailleurs, et il est
+ * desormais SECOND : les emetteurs passent d'abord.
  */
-export function heatSources(gameplay = {}) {
+export function heatSources(gameplay = {}, emitters = []) {
   const out = [];
+  // Les emetteurs de rayonnement THERMIQUE : la vraie source.
+  for (const e of emitters) {
+    if (e.type !== 1) continue;
+    out.push({ name: e.name, position: e.position, body: e.body,
+               emitter: e, radius: 0, heat: e.magnitude });
+  }
   for (const [cls, list] of Object.entries(gameplay.placed || {})) {
     if (!/heat/i.test(cls)) continue;
     for (const e of list) {
@@ -188,11 +210,53 @@ export function heatSources(gameplay = {}) {
  * Decroissance lineaire jusqu'au bord du volume : c'est ce que fait une lumiere
  * ponctuelle d'Unity 4 en mode simple, et le jeu ne donne pas d'autre courbe.
  */
-export function heatAt(sources, world) {
+/**
+ * Les quatre invites du sac dorsal : lesquelles, et quand.
+ *
+ * @lit JetpackPromptController
+ *
+ * ELLES N'EXISTENT QU'EN APESANTEUR. `OnBreakPlayerFieldAlignment` allume le
+ * composant et pose ses quatre invites ; `OnInitPlayerFieldAlignment` l'eteint
+ * et les retire. Poser le pied sur une planete les fait donc disparaitre
+ * toutes, et le portage les affichait des qu'on n'etait pas dans le vaisseau.
+ *
+ * ET LES TROIS POUSSEES NE VIENNENT QU'A L'ENTRAINEMENT. `_isTrainingMode` est
+ * pose par `OnEnterZeroGTraining` : ce sont les invites du satellite casse, pas
+ * celles du vol libre. Une fois qu'on a appris, le jeu ne les remontre plus —
+ * et il ne les montre pas non plus tant qu'on vise un referentiel, parce que
+ * viser veut dire qu'on sait deja ou l'on va.
+ *
+ * L'ACCORD DE VITESSE, LUI, EXCLUT LES AUTRES. Il demande une cible visee et
+ * plus d'une unite par seconde de vitesse relative, et quand il s'affiche il
+ * est SEUL : le jeu ne propose qu'une chose a la fois.
+ *
+ * @returns {{matchVelocity:boolean, thrust:boolean}}
+ */
+export function jetpackPrompts({
+  inField = true, mapView = false, autopilotAllowed = true,
+  targeted = false, localSpeed = 0, training = false,
+} = {}) {
+  const rien = { matchVelocity: false, thrust: false };
+  if (inField || mapView) return rien;
+  if (autopilotAllowed && targeted && Math.abs(localSpeed) > 1) {
+    return { matchVelocity: true, thrust: false };
+  }
+  if (training && !targeted) return { matchVelocity: false, thrust: true };
+  return rien;
+}
+
+export function heatAt(sources, world, shiftOf = null) {
   let best = 0;
   for (const s of sources) {
-    const d = Math.hypot(world[0] - s.position[0], world[1] - s.position[1],
-                         world[2] - s.position[2]);
+    const dec = shiftOf ? (shiftOf(s) || [0, 0, 0]) : [0, 0, 0];
+    const d = Math.hypot(world[0] - s.position[0] - dec[0],
+                         world[1] - s.position[1] - dec[1],
+                         world[2] - s.position[2] - dec[2]);
+    // Un emetteur porte SA courbe : ni lineaire, ni bornee par son collider.
+    // Celle des feux de camp tient 100 jusqu'a dix unites puis tombe a zero a
+    // quarante-cinq — le collider de 2,36, lui, est la forme du feu, pas sa
+    // portee, et c'est ce que le portage avait pris pour une portee.
+    if (s.emitter) { best = Math.max(best, radiationAt(s.emitter, d)); continue; }
     if (d >= s.radius) continue;
     best = Math.max(best, s.heat * (1 - d / s.radius));
   }
@@ -309,4 +373,41 @@ export class RemoteConsoles {
     const d = [t[0] - p[0], t[1] - p[1], t[2] - p[2]];
     return { pos: p, vel: Math.hypot(...d) > 1e-3 ? d : [0, 0, 1] };
   }
+}
+
+/**
+ * `PlayerResources.OnEatMarshmallow` : la sante repart au MAXIMUM.
+ *
+ *     _currentHealth = _maxHealth
+ *
+ * Deux lignes d'IL, et une mecanique entiere que le portage n'avait pas : la
+ * guimauve n'est pas un decor de feu de camp, c'est le soin du jeu. Le portage
+ * comptait les guimauves mangees et n'en faisait rien
+ * ([`docs/67`](../../docs/67-annonces.md)).
+ *
+ * @lit PlayerResources
+ */
+export function eatMarshmallowHeals(resources) {
+  if (!resources) return 0;
+  const avant = resources.health;
+  resources.health = resources.maxHealth;
+  resources.dead = false;
+  return resources.health - avant;
+}
+
+/**
+ * `Flashlight.CheckPromptStatus` : quand proposer d'allumer la lampe.
+ *
+ * Sept conditions, toutes necessaires, et la derniere est un OU. Le portage
+ * affichait l'invite sur la seule portee, ce qui la montrait en plein jour et
+ * dans le vaisseau.
+ *
+ * @lit Flashlight
+ */
+export function flashlightPromptVisible({
+  on = false, suit = false, inShip = false, inMapView = false,
+  attached = false, satelliteCam = false, inDarkZone = false, onDaySide = true,
+} = {}) {
+  if (on || !suit || inShip || inMapView || attached || satelliteCam) return false;
+  return inDarkZone || !onDaySide;
 }

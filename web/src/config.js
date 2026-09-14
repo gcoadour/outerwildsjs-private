@@ -50,6 +50,24 @@ export async function loadGameplay() {
 }
 
 /**
+ * Les prefabriques : ce que le build INSTANCIE en cours de partie.
+ *
+ * La sonde entiere en vient (docs/60), et avec elle les dix effets qui se
+ * detruisent seuls — `_secondsUntilSelfDestruct`, de 1 a 8 secondes. Sans ce
+ * fichier, le moteur retombe sur ses constantes, comme partout ailleurs.
+ */
+export async function loadPrefabs() {
+  try {
+    const res = await fetch("data/prefabs.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    return await res.json();
+  } catch (e) {
+    console.warn("data/prefabs.json absent :", e.message);
+    return { probe: null, selfDestruct: {}, hideInMapView: [] };
+  }
+}
+
+/**
  * Constantes de deplacement du joueur.
  *
  * Elles viennent de DEUX composants : `PlayerCharacterController` pour la

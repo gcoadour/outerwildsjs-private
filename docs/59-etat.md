@@ -1,5 +1,13 @@
 # Où en est le portage — le compte, en face
 
+> **Corrigé par [`60-sonde.md`](60-sonde.md).** Tout ce qui suit compte
+> `level0`, et `level0` seul. L'alpha pose 37 classes de plus — 61 instances —
+> dans `sharedassets1.assets`, `resources.assets` et `mainData`, et la sonde y
+> est en entier. Le compte juste est de **1 413 instances lues sur 1 451, soit
+> 97,4 %** : le pourcentage a baissé en devenant vrai. La phrase de conclusion
+> ci-dessous — « c'est le fond du tonneau » — portait sur le bon fond et le
+> mauvais tonneau.
+
 Cette page remplace l'estimation de [`08-reste-a-faire.md`](08-reste-a-faire.md)
 par un **chiffre mesurable et rejouable** :
 

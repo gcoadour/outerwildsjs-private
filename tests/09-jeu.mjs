@@ -14,16 +14,19 @@ import { check, report } from "./run.mjs";
 import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
          reglagesDe } from "../web/src/cameraeffects.js";
-import { Telescope, TELESCOPE } from "../web/src/tools.js";
+import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
+         zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
-         webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
+         webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
-         roastPrompts, roastBroken, helmetSettings, HELMET_LAG, HELMET_LAG_CTOR,
+         roastPrompts, roastBroken, shipProximity, RoastPrompt, helmetSettings,
+         HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
          ROAST_DISTANCE } from "../web/src/helmet.js";
-import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
-         landingPadSensors, museumEntryways, smoothStep,
+import { elevators, Elevator as Cabine, LaunchTerminal, landedOn, LandingPads,
+         LANDED_SPEED, landingPadSensors, museumEntryways, smoothStep,
+         launchTerminals, elevatorControllers, RETURN_ABOVE,
          ELEVATOR } from "../web/src/tower.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
@@ -31,8 +34,13 @@ import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
          COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
-import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
+import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
+import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
+import { MarshmallowStick as Baton, thermTime, THERM_HEAT_SPAN,
+         STICK_CLIPS, STICK_LIGHTS } from "../web/src/held.js";
+import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo, matchedVelocity,
+         LOCK_NEAR, BRACKET_RATE } from "../web/src/tracker.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
          ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
          ancientProbeAcceleration, ANCIENT_PROBE_THRUST,
@@ -42,33 +50,62 @@ import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAccelerati
          BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
-import { ambienceZones, activeZones, winnersByLayer, clipOf,
+import { ambienceZones, winnersByLayer, clipOf,
          AmbienceMixer } from "../web/src/ambience.js";
-import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
-         gameSectorAt, probePrompts, radiationEmitters,
-         radiationAt, CompoundTrigger, sandstormVolumes } from "../web/src/volumes.js";
+import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
+         probePrompts, radiationEmitters,
+         radiationAt, CompoundTrigger, sandstormVolumes,
+         childTriggers, Sandstorm, promptFaced } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
 import { tornadoPivots, TornadoPivots, matchTransforms,
-         disposableContainers } from "../web/src/decor.js";
+         disposableContainers, MeteorLaunchers, METEOR, warps, WARP,
+         DerelictWarps } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
          DecorField } from "../web/src/decor.js";
 import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
-         EndOfTimeMusic, END_OF_TIME, eventAudio } from "../web/src/reactaudio.js";
+         EndOfTimeMusic, END_OF_TIME, eventAudio, UISounds, UI_SOUNDS,
+         UI_VOLUME, REPAIR_FADE } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
-         zoneFaced, ZeroGTraining, CameraLock } from "../web/src/gear.js";
+         zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
+         suitBarrierPush } from "../web/src/gear.js";
 import { Interactables } from "../web/src/interact.js";
+import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
+         FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
+         slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
+         toWorld } from "../web/src/attach.js";
+import { eatMarshmallowHeals, flashlightPromptVisible,
+         jetpackPrompts } from "../web/src/consoles.js";
+import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
+import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
+         annonceDe } from "../web/src/modes.js";
+import { ATTERRISSAGE, rollMode, orbitSpeed, project,
+         limitOrbitThrust, allowLandingMode, LandingView } from "../web/src/landing.js";
+import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
+         modelLandingSpots, modelShipBody,
+         rocketKids } from "../web/src/modelship.js";
+import { QUANTIQUE, QuantumObject as ObjetQuantique, planarQuantumObjects,
+         quantumStatues, locksOnSnapshot, collapsesOnFlashlightOff,
+         statueParts, planarCandidate, slopeOK } from "../web/src/quantumobj.js";
+import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
+         launchSpeed, launchPitch, orbitalSpeed, launchWindowLength,
+         tracksHorizon, horizonAim, impendingCollision, lanternRange,
+         snapshotSize, probeIcon, probeReadout, probeLabelPos,
+         selfDestructed, angleEntre } from "../web/src/probe.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
-import { TimeLoop } from "../web/src/timeloop.js";
+import { Settings } from "../web/src/settings.js";
+import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
+         SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
          engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
-import { Ship, spinStep, quatRotate, terminalAngularSpeed } from "../web/src/ship.js";
+import { Ship, spinStep, quatRotate, terminalAngularSpeed,
+         IGNITION_DURATION } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
 import { playerConstants } from "../web/src/config.js";
@@ -85,17 +122,23 @@ import { underAsleep, noCollide } from "../web/src/physics.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
-import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
+import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
-import { ambientIntensity } from "../web/src/sectors.js";
+import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
+         ambientColor, ambientTint, hsvToRgb } from "../web/src/sectors.js";
+import { entrywayTriggers, sunlessZones, isOutsideEntryway, Entryway,
+         EffectZones, ZonePresence, zonesAround } from "../web/src/entryways.js";
+import { Minimap, localMapPosition, MARKER_RADIUS, TRAIL_ANGLE,
+         MINIMAP_EVENTS } from "../web/src/minimap.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
 import { envelope } from "../web/src/pipeline/extract/particles.js";
 import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
          LOOK_DEAD_ZONE, SPRINT_AT } from "../web/src/touch.js";
 import { padState, padEdges, deadZone, padLookCurve, PAD_BUTTONS,
+         padDisagreements, UNITY_VERS_NAVIGATEUR,
          PAD_DEAD_ZONE } from "../web/src/gamepad.js";
 import { bodySpin, spinPeriod, rotateAbout, SpinField,
          sunElevation } from "../web/src/spin.js";
@@ -106,10 +149,11 @@ import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
          NIGHT_FADE } from "../web/src/lights.js";
-import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
+import { oxygenZones, inOxygenZone,
+         Resources as Ressources } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
          Marshmallow } from "../web/src/consoles.js";
-import { lodThresholds, colliderLODNames } from "../web/src/lod.js";
+import { lodThresholds } from "../web/src/lod.js";
 import { segmentDepthInSphere, occludes, lookRotation, alignToObserver,
          CHECK_RADIUS, CHECK_DEPTH } from "../web/src/quantum.js";
 import { NoiseField, corruptionRange, corruptionThreshold } from "../web/src/bramble.js";
@@ -177,9 +221,103 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   loop.preventSupernova = false;
   loop.update(1, 1e9);
   check("elle repart des qu'on la laisse", loop.supernova, true);
-  // l'onde de choc rattrape ce qui est assez pres
+  // L'onde rattrape ce qui est assez pres — mais pas tout de suite. Avec la
+  // courbe CUBIQUE du build, il lui faut 2,24 s pour atteindre cent unites, la
+  // ou la lineaire d'avant les couvrait en un vingtieme de seconde.
   loop.update(1, 100);
-  check("l'onde tue ce qu'elle rattrape", loop.deathCause, "supernova");
+  check("une seconde apres, l'onde n'a pas encore cent unites",
+        loop.deathCause, null);
+  check("elle n'en a que neuf", Math.round(loop.shockwaveRadius), 9);
+  loop.update(1.5, 100);
+  check("deux secondes et demie plus tard, elle rattrape",
+        loop.deathCause, "supernova");
+
+  // --- LA BOUCLE DANS LES MOTS DU BUILD (docs/88-boucle.md) -------------
+  //
+  // Dix-huit minutes, pas vingt : `TimeLoop._loopDurationInMinutes` est pose
+  // sur `SolarSystemRoot`, et le portage l'avait devinee.
+  check("la boucle dure dix-huit minutes", LOOP_MINUTES, 18);
+  check("et le repli explicite porte la meme valeur",
+        new TimeLoop().duration, 18 * 60);
+
+  // L'ONDE N'EST PAS LINEAIRE. Les deux courbes ne se rejoignent qu'a la fin.
+  check("au depart, l'onde est au centre", shockwaveRadius(0), 0);
+  check("au bout des quinze secondes, trente mille unites",
+        shockwaveRadius(SHOCKWAVE_SECONDS), SHOCKWAVE_RADIUS);
+  check("a mi-chemin, un huitieme du rayon — pas la moitie",
+        shockwaveRadius(SHOCKWAVE_SECONDS / 2), SHOCKWAVE_RADIUS / 8);
+  check("au tiers du temps, un vingt-septieme",
+        round(shockwaveRadius(SHOCKWAVE_SECONDS / 3), 6),
+        round(SHOCKWAVE_RADIUS / 27, 6));
+  check("et elle ne depasse pas son rayon",
+        shockwaveRadius(SHOCKWAVE_SECONDS * 10), SHOCKWAVE_RADIUS);
+
+  // `TimeLoop.Start` recalcule la prevention a partir des codes de lancement.
+  const neuve = new TimeLoop(1);
+  neuve.start(false);
+  check("sans les codes, la fin des temps attend", neuve.preventSupernova, true);
+  check("et l'annonce du build part", neuve.events.join(","), "StartOfTimeLoop");
+  neuve.elapsed = neuve.duration + 1;
+  neuve.update(1, 1e9);
+  check("l'etoile n'explose donc pas", neuve.supernova, false);
+  // Apprendre les codes EN COURS de boucle ne change rien : la prevention est
+  // calculee au demarrage, une fois.
+  neuve.update(1, 1e9);
+  check("apprendre les codes en cours de boucle n'y change rien",
+        neuve.supernova, false);
+  neuve.restart(true);
+  check("la boucle suivante, elle, explose", neuve.preventSupernova, false);
+  check("avec les deux annonces, dans l'ordre",
+        neuve.events.slice(-2).join(","), "RestartTimeLoop,StartOfTimeLoop");
+  check("et le compte de boucles a monte", neuve.loopCount, 1);
+  neuve.elapsed = neuve.duration;
+  neuve.update(1, 1e9);
+  check("l'effondrement et l'explosion s'annoncent",
+        neuve.events.slice(-2).join(","), "TriggerSupernova,SunExploded");
+  // `ResetSimulation` : on repart de zero, boucle comprise.
+  neuve.resetSimulation();
+  check("la remise a zero efface le compte", neuve.loopCount, 0);
+  check("et elle s'annonce", neuve.events.at(-1), "ResetSimulation");
+  neuve.resume();
+  check("reprendre ne recommence rien", neuve.events.at(-1), "ResumeSimulation");
+
+  // --- LES DEUX SENSIBILITES (docs/93-commandes.md) ----------------------
+  //
+  // Le menu du build en pose deux, et le portage n'en appliquait qu'une :
+  // regler la sensibilite de VOL ne changeait rien.
+  const reg = new Settings(null);
+  check("le neutre rend un facteur de un", reg.lookFactor(), 1);
+  check("et le vol aussi", reg.flightFactor(), 1);
+  reg.values.flightSensitivity = 10;
+  check("la sensibilite de vol double le facteur", reg.flightFactor(), 2);
+  check("sans toucher a celui du regard", reg.lookFactor(), 1);
+  // Une seule inversion dans le menu : elle vaut pour les deux.
+  reg.values.invertY = true;
+  check("l'inversion porte sur le regard", reg.lookFactor(), -1);
+  check("et sur le vol", reg.flightFactor(), -2);
+  // L'anneau : depasser dix ramene a un, pas a dix.
+  check("dix puis un", reg.step(10, 1), 1);
+  check("un puis dix", reg.step(1, -1), 10);
+
+  // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------
+  //
+  // Armee quand on ne sait pas, elle ne tire que quand on sait : elle attend,
+  // au premier tour d'une partie neuve, qu'on soit alle apprendre les codes.
+  const sphere = new ResetTrigger({ volume: { shape: "sphere", radius: 5.196,
+                                              center: [0, 0, 0] },
+                                    position: [0, 0, 0], body: "TH_Body" });
+  check("elle nait desarmee", sphere.armed, false);
+  check("un deuxieme tour ne l'arme pas",
+        sphere.startOfTimeLoop(2, false), false);
+  check("le premier tour AVEC les codes non plus",
+        sphere.startOfTimeLoop(1, true), false);
+  check("le premier tour sans les codes, oui",
+        sphere.startOfTimeLoop(1, false), true);
+  check("dedans sans les codes, elle ne tire pas", sphere.enter(true, false), false);
+  check("dehors avec les codes non plus", sphere.enter(false, true), false);
+  check("dedans avec les codes, elle tire", sphere.enter(true, true), true);
+  check("et elle ne tire qu'une fois", sphere.enter(true, true), false);
+  check("elle s'est desarmee", sphere.armed, false);
 }
 
 // --- mise en scene de la supernova --------------------------------------
@@ -327,12 +465,16 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- lune quantique : occlusion et inclinaison ---------------------------
 {
+  // `occludes` porte la loi entiere : une sphere de rayon `_sphereCheckRadius`
+  // lancee, et un obstacle qui compte s'il la garde dedans sur `_checkDepth`.
+  // La forme booleenne d'a cote (`segmentHitsSphere`) n'etait qu'une moitie, et
+  // rien ne l'appelait (docs/74-etalons.md).
   check("un corps sur la ligne de vue masque",
-        segmentHitsSphere([0, 0, 0], [0, 0, 1000], [0, 0, 500], 100), true);
+        occludes([0, 0, 0], [0, 0, 1000], [0, 0, 500], 200, 0, 1), true);
   check("un corps a cote ne masque pas",
-        segmentHitsSphere([0, 0, 0], [0, 0, 1000], [400, 0, 500], 100), false);
+        occludes([0, 0, 0], [0, 0, 1000], [400, 0, 500], 100, 0, 1), false);
   check("un corps derriere la cible ne masque pas",
-        segmentHitsSphere([0, 0, 0], [0, 0, 500], [0, 0, 900], 100), false);
+        occludes([0, 0, 0], [0, 0, 500], [0, 0, 900], 100, 0, 1), false);
 
   check("inclinaison lue dans les champs",
         round(orbitTilt({ _orbitInclination: 30 }, "x"), 4),
@@ -472,10 +614,111 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- eclairage ambiant par secteur --------------------------------------
 {
+  // `MajorSector.GetAmbientLight` est une MARCHE : la couleur pleine sous
+  // `_ambientLightRange`, le noir au-dela. Le portage en avait fait une pente,
+  // et le test gardait la pente — une conclusion, pas une mesure.
   check("secteur sans ambiance", round(ambientIntensity(0, 0), 3), 0.1);
   check("centre d'un secteur eclaire", round(ambientIntensity(0, 750), 3), 0.35);
-  check("a mi-portee", round(ambientIntensity(375, 750), 3), 0.225);
+  check("a mi-portee, la meme chose qu'au centre",
+        round(ambientIntensity(375, 750), 3), 0.35);
+  check("juste en deca de la portee, encore pleine",
+        round(ambientIntensity(749.9, 750), 3), 0.35);
+  check("a la portee exacte, la marche tombe",
+        round(ambientIntensity(750, 750), 3), 0.1);
   check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0.1);
+  // `_ambientLight = 0` rend Color.black : la portee ne rattrape rien. Dark
+  // Bramble a 1 200 de portee et la valeur 0.
+  check("un secteur noir n'eclaire pas, meme a portee",
+        round(ambientIntensity(0, 1200, 0), 3), 0.1);
+
+  // La TEINTE : une enumeration a trois valeurs, pas un nombre.
+  check("le noir est noir", ambientColor(0).join(","), "0,0,0");
+  check("le bleu de nuit est le plus fort en bleu",
+        ambientColor(1).map((x) => round(x, 4)).join(","), "0.045,0.045,0.0588");
+  check("le vert est le plus fort en vert",
+        ambientColor(2).map((x) => round(x, 4)).join(","), "0.045,0.0588,0.0484");
+  check("les deux teintes ont la meme valeur",
+        Math.max(...ambientColor(1)) === Math.max(...ambientColor(2)), true);
+  check("la teinte normalisee vaut un sur sa composante forte",
+        Math.max(...ambientTint(1)), 1);
+  check("et sans couleur, elle est blanche", ambientTint(0).join(","), "1,1,1");
+  // `ColorHSV.ToColorRGB` : saturation nulle, du gris.
+  check("saturation nulle : du gris", hsvToRgb(200, 0, 0.5).join(","), "0.5,0.5,0.5");
+  check("rouge pur", hsvToRgb(0, 1, 1).join(","), "1,0,0");
+  check("vert pur", hsvToRgb(120, 1, 1).join(","), "0,1,0");
+  check("bleu pur", hsvToRgb(240, 1, 1).join(","), "0,0,1");
+  check("la teinte boucle a 360", hsvToRgb(360, 1, 1).join(","), "1,0,0");
+}
+
+// --- les seuils et les zones sans soleil (docs/83-seuils.md) --------------
+//
+// `EntrywayTrigger` ne demande pas « suis-je dedans » mais « dans quel sens
+// ai-je traverse » : une grotte n'a pas de forme, elle a des portes.
+{
+  const gameplay = { placed: {
+    SunlessZone: [
+      { name: "CaveVolume", position: [0, 0, 0], body: "TH_Body" },
+      { name: "CorrosiveMembrane", position: [100, 0, 0], body: "GD_Body",
+        volume: { shape: "sphere", radius: 20, center: [0, 0, 0] } },
+    ],
+    EntrywayTrigger: [
+      { name: "CaveEntry", position: [0, 0, 0], body: "TH_Body",
+        parents: ["TH_Body", "CaveEntrance", "CaveVolume"],
+        volume: { shape: "box", size: [4, 4, 4], center: [0, 0, 0] },
+        fields: { _localExitDirection: { x: 0, y: 1, z: 0 }, _initialOccupants: [] } },
+      { name: "Ailleurs", position: [500, 0, 0], body: "TH_Body",
+        parents: ["TH_Body", "MusicVolume"],
+        volume: { shape: "box", size: [4, 4, 4], center: [0, 0, 0] },
+        fields: { _localExitDirection: { x: 1, y: 0, z: 0 } } },
+    ],
+  } };
+
+  const seuils = entrywayTriggers(gameplay);
+  check("deux seuils lus", seuils.length, 2);
+  check("et leur direction de sortie", seuils[0].exit.join(","), "0,1,0");
+  // La sortie pointe vers +Y : au-dessus de la porte, on est DEHORS.
+  check("au-dessus du seuil, on est dehors",
+        isOutsideEntryway(seuils[0], [0, 10, 0]), true);
+  check("en dessous, on est dedans",
+        isOutsideEntryway(seuils[0], [0, -10, 0]), false);
+
+  const zones = sunlessZones(gameplay);
+  check("deux zones sans soleil", zones.length, 2);
+  // Le lien est dans la HIERARCHIE : le seuil du volume musical n'est pas a
+  // elle, meme s'il est sur le meme corps.
+  check("la grotte n'a qu'une porte, celle qui la nomme",
+        zones[0].entryways.map((t) => t.name).join(","), "CaveEntry");
+  check("la membrane n'en a aucune, elle a une sphere",
+        zones[1].entryways.length, 0);
+
+  // La TRAVERSEE. Dehors -> boite -> dedans : une entree.
+  const porte = new Entryway(seuils[0]);
+  check("loin, rien", porte.update([0, 10, 0]), null);
+  check("dans l'embrasure non plus, on attend d'en sortir",
+        porte.update([0, 1, 0]), null);
+  check("ressorti de l'autre cote : entree", porte.update([0, -10, 0]), "entry");
+  check("repasse dans l'embrasure : on attend", porte.update([0, -1, 0]), null);
+  check("ressorti par le haut : sortie", porte.update([0, 10, 0]), "exit");
+  // LE demi-tour : entrer dans la boite et en ressortir du meme cote ne compte
+  // pas. C'est toute la difference avec un test de contenance.
+  check("entre dans l'embrasure", porte.update([0, 1, 0]), null);
+  check("et fait demi-tour : rien", porte.update([0, 10, 0]), null);
+
+  // Le COMPTE : `_sunlessZoneCount` n'est pas un booleen.
+  const sz = new EffectZones(sunlessZones(gameplay));
+  check("au depart, il fait jour", sz.sunless, false);
+  sz.update([0, 10, 0]);
+  sz.update([0, 1, 0]);
+  sz.update([0, -10, 0]);
+  check("la grotte franchie, il fait noir", sz.count, 1);
+  // La membrane est une contenance : on l'ajoute sans quitter la grotte.
+  sz.update([100, 0, 0]);
+  check("deux zones a la fois : le compte monte", sz.count, 2);
+  check("et il fait toujours noir", sz.sunless, true);
+  sz.update([100, 100, 0]);
+  check("sortir de la membrane ne rallume pas la grotte", sz.count, 1);
+  check("les evenements du build sont partis",
+        sz.events.filter((e) => e === "EnterSunlessZone").length, 2);
 }
 
 // --- coupure passe-bas des emetteurs ------------------------------------
@@ -1045,9 +1288,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("un seuil unique passe aussi", seuils.get("Cabane"), 0.05);
   check("une distance n'est pas une hauteur d'ecran",
         seuils.has("Distances"), false);
-  const cols = colliderLODNames(gameplay);
-  check("colliders par niveau de detail", cols.size, 2);
-  check("... nommes", cols.has("Rampe"), true);
+  // `colliderLODs` porte la meme liste, avec ce qui la rend utile : la portee
+  // et QUI reveille le groupe. La version qui ne rendait que les noms
+  // dupliquait celle-ci et n'avait aucun appelant (docs/74-etalons.md).
+  const cols = colliderLODs(gameplay);
+  check("colliders par niveau de detail", cols.length, 2);
+  check("... nommes", cols.some((g) => g.name === "Rampe"), true);
 
   const lod = new MeshLOD(LOD_RATIO, 400, seuils);
   check("un maillage nomme prend le seuil du build",
@@ -1231,11 +1477,28 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     for (let k = 0; k <= 15; k++) b.push({ pressed: k === i, value: k === i ? 1 : 0 });
     return { axes: [0, 0, 0, 0], buttons: b };
   };
-  check("B interagit", padEdges(press(1)).codes.join(","), "KeyE");
-  check("Back ouvre la carte", padEdges(press(8)).codes.join(","), "KeyM");
-  check("A pousse vers le haut", padState(press(0)).up, true);
-  check("la gachette droite accelere",
-        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 0, 1] }).boost, true);
+  //
+  // Ces quatre lignes gardaient la disposition que le PORTAGE avait inventee.
+  // Celle du build est dans l'`InputManager` (docs/61-commandes.md), et quatre
+  // de ses six boutons ne tombaient pas au meme endroit.
+  check("A saute", padState(press(0)).jump, true);
+  check("B annule", padEdges(press(1)).codes.join(","), "KeyQ");
+  check("X interagit", padEdges(press(2)).codes.join(","), "KeyE");
+  check("Y prend la vue arriere", padEdges(press(3)).codes.join(","), "KeyR");
+  check("LB vise un referentiel", padEdges(press(4)).codes.join(","), "Mouse0");
+  check("RB lance la sonde", padEdges(press(5)).codes.join(","), "Mouse2");
+  check("Back ouvre la carte", padEdges(press(8)).codes.join(","), "Enter");
+  check("Start met en pause", padEdges(press(9)).codes.join(","), "Escape");
+  // Les gachettes montent et descendent : `Move Up` est l'axe 9 d'Unity, la
+  // gachette DROITE, et `Move Down` l'axe 8, la gauche. Le portage montait au
+  // bouton A — qui est le saut — et accelerait a la gachette droite, avec un
+  // accelerateur que le build n'a pas.
+  check("la gachette droite monte",
+        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 0, 1] }).up, true);
+  check("la gachette gauche descend",
+        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 1, 0] }).down, true);
+  check("et il n'y a plus d'accelerateur",
+        padState({ axes: [0, 0, 0, 0], buttons: [0, 0, 0, 0, 0, 0, 1, 1] }).boost, false);
 
   // Seuls les FRONTS comptent : un bouton tenu ouvrirait puis fermerait la
   // carte a chaque image.
@@ -1244,8 +1507,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         padEdges(press(8), first.state).codes.length, 0);
   check("relache puis repris : un nouveau front",
         padEdges(press(8), padEdges(press(0), first.state).state).codes.join(","),
-        "KeyM");
+        "Enter");
   check("chaque bouton porte le nom du build", PAD_BUTTONS[5].build, "RightBumper");
+
+  // LES DEUX TABLES DISENT-ELLES LA MEME CHOSE ? (docs/94-manette.md)
+  //
+  // `input.js` porte la liaison `pad` de chaque canal en numeros d'Unity,
+  // `gamepad.js` la sienne en numeros du navigateur. Deux tables ecrites a la
+  // main depuis le meme `InputManager`, et le portage s'est deja trompe sur
+  // quatre lignes de six.
+  check("les deux tables de manette s'accordent",
+        padDisagreements(new Commandes(null)).length, 0);
+  // Un canal deplace se voit tout de suite : c'est ce que le controle attrape.
+  {
+    const fausse = new Commandes(null);
+    fausse.get("Jump").pad = { button: 1 };
+    const d = padDisagreements(fausse);
+    check("deplacer un canal fait un desaccord", d.length, 1);
+    check("et il nomme le canal", d[0].canal, "Jump");
+    check("avec le bouton attendu", d[0].attendu,
+          UNITY_VERS_NAVIGATEUR.boutons[1]);
+  }
+  // La LAMPE est le cas particulier : un axe d'Unity, quatre boutons pour le
+  // navigateur, et deux lignes de la table pour un seul canal.
+  check("la lampe passe par la croix directionnelle",
+        UNITY_VERS_NAVIGATEUR.axes[6].dpad.join(","), "14,15");
 }
 
 // --- Ogg Opus : le conteneur -------------------------------------------
@@ -1384,7 +1670,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Saut : sur le FRONT de la touche, et une seule fois.
   const q = new Player({}, [0, 251.7, 0]);
   for (let i = 0; i < 60; i++) q.update(1 / 60, corps, rien, vertical, null);
-  q.update(1 / 60, corps, { forward: 0, right: 0, up: true }, vertical, null);
+  // `Jump` et `Move Up` sont DEUX canaux du build : l'espace saute, la
+  // majuscule pousse. Le portage les avait sur la meme touche.
+  q.update(1 / 60, corps, { forward: 0, right: 0, jump: true }, vertical, null);
   check("le saut part a _jumpSpeed", round(q.vel.y, 1), 5.8);
   check("... et quitte le sol", q.grounded, false);
 
@@ -1546,6 +1834,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le roulis tourne le vaisseau autour de son nez",
         round(roul.axes.fwd[2], 2), 1);
   check("... et incline son haut", Math.abs(roul.axes.up[0]) > 0.1, true);
+
+  // `ReadRotationalInput` rend Vector3.zero des que `IsLanded()` : pose, on ne
+  // tourne plus DU TOUT. Pas moins, pas lentement — zero
+  // (docs/87-atterrissage.md).
+  const auSol = new Ship(consts, null, [0, 0, 0]);
+  auSol.boarded = true;
+  auSol.onPad = true;
+  for (let i = 0; i < 60; i++) auSol.rotate(1 / 60, { roll: 1 }, droit);
+  check("gare sur la piste, le roulis ne fait rien", auSol.quat.join(","), "0,0,0,1");
+  auSol.onPad = false;
+  auSol.rotate(1 / 60, { roll: 1 }, droit);
+  check("une fois parti, il repond de nouveau", auSol.quat.join(",") !== "0,0,0,1", true);
 
   // Un pas d'integration d'orientation ne change pas la norme.
   const q = spinStep([0, 0, 0, 1], [0, 3, 0], 0.1);
@@ -2291,29 +2591,70 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     zone("Hatch", 0, 100, 0.5, "sas.ogg"),
   ];
 
+  const ou = (l, pt) => zonesAround(l.map((z) => new ZonePresence(z)), pt);
+
   check("une zone sans forme ni clip est ecartee",
         ambienceZones({ volumes: [...zones, { name: "vide", layer: 0 }] }).length, 4);
+  // ... mais une zone SANS FORME qui a des portes, elle, est gardee : c'est le
+  // cas des six zones du build qui n'ont pas de collider (docs/84-ambiance.md).
+  const porte = (name, parent, body, pos = [0, 0, 0], taille = 4) => ({
+    name, body, parents: ["Racine", parent], position: pos, rotation: null,
+    volume: { shape: "box", size: [taille, taille, taille], center: [0, 0, 0] },
+    exit: [0, 1, 0], initial: 0,
+  });
+  const grotte = { name: "CaveVolume01", body: "Twin01_Body", layer: 1,
+                   priority: 1, file: "grotte.ogg", fade: 2, position: [0, 0, 0] };
+  const jointes = ambienceZones({ volumes: [grotte] },
+    [porte("TowerEntryway", "CaveVolume01", "Twin01_Body"),
+     porte("CityEntryway", "CaveVolume01", "Twin01_Body", [50, 0, 0]),
+     porte("Ailleurs", "MusicVolume", "Twin01_Body")]);
+  check("une zone sans forme mais avec des portes est gardee", jointes.length, 1);
+  check("et elle prend les siennes, pas celles du voisin",
+        jointes[0].entryways.map((t) => t.name).sort().join(","),
+        "CityEntryway,TowerEntryway");
+  // Il y a DEUX `MusicVolume` dans le build, sur deux corps : la jointure se
+  // fait par nom ET par corps.
+  const deuxMemesNoms = ambienceZones(
+    { volumes: [{ name: "MusicVolume", body: "QuantumMoon_Body", layer: 2,
+                  priority: 0, file: "q.ogg", position: [0, 0, 0],
+                  volume: { shape: "sphere", radius: 100, center: [0, 0, 0] } }] },
+    [porte("Entryway", "MusicVolume", "Twin01_Body")]);
+  check("le seuil de la cite ne suit pas la musique de la lune quantique",
+        deuxMemesNoms[0].entryways.length, 0);
+
+  // LA PRESENCE : on n'est pas « dedans » une grotte, on y est ENTRE.
+  const presence = new ZonePresence(jointes[0]);
+  check("dehors au depart", presence.update([0, 10, 0]), false);
+  presence.update([0, 1, 0]);              // dans l'embrasure de la tour
+  check("ressorti par l'autre cote : on y est", presence.update([0, -10, 0]), true);
+  // On ressort par une AUTRE porte, cinquante metres plus loin : le compte
+  // retombe. Une contenance posee sur une seule boite d'enfant — ce que faisait
+  // l'extraction — ne pouvait pas decrire ca.
+  presence.update([50, -1, 0]);
+  check("toujours dedans en gagnant l'autre porte", presence.inside, true);
+  presence.update([50, 10, 0]);
+  check("ressorti par elle, on n'y est plus", presence.inside, false);
   check("au centre, les quatre zones contiennent l'auditeur",
-        activeZones(zones, [0, 0, 0]).length, 4);
+        ou(zones, [0, 0, 0]).length, 4);
   // A 100 unites on est encore SUR le bord de MusicVolume : la borne est
   // inclusive, et c'est ce que le test garde.
   check("a 100 unites, l'atmosphere et le bord de la musique",
-        activeZones(zones, [100, 0, 0]).map((z) => z.name).sort().join(","),
+        ou(zones, [100, 0, 0]).map((z) => z.name).sort().join(","),
         "Atmosphere,MusicVolume");
-  check("a 101, la musique est sortie", activeZones(zones, [101, 0, 0]).length, 1);
+  check("a 101, la musique est sortie", ou(zones, [101, 0, 0]).length, 1);
 
-  const g = winnersByLayer(zones, [0, 0, 0]);
+  const g = winnersByLayer(ou(zones, [0, 0, 0]));
   check("trois couches gagnees", g.size, 3);
   check("dans la couche 1, la grotte couvre l'atmosphere", g.get(1).name, "CaveVolume");
   check("la couche 0 revient au sas", g.get(0).name, "Hatch");
   check("hors de la grotte, l'atmosphere reprend la couche 1",
-        winnersByLayer(zones, [50, 0, 0]).get(1).name, "Atmosphere");
+        winnersByLayer(ou(zones, [50, 0, 0])).get(1).name, "Atmosphere");
 
   // A priorite egale, la plus petite zone gagne : une piece est plus precise
   // qu'une atmosphere, et c'est la seule regle qui donne un resultat stable.
   const exaequo = [zone("grande", 1, 0, 250, "a.ogg"), zone("petite", 1, 0, 20, "b.ogg")];
   check("a egalite, la plus petite l'emporte",
-        winnersByLayer(exaequo, [0, 0, 0]).get(1).name, "petite");
+        winnersByLayer(ou(exaequo, [0, 0, 0])).get(1).name, "petite");
 
   const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg", { nightFile: "nuit.ogg" });
   check("de jour, le clip du jour", clipOf(nuit, false), "jour.ogg");
@@ -2728,11 +3069,38 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("les trois, oui", entrainement.update(), true);
   check("et on ne l'annonce qu'une fois", entrainement.update(), false);
 
+  // Le verrouillage de camera, RELU dans l'IL : les trois verifications qui
+  // etaient ici gardaient une paraphrase — un `progress` de 0 a 1 qui
+  // n'existe nulle part dans le build (docs/69-assise.md).
   const lock = new CameraLock();
-  lock.lockOn({ name: "Projector" }, 2);
-  check("le verrouillage progresse a son rythme", lock.update(0.25), 0.5);
-  lock.breakLock();
-  check("et se rompt", lock.update(1), 0);
+  check("sans cible, rien", lock.update(1, [1, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5), null);
+  lock.lockOn({ name: "Projector" }, { followRate: 2 });
+  {
+    // Cible a 90 degres sur la droite, joueur regardant +Z, haut +Y.
+    const r = lock.update(0.5, [10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5);
+    check("le lacet vaut l'ecart, fois le taux, fois le temps", r.yaw, 90);
+    check("et sous dix unites, le champ ne bouge pas", r.fov, 70);
+  }
+  {
+    // La meme cible, mais a gauche : le signe vient de `Dot(aplati, right)`.
+    const r = lock.update(0.5, [-10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5);
+    check("a gauche, le lacet est negatif", r.yaw, -90);
+  }
+  {
+    // Une cible HAUTE, mais pile devant : le lacet est nul, car l'ecart est
+    // aplati dans le plan du joueur avant d'etre mesure.
+    const r = lock.update(1, [0, 50, 3], [0, 0, 1], [0, 1, 0], [1, 0, 0], 50);
+    check("ce qui est plus haut ne fait pas tourner le corps", Math.round(r.yaw), 0);
+    check("et a cinquante unites, le champ est au plancher", r.fov, 20);
+  }
+  check("l'ecart brut se mesure aussi seul, en degres signes",
+        Math.round(lockYawError([0, 0, -10], [0, 0, 1], [0, 1, 0], [1, 0, 0])), 180);
+  check("a vingt unites, cinq cents divise par la distance", lockFOV(20), 25);
+  check("et le plancher tient a vingt-cinq", lockFOV(25), 20);
+  check("juste sous dix, le champ initial revient", lockFOV(10), 70);
+  check("la rupture ramene le champ en deux secondes",
+        lock.breakLock().snapSeconds, 2);
+  check("et plus rien ne suit", lock.update(1, [1, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5), null);
 }
 
 {
@@ -2760,23 +3128,108 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("quatre champs, dont un sans forme : ici deux et un", champs.length, 2);
   check("celui qui vit de ses declencheurs n'a pas de volume",
         champs[1].volume, null);
-  check("dans le volume, on flotte", zeroGAt(champs, [10, 0, 0]).name, "ZeroGVolume");
-  check("dehors, non", zeroGAt(champs, [1000, 0, 0]), null);
+  const presencesZ = champs.map((z) => new ZonePresence(z));
+  // La chambre du build n'a pas de forme : elle a une porte. Sans seuil joint,
+  // elle ne peut rien dire — et c'est ce que le portage faisait d'elle.
+  const chambre = { name: "ZeroGChamber", body: "TH_Body", overridePriority: 2,
+                    position: [0, 0, 0], entryways: [
+    { name: "Entryway", body: "TH_Body", parents: ["ZeroGChamber"],
+      position: [0, 0, 0], rotation: null,
+      volume: { shape: "box", size: [4, 4, 4], center: [0, 0, 0] },
+      exit: [0, 0, -1], initial: 0 }] };
+  const pc = new ZonePresence(chambre);
+  check("dehors de la chambre au depart", pc.update([0, 0, -10]), false);
+  pc.update([0, 0, -1]);
+  check("franchie, on y flotte", pc.update([0, 0, 10]), true);
+  // Et sa priorite l'emporte sur celle du volume ordinaire.
+  check("la chambre couvre un volume de priorite plus basse",
+        strongestZeroG([champs[0], chambre]).name, "ZeroGChamber");
+  check("dans le volume, on flotte",
+        strongestZeroG(zonesAround(presencesZ, [10, 0, 0])).name, "ZeroGVolume");
+  check("dehors, non",
+        strongestZeroG(zonesAround(presencesZ, [1000, 0, 0])), null);
 
-  const secteurs = gameSectors({ placed: {
+  // --- LE SECTEUR MAJEUR ACTIF (docs/82-secteur-majeur.md) ---
+  //
+  // Trois classes, une seule qui porte la minicarte. Le rayon lu est celui du
+  // DECLENCHEUR, jamais `_horizonRadius`.
+  const secteurs = majorSectors({ placed: {
+    PlanetoidSector: [{ name: "Sector_TH", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 1000, center: [0, 0, 0] },
+      fields: { _sectorName: 3, _thrustLimit: 20, _ambientLightRange: 250,
+                _useMinimap: true, _horizonRadius: 200 } }],
     ZeroGSector: [{ name: "Sector_DB", position: [0, 0, 0],
       volume: { shape: "sphere", radius: 1500, center: [0, 0, 0] },
       fields: { _sectorName: 6, _thrustLimit: 20, _ambientLightRange: 1200 } }],
-    MajorSector: [{ name: "Sector_QuantumMoon", position: [0, 0, 0],
+    MajorSector: [{ name: "Sector_QuantumMoon", position: [100, 0, 0],
       volume: { shape: "sphere", radius: 120, center: [0, 0, 0] },
-      fields: { _sectorName: 7, _thrustLimit: 20 } }],
+      fields: { _sectorName: 7, _thrustLimit: 5 } }],
   } });
-  check("trois secteurs de jeu : ici deux", secteurs.length, 2);
-  check("la poussee y est limitee a 20", secteurs[0].thrustLimit, 20);
-  check("emboites, le plus petit gagne",
-        gameSectorAt(secteurs, [0, 0, 0]).name, "Sector_QuantumMoon");
-  check("plus loin, le grand reprend",
-        gameSectorAt(secteurs, [500, 0, 0]).name, "Sector_DB");
+  check("secteurs majeurs, les trois classes confondues", secteurs.length, 3);
+  check("le declencheur n'est pas l'horizon", secteurs[0].horizon, 200);
+  check("un PlanetoidSector porte la minicarte", secteurs[0].useMinimap, true);
+  check("un ZeroGSector n'en porte pas", secteurs[1].useMinimap, false);
+  check("un MajorSector nu non plus", secteurs[2].useMinimap, false);
+  // `CalculateActiveMajorSector` : le plus proche PAR LE CENTRE, non le plus
+  // petit. Au centre du grand, c'est le grand qui gagne meme si le petit le
+  // contient — ce que l'ancienne regle « le plus petit volume » inversait.
+  check("actif : le plus proche par le centre",
+        activeMajorSector(secteurs, [0, 0, 0]).name, "Sector_TH");
+  check("pres du petit, c'est lui",
+        activeMajorSector(secteurs, [110, 0, 0]).name, "Sector_QuantumMoon");
+  check("hors de tout declencheur, aucun",
+        activeMajorSector(secteurs, [5000, 0, 0]), null);
+  // `GetThrustLimit` : le minimum sur TOUS ceux qu'on touche, actif ou non.
+  check("la poussee prend le minimum de tous",
+        sectorThrustLimit(secteurs, [110, 0, 0]), 5);
+  check("hors du petit, les deux grands s'accordent",
+        sectorThrustLimit(secteurs, [500, 0, 0]), 20);
+  check("hors de tout, aucune limite",
+        sectorThrustLimit(secteurs, [5000, 0, 0]), null);
+
+  // --- LA MINICARTE ---
+  const globe = localMapPosition([0, 0, 0], [10, 0, 0]);
+  check("le marqueur vit sur le globe de 0,51", globe[0], MARKER_RADIUS);
+  check("et la distance n'y change rien",
+        localMapPosition([0, 0, 0], [1000, 0, 0])[0], MARKER_RADIUS);
+  const mm = new Minimap(null);
+  check("eteinte au depart", mm.on, false);
+  mm.switchMajorSector(secteurs[0]);
+  check("un secteur qui la porte l'allume", mm.on, true);
+  check("et l'evenement part", mm.events.join(","), MINIMAP_EVENTS.on);
+  // `AttemptActivation` ALLUME et ne peut pas eteindre : passer a un secteur
+  // qui ne la porte pas la laisse allumee. Un `setEnabled(condition)` par
+  // image effacait cette bizarrerie.
+  mm.switchMajorSector(secteurs[1]);
+  check("passer a un secteur sans minicarte ne l'eteint pas", mm.on, true);
+  check("mais la trace repart de zero", mm.trail.length, 0);
+  mm.switchMajorSector(null);
+  check("le vide, lui, l'eteint", mm.on, false);
+  check("deux evenements en tout", mm.events.length, 2);
+  mm.switchMajorSector(secteurs[0]);
+  mm.enterShip();
+  check("monter dans le vaisseau l'eteint", mm.on, false);
+  mm.exitShip();
+  check("en ressortir la rallume", mm.on, true);
+  mm.switchMajorSector(secteurs[1]);
+  mm.enterShip(); mm.exitShip();
+  check("ressortir dans un secteur sans minicarte ne rallume pas", mm.on, false);
+  // `MinimapHUD.AllowVisibility` : trois conditions, trois sources.
+  mm.switchMajorSector(secteurs[0]);
+  check("sans le paquetage, rien a l'ecran",
+        mm.allowVisibility({ helmetHUD: true, hasMinimap: false }), false);
+  check("casque baisse, rien non plus",
+        mm.allowVisibility({ helmetHUD: false, hasMinimap: true }), false);
+  check("les trois ensemble, on la voit",
+        mm.allowVisibility({ helmetHUD: true, hasMinimap: true }), true);
+  // La trace : un point de plus des que la direction bouge de plus de 5 degres.
+  const tourne = (deg) => [Math.cos(deg * Math.PI / 180), Math.sin(deg * Math.PI / 180), 0];
+  mm.reset();
+  mm.sample(mm.trail, "trailIndex", "last", tourne(0));
+  mm.sample(mm.trail, "trailIndex", "last", tourne(TRAIL_ANGLE - 1));
+  check("sous cinq degres, pas de point de plus", mm.trail.length, 1);
+  mm.sample(mm.trail, "trailIndex", "last", tourne(TRAIL_ANGLE + 1));
+  check("au-dela, un point de plus", mm.trail.length, 2);
 
   const invites = probePrompts({ placed: { ProbePromptTrigger: [
     { name: "ProbePromptTrigger", position: [0, 0, 0],
@@ -3260,6 +3713,63 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a cheval sur deux corps, pas pose non plus",
         landedOn(["TimberHearth_Body", "Moon_Body", "TimberHearth_Body"]), null);
   check("et aucun capteur du tout n'est pas un atterrissage", landedOn([]), null);
+  // LA TROISIEME CONDITION, qui manquait : au-dela de cinq unites de vitesse
+  // relative, on ne se pose pas — on GLISSE (docs/89-pose.md). Elle compte
+  // depuis que « pose » coupe toute rotation.
+  const trois = ["TimberHearth_Body", "TimberHearth_Body", "TimberHearth_Body"];
+  check("a l'arret, on est pose", landedOn(trois, 0), "TimberHearth_Body");
+  check("a la limite exacte, encore",
+        landedOn(trois, LANDED_SPEED), "TimberHearth_Body");
+  check("au-dela, on glisse", landedOn(trois, LANDED_SPEED + 0.01), null);
+
+  // Les deux annonces du build, sur les transitions et pas sur l'etat.
+  const quai = new LandingPads();
+  check("en vol, rien", quai.update([null, null, null]), null);
+  check("le toucher s'annonce", quai.update(trois, 0), "ShipTouchdown");
+  check("et ne se repete pas", quai.update(trois, 0), null);
+  check("le decollage aussi", quai.update([null, null, null]), "ShipTakeoff");
+  // Reprendre de la vitesse sans quitter le sol compte comme un decollage :
+  // c'est la meme ligne du build, et c'est ce qui rend les commandes.
+  const glisse = new LandingPads();
+  glisse.update(trois, 0);
+  check("pose a l'arret", glisse.landed, true);
+  check("puis lance, on decolle",
+        glisse.update(trois, LANDED_SPEED + 1), "ShipTakeoff");
+  check("et le corps touche est oublie", glisse.body, null);
+
+  // --- LA TOUR, DE BOUT EN BOUT (docs/92-tour.md) ---
+  //
+  // La borne, le declencheur d'en haut, et la cabine : le portage n'avait que
+  // la cabine, et ses trois commandes etaient appelees par personne.
+  const bornes = launchTerminals({ placed: { LaunchTerminal: [
+    { name: "LaunchTerminal", body: "TH_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 0.42, center: [0, 0, 0] } }] } });
+  check("une borne de lancement", bornes.length, 1);
+  check("et elle a sa forme", bornes[0].volume.radius, 0.42);
+  const dcls = elevatorControllers({ placed: { LaunchElevatorController: [
+    { name: "ElevatorController", body: "TH_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 10, center: [0, 0, 0] } }] } });
+  check("un declencheur d'en haut", dcls.length, 1);
+  check("de dix unites", dcls[0].volume.radius, 10);
+
+  // La cabine nait verrouillee : `LaunchElevatorController.Start` la ferme.
+  const cabTour = new Cabine({ trackHeight: 31.5, liftDuration: 5 });
+  cabTour.deactivateControls();
+  check("verrouillee, la commande ne repond pas", cabTour.pressInteract(0), false);
+  check("et la cabine n'a pas bouge", cabTour.fraction, 0);
+  cabTour.activateControls();
+  check("la tour actionnee, elle repond", cabTour.pressInteract(0), true);
+  cabTour.update(5);
+  check("cinq secondes plus tard, elle est en haut", round(cabTour.fraction, 3), 1);
+  // `OnTriggerEnter` : au-dessus de 0,9, entrer dans la sphere la renvoie.
+  check("elle est bien au-dessus du seuil", cabTour.fraction > RETURN_ABOVE, true);
+  cabTour.returnToStart(5);
+  cabTour.update(10);
+  check("le declencheur d'en haut la renvoie en bas", round(cabTour.fraction, 3), 0);
+  // ... et `returnToStart` ne bascule PAS le sens : une nouvelle pression
+  // remonte, elle ne redescend pas.
+  cabTour.pressInteract(10);
+  check("la pression suivante remonte", cabTour.goingToTheEnd, true);
 
   const pads = landingPadSensors({ placed: { LandingPadSensor: [
     { name: "SurfaceSensor", position: [0, 0, 0], body: "Ship_Body",
@@ -3689,6 +4199,1724 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("l'un sort sans emporter l'autre", compose.contains("b"), true);
   // Sortir de ce dans quoi on n'est jamais entre ne fait rien.
   check("une sortie sans entree ne fait rien", compose.exitChild("inconnu"), false);
+
+  // --- la sonde, telle que le build la pose (docs/60) ---
+  //
+  // Le prefabrique vit dans `sharedassets1.assets` : le recensement ne lisait
+  // que `level0` et docs/08 en avait conclu que le modele de sonde manquait au
+  // build. Ces chiffres viennent tous du prefabrique ou de l'IL du lanceur.
+  check("la charge ignore les quinze premiers centiemes", chargeFraction(0.15), 0);
+  check("une pichenette ne charge rien", chargeFraction(0.05), 0);
+  check("une seconde pleine charge tout", chargeFraction(1), 1);
+  check("a mi-course, un peu plus de la moitie",
+        Number(chargeFraction(0.6).toFixed(4)), Number((0.45 / 0.85).toFixed(4)));
+  check("une charge nulle part a quarante", launchSpeed(0), 40);
+  check("une charge pleine part a cent", launchSpeed(1), 100);
+  // L'inclinaison est SIGNEE : positive quand on vise au-dessus du regard.
+  check("viser droit devant : zero", launchPitch([0, 0, 1], [0, 1, 0], [0, 0, 1]), 0);
+  check("viser vers le haut : positif",
+        launchPitch([0, 0, 1], [0, 1, 0], [0, 1, 0]) > 0, true);
+  check("viser vers le bas : negatif",
+        launchPitch([0, 0, 1], [0, 1, 0], [0, -1, 0]) < 0, true);
+  // La pichenette vise une ORBITE : sqrt(g r) * 1,1, plafonnee a cent.
+  check("la vitesse orbitale, a plat",
+        Number(orbitalSpeed(10, 100, 0).toFixed(3)),
+        Number((Math.sqrt(1000) * 1.1).toFixed(3)));
+  check("viser en l'air la fait monter",
+        orbitalSpeed(10, 100, 45) > orbitalSpeed(10, 100, 0), true);
+  check("mais jamais plus du double",
+        Number(orbitalSpeed(10, 100, 89).toFixed(3)),
+        Number(Math.min(Math.sqrt(1000) * 1.1 * 2, 100).toFixed(3)));
+  check("et jamais plus que la vitesse maximale", orbitalSpeed(100, 1000, 0), 100);
+  // La fenetre de tir : deux cents metres tant qu'on ignore le geste.
+  check("avant d'apprendre, il faut deux cents metres", launchWindowLength(false), 200);
+  check("apres, cinq suffisent", launchWindowLength(true), 5);
+  // Le suivi d'horizon ne s'arme que sur un tir tendu, hors du poste.
+  check("un tir tendu suit l'horizon", tracksHorizon(0, 10, false, 300), true);
+  check("un tir charge ne le suit pas", tracksHorizon(0.8, 10, false, 300), false);
+  check("un tir trop haut non plus", tracksHorizon(0, 60, false, 300), false);
+  check("un tir trop bas non plus", tracksHorizon(0, -20, false, 300), false);
+  check("depuis le poste de pilotage, jamais", tracksHorizon(0, 10, true, 300), false);
+  check("et il faut un secteur qui ait un horizon", tracksHorizon(0, 10, false, 0), false);
+  // La visee tangente : a distance R du centre, le point vise est a
+  // sqrt(dist^2 - R^2) — donc plus court que la distance au centre.
+  const vise = horizonAim([0, 0, 0], [0, 0, -320], [1, 0, 0], 300);
+  check("sous l'horizon plus deux cents, on corrige", vise !== null, true);
+  check("le point vise est le point de tangence",
+        Math.round(Math.hypot(vise[0], vise[1], vise[2])),
+        Math.round(Math.sqrt(320 * 320 - 300 * 300)));
+  check("trop loin, on ne corrige plus",
+        horizonAim([0, 0, 0], [0, 0, -600], [1, 0, 0], 300), null);
+  check("sous l'horizon non plus",
+        horizonAim([0, 0, 0], [0, 0, -200], [1, 0, 0], 300), null);
+  // La collision imminente : le pas de physique depasserait-il le point ?
+  check("a cent metres et cent par seconde, pas encore",
+        impendingCollision([0, 0, 100], [0, 0, 100], [0, 0, 0], 0.02), false);
+  check("a un metre et cent par seconde, oui",
+        impendingCollision([0, 0, 1], [0, 0, 100], [0, 0, 0], 0.02), true);
+  // La lanterne : eteinte a l'ancrage, cinquante deux secondes plus tard.
+  check("la lanterne s'allume a zero", lanternRange(0), 0);
+  check("a mi-parcours, la moitie", lanternRange(1), 25);
+  check("deux secondes plus tard, cinquante", lanternRange(2), SONDE.lanternRange);
+  check("et elle ne monte pas plus haut", lanternRange(10), SONDE.lanternRange);
+  // La photo : 512 pres, 64 loin, et le seuil est a deux cents metres.
+  check("sous deux cents metres, pleine definition", snapshotSize(150), 512);
+  check("a mille metres, la plus petite", snapshotSize(1000), 64);
+  check("et plus loin, pas plus petite", snapshotSize(5000), 64);
+  check("a six cents metres, entre les deux", snapshotSize(600), 288);
+  // Le marqueur : le danger l'emporte, et il tient une seconde.
+  check("en vol, on repere", probeIcon(0, null, false), "locator");
+  check("posee, on ancre", probeIcon(0, null, true), "anchor");
+  check("dans un danger, on alerte", probeIcon(5, null, true), "danger");
+  check("un degat de contact tient une seconde", probeIcon(0, 0.5, false), "danger");
+  check("et pas deux", probeIcon(0, 1.5, false), "locator");
+  check("le texte du marqueur", probeReadout(42.4), " 42m");
+  check("avec l'integrite de la croute", probeReadout(10, 87),
+        " 10m\n Crust Integrity: 87%");
+  check("et les renseignements du lieu", probeReadout(10, null, ["Chert"]),
+        " 10m\n Chert");
+  check("derriere la camera, pas de marqueur",
+        probeLabelPos({ x: 10, y: 10, z: -1 }, 600, { width: 32, height: 32 }), null);
+  check("devant, trente pixels au-dessus du point",
+        probeLabelPos({ x: 100, y: 200, z: 5 }, 600, { width: 32, height: 32 }).y,
+        600 - 200 - 16 - 30);
+  check("l'autodestruction attend sa seconde", selfDestructed(0.5), false);
+  check("puis elle detruit", selfDestructed(1.5), true);
+
+  // Le lanceur : UNE sonde a la fois. C'est la difference de jeu la plus
+  // visible de ce lot — le portage en lancait autant qu'on voulait.
+  const monde = { pos: [0, 0, 0], forward: [0, 0, 1], playerForward: [0, 0, 1],
+                  playerUp: [0, 1, 0], playerVelocity: [0, 0, 0], knowsProbes: true };
+  const lanceur = new Lanceur();
+  lanceur.update(0.016, { launch: true }, monde);
+  check("appuyer met en charge", lanceur.charging, true);
+  check("mais ne lance rien", lanceur.active, 0);
+  for (let i = 0; i < 60; i++) lanceur.update(0.016, { launch: true }, monde);
+  check("la charge monte", lanceur.charge > 0.5, true);
+  lanceur.update(0.016, { launch: false }, monde);
+  check("relacher lance", lanceur.active, 1);
+  check("et le son est celui de la pleine puissance",
+        lanceur.events.includes("ProbeLaunch_HighPower"), true);
+  lanceur.update(0.016, { launch: true }, monde);
+  check("une seconde sonde ne part pas", lanceur.launched, 1);
+  // Le rappel demande un MAINTIEN de trois dixiemes.
+  lanceur.update(0.2, { retrieve: true }, monde);
+  check("un appui bref ne rappelle pas", lanceur.active, 1);
+  lanceur.update(0.4, { retrieve: true }, monde);
+  check("trois dixiemes rappellent", lanceur.active, 0);
+  check("et l'evenement de destruction part",
+        lanceur.events.includes("ProbeDestroyed"), true);
+  // La pichenette, pres d'un corps : elle part en ORBITE, pas a quarante.
+  const orbital = new Lanceur();
+  orbital.update(0.016, { launch: true }, monde);
+  const jete = orbital.update(0.016, { launch: false },
+    { ...monde, field: { magnitude: 12, dir: { x: 0, y: -1, z: 0 } },
+      wellCenter: [0, -300, 0] });
+  check("la pichenette vise l'orbite",
+        Math.round(Math.hypot(...jete.vel)),
+        Math.round(orbitalSpeed(12, 300, 0)));
+  check("et le son est celui de la faible puissance",
+        orbital.events.includes("ProbeLaunch_LowPower"), true);
+  // Un mur devant : le tir est refuse, et une seule fois.
+  const bloque = new Lanceur();
+  const mur = { ...monde, raycast: () => ({ point: [0, 0, 3], normal: [0, 0, -1] }) };
+  bloque.update(0.016, { launch: true }, mur);
+  check("un mur refuse le tir", bloque.events.includes("ProbeLaunchAborted"), true);
+  check("et ne met pas en charge", bloque.charging, false);
+  bloque.update(0.016, { launch: true }, mur);
+  check("maintenir la touche ne le refuse pas deux fois",
+        bloque.events.length, 0);
+  // Dans le vaisseau, hors du poste de pilotage : refuse aussi.
+  const cabine = new Lanceur();
+  cabine.update(0.016, { launch: true }, { ...monde, insideShip: true });
+  check("dans la cabine, le tir est refuse",
+        cabine.events.includes("ProbeLaunchAborted"), true);
+  const poste = new Lanceur();
+  poste.update(0.016, { launch: true },
+               { ...monde, insideShip: true, atFlightConsole: true });
+  check("au poste de pilotage, il passe", poste.charging, true);
+
+  // La sonde en vol : le collider ne s'allume qu'au bout de deux dixiemes,
+  // puis elle se plante NEZ DANS la surface et la lanterne monte.
+  const sonde = new Sonde([0, 0, 0], [0, 0, 1], [0, 0, 50]);
+  check("au depart, pas de collider", sonde.colliderOn, false);
+  sonde.step(0.1, {});
+  check("a un dixieme, toujours pas", sonde.colliderOn, false);
+  sonde.step(0.15, {});
+  check("a deux dixiemes et demi, oui", sonde.colliderOn, true);
+  check("et elle a avance", Math.round(sonde.pos[2]), 13);
+  const sol = { point: [0, 0, 20], normal: [0, 0, -1] };
+  sonde.step(0.5, { raycast: () => sol });
+  check("elle s'ancre", sonde.anchored, true);
+  check("au point touche", sonde.pos.join(","), "0,0,20");
+  check("le nez dans la surface", sonde.forward.join(","), "0,0,1");
+  check("et elle ne bouge plus", Math.hypot(...sonde.vel), 0);
+  check("la lanterne part de zero", sonde.lantern, 0);
+  sonde.step(1, {});
+  check("et monte", sonde.lantern, 25);
+  check("la boucle de vol s'est tue", sonde.flightLoop, 0);
+  // Le scan : la sphere de trente, et le plus proche.
+  sonde.scan([{ nom: "loin", pos: [0, 0, 100] }, { nom: "pres", pos: [0, 0, 25] },
+              { nom: "moyen", pos: [0, 0, 40] }]);
+  check("deux points dans la sphere de trente", sonde.poi.length, 2);
+  check("et le plus proche est retenu", sonde.closestPOI.nom, "pres");
+  // Le capteur haute vitesse : sur un decor STATIQUE, il ancre en reculant de
+  // quinze centimetres du point d'impact.
+  //
+  // Le decor ne repond qu'au rayon du CAPTEUR (portee cent) et pas a celui du
+  // balayage : c'est le cas ou les deux detections divergent, et donc le seul
+  // ou le capteur sert a quelque chose.
+  // Il travaille des la premiere image : `ProbeAnchor.OnImpendingCollision`
+  // n'attend pas que le collider s'allume, seulement que la sonde ne soit pas
+  // deja posee.
+  const rapide = new Sonde([0, 0, 0], [0, 0, 1], [0, 0, 6000]);
+  const paroi = { point: [0, 0, 80], normal: [0, 0, -1], dynamic: false };
+  rapide.step(0.016,
+    { raycast: (from, dir, portee) => (portee === SONDE.sensorRange ? paroi : null) });
+  check("le capteur voit le mur cent metres devant", rapide.anchored, true);
+  check("et recule de quinze centimetres",
+        Number(rapide.pos[2].toFixed(2)), 79.85);
+  check("l'angle entre deux directions opposees vaut cent quatre-vingts",
+        Math.round(angleEntre([0, 0, 1], [0, 0, -1])), 180);
+
+  // --- les commandes du build (docs/61) ---
+  //
+  // Elles vivent dans l'`InputManager` de `mainData`, que le portage ne lisait
+  // pas : ses touches etaient les siennes. Ce qui suit garde la TRADUCTION —
+  // le nom Unity vers le code du navigateur — et le comportement des canaux ;
+  // les liaisons elles-memes sont gardees contre le build par
+  // `tests/05-extract.mjs`.
+  check("une lettre devient une place", codeUnity("a"), "KeyA");
+  check("et la place survit a un azerty", codeUnity("q"), "KeyQ");
+  check("l'espace", codeUnity("space"), "Space");
+  check("la majuscule gauche", codeUnity("left shift"), "ShiftLeft");
+  check("le controle droit", codeUnity("right ctrl"), "ControlRight");
+  // « return » est la grande touche, « enter » celle du pave numerique. Unity
+  // les distingue, et le build lie les DEUX a la carte.
+  check("return est la grande touche", codeUnity("return"), "Enter");
+  check("enter est celle du pave", codeUnity("enter"), "NumpadEnter");
+  // Unity compte gauche, DROIT, milieu ; le DOM compte gauche, MILIEU, droit.
+  // La traduction croise donc 1 et 2, et c'est le navigateur qui l'a appris au
+  // portage : `mouse 1` mettait la sonde sur la molette.
+  check("le clic droit d'Unity est le bouton 2 du DOM", codeUnity("mouse 1").mouse, 2);
+  check("son clic du milieu est le bouton 1", codeUnity("mouse 2").mouse, 1);
+  check("et le gauche ne bouge pas", codeUnity("mouse 0").mouse, 0);
+  check("un bouton de manette", codeUnity("joystick button 5").pad, 5);
+  check("et ce qu'on ne connait pas ne devient rien", codeUnity("§"), null);
+
+  const cmd = new Commandes(null);
+  check("sans data/input.json, on se sait repli", cmd.fallback, true);
+  check("vingt-deux canaux du build", Object.keys(COMMANDES).length, 22);
+  check("et cinq ajouts nommes", Object.keys(AJOUTS).length, 5);
+  check("dont sortir le baton, qui n'a pas de canal dans l'alpha",
+        !!AJOUTS.Stick, true);
+  // Les trois boutons de souris, que le portage n'avait pas.
+  check("viser un referentiel est le clic GAUCHE",
+        cmd.get("Lock On").pos.mouse[0], 0);
+  check("la sonde est le clic DROIT", cmd.get("Probe").pos.mouse[0], 2);
+  check("la lunette est le clic du MILIEU", cmd.get("Telescope").pos.mouse[0], 1);
+  check("le clic droit tient la sonde",
+        cmd.held("Probe", { mouse: { 2: true } }), true);
+  check("et le gauche ne la tient pas",
+        cmd.held("Probe", { mouse: { 0: true } }), false);
+  // Les axes de deplacement : a/d et w/s, avec leurs suppleants j/l et k/i.
+  check("d va a droite", cmd.axis("Move X", { keys: { KeyD: true } }), 1);
+  check("a va a gauche", cmd.axis("Move X", { keys: { KeyA: true } }), -1);
+  check("l aussi, c'est le suppleant", cmd.axis("Move X", { keys: { KeyL: true } }), 1);
+  check("w avance", cmd.axis("Move Z", { keys: { KeyW: true } }), 1);
+  check("les deux a la fois s'annulent",
+        cmd.axis("Move Z", { keys: { KeyW: true, KeyS: true } }), 0);
+  // Le sac dorsal monte a la MAJUSCULE et descend au CONTROLE ; l'espace saute.
+  check("la majuscule monte", cmd.held("Move Up", { keys: { ShiftLeft: true } }), true);
+  check("le controle descend", cmd.held("Move Down", { keys: { ControlLeft: true } }), true);
+  check("l'espace saute", cmd.held("Jump", { keys: { Space: true } }), true);
+  check("et l'espace ne monte pas", cmd.held("Move Up", { keys: { Space: true } }), false);
+  // La lunette zoome avec les MEMES touches que le sac dorsal : c'est le build
+  // qui les partage, par jeu de commandes.
+  check("zoomer, c'est monter", cmd.held("Zoom In", { keys: { ShiftLeft: true } }), true);
+  // Interagir et le pilote automatique partagent E, comme dans le build.
+  check("E interagit", cmd.held("Interact", { keys: { KeyE: true } }), true);
+  check("et pilote", cmd.held("Autopilot", { keys: { KeyE: true } }), true);
+  check("Q annule", cmd.held("Cancel", { keys: { KeyQ: true } }), true);
+  check("la carte est sur entree", cmd.held("Map", { keys: { Enter: true } }), true);
+  // La manette : les numeros du build, traduits.
+  check("la sonde est au bouton 5", cmd.padButton("Probe"), 5);
+  check("la carte au bouton 6", cmd.padButton("Map"), 6);
+  check("et monter est un AXE", cmd.padAxis("Move Up").axis, 9);
+  // Les libelles d'invite.
+  check("l'invite de la sonde", cmd.label("Probe"), "clic droit");
+  check("et celle de la lunette", cmd.label("Telescope"), "clic milieu");
+  check("celle du saut", cmd.label("Jump"), "Espace");
+  check("celle du sac dorsal", cmd.label("Move Up"), "Maj");
+  check("et celle de l'interaction", cmd.label("Interact"), "E");
+  // Un canal absent ne fait rien plutot que d'exploser.
+  check("un canal inconnu ne tient rien", cmd.held("Inexistant", {}), false);
+  check("et son axe vaut zero", cmd.axis("Inexistant", {}), 0);
+  // Avec des donnees, ce sont ELLES qui gagnent.
+  const cmd2 = new Commandes({ channels: {
+    Probe: { Key: { kind: "buttons", neg: [], pos: ["z"] },
+             PC: { kind: "buttons", neg: [], pos: ["joystick button 7"] } } } });
+  check("avec data/input.json, on ne se sait plus repli", cmd2.fallback, false);
+  check("et la liaison vient du fichier", cmd2.get("Probe").pos.codes[0], "KeyZ");
+  check("la manette aussi", cmd2.padButton("Probe"), 7);
+  check("les canaux absents du fichier gardent la table",
+        cmd2.get("Jump").pos.codes[0], "Space");
+
+  // --- viser un referentiel (docs/62) ---
+  //
+  // `ReferenceFrameTracker` : la cible se REGARDE, elle ne se choisit pas dans
+  // la carte. Le portage ne la choisissait que dans la carte.
+  check("les crochets se ferment a dix par seconde",
+        bracketScale(1, true, 0.05), 0.5);
+  check("et se rouvrent aussi vite", bracketScale(0, false, 0.05), 0.5);
+  check("sans jamais depasser un", bracketScale(0.9, false, 1), 1);
+  check("ni descendre sous zero", bracketScale(0.1, true, 1), 0);
+  check("dix par seconde", BRACKET_RATE, 10);
+  check("l'angle a la perpendiculaire", Math.round(angleTo([0, 0, 1], [0, 1, 0])), 90);
+  // La visee : le mieux CENTRE gagne, pas le plus proche.
+  const corps = [
+    { name: "loin mais centre", position: [0, 0, 5000], radius: 200 },
+    { name: "pres mais de cote", position: [3000, 0, 300], radius: 100 },
+  ];
+  check("le mieux centre gagne",
+        aimedFrame(corps, [0, 0, 0], [0, 0, 1]).name, "loin mais centre");
+  check("et regarder de cote change la cible",
+        aimedFrame(corps, [0, 0, 0], [1, 0, 0.1]).name, "pres mais de cote");
+  // Temps 1 : un corps perce par le rayon PROCHE l'emporte sur un mieux centre.
+  const pres = [
+    { name: "la lune, sous le nez", position: [0, 0, 300], radius: 250 },
+    { name: "la planete, derriere", position: [0, 0, 40000], radius: 2000 },
+  ];
+  check("ce qu'on touche a mille l'emporte",
+        aimedFrame(pres, [0, 0, 0], [0, 0, 1]).name, "la lune, sous le nez");
+  check("le rayon proche porte a mille", LOCK_NEAR, 1000);
+  check("et rien devant ne donne rien",
+        aimedFrame([], [0, 0, 0], [0, 0, 1]), null);
+  // Le verrouillage : la meme touche pose et retire.
+  const lock = new LockOn();
+  const cible1 = { name: "a" }, cible2 = { name: "b" };
+  lock.update(0.016, true, cible1);
+  check("viser pose la cible", lock.current, cible1);
+  check("et l'annonce", lock.events.join(","), "TargetReferenceFrame");
+  check("les crochets repartent d'en haut", lock.bracket > 0.8, true);
+  lock.update(0.016, true, cible1);
+  check("re-viser la meme la retire", lock.current, null);
+  check("et l'annonce aussi", lock.events.join(","), "UntargetReferenceFrame");
+  lock.update(0.016, true, cible1);
+  lock.update(0.016, true, cible2);
+  check("viser une autre change de cible", lock.current, cible2);
+  check("l'ancienne est retenue", lock.last, cible1);
+  lock.update(0.016, true, null);
+  check("viser le vide devise", lock.current, null);
+  check("deviser deux fois ne dit rien",
+        (lock.update(0.016, true, null), lock.events.length), 0);
+  // L'invite ne s'affiche que sur une cible AUTRE que celle qu'on tient.
+  lock.update(0.016, true, cible1);
+  lock.update(0.016, false, cible1);
+  check("pas d'invite sur ce qu'on vise deja", lock.showPrompt, false);
+  lock.update(0.016, false, cible2);
+  check("mais une sur ce qu'on pourrait viser", lock.showPrompt, true);
+  // Le pilote automatique REFUSE si l'on est deja arrive.
+  check("aller plus loin que la distance d'arrivee", canFlyTo(5000, 1000), true);
+  check("y etre deja, non", canFlyTo(500, 1000), false);
+  check("et un referentiel qui l'interdit, non plus",
+        canFlyTo(5000, 1000, false), false);
+  check("accorder sa vitesse la copie",
+        matchedVelocity([1, 2, 3]).join(","), "1,2,3");
+
+  // --- ce qui boucle et ce qui ne boucle pas (docs/63) ---
+  //
+  // Le portage jouait TOUT en boucle. Le build ne le fait pas, et la regle
+  // d'Unity est en deux etages pour les clips legacy.
+  check("un clip en Loop boucle",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.LOOP }), true);
+  check("un clip en Once ne boucle pas",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.ONCE }), false);
+  check("un ping-pong boucle aussi",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.PINGPONG }), true);
+  // En Default, c'est le composant qui tranche...
+  check("en Default, le composant tranche",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.DEFAULT }, WRAP.LOOP), true);
+  // ... et si le composant est en Default aussi, Unity retombe sur Once.
+  check("et deux Default valent Once",
+        clipLoops({ m_AnimationType: 1, m_WrapMode: WRAP.DEFAULT }, WRAP.DEFAULT), false);
+  // Mecanim ne lit pas le wrapMode du clip : la reponse est dans le muscle.
+  check("un clip Mecanim en boucle boucle",
+        clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT,
+                    m_MuscleClip: { m_LoopBlend: true } }), true);
+  check("et sans boucle, non",
+        clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT,
+                    m_MuscleClip: { m_LoopBlend: false } }), false);
+  check("un muscle absent vaut boucle",
+        clipLoops({ m_AnimationType: 2, m_WrapMode: WRAP.DEFAULT }), true);
+
+  // --- ce qu'on tient dans la main (docs/64) ---
+  check("deux objets en main", HELD_ROOTS.length, 2);
+  check("le baton a quatre clips", STICK_CLIPS.length, 4);
+  check("et deux lumieres", STICK_LIGHTS.length, 2);
+  check("la lampe de la guimauve porte a 1,21",
+        STICK_LIGHTS[0].range, 1.21);
+  check("celle du thermometre est courte et vive",
+        `${STICK_LIGHTS[1].range},${STICK_LIGHTS[1].intensity}`, "0.16,2");
+  // Le thermometre est une POSE d'animation : quarante unites de chaleur
+  // parcourent le clip entier, et au-dela on reste sur la derniere image.
+  check("quarante unites parcourent le clip", THERM_HEAT_SPAN, 40);
+  check("froid, l'aiguille est au depart", thermTime(0), 0);
+  check("a mi-chaleur, a mi-course", thermTime(20), 0.5);
+  check("brulant, elle bute", thermTime(400), 1);
+  check("et un froid negatif ne la renverse pas", thermTime(-5), 0);
+  // Le baton est DEHORS au premier instant : `Awake` met deux clips a la queue.
+  const baton = new Baton();
+  check("le baton commence dehors", baton.out, true);
+  check("et sort avant d'attendre", baton.clip, "PullOut");
+  baton.update(0.016, { playing: false });
+  check("le clip fini, il attend", baton.clip, "idle");
+  baton.toggle();
+  check("le ranger le range", baton.out, false);
+  check("et joue PutBack", baton.clip, "PutBack");
+  check("les lumieres s'eteignent", baton.lights, false);
+  check("le thermometre se coupe", baton.canTherm, false);
+  check("et la guimauve se remet a neuf",
+        baton.events.includes("ResetMarshmallow"), true);
+  baton.toggle();
+  check("le ressortir le ressort", baton.out, true);
+  check("les lumieres reviennent", baton.lights, true);
+  // Manger range le baton TOUT SEUL.
+  const mange = new Baton();
+  mange.update(0.016, { eaten: true });
+  check("manger range le baton", mange.out, false);
+  check("il s'en souvient", mange.putAwayOnce, true);
+  // La flamme ne se voit que baton dehors et animation finie.
+  const flamme = new Baton();
+  flamme.update(0.016, { playing: true });
+  check("pas de flamme pendant la sortie", flamme.flame, false);
+  flamme.update(0.016, { playing: false });
+  check("mais une fois sorti, oui", flamme.flame, true);
+
+  // --- l'onde du telescope (docs/65) ---
+  check("cinq cents points", WAVE.points, 500);
+  check("et une boite dans le coin",
+        `${WAVE.x0},${WAVE.y0},${WAVE.x1},${WAVE.y1}`, "0.4,0.15,0.6,0.25");
+  const onde = new SoundWave();
+  check("au repos, la ligne est plate au milieu",
+        new Set(onde.ordered()).size, 1);
+  check("et au milieu vaut un demi", onde.ordered()[0], 0.5);
+  // Force nulle : la valeur reste 0,5 quel que soit l'echantillon.
+  check("sans signal, l'echantillon ne fait rien", onde.push(1, 0), 0.5);
+  check("un signal plein prend toute la hauteur", onde.push(1, 1), 1);
+  check("et l'oppose descend au plancher", onde.push(-1, 1), 0);
+  check("a demi-force, a mi-hauteur", onde.push(1, 0.5), 0.75);
+  // Le point neuf est le DERNIER de la liste : l'onde defile vers la gauche.
+  check("le dernier point est le plus recent", onde.ordered()[499], 0.75);
+  check("et le tampon garde sa taille", onde.ordered().length, 500);
+  // Cinq cents images plus tard, le premier point a disparu.
+  const courte = new SoundWave(4);
+  for (const v of [1, 1, 1, 1, 1]) courte.push(v, 1);
+  check("un tampon de quatre ne garde que quatre points",
+        courte.ordered().join(","), "1,1,1,1");
+  // La lunette grossit avec le champ : quatre fois plus grande a soixante.
+  check("a quinze degres, taille d'origine", telescopeScale(15), 1);
+  check("a soixante, quatre fois plus", telescopeScale(60), 4);
+  check("et l'echelle d'origine multiplie", telescopeScale(30, 2), 4);
+  check("la fleche du zoom est en bas au plus etroit",
+        zoomArrowFraction(TELESCOPE_GUI.minFOV), 0);
+  check("et monte avec le champ",
+        Number(zoomArrowFraction(45).toFixed(4)), 0.5);
+  check("sans jamais deborder", zoomArrowFraction(1000), 1);
+
+  // --- l'allumage du vaisseau (docs/66) ---
+  //
+  // Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME, une seconde
+  // durant, et relacher annule tout.
+  check("une seconde d'allumage", IGNITION_DURATION, 1);
+  const nef = new Ship({}, null, [0, 0, 0]);
+  nef.landed = true;
+  check("l'appui allume", nef.ignition(0.1, 1), 0);
+  check("et l'annonce", nef.events.join(","), "StartShipIgnition");
+  check("pendant l'allumage, aucune poussee", nef.ignition(0.5, 1), 0);
+  check("et rien a annoncer", nef.events.length, 0);
+  check("la seconde passee, la poussee vient", nef.ignition(0.5, 1), 1);
+  check("et l'allumage est complet",
+        nef.events.join(","), "CompleteShipIgnition");
+  // Relacher AVANT la fin annule, et il faut tout recommencer.
+  const nef2 = new Ship({}, null, [0, 0, 0]);
+  nef2.landed = true;
+  nef2.ignition(0.1, 1);
+  nef2.ignition(0.4, 1);
+  check("relacher annule", nef2.ignition(0.1, 0), 0);
+  check("et l'annonce", nef2.events.join(","), "CancelShipIgnition");
+  nef2.ignition(0.1, 1);
+  check("on repart de zero", nef2.ignition(0.5, 1), 0);
+  check("et il faut de nouveau une seconde", nef2.ignition(0.5, 1), 1);
+  // En vol, l'allumage ne s'applique pas : la poussee passe telle quelle.
+  const enVol = new Ship({}, null, [0, 0, 0]);
+  enVol.landed = false;
+  check("en vol, la poussee passe", enVol.ignition(0.016, 1), 1);
+  check("et rien ne s'annonce", enVol.events.length, 0);
+  // Une poussee vers le BAS au sol est bornee a zero : on ne s'enfonce pas
+  // dans la piste.
+  const bas = new Ship({}, null, [0, 0, 0]);
+  bas.landed = true;
+  check("pousser vers le bas au sol ne fait rien", bas.ignition(0.1, -1), 0);
+  check("et n'allume pas", bas.events.length, 0);
+
+  // --- ce que le jeu annonce, lot 2 (docs/67) ---
+  //
+  // Le mur qui reclame la combinaison : un collider qu'on allume et qu'on
+  // eteint, pas un volume qui declenche.
+  const barriere = [{ kind: "barrier", name: "SuitBarrier", position: [0, 0, 0],
+                 volume: { shape: "box", size: [10, 10, 10] } }];
+  const nu = new Equipment({ suit: false });
+  const vetu = new Equipment({ suit: true });
+  check("sans combinaison, le barriere repousse",
+        suitBarrierPush(barriere, [4, 0, 0], nu) !== null, true);
+  check("et il repousse par la face la plus proche",
+        suitBarrierPush(barriere, [4, 0, 0], nu).map((v) => Math.round(v * 100) / 100)
+          .join(","), "1,0,0");
+  check("de l'autre cote, dans l'autre sens",
+        Math.sign(suitBarrierPush(barriere, [-4, 0, 0], nu)[0]), -1);
+  check("et par le haut si c'est plus court",
+        suitBarrierPush(barriere, [0, 4.5, 0], nu).findIndex((v) => v !== 0), 1);
+  check("avec la combinaison, il n'existe pas",
+        suitBarrierPush(barriere, [0, 0, 0], vetu), null);
+  check("et dehors, rien non plus",
+        suitBarrierPush(barriere, [50, 0, 0], nu), null);
+  // Manger une guimauve REND TOUTE LA SANTE. Deux lignes d'IL, et le portage
+  // comptait les guimauves sans rien en faire.
+  const res = { health: 12, maxHealth: 100, dead: true };
+  check("manger rend toute la sante", eatMarshmallowHeals(res), 88);
+  check("la sante est pleine", res.health, 100);
+  check("et l'on n'est plus mort", res.dead, false);
+  check("sans ressources, rien ne casse", eatMarshmallowHeals(null), 0);
+  // L'invite de lampe : sept conditions, et la derniere est un OU.
+  const invite = (o) => flashlightPromptVisible({ suit: true, onDaySide: false, ...o });
+  check("de nuit, sans lampe allumee, on propose", invite({}), true);
+  check("lampe allumee, non", invite({ on: true }), false);
+  check("sans combinaison, non", invite({ suit: false }), false);
+  check("dans le vaisseau, non", invite({ inShip: true }), false);
+  check("sur la carte, non", invite({ inMapView: true }), false);
+  check("assis quelque part, non", invite({ attached: true }), false);
+  check("a la camera du satellite, non", invite({ satelliteCam: true }), false);
+  check("en plein jour, non", invite({ onDaySide: true }), false);
+  check("mais en plein jour dans une zone sombre, oui",
+        invite({ onDaySide: true, inDarkZone: true }), true);
+
+  // --- les meteores de Brittle Hollow (docs/68) ---
+  //
+  // `meteorLaunchers` etait ecrit, eprouve, et appele par personne.
+  check("cinquante de degats au contact", METEOR.damage, 50);
+  check("et une demi-seconde d'immunite", METEOR.ignoreSeconds, 0.5);
+  const tireur = [{ name: "L", position: [0, 0, 0], direction: [0, 1, 0],
+                     minSpeed: 100, maxSpeed: 200, minInterval: 5,
+                     maxInterval: 20, radius: 10 }];
+  // Un tirage constant a la moitie : delai 12,5 s, vitesse 150.
+  const lesTireurs = new MeteorLaunchers(tireur, () => 0.5);
+  check("rien ne part avant le delai", lesTireurs.update(1, 10).length, 0);
+  check("puis un meteore part", lesTireurs.update(1, 13).length, 1);
+  check("a la vitesse tiree", Math.round(lesTireurs.meteors[0].vel[1]), 150);
+  check("et il n'y en a qu'un", lesTireurs.meteors.length, 1);
+  // Le delai se RETIRE a chaque tir : ce n'est pas une periode.
+  check("le delai est retire", lesTireurs.launchers[0].delay, 12.5);
+  check("rien juste apres", lesTireurs.update(1, 20).length, 0);
+  check("un second au delai suivant", lesTireurs.update(1, 26).length, 1);
+  // La demi-seconde d'immunite : un meteore tout neuf ne touche personne.
+  const neuf = new MeteorLaunchers(tireur, () => 0);
+  neuf.update(1, 6);
+  check("un meteore tout neuf ne touche pas", neuf.hits([0, 0, 0], 1), null);
+  neuf.step(0.6, null);
+  check("passe la demi-seconde, il touche",
+        neuf.hits(neuf.meteors[0].pos, 1) !== null, true);
+  check("et loin, il ne touche pas", neuf.hits([0, 0, 9999], 1), null);
+  // Le champ le fait retomber.
+  const retombe = new MeteorLaunchers(tireur, () => 0);
+  retombe.update(1, 6);
+  const vAvant = retombe.meteors[0].vel[1];
+  retombe.step(1, { dir: { x: 0, y: -1, z: 0 }, magnitude: 20 });
+  check("le champ le freine", retombe.meteors[0].vel[1], vAvant - 20);
+  // Il ne vit pas eternellement.
+  const vieux = new MeteorLaunchers(tireur, () => 0);
+  vieux.update(1, 6);
+  vieux.step(METEOR.life + 1, null);
+  check("et il finit par disparaitre", vieux.meteors.length, 0);
+}
+
+{
+  // --- S'ASSEOIR (docs/69-assise.md) ---
+  //
+  // Les quatre `PlayerAttachPoint` : le portage ne s'asseyait nulle part, et
+  // `attachPoints` etait lu par personne.
+
+  check("le taux du constructeur", ATTACHE.rotationRate, 100);
+  check("et le glissement", ATTACHE.translationRate, 2);
+
+  // La duree du demi-tour est une DISTANCE ANGULAIRE divisee par un taux.
+  check("arriver de face ne prend aucun temps",
+        turnDuration([0, 0, 1], [0, 0, 1]), 0);
+  check("arriver de dos prend 1,8 s a cent degres par seconde",
+        turnDuration([0, 0, -1], [0, 0, 1]), 1.8);
+  check("un quart de tour, 0,9 s",
+        Math.round(turnDuration([1, 0, 0], [0, 0, 1]) * 1000) / 1000, 0.9);
+
+  // Le SmoothStep, et le cas ou la duree est nulle : `ble.un` du build.
+  check("duree nulle, on y est deja", turnFraction(0, 0), 1);
+  check("a mi-duree, la moitie du chemin", turnFraction(0.9, 1.8), 0.5);
+  check("au quart, moins que le quart (SmoothStep)",
+        turnFraction(0.45, 1.8) < 0.25, true);
+
+  // Le glissement est une fraction PAR IMAGE, bornee.
+  check("a soixante images, un trentieme",
+        Math.round(slideFraction(1 / 60) * 10000) / 10000, 0.0333);
+  check("une image trop longue ne depasse pas la cible", slideFraction(10), 1);
+
+  // `CenterCamera(rate)` est `SnapToDegrees(0, 0, rate)`.
+  check("recentrer depuis (30, 40) prend un demi-tour de seconde",
+        snapDuration(30, 40, 0, 0, 100), 0.5);
+  check("et depuis le centre, aucun temps", snapDuration(0, 0, 0, 0, 100), 0);
+  check("a mi-duree, la moitie des degres",
+        snapDegrees([30, 40], [0, 0], 0.25, 0.5)[0], 15);
+
+  // Le repere du point : aller et retour.
+  const point = { position: [10, 0, 0], rotation: [0, 0.707107, 0, 0.707107] };
+  const local = toLocal(point, [10, 0, 5]);
+  // Le point regarde +X ; ce qui est cinq unites devant lui en monde (+Z)
+  // est donc a -5 sur SON axe X, et non a +5 : c'est la rotation inverse.
+  check("le repere du point tourne bien avec lui", Math.round(local[0]), -5);
+  const retour = toWorld(point, local);
+  check("et l'aller-retour retombe sur ses pieds", Math.round(retour[2]), 5);
+
+  // Le slerp prend le chemin court, meme entre quaternions opposes.
+  const q = qslerp([0, 0, 0, 1], [0, 0, 0, -1], 0.5);
+  check("le chemin court entre deux ecritures de la meme pose",
+        Math.abs(q[3]), 1);
+
+  // Le poste de pilotage : les trois drapeaux, et une assise complete.
+  const pilotage = new AttachPoint({
+    name: "FlightConsole", body: "Ship_Body", position: [0, 0, 0],
+    rotation: [0, 0, 0, 1], lockTurning: true, matchRotation: true,
+    centerCamera: true, rotationRate: 100 });
+  const joueur = { position: [0, 0, -2], rotation: [0, 1, 0, 0] };  // dos tourne
+  const demande = pilotage.attach(joueur, 0);
+  check("le poste recentre la camera", demande.centerCamera, true);
+  check("au taux du point", demande.rate, 100);
+  check("et verrouille le tour du joueur", demande.lock, true);
+  check("dos tourne, le demi-tour dure 1,8 s",
+        Math.round(pilotage.turnDuration * 100) / 100, 1.8);
+  // Une image plus tard : le joueur a glisse vers le point, sans y etre.
+  const p1 = pilotage.update(0.1, 0.1);
+  check("il glisse vers le siege", p1.position[2] > -2, true);
+  check("sans y etre deja", p1.position[2] < 0, true);
+  // Et au bout de la duree, il est aligne sur le point : rotation identite.
+  pilotage.update(0.1, 5);
+  const fin = pilotage.update(0.1, 5);
+  check("passe la duree, il regarde ou le siege regarde",
+        Math.round(Math.abs(fin.rotation[3]) * 1000) / 1000, 1);
+
+  // On se leve avec la vitesse DU POINT, jamais zero.
+  const assis = new AttachPoint({ name: "FlightConsole", body: "Ship_Body",
+                                  position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+  assis.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  check("s'asseoir s'annonce", assis.events[0], "AttachPlayerToPoint");
+  check("et l'annonce sait a quoi", assis.body, "Ship_Body");
+  const leve = assis.detach([0, 0, 200]);
+  check("se lever aussi", assis.events[1], "DetachPlayerFromPoint");
+  check("et on emporte la vitesse du point", leve.velocity[2], 200);
+  check("plus rien ne suit une fois debout", assis.update(0.1, 1), null);
+
+  // L'ascenseur : le seul point qui ne prend RIEN.
+  const lift = new AttachPoint({ name: "AttachPoint", body: "TimberHearth_Body",
+                                 position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                                 lockTurning: false, matchRotation: false,
+                                 centerCamera: false });
+  const monte = lift.attach({ position: [0, 1, 0], rotation: [0, 1, 0, 0] }, 0);
+  check("monter ne recentre pas la camera", monte.centerCamera, false);
+  check("ni ne verrouille le tour", monte.lock, false);
+  check("et l'orientation reste au joueur", lift.update(0.1, 1).rotation, null);
+
+  // Le porteur bouge : le point suit, et le joueur avec.
+  const suivi = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+  suivi.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  const porte = suivi.update(1, 1, [100, 0, 0]);
+  check("le joueur part avec son porteur", porte.position[0] > 50, true);
+
+  // Le porteur TOURNE : c'est le cas du vaisseau, et le decalage seul ne le
+  // dit pas. Le repere vivant remplace alors la pose au repos.
+  const coque = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                                  matchRotation: true });
+  coque.follow({ position: [0, 500, 0], rotation: [0, 1, 0, 0] });
+  check("le siege prend le repere de sa coque",
+        Math.round(coque.forward()[2]), -1);
+  coque.attach({ position: [0, 499, 0], rotation: [0, 1, 0, 0] }, 0);
+  check("et le joueur y est porte", Math.round(coque.update(1, 9).position[1]), 500);
+  coque.follow(null);
+  check("rendu, le point retrouve sa pose au repos", coque.forward()[2], 1);
+
+  // La lunette suspend l'assise, et en sortir RECOMMENCE le demi-tour.
+  const lunette = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                                    matchRotation: true });
+  lunette.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  check("entrer dans la lunette suspend le suivi",
+        lunette.enterTelescope() && lunette.matchRotation, false);
+  check("et n'y entre pas deux fois", lunette.enterTelescope(), false);
+  lunette.exitTelescope({ position: [0, 0, -1], rotation: [0, 1, 0, 0] }, 9);
+  check("en sortir le restaure", lunette.matchRotation, true);
+  check("et redemarre le demi-tour depuis maintenant", lunette.since, 9);
+
+  // Un seul point a la fois.
+  const tous = new AttachPoints([
+    { name: "FlightConsole", position: [0, 0, 0], rotation: [0, 0, 0, 1] },
+    { name: "ShipComputer", position: [0, -6, 0], rotation: [0, 0, 0, 1] },
+  ]);
+  check("les deux points sont poses", tous.count, 2);
+  check("on trouve celui de la zone", tous.at([0, -6, 0.2]).name, "ShipComputer");
+  check("et rien la ou il n'y en a pas", tous.at([0, 50, 0]), null);
+  tous.attach(tous.at([0, 0, 0]), { position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  check("on est assis", tous.attached, true);
+  tous.attach(tous.at([0, -6, 0]), { position: [0, -6, -1], rotation: [0, 0, 0, 1] }, 1);
+  check("passer a l'autre libere le premier",
+        tous.points[0].attached, false);
+  check("et le second tient", tous.points[1].attached, true);
+  tous.detach();
+  check("se lever libere tout", tous.attached, false);
+  // Les annonces se drainent d'un bloc, comme celles du vaisseau.
+  const annonces = tous.drain();
+  check("les quatre annonces sont passees", annonces.length, 4);
+  check("et le drainage vide", tous.drain().length, 0);
+}
+
+{
+  // --- CE QUI SE COMMANDE, ET QUAND (docs/70-modes.md) ---
+  //
+  // `OWInput` echange un ENSEMBLE de canaux actifs a chaque changement de
+  // mode, et `GetAxis` rend zero pour tout canal absent. Le portage lisait les
+  // vingt-deux canaux en permanence, ce qui n'est vrai dans aucun mode.
+
+  check("dix ensembles", Object.keys(ENSEMBLES).length, 10);
+  // Les alias de mode retombent tous sur un canal du build : c'est tout ce que
+  // sont les classes `*Input` — des tables d'alias.
+  check("chaque alias designe un canal connu",
+        Object.values(ALIAS).every((c) => COMMANDES[c] !== undefined), true);
+  check("roulis et lacet sont le MEME canal", ALIAS.roll, ALIAS.yaw);
+  check("avancer le texte, c'est interagir", ALIAS.advanceText, ALIAS.interact);
+
+  // Les tailles mesurees, ensemble par ensemble.
+  check("a pied, dix-huit canaux sur vingt-deux", canaux("personnage").size, 18);
+  check("au poste de pilotage, dix-sept", canaux("vaisseau").size, 17);
+  check("a la camera d'atterrissage, douze", canaux("atterrissage").size, 12);
+  check("au vaisseau miniature, huit", canaux("modele").size, 8);
+  check("a la carte, huit", canaux("carte").size, 8);
+  check("a la lunette, six", canaux("lunette").size, 6);
+  check("a l'ordinateur de bord, quatre", canaux("ordinateur").size, 4);
+  check("a la camera du satellite, trois", canaux("satellite").size, 3);
+  check("en dialogue, deux", canaux("dialogue").size, 2);
+  check("dans un menu, UN", canaux("menu").size, 1);
+
+  // Et ce que ces tailles veulent dire, ligne par ligne.
+  check("a pied, pas d'autopilote", canaux("personnage").has("Autopilot"), false);
+  check("ni de camera d'atterrissage",
+        canaux("personnage").has("Landing Camera"), false);
+  check("ni de zoom", canaux("personnage").has("Zoom In"), false);
+  check("au poste, pas de saut", canaux("vaisseau").has("Jump"), false);
+  check("et PAS DE LAMPE", canaux("vaisseau").has("Flashlight"), false);
+  check("a la lunette, on ne marche plus", canaux("lunette").has("Move Z"), false);
+  check("ni ne saute", canaux("lunette").has("Jump"), false);
+  check("mais on vise toujours un referentiel",
+        canaux("lunette").has("Lock On"), true);
+  check("a la carte, on n'interagit pas", canaux("carte").has("Interact"), false);
+  check("mais on vise", canaux("carte").has("Lock On"), true);
+  check("dans un menu, seule la touche qui le referme",
+        [...canaux("menu")][0], "Pause");
+  check("en dialogue, avancer et choisir",
+        [...canaux("dialogue")].sort().join(","), "Interact,Move Z");
+  check("a la camera d'atterrissage, pas de menu",
+        canaux("atterrissage").has("Pause"), false);
+
+  // Chaque mode se quitte : un ensemble sans sortie enfermerait le joueur.
+  for (const [nom, sortie] of [["carte", "Map"], ["lunette", "Telescope"],
+                               ["menu", "Pause"], ["dialogue", "Interact"],
+                               ["ordinateur", "Cancel"], ["satellite", "Cancel"],
+                               ["modele", "Cancel"],
+                               ["atterrissage", "Landing Camera"]]) {
+    check(`on sort du mode ${nom}`, canaux(nom).has(sortie), true);
+  }
+
+  const m = new Modes();
+  check("on commence a pied", m.mode, "personnage");
+  check("et la lampe s'allume", m.permet("Flashlight"), true);
+  m.entre("vaisseau");
+  check("au poste, la lampe ne repond plus", m.permet("Flashlight"), false);
+  check("mais l'autopilote, oui", m.permet("Autopilot"), true);
+  m.sort("vaisseau");
+  check("en sortant, la lampe revient", m.permet("Flashlight"), true);
+
+  // LA CASE DE SAUVEGARDE N'EST PAS UNE PILE. C'est le build, et le reproduire
+  // est le but : un portage qui « corrige » cela ne se commande plus pareil.
+  const pile = new Modes();
+  pile.entre("lunette");
+  check("a la lunette", pile.permet("Zoom In"), true);
+  pile.entre("carte");
+  check("la carte ecrase la sauvegarde de la lunette",
+        pile.dernier.has("Zoom In"), true);
+  pile.entre("menu");
+  check("et le menu ecrase celle de la carte", pile.dernier.has("Map"), true);
+  pile.sort("menu");
+  check("refermer le menu rend la CARTE", pile.permet("Map"), true);
+  pile.sort("carte");
+  check("et refermer la carte rend la carte encore", pile.permet("Map"), true);
+  // Et c'est bien l'ensemble de la CARTE que l'on garde, pas celui de la
+  // lunette : « Move Z » y est, et la lunette ne l'a pas.
+  check("la lunette, elle, est perdue", pile.permet("Move Z"), true);
+
+  // Sortir du poste alors que la lunette est ouverte ne touche a RIEN.
+  const lu = new Modes();
+  lu.entre("vaisseau");
+  lu.entre("lunette");
+  check("la lunette depuis le poste", lu.permet("Zoom In"), true);
+  check("sortir du poste ne fait rien", lu.sort("vaisseau"), false);
+  check("et la lunette tient toujours", lu.permet("Zoom In"), true);
+  lu.sort("lunette");
+  check("c'est en la refermant qu'on retrouve le poste",
+        lu.permet("Autopilot"), true);
+
+  // LE VOCABULAIRE DU BUILD (docs/86-annonces-de-mode.md).
+  //
+  // `OWInput.AddListeners` abonne dix-neuf chaines, une par transition, et
+  // chacune porte le nom de la methode qui la traite : la correspondance est
+  // ecrite deux fois dans l'assembly, elle n'est pas devinee.
+  check("dix-neuf annonces de mode", Object.keys(EVENEMENTS).length, 19);
+  check("neuf modes y entrent",
+        new Set(Object.values(EVENEMENTS).filter(([, s]) => s === "entre")
+          .map(([m]) => m)).size, 9);
+  check("et les neuf en sortent",
+        new Set(Object.values(EVENEMENTS).filter(([, s]) => s === "sort")
+          .map(([m]) => m)).size, 9);
+  check("chaque annonce vise un ensemble qui existe",
+        Object.values(EVENEMENTS).every(([m]) => m === "mort" || !!ENSEMBLES[m]),
+        true);
+  check("l'annonce d'entree a la carte", annonceDe("carte", "entre"), "EnterMapView");
+  check("et celle de sortie du poste",
+        annonceDe("vaisseau", "sort"), "ExitFlightConsole");
+  check("un mode sans annonce n'en invente pas",
+        annonceDe("personnage", "entre"), null);
+
+  const an = new Modes();
+  check("une annonce inconnue ne fait rien", an.annonce("PasUnEvenement"), false);
+  an.annonce("EnterFlightConsole");
+  check("l'annonce du build pose l'ensemble", an.permet("Autopilot"), true);
+  check("et elle est retenue", an.events.join(","), "EnterFlightConsole");
+  an.annonce("EnterTelescopeView");
+  check("sortir du poste sous la lunette echoue, comme a la main",
+        an.annonce("ExitFlightConsole"), false);
+  check("et rien n'a ete retenu de ce refus", an.events.length, 2);
+  an.annonce("ExitTelescopeView");
+  check("puis le poste revient", an.permet("Autopilot"), true);
+  // `PlayerDeath` est dans la meme table, et pose l'ensemble vide.
+  an.annonce("PlayerDeath");
+  check("l'annonce de mort vide l'ensemble", an.actif.size, 0);
+
+  // --- le mode atterrissage (docs/87-atterrissage.md) --------------------
+  //
+  // Deux mecaniques que le build nomme presque pareil : la VUE (une camera, un
+  // regard, des commandes) et le MODE (une poussee ecretee).
+  check("le manche lace par defaut", rollMode(false, false), false);
+  check("la touche alt donne le roulis", rollMode(true, false), true);
+  // ... et en vue d'atterrissage, tout s'inverse.
+  check("en vue d'atterrissage, le manche roule", rollMode(false, true), true);
+  check("et la touche alt rend le lacet", rollMode(true, true), false);
+
+  // `ReferenceFrame.GetOrbitSpeed` = sqrt(g(d) * d), sur le champ analytique.
+  const corps = { gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 200,
+                             lowerSurfaceRadius: 200, cutoffRadius: 0,
+                             falloffType: 0 } };
+  check("a la surface, la vitesse orbitale",
+        round(orbitSpeed(corps, 200), 3), round(Math.sqrt(12 * 200), 3));
+  check("sans distance, rien", orbitSpeed(corps, 0), 0);
+
+  check("la projection suit l'axe", project([3, 4, 0], [1, 0, 0]).join(","), "3,0,0");
+  check("un axe nul ne projette rien", project([3, 4, 0], [0, 0, 0]).join(","), "0,0,0");
+
+  // L'ECRETAGE. Radial le long de x, tangentiel le long de y.
+  const radial = [10, 0, 0];
+  // Deja a la vitesse orbitale : la poussee tangentielle est annulee...
+  const vOrb = 5;
+  const borne = limitOrbitThrust([0, 4, 0], [0, 5, 0], radial, vOrb, 1);
+  check("a la vitesse orbitale, la poussee tangentielle est annulee",
+        borne.map((x) => round(x, 6)).join(","), "0,0,0");
+  // ... mais la RADIALE passe entiere : on monte et on descend a pleine
+  // puissance, c'est tout l'interet.
+  const mixte = limitOrbitThrust([3, 4, 0], [0, 5, 0], radial, vOrb, 1);
+  check("la part radiale n'est jamais touchee", round(mixte[0], 6), 3);
+  check("seule la tangentielle est ecretee", round(mixte[1], 6), 0);
+  // Sous la vitesse orbitale, rien ne change.
+  const libre = limitOrbitThrust([0, 1, 0], [0, 1, 0], radial, vOrb, 1);
+  check("sous la vitesse orbitale, la poussee passe",
+        libre.map((x) => round(x, 6)).join(","), "0,1,0");
+
+  check("sans referentiel, pas de mode atterrissage",
+        allowLandingMode({ frame: null, distance: 10 }), false);
+  check("pose, pas davantage",
+        allowLandingMode({ frame: { alignment: 500 }, landed: true, distance: 10 }),
+        false);
+  check("trop loin non plus",
+        allowLandingMode({ frame: { alignment: 500 }, distance: 900 }), false);
+  check("assez pres, oui",
+        allowLandingMode({ frame: { alignment: 500 }, distance: 10 }), true);
+
+  // LA BASCULE. Le regard part a l'appui, la camera 0,45 s plus tard.
+  const vue = new LandingView();
+  const t0 = vue.toggle(0, 5);
+  check("le regard bascule des l'appui", t0.snap.join(","),
+        `${ATTERRISSAGE.snapYaw},${ATTERRISSAGE.snapPitch}`);
+  check("a cinq unites, pas d'egalisation", t0.match, false);
+  check("le manche roule deja", vue.rollByDefault, true);
+  check("et le roulis est inverse", vue.flipRollFactor, -1);
+  check("la camera n'a pas encore bascule", vue.update(0.4), false);
+  // Tant que la transition dure, la touche ne repond plus.
+  check("et la touche ne repond pas", vue.toggle(0.4), null);
+  check("passe le delai, elle bascule", vue.update(0.5), true);
+  check("avec les deux annonces du build",
+        vue.events.join(","), "SwitchActiveCamera,EnterLandingView");
+  // Le MODE demande en plus d'etre assez pres.
+  check("loin, la vue sans le mode",
+        vue.updateMode({ frame: { alignment: 500 }, distance: 900 }), null);
+  check("pres, le mode s'ouvre",
+        vue.updateMode({ frame: { alignment: 500 }, distance: 10 }), "enter");
+  check("et il s'annonce", vue.events.at(-1), "EnterLandingMode");
+  check("s'eloigner le referme",
+        vue.updateMode({ frame: { alignment: 500 }, distance: 900 }), "exit");
+  const t1 = vue.toggle(1);
+  check("ressortir recentre le regard", t1.centre, true);
+  check("le manche relace", vue.rollByDefault, false);
+  check("et le roulis reprend son sens", vue.flipRollFactor, 1);
+  // Au-dela de vingt unites de vitesse relative, ouvrir la vue egalise.
+  const vite = new LandingView();
+  check("a vingt-cinq unites, l'egalisation part",
+        vite.toggle(0, ATTERRISSAGE.matchSpeed + 5).match, true);
+
+  // Un mort ne commande RIEN — pas meme d'ouvrir le menu.
+  const mo = new Modes();
+  mo.meurt();
+  check("un mort n'a aucun canal", mo.actif.size, 0);
+  check("pas meme la pause", mo.permet("Pause"), false);
+  mo.init();
+  check("et rouvrir les yeux les rend tous", mo.actif.size, 18);
+
+  // Les cinq ajouts du portage ne sont dans aucun ensemble du build, et
+  // passent toujours : ils sont hors du systeme de modes, pas dedans.
+  const aj = new Modes();
+  aj.entre("menu");
+  for (const nom of Object.keys(AJOUTS)) {
+    check(`l'ajout « ${nom} » passe meme dans un menu`, aj.permet(nom), true);
+  }
+
+  // Le filtre vit dans `Commandes`, comme `GetAxis` dans le build.
+  const cm = new Commandes(null);
+  const etat = { keys: { KeyF: true, KeyE: true } };
+  check("sans modes poses, tout se lit", cm.held("Flashlight", etat), true);
+  const fm = new Modes();
+  cm.setModes(fm);
+  check("a pied, la lampe repond", cm.held("Flashlight", etat), true);
+  fm.entre("vaisseau");
+  check("au poste, la MEME touche ne rend plus rien",
+        cm.held("Flashlight", etat), false);
+  check("et l'axe rend zero", cm.axis("Move X", { keys: { KeyD: true } }), 1);
+  fm.entre("menu");
+  check("dans un menu, plus un axe", cm.axis("Move X", { keys: { KeyD: true } }), 0);
+  check("et les modes qui sauvegardent sont sept", SAUVEGARDENT.size, 7);
+}
+
+{
+  // --- CE QUI BOUGE QUAND ON NE LE REGARDE PAS (docs/71-quantique.md) ---
+
+  check("cent unites de verrou", QUANTIQUE.maxQuantumLockRange, 100);
+  check("cent de rayon de fonction d'onde", QUANTIQUE.wavefunctionRadius, 100);
+  check("quarante-cinq degres de pente", QUANTIQUE.maxSlope, 45);
+  check("une chance sur cinq par morceau", QUANTIQUE.rendererChance, 0.2);
+
+  // Les cinq enfants de `MakeChildrenPlanarQuantum` : trois pins, une cabane,
+  // un panneau — sur la lune quantique.
+  const gpq = { placed: { MakeChildrenPlanarQuantum: [
+    { name: "QuantumObjects", body: "QuantumMoon_Body", position: [0, 0, 0],
+      fields: {}, children: [
+        { name: "Pine_Thick", local: [-13.8, 18.3, -15.1], position: [-13.8, 18.3, -15.1] },
+        { name: "Pine_Thick", local: [6.3, 19, 15.4], position: [6.3, 19, 15.4] },
+        { name: "Pine_Thick", local: [-25.3, 21.1, 17.6], position: [-25.3, 21.1, 17.6] },
+        { name: "QuantumCabin", local: [0, 18.9, 0], position: [0, 18.9, 0] },
+        { name: "Sign01", local: [-5.6, 19.6, 13.7], position: [-5.6, 19.6, 13.7] },
+      ] },
+  ] } };
+  const cinq = planarQuantumObjects(gpq);
+  check("cinq objets planaires", cinq.length, 5);
+  check("et tous sur la lune quantique",
+        cinq.every((o) => o.body === "QuantumMoon_Body"), true);
+  check("trois pins", cinq.filter((o) => o.name === "Pine_Thick").length, 3);
+  check("une cabane et un panneau",
+        cinq.filter((o) => /Cabin|Sign/.test(o.name)).length, 2);
+  check("sans composant pose, rien", planarQuantumObjects({}).length, 0);
+
+  // La statue du musee, avec ses morceaux.
+  const st = quantumStatues({ placed: { QuantumStatue: [
+    { name: "QuantumStatue", body: null, position: [1, 2, 3],
+      fields: { _maxQuantumLockRange: 100, _minQuantumLockRange: 0,
+                _isLightSensitive: false },
+      children: [{ name: "AncientHeadStatue", local: [0, 1.1, 0] }] },
+  ] } });
+  check("une statue", st.length, 1);
+  check("un morceau", st[0].parts.length, 1);
+  check("et elle n'est pas sensible a la lumiere", st[0].lightSensitive, false);
+
+  // L'EFFONDREMENT SE DECLENCHE SUR LA TRANSITION, et sur elle seule.
+  const q = new ObjetQuantique(cinq[0]);
+  check("regarde, il ne bouge pas", q.update(true), false);
+  check("toujours regarde, toujours pas", q.update(true), false);
+  check("a l'instant ou il sort du champ, il bouge", q.update(false), true);
+  check("et ne rebouge pas tant qu'il reste dehors", q.update(false), false);
+  q.update(true);
+  check("le revoir puis detourner les yeux le refait bouger",
+        q.update(false), true);
+  check("deux effondrements en tout", q.collapses, 2);
+
+  // LE VERROU DE LA SONDE. Distance dans la fourchette ET dans le cadre.
+  const v = new ObjetQuantique(cinq[1]);
+  check("hors portee, rien ne change", v.snapshot(500, true), false);
+  check("a bonne distance mais hors cadre, non", v.snapshot(50, false), false);
+  check("a bonne distance et dans le cadre, verrouille", v.snapshot(50, true), true);
+  v.update(true);
+  check("un objet verrouille ne s'effondre plus", v.update(false), false);
+  v.retrieveProbe();
+  check("rappeler la sonde le libere", v.locked, false);
+  v.update(true);
+  check("et il s'effondre a nouveau", v.update(false), true);
+  // La loi seule, hors de l'objet.
+  check("hors portee : inchange", locksOnSnapshot(500, true), null);
+  check("sous la portee minimale : inchange aussi",
+        locksOnSnapshot(-1, true, { minLockRange: 0, maxLockRange: 100 }), null);
+  check("dans la fourchette, le cadre decide", locksOnSnapshot(50, false), false);
+
+  // LA LAMPE. Une sonde posee a moins de cent unites protege l'objet.
+  check("invisible, eteindre ne fait rien",
+        collapsesOnFlashlightOff(false, null), false);
+  check("visible et sans sonde, il s'effondre",
+        collapsesOnFlashlightOff(true, null), true);
+  check("visible avec la sonde a cinquante, il tient",
+        collapsesOnFlashlightOff(true, 50), false);
+  check("la sonde a cent tient encore", collapsesOnFlashlightOff(true, 100), false);
+  check("a cent-un, elle ne protege plus",
+        collapsesOnFlashlightOff(true, 101), true);
+
+  // LA STATUE : chaque morceau a sa chance, tiree independamment.
+  const parts = ["a", "b", "c", "d", "e"];
+  check("tout visible si le tirage est toujours bas",
+        statueParts(parts, () => 0).filter((p) => p.visible).length, 5);
+  check("rien si le tirage est toujours haut",
+        statueParts(parts, () => 0.9).filter((p) => p.visible).length, 0);
+  check("et le seuil est bien un cinquieme",
+        statueParts(parts, () => 0.2).filter((p) => p.visible).length, 0);
+  check("juste en dessous, tout",
+        statueParts(parts, () => 0.19).filter((p) => p.visible).length, 5);
+
+  // Le tirage planaire : dans le disque, a la hauteur du terrain.
+  {
+    let n = 0;
+    const suite = [0.9, 0.9, 0.5, 0.5];     // premier couple hors du disque
+    const p = planarCandidate(() => suite[n++ % suite.length]);
+    check("le point tombe dans le disque",
+          Math.hypot(p[0], p[2]) <= QUANTIQUE.wavefunctionRadius, true);
+    check("et part d'au-dessus du terrain", p[1], QUANTIQUE.maxTerrainHeight);
+    check("le tirage hors du disque est REJETE, pas ramene", n > 2, true);
+  }
+
+  // La pente : quarante-cinq degres, strictement.
+  check("a plat, la pente convient", slopeOK([0, 1, 0], [0, 1, 0]), true);
+  check("a trente degres, encore",
+        slopeOK([Math.sin(Math.PI / 6), Math.cos(Math.PI / 6), 0], [0, 1, 0]), true);
+  check("a soixante, non",
+        slopeOK([Math.sin(Math.PI / 3), Math.cos(Math.PI / 3), 0], [0, 1, 0]), false);
+
+  // Le tirage refuse un candidat visible : un objet quantique ne se
+  // materialise jamais sous vos yeux.
+  {
+    const o = new ObjetQuantique(cinq[3]);
+    let essais = 0;
+    o.update(true);
+    const bouge = o.update(false, () => { essais++; return essais >= 4 ? [1, 2, 3] : null; });
+    check("il insiste jusqu'a trouver une place qu'on ne voit pas", bouge, true);
+    check("en quatre essais", essais, 4);
+    check("et il y est", o.position.join(","), "1,2,3");
+  }
+  {
+    // Mille essais, aucune place : l'objet reste ou il est.
+    const o = new ObjetQuantique(cinq[4]);
+    const avant = o.position.join(",");
+    o.update(true);
+    check("sans place libre, il ne bouge pas", o.update(false, () => null), false);
+    check("et reste ou il etait", o.position.join(","), avant);
+  }
+}
+
+{
+  // --- LES LOIS QUI N'ETAIENT QU'IMPORTEES (docs/72-poussiere.md) ---
+
+  // LA POUSSIERE DE VITESSE. Rien sous trente unites par seconde.
+  check("trente unites par seconde, le seuil", DUST.minSpeed, 30);
+  check("sous le seuil, aucune trace", motionDust(29).alpha, 0);
+  check("mais le systeme emet quand meme", motionDust(29).emitting, true);
+  // `s x 0,01` borne a 0,2 atteint le plafond des vingt unites par seconde, et
+  // le seuil en coupe trente : entre les deux lois, l'alpha ne prend QUE deux
+  // valeurs, 0 et 0,2. La rampe existe dans le code du build et n'est jamais
+  // parcourue — c'est le build qui le dit, pas le portage qui simplifie.
+  check("au-dessus du seuil, l'alpha est au plafond", motionDust(31).alpha, 0.2);
+  check("et beaucoup plus vite, toujours au plafond", motionDust(500).alpha, 0.2);
+  check("et il plafonne a un cinquieme", motionDust(9999).alpha, DUST.maxAlpha);
+  // La duree de vie DIMINUE quand le debit augmente.
+  check("a trente, la vie est de cinq secondes", motionDust(30).lifetime, 5);
+  check("a cent, elle est au plancher", motionDust(100).lifetime, DUST.minLifetime);
+  check("et le debit a monte", motionDust(100).rate > motionDust(30).rate, true);
+  check("sans cible visee, rien n'est seme",
+        motionDust(500, { targeting: false }).emitting, false);
+  check("et sur la carte non plus",
+        motionDust(500, { mapView: true }).emitting, false);
+
+  // ON NE GRILLE PAS DE LOIN.
+  check("quatre unites", ROAST_DISTANCE, 4);
+  check("a trois unites, on grille encore", roastBroken(3, null), false);
+  check("a cinq, c'est fini", roastBroken(5, null), true);
+  check("et l'invite du build a le dernier mot",
+        roastBroken(9, { distance: 10 }), false);
+
+  // LA TOILE : deux anneaux en sens INVERSE, au cube des fractions.
+  const anim = webAnimators({ placed: { GazeWebAnimator: [
+    { name: "GazeVolume", body: "Twin01_Body", position: [0, 0, 0], fields: {},
+      targets: { _innerWeb: { name: "innerWeb" }, _outerWeb: { name: "outerWeb" },
+                 _gazeSwitch: { name: "GazeVolume" } } },
+  ] } });
+  check("un animateur de toile", anim.length, 1);
+  check("qui nomme ses deux anneaux",
+        [anim[0].inner, anim[0].outer].join(","), "innerWeb,outerWeb");
+  check("et l'interrupteur qui les commande", anim[0].gazeSwitch, "GazeVolume");
+  check("sans rien poser, rien", webAnimators({}).length, 0);
+  {
+    const v = webSpeeds(0, 0);
+    check("au repos, rien ne tourne", v.outer + v.inner, 0);
+    const q = webSpeeds(0.5, 0);
+    const p2 = webSpeeds(1, 0);
+    // Au CUBE : a mi-regard, un huitieme de la vitesse, pas la moitie.
+    check("a mi-regard, un huitieme de la vitesse", q.outer / p2.outer, 0.125);
+    const c = webSpeeds(1, 1);
+    check("les deux anneaux tournent en sens INVERSE", c.inner < 0 && c.outer > 0, true);
+  }
+  check("la toile s'efface en deux secondes", webAlpha(2), 0);
+  check("a mi-chemin, a moitie", webAlpha(1), 0.5);
+  check("et jamais en dessous de zero", webAlpha(10), 0);
+
+  // LA TEMPETE DE SABLE : quatre cylindres, UNE entree, UNE sortie.
+  const gpSable = { placed: {
+    SandstormVolume: [{ name: "FluidVolume", body: "SandFunnel_Body",
+                        position: [0, 0, 0], fields: {} }],
+    ChildTriggerVolume: [
+      { name: "FluidCylinder", body: "SandFunnel_Body", position: [0, 0, 0],
+        rotation: [0, 0, 0, 1],
+        volume: { shape: "capsule", radius: 30, height: 400, axis: 1, center: [0, 0, 0] } },
+      { name: "FluidCylinder", body: "SandFunnel_Body", position: [40, 0, 0],
+        rotation: [0, 0, 0, 1],
+        volume: { shape: "capsule", radius: 25, height: 300, axis: 1, center: [0, 0, 0] } },
+    ],
+  } };
+  check("une tempete posee", sandstormVolumes(gpSable).length, 1);
+  const cyl = childTriggers(gpSable, "SandFunnel_Body");
+  check("deux cylindres", cyl.length, 2);
+  check("et chacun a son identite", cyl[0].id !== cyl[1].id, true);
+  const orage = new Sandstorm(sandstormVolumes(gpSable), cyl);
+  check("dehors, rien", orage.update([1000, 0, 0]), null);
+  check("et l'ecran est calme", orage.active, false);
+  check("entrer dans le premier cylindre l'annonce",
+        orage.update([0, 0, 0]), "enter");
+  check("l'ecran se charge", orage.active, true);
+  // LE POINT DU VOLUME COMPOSE : passer d'un cylindre a l'autre n'emet RIEN.
+  check("passer au second n'annonce rien", orage.update([40, 0, 0]), null);
+  check("et l'ecran ne clignote pas", orage.active, true);
+  check("ressortir l'annonce une fois", orage.update([1000, 0, 0]), "exit");
+  check("et l'ecran se calme", orage.active, false);
+  check("ressortir deux fois n'annonce rien", orage.update([1000, 0, 0]), null);
+  // Sans cylindre, la tempete n'a pas de forme et ne declenche jamais.
+  check("sans cylindre, rien",
+        new Sandstorm(sandstormVolumes(gpSable), []).update([0, 0, 0]), null);
+  // Le compte du volume compose, seul.
+  const comp = new CompoundTrigger();
+  comp.enterChild("a"); comp.enterChild("a");
+  check("deux entrees du meme corps, un seul suivi", comp.inside, 1);
+  check("une sortie ne suffit pas", comp.exitChild("a"), false);
+  check("la seconde, oui", comp.exitChild("a"), true);
+  check("et plus personne dedans", comp.inside, 0);
+}
+
+{
+  // --- LES PASSAGES, LES COQUILLES, ET LE SOL QUI TOURNE (docs/73) ---
+
+  // LES TROIS PASSAGES DE DARK BRAMBLE.
+  check("six secondes de traversee", WARP.duration, 6);
+  check("une seconde de garde apres l'arrivee", WARP.arrivalGuard, 1);
+  check("et dix unites par seconde en arrivant", WARP.exitSpeed, 10);
+
+  const gpW = { placed: { DerelictWarp: [
+    { name: "DarkBrambleShortcut", body: "TimberHearth_Body", position: [0, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 50, center: [0, 0, 0] },
+      fields: { _warpOnExit: false, _localArrivalPos: { x: 0, y: 0, z: 32.5 } },
+      targets: { _sisterWarp: { name: "WarpVolume", body: "DarkBramble_Body" } } },
+    { name: "WarpVolume", body: "DarkBramble_Body", position: [1000, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 60, center: [0, 0, 0] },
+      fields: { _warpOnExit: false, _localArrivalPos: { x: 0, y: 0, z: 107.59 } },
+      targets: { _sisterWarp: { name: "DarkBrambleShortcut", body: "TimberHearth_Body" } } },
+  ] } };
+  const res = new DerelictWarps(warps(gpW));
+  check("deux passages", res.count, 2);
+  check("et chacun connait son jumeau",
+        res.warps.every((w) => w.jumeau !== null), true);
+  // Entrer ne suffit pas : il faut TENIR trois secondes.
+  check("a l'entree, rien", res.update(0.1, 0, [0, 0, 0]), null);
+  check("a deux secondes, toujours rien", res.update(0.1, 2, [0, 0, 0]), null);
+  const saut = res.update(0.1, 3, [0, 0, 0]);
+  check("a trois secondes, on part", saut !== null, true);
+  check("vers le jumeau", saut.receiver.name, "WarpVolume");
+  // Le point d'arrivee : le local du JUMEAU, dans son repere.
+  check("au point d'arrivee du jumeau", Math.round(saut.arrival[2]), 108);
+  check("et pres de son centre", Math.round(saut.arrival[0]), 1000);
+  // On arrive EN MOUVEMENT, vers le centre ou en s'en eloignant.
+  check("et en mouvement", Math.round(Math.hypot(...saut.velocity)), 10);
+  // La seconde de garde : arriver DANS le jumeau ne renvoie pas aussitot.
+  check("la garde empeche le renvoi immediat",
+        res.update(0.1, 3.5, [1000, 0, 0]), null);
+
+  // Sortir d'un volume `_warpOnExit` part TOUT DE SUITE.
+  const gpX = { placed: { DerelictWarp: [
+    { name: "WarpVolume", body: "DerelictDimension_Body", position: [0, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 550, center: [0, 0, 0] },
+      fields: { _warpOnExit: true, _localArrivalPos: { x: 525, y: 0, z: 0 } },
+      targets: { _sisterWarp: { name: "Autre", body: "DarkBramble_Body" } } },
+    { name: "Autre", body: "DarkBramble_Body", position: [5000, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 60, center: [0, 0, 0] },
+      fields: { _warpOnExit: false, _localArrivalPos: { x: 0, y: 0, z: 10 } },
+      targets: { _sisterWarp: { name: "WarpVolume", body: "DerelictDimension_Body" } } },
+  ] } };
+  const bord = new DerelictWarps(warps(gpX));
+  bord.update(0.1, 0, [0, 0, 0]);                 // dedans
+  check("rester dedans ne fait rien", bord.update(0.1, 1, [0, 0, 0]), null);
+  const sortie = bord.update(0.1, 2, [10000, 0, 0]);
+  check("en sortir part tout de suite", sortie !== null, true);
+  check("et cela s'annonce", bord.drain().includes("ExitDerelictZone"), true);
+  check("le drainage vide", bord.drain().length, 0);
+
+  // LES COQUILLES SONORES.
+  check("une seconde de fondu", SHELL_FADE, 1);
+  const gpS = { placed: { AudioShell: [
+    { name: "OceanAudio", body: "GiantsDeep_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 498, center: [0, 0, 0] }, fields: {} },
+  ] } };
+  const sources = [{ position: [0, 0, 0], name: "ocean" },
+                   { position: [9999, 0, 0], name: "ailleurs" }];
+  const coq = new AudioShells(audioShells(gpS), sources);
+  check("une coquille", coq.count, 1);
+  check("appariee a la source de son centre", coq.paired, 1);
+  check("et c'est la bonne", coq.shells[0].index, 0);
+  // Dehors : la source joue a plein.
+  check("dehors, la source joue", coq.update(1, [1000, 0, 0]).get(0), 1);
+  // Entrer la tete : le fondu part de 1 et descend en une seconde.
+  const g0 = coq.update(0, [0, 0, 0]).get(0);
+  check("a l'instant ou la tete entre, rien n'a encore change", g0, 1);
+  check("a mi-seconde, la moitie", coq.update(0.5, [0, 0, 0]).get(0), 0.5);
+  check("a une seconde, etouffee", coq.update(0.5, [0, 0, 0]).get(0), 0);
+  check("et cela tient", coq.update(2, [0, 0, 0]).get(0), 0);
+  // Ressortir la remonte, du meme fondu.
+  coq.update(0, [1000, 0, 0]);
+  check("ressortir la remonte", coq.update(0.5, [1000, 0, 0]).get(0), 0.5);
+  // Une source qu'aucune coquille ne commande n'est jamais touchee.
+  check("l'autre source n'est jamais commandee",
+        coq.update(1, [0, 0, 0]).has(1), false);
+
+  // ON PART AVEC LE SOL : `MatchInitialMotion`.
+  {
+    // Un porteur qui tourne autour de Y a un radian par seconde ; un point a
+    // dix unites de son axe va donc a dix unites par seconde.
+    const porteur = { velocity: [0, 0, 0], position: [0, 0, 0],
+                      angularVelocity: [0, 1, 0] };
+    const v = matchInitialVelocity(porteur, [10, 0, 0]);
+    check("le sol emporte le point a dix unites par seconde",
+          Math.round(Math.hypot(v[0], v[1], v[2])), 10);
+    check("et perpendiculairement au rayon", Math.round(v[0]), 0);
+    // Sur l'axe, rien ne bouge : un pole ne va nulle part.
+    const pole = matchInitialVelocity(porteur, [0, 10, 0]);
+    check("au pole, le sol ne va nulle part",
+          Math.round(Math.hypot(pole[0], pole[1], pole[2])), 0);
+    // Le drapeau des cinq instances : on jette le terme tangentiel.
+    const sans = matchInitialVelocity(porteur, [10, 0, 0], { ignoreAngular: true });
+    check("cinq instances ignorent la rotation", Math.hypot(...sans), 0);
+    // Et la vitesse du porteur s'ajoute toujours.
+    const mobile = { velocity: [100, 0, 0], position: [0, 0, 0],
+                     angularVelocity: [0, 1, 0] };
+    check("la vitesse du porteur s'ajoute",
+          Math.round(matchInitialVelocity(mobile, [10, 0, 0])[0]), 100);
+  }
+}
+
+{
+  // --- LA QUEUE DES LOIS (docs/74-etalons.md) ---
+
+  // Les phares du vaisseau : 600 partout, et `min(limite, 600)` dans un
+  // secteur majeur. Le portage n'avait pas la valeur par defaut.
+  check("six cents unites de portee", SHIPLIGHT_RANGE, 600);
+  check("hors secteur, la portee pleine", shiplightRange(100, false), 600);
+  check("dans un secteur majeur sans limite, pleine aussi",
+        shiplightRange(0, true), 600);
+  check("l'epave les bride a cent", shiplightRange(100, true), 100);
+  check("et une limite plus large ne les elargit pas",
+        shiplightRange(9000, true), 600);
+
+  // `MapMarker.LateUpdate` : les trois regles que le portage n'avait pas.
+  {
+    const m = { type: "Planet", maxDistance: 50000 };
+    const joueur = [100, 100];
+    check("loin du joueur, le marqueur se voit",
+          markerVisible(m, [500, 500, 1000], joueur, null), true);
+    check("a moins de dix pixels du joueur, non",
+          markerVisible(m, [103, 102, 1000], joueur, null), false);
+    check("a moins de dix pixels du VAISSEAU non plus",
+          markerVisible(m, [500, 500, 1000], joueur, [502, 503]), false);
+    check("au-dela de sa distance maximale, non",
+          markerVisible(m, [500, 500, 99999], joueur, null), false);
+    check("derriere la camera non plus",
+          markerVisible(m, [500, 500, -1], joueur, null), false);
+    // Le marqueur du joueur sort AVANT tous les tests.
+    const moi = { type: "Player", maxDistance: 1 };
+    check("le marqueur du joueur ne se masque jamais",
+          markerVisible(moi, [100, 100, 5], joueur, [100, 100]), true);
+    // Et dans la zone brouillee, plus rien.
+    check("dans l'epave, aucun marqueur",
+          markerVisible(moi, [500, 500, 10], joueur, null, true), false);
+  }
+
+  // L'entonnoir n'existe qu'entre sa minute de pousse et celle de retrait.
+  {
+    const f = { growAfterMinutes: 5, shrinkAfterMinutes: 15 };
+    check("avant la pousse, pas d'entonnoir", funnelActive(4 * 60, f), false);
+    check("pendant, oui", funnelActive(10 * 60, f), true);
+    check("apres le retrait, non", funnelActive(16 * 60, f), false);
+    check("la minute de pousse compte", funnelActive(5 * 60, f), true);
+    check("celle du retrait, non", funnelActive(15 * 60, f), false);
+  }
+
+  // Et la tempete suit l'entonnoir : traverser l'endroit ou il SERA ne leve
+  // rien, parce qu'il n'y est pas encore.
+  {
+    const gp = { placed: {
+      SandstormVolume: [{ name: "V", body: "SandFunnel_Body", position: [0, 0, 0],
+                          fields: {} }],
+      ChildTriggerVolume: [{ name: "C", body: "SandFunnel_Body", position: [0, 0, 0],
+                             rotation: [0, 0, 0, 1],
+                             volume: { shape: "sphere", radius: 30, center: [0, 0, 0] } }],
+    } };
+    const o = new Sandstorm(sandstormVolumes(gp), childTriggers(gp));
+    check("entonnoir absent, rien ne se leve",
+          o.update([0, 0, 0], null, false), null);
+    check("entonnoir la, la tempete monte", o.update([0, 0, 0], null, true), "enter");
+    // Et s'il se retire pendant qu'on est dedans, la tempete tombe.
+    check("s'il se retire, elle tombe", o.update([0, 0, 0], null, false), "exit");
+    check("et l'ecran se calme", o.active, false);
+  }
+}
+
+{
+  // --- LA FIN DE LA LISTE (docs/75-chaleur.md) ---
+
+  // LA CHALEUR QUI N'EXISTAIT PAS. `heatSources` ramassait les classes dont le
+  // NOM contient « heat » — il n'y en a AUCUNE dans ce build.
+  check("aucune classe de nom thermique", heatSources({ placed: {
+    SomethingElse: [{ name: "x", position: [0, 0, 0], volume: { radius: 3 } }],
+  } }).length, 0);
+  // La chaleur est ailleurs : huit emetteurs de rayonnement de type 1.
+  const gpR = { placed: { RadiationEmitter: [
+    { name: "Campfire", body: "TimberHearth_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 2.36, center: [0, 0, 0] },
+      fields: { radiationType: 1, magnitude: 100, falloffMode: 1,
+                CustomFalloff: { customFalloff: { m_Curve: [
+                  { time: 10, value: 1 }, { time: 45, value: 0 }] } } } },
+    { name: "Sun", body: "Sun_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 30000, center: [0, 0, 0] },
+      fields: { radiationType: 0, magnitude: 100, falloffMode: 0 } },
+  ] } };
+  const emet = radiationEmitters(gpR);
+  check("deux emetteurs", emet.length, 2);
+  check("dont un seul thermique", emet.filter((e) => e.type === 1).length, 1);
+  const feux = heatSources(gpR, emet);
+  check("une seule source de chaleur", feux.length, 1);
+  check("et c'est le feu de camp", feux[0].name, "Campfire");
+  // La courbe tient 100 jusqu'a dix unites, puis tombe a zero a quarante-cinq.
+  check("sur le feu, cent", heatAt(feux, [0, 0, 0]), 100);
+  check("a dix unites, encore cent", heatAt(feux, [10, 0, 0]), 100);
+  check("a quarante-cinq, plus rien", Math.round(heatAt(feux, [45, 0, 0])), 0);
+  check("a mi-chemin, la moitie",
+        Math.round(heatAt(feux, [27.5, 0, 0])), 50);
+  // LE COLLIDER DE 2,36 N'EST PAS LA PORTEE : c'est la forme du feu. Le
+  // portage avait pris l'un pour l'autre, et n'avait donc AUCUNE chaleur.
+  check("le collider ne borne pas la chaleur",
+        heatAt(feux, [5, 0, 0]) > 0, true);
+
+  // L'INVITE DE SONDE : un ecart maximal, pas un cone de vue.
+  {
+    const inv = { gaze: [0, 0, 1], minAngle: 45 };
+    check("pile dans l'axe, l'invite vient",
+          promptFaced(inv, [0, 0, 1], [0, 0, 1]), true);
+    check("a quarante degres, encore",
+          promptFaced(inv, [Math.sin(0.698), 0, Math.cos(0.698)], [0, 0, 1]), true);
+    check("a cinquante, non",
+          promptFaced(inv, [Math.sin(0.873), 0, Math.cos(0.873)], [0, 0, 1]), false);
+    check("et une invite sans regard vient toujours",
+          promptFaced({ gaze: null }, [1, 0, 0], [0, 0, 1]), true);
+  }
+
+  // LA SONDE ANCIENNE : cinquante d'acceleration locale, vers l'avant.
+  check("cinquante de poussee", ANCIENT_PROBE_THRUST, 50);
+  {
+    const a = ancientProbeAcceleration([0, 0, 1]);
+    check("et elle pousse vers l'avant", a.join(","), "0,0,50");
+  }
+
+  // LA REGLETTE DE ZOOM.
+  check("au champ minimal, la fleche est en bas", zoomArrowFraction(15), 0);
+  check("au champ maximal, plus haut", zoomArrowFraction(60) > 0.7, true);
+  check("et elle ne sort pas de sa reglette", zoomArrowFraction(9999), 1);
+
+  // `SelfDestruct` : cinq secondes pour la supernova lointaine, pas une.
+  check("avant le delai, l'effet vit", selfDestructed(4.9, 5), false);
+  check("apres, il s'efface", selfDestructed(5.1, 5), true);
+  check("et le delai par defaut est d'une seconde", selfDestructed(1.1), true);
+}
+
+{
+  // --- LA PROXIMITE DU VAISSEAU, ET LE TUTORIEL A USAGE UNIQUE (docs/76) ---
+
+  // Les voyants d'avarie ne parlent que de PRES : `TurnOffIcons` a la sortie.
+  const zones = shipProximity({ placed: { ShipProximityVolume: [
+    { name: "ShipZone", body: "Ship_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 13, center: [0, 0, 0] }, fields: {} },
+  ] } });
+  check("une zone de proximite", zones.length, 1);
+  check("de treize unites", zones[0].volume.radius, 13);
+  check("sur le vaisseau", zones[0].body, "Ship_Body");
+  check("sans rien de pose, rien", shipProximity({}).length, 0);
+
+  {
+    const v = new DamageDisplay(0.5);
+    // De pres : le voyant general en continu, les autres qui clignotent.
+    const a = v.update(0, true, [true, false], true);
+    check("le voyant general s'allume", a[0], true);
+    const b = v.update(0.6, true, [true, false], true);
+    check("et les autres clignotent", b[1], true);
+    // De loin : TOUT est eteint, general compris.
+    const c = v.update(1.2, true, [true, false], false);
+    check("de loin, plus un voyant", c.every((x) => x === false), true);
+    // Le battement continue de tourner : revenir ne le rattrape pas a
+    // contretemps.
+    const avant = v.blinkOn;
+    v.update(1.9, true, [true], false);
+    check("mais le battement continue", v.blinkOn !== avant, true);
+  }
+}
+
+{
+  // --- LES HUIT SONS D'INTERFACE (docs/77-sons.md) ---
+
+  check("le demi-volume de toute l'interface", UI_VOLUME, 0.5);
+  check("neuf evenements, huit clips", Object.keys(UI_SOUNDS).length, 9);
+  // La lampe partage `_switch01` dans les deux sens : un interrupteur fait le
+  // meme bruit a l'aller et au retour.
+  check("allumer et eteindre, le meme clip",
+        UI_SOUNDS.TurnOnFlashlight, UI_SOUNDS.TurnOffFlashlight);
+  // Viser et lacher, eux, sont DEUX clips differents.
+  check("viser et lacher ne s'entendent pas pareil",
+        UI_SOUNDS.TargetReferenceFrame !== UI_SOUNDS.UntargetReferenceFrame, true);
+  check("avancer le texte et le finir non plus",
+        UI_SOUNDS.AdvanceText !== UI_SOUNDS.ExitDialogueMode, true);
+
+  const faux = {
+    of(script) {
+      if (script === "UIAudioController") {
+        return { clips: { _advanceTextClip: "a.ogg", _finishTextClip: "f.ogg",
+                          _affirmative01: "oui.ogg", _negative01: "non.ogg",
+                          _jetpackWarning: "sac.ogg", _switch01: "clic.ogg",
+                          _targetReferenceFrame: "vise.ogg",
+                          _untargetReferenceFrame: "lache.ogg" } };
+      }
+      if (script === "RepairAudioController") {
+        return { clips: { _repairLoop: "rep.ogg", _spaceRepairLoop: "repvide.ogg",
+                          _repairFinish: "fin.ogg", _spaceRepairFinish: "finvide.ogg" } };
+      }
+      if (script === "SpacesuitAudioController") {
+        return { clips: { _refillOxygenClip: "o2.ogg" } };
+      }
+      return null;
+    },
+  };
+  const ui = new UISounds(faux);
+  check("avancer le texte clique", ui.fire("AdvanceText").file, "a.ogg");
+  check("a demi-volume", ui.fire("AdvanceText").volume, 0.5);
+  check("finir a son propre son", ui.fire("ExitDialogueMode").file, "f.ogg");
+  check("allumer la lampe", ui.fire("TurnOnFlashlight").file, "clic.ogg");
+  check("l'eteindre aussi", ui.fire("TurnOffFlashlight").file, "clic.ogg");
+  check("viser", ui.fire("TargetReferenceFrame").file, "vise.ogg");
+  check("lacher", ui.fire("UntargetReferenceFrame").file, "lache.ogg");
+  check("un evenement inconnu ne joue rien", ui.fire("N'importe quoi"), null);
+  check("et sans clips, rien non plus", new UISounds(null).fire("AdvanceText"), null);
+
+  // ON NE REPARE PAS PAREIL DANS LE VIDE.
+  check("a l'air, la boucle de l'atelier", ui.startRepair(true).file, "rep.ogg");
+  check("et elle MONTE en deux dixiemes", ui.startRepair(true).fade, REPAIR_FADE);
+  check("dans le vide, l'autre boucle", ui.startRepair(false).file, "repvide.ogg");
+  // Arreter rend la boucle EN COURS, pas une boucle choisie a nouveau.
+  check("arreter rend celle qui jouait", ui.stopRepair().file, "repvide.ogg");
+  check("et il n'y en a plus", ui.stopRepair(), null);
+  check("finir a l'air", ui.finishRepair(true).file, "fin.ogg");
+  check("finir dans le vide", ui.finishRepair(false).file, "finvide.ogg");
+  ui.startRepair(true);
+  ui.finishRepair(true);
+  check("et la fin arrete la boucle", ui.stopRepair(), null);
+  check("le plein d'oxygene s'entend", ui.refillOxygen().file, "o2.ogg");
+  check("a plein volume", ui.refillOxygen().volume, 1);
+}
+
+{
+  // --- LE VAISSEAU MINIATURE ET L'ENFANT (docs/78-modele.md) ---
+
+  check("dix unites par seconde, le seuil de crash", MODELE.crashSpeed, 10);
+  check("un contact doux n'est pas un crash", crashes(9.9), false);
+  check("au-dela, si", crashes(10.1), true);
+  check("et pile au seuil, non plus", crashes(10), false);
+
+  // ETRE POSE NE SUFFIT PAS : il faut etre IMMOBILE, et la rotation compte
+  // cent fois plus serre que la translation.
+  check("un dixieme d'unite par seconde", MODELE.landSpeed, 0.1);
+  check("un centieme de radian par seconde", MODELE.landSpin, 0.01);
+  check("assez lent, assez droit", stillEnough(0.05, 0.005), true);
+  check("trop vite, non", stillEnough(0.2, 0), false);
+  check("et un modele qui TOURNE lentement ne compte pas",
+        stillEnough(0, 0.05), false);
+
+  const piste = new ModelLandingSpot();
+  check("hors de la piste, rien", piste.update(0, 0, 0), false);
+  piste.setInside(true);
+  check("dedans mais trop vite, rien", piste.update(0, 5, 0), false);
+  check("dedans et immobile : on note l'instant", piste.update(1, 0, 0), false);
+  check("mais l'annonce attend deux dixiemes", piste.update(1.1, 0, 0), false);
+  check("puis elle vient", piste.update(1.3, 0, 0), true);
+  check("et une seule fois", piste.update(2, 0, 0), false);
+  // UNE FOIS POSE, ON NE PEUT PLUS RATER : le build ne re-teste pas les
+  // seuils. Seule la SORTIE de la zone annule.
+  const p2 = new ModelLandingSpot();
+  p2.setInside(true);
+  p2.update(0, 0, 0);
+  check("repartir tout de suite compte quand meme",
+        p2.update(0.3, 999, 999), true);
+  p2.setInside(false);
+  p2.setInside(true);
+  check("mais quitter la piste efface tout", p2.update(0.4, 999, 999), false);
+
+  // L'ENFANT COMPTE, et l'ordre n'est pas celui qu'on choisirait.
+  const gamin = new RocketKid();
+  check("la premiere fois, il se presente", gamin.tree(), "introduction");
+  check("et il se represente tant qu'on n'a rien fait", gamin.tree(), "introduction");
+  gamin.landed();
+  check("un atterrissage lui vaut un compliment",
+        gamin.tree(), "successfulLanding");
+  // ET IL SE REPRESENTE. Les deux compteurs sont a zero apres le compliment,
+  // donc la PREMIERE branche s'applique a nouveau : l'enfant se represente
+  // apres chaque reussite reconnue. C'est le build, ce n'est pas un oubli du
+  // portage, et l'invariant garde la mesure et non ce qu'on en penserait.
+  check("et il se represente ensuite", gamin.tree(), "introduction");
+  for (let i = 0; i < 4; i++) gamin.crashed();
+  check("quatre crashs ne suffisent pas", gamin.tree(), null);
+  gamin.crashed();
+  check("le cinquieme, si", gamin.tree(), "tooManyCrashes");
+  check("et le compteur repart de zero", gamin.crashes, 0);
+  // LES CRASHS PASSENT AVANT : se planter cinq fois puis reussir une fois vaut
+  // le reproche, pas le compliment.
+  const g2 = new RocketKid();
+  for (let i = 0; i < 5; i++) g2.crashed();
+  g2.landed();
+  check("cinq crashs et une reussite : le reproche d'abord",
+        g2.tree(), "tooManyCrashes");
+  check("et la reussite attend son tour", g2.tree(), "successfulLanding");
+
+  // Les lectures de la scene.
+  const gpM = { placed: {
+    ModelShipLandingSpot: [
+      { name: "ModelLandingSpot", body: "TimberHearth_Body", position: [0, 0, 0], fields: {} },
+      { name: "ModelLandingSpot", body: "TimberHearth_Body", position: [5, 0, 0], fields: {} },
+    ],
+    ModelShipCrashBehavior: [
+      { name: "ModelShip_Body", body: "ModelShip_Body", position: [1, 2, 3],
+        fields: { _crashSound: { name: "boum" } } },
+    ],
+    RocketKidConvoController: [
+      { name: "ConversationZone", body: "TimberHearth_Body", position: [0, 0, 0],
+        fields: {}, trees: { _introduction: "a", _successfulLanding: "b",
+                             _tooManyCrashes: "c" } },
+    ],
+  } };
+  check("deux pistes", modelLandingSpots(gpM).length, 2);
+  check("un vaisseau miniature", modelShipBody(gpM).name, "ModelShip_Body");
+  check("avec son son de crash", modelShipBody(gpM).crashSound, "boum");
+  check("sans rien de pose, rien", modelShipBody({}), null);
+  const k = rocketKids(gpM);
+  check("un enfant", k.length, 1);
+  check("avec ses trois arbres",
+        [k[0].trees.introduction, k[0].trees.successfulLanding,
+         k[0].trees.tooManyCrashes].join(","), "a,b,c");
+}
+
+{
+  // --- PERDRE LA GRAVITE (docs/79-alignement.md) ---
+
+  check("cinquante degres par seconde", FIELD_ALIGN.rate, 50);
+  // Moitie moins vite que le demi-tour d'un siege : se relever est vif,
+  // perdre le sol est lent.
+  check("moitie moins vite que le siege", FIELD_ALIGN.rate * 2, ATTACHE.rotationRate);
+
+  // La duree est encore un ANGLE divise par un TAUX, la troisieme fois.
+  check("deux poses identiques, aucune duree",
+        discreteRotationDuration([0, 0, 0, 1], [0, 0, 0, 1]), 0);
+  {
+    // Un demi-tour complet : 180 degres a 50 degres par seconde.
+    const d = discreteRotationDuration([0, 0, 0, 1], [0, 1, 0, 0]);
+    check("un demi-tour dure 3,6 s", Math.round(d * 100) / 100, 3.6);
+  }
+  {
+    // Un quart de tour.
+    const q = Math.sqrt(0.5);
+    const d = discreteRotationDuration([0, 0, 0, 1], [0, q, 0, q]);
+    check("un quart de tour, 1,8 s", Math.round(d * 100) / 100, 1.8);
+  }
+
+  const al = new FieldAlignment();
+  // `CheckAlignmentRequirements` rend VRAI a la toute premiere image, quoi
+  // qu'il arrive : sans cela, le premier instant d'une partie est une chute.
+  check("la premiere image est alignee, meme sans champ",
+        al.update(false, 0, 90), null);
+  check("et les commandes repondent", al.locked, false);
+  // Puis perdre le champ verrouille le regard.
+  check("perdre le champ", al.update(false, 1, 90), "break");
+  check("et prend les commandes", al.locked, true);
+  check("pendant 90/50 secondes", al.duration, 1.8);
+  check("a mi-chemin, toujours verrouille",
+        al.update(false, 1.9, 0) === null && al.locked, true);
+  al.update(false, 3, 0);
+  check("passe la duree, elles reviennent", al.locked, false);
+
+  // Et l'ecart se passe aussi sous la FORME DU BUILD : deux poses.
+  const al3 = new FieldAlignment();
+  al3.update(true, 0, 0);
+  al3.update(false, 1, [[0, 0, 0, 1], [0, 1, 0, 0]]);   // un demi-tour
+  check("deux poses valent un angle", Math.round(al3.duration * 100) / 100, 3.6);
+
+  // Retrouver le sol rend les commandes TOUT DE SUITE.
+  const al2 = new FieldAlignment();
+  al2.update(true, 0, 0);
+  al2.update(false, 1, 3600);        // une duree enorme
+  check("verrouille pour longtemps", al2.duration, 72);
+  check("retrouver un champ", al2.update(true, 1.1, 0), "init");
+  check("rend les commandes sans attendre", al2.locked, false);
+  // Et la transition ne se rejoue pas tant que l'etat ne change pas.
+  check("rester dans le champ n'annonce rien", al2.update(true, 2, 0), null);
+}
+
+{
+  // --- LES INVITES DU SAC DORSAL, ET LE BATON (docs/80-invites.md) ---
+
+  // ELLES N'EXISTENT QU'EN APESANTEUR.
+  check("les pieds au sol, aucune invite",
+        jetpackPrompts({ inField: true, training: true }).thrust, false);
+  check("ni l'accord de vitesse",
+        jetpackPrompts({ inField: true, targeted: true, localSpeed: 99 })
+          .matchVelocity, false);
+  check("sur la carte non plus",
+        jetpackPrompts({ inField: false, mapView: true, training: true }).thrust,
+        false);
+
+  // LES TROIS POUSSEES NE VIENNENT QU'A L'ENTRAINEMENT.
+  check("en apesanteur sans entrainement, rien",
+        jetpackPrompts({ inField: false, training: false }).thrust, false);
+  check("a l'entrainement, les trois",
+        jetpackPrompts({ inField: false, training: true }).thrust, true);
+  // Et pas tant qu'on vise : viser veut dire qu'on sait ou l'on va.
+  check("mais pas si l'on vise une cible",
+        jetpackPrompts({ inField: false, training: true, targeted: true,
+                         localSpeed: 0 }).thrust, false);
+
+  // L'ACCORD DE VITESSE EXCLUT LES AUTRES.
+  {
+    const p = jetpackPrompts({ inField: false, training: true, targeted: true,
+                               localSpeed: 5 });
+    check("il vient quand on vise et qu'on bouge", p.matchVelocity, true);
+    check("et il est SEUL", p.thrust, false);
+  }
+  check("sous une unite par seconde, non",
+        jetpackPrompts({ inField: false, targeted: true, localSpeed: 0.5 })
+          .matchVelocity, false);
+  check("pile a une unite non plus",
+        jetpackPrompts({ inField: false, targeted: true, localSpeed: 1 })
+          .matchVelocity, false);
+  check("sans cible visee, non plus",
+        jetpackPrompts({ inField: false, targeted: false, localSpeed: 99 })
+          .matchVelocity, false);
+  check("et sans autopilote autorise",
+        jetpackPrompts({ inField: false, targeted: true, localSpeed: 99,
+                         autopilotAllowed: false }).matchVelocity, false);
+
+  // LE BATON SORT EN APPUYANT PRES DU FEU.
+  const inv = new RoastPrompt({ distance: 4 });
+  check("le premier appui annonce", inv.press(), "BeginRoasting");
+  check("le second ne re-annonce pas", inv.press(), null);
+  check("pres du feu, rien ne s'arrete", inv.update(3), null);
+  check("s'eloigner annonce", inv.update(5), "StopRoasting");
+  check("et une seule fois", inv.update(5), null);
+  // Et on peut recommencer.
+  check("revenir et appuyer ressort le baton", inv.press(), "BeginRoasting");
+  // Sans avoir appuye, s'eloigner ne dit rien.
+  const inv2 = new RoastPrompt({ distance: 4 });
+  check("sans avoir appuye, s'eloigner est muet", inv2.update(99), null);
+}
+
+{
+  // --- L'INVULNERABILITE DU PREMIER TOUR (docs/81-invulnerable.md) ---
+
+  const d = new PlayerData();
+  d.wipe();
+  check("premiere boucle, sans les codes : invulnerable",
+        d.startOfTimeLoop(1), true);
+  check("et le savoir d'entrainement retombe", d.completedZeroGTraining, false);
+  // Monter dans le vaisseau y met fin.
+  check("monter dans le vaisseau y met fin", d.enterShip(), true);
+  check("et cela ne revient pas", d.isInvulnerable, false);
+  check("le signaler deux fois ne dit plus rien", d.enterShip(), false);
+  // Deuxieme boucle : plus de protection, meme sans les codes.
+  check("deuxieme boucle, plus de protection", d.startOfTimeLoop(2), false);
+  // Premiere boucle MAIS on connait deja les codes : plus de protection non
+  // plus. Les codes se retiennent d'une partie a l'autre.
+  d.learn("knowsLaunchCodes");
+  check("premiere boucle avec les codes : rien", d.startOfTimeLoop(1), false);
+
+  // ELLE NE PROTEGE QUE DES DEGATS.
+  const r = new Ressources({ _maxHealth: 100 });
+  r.invulnerable = true;
+  check("les degats ne retirent rien", r.hurt(40), 0);
+  check("la sante est intacte", r.health, 100);
+  check("et l'on n'est pas mort", r.dead, false);
+  r.invulnerable = false;
+  check("une fois la protection finie, ils portent", r.hurt(40), 40);
+  // La mort par volume, elle, ne consulte pas la protection : c'est
+  // `PlayerDeathHandler` qui l'emet, et il ne la lit pas.
+  const r2 = new Ressources({ _maxHealth: 100 });
+  r2.invulnerable = true;
+  r2.dead = true;
+  check("un mort reste mort, protege ou non", r2.hurt(10), 0);
+  check("et il l'est toujours", r2.dead, true);
 }
 
 report();

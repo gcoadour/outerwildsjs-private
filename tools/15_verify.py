@@ -31,6 +31,7 @@ import argparse
 import http.server
 import json
 import os
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -74,9 +75,23 @@ class Report:
 
 
 def serve(root, port):
-    """Sert le depot en tache de fond, comme web/serve.sh."""
+    """Sert le depot en tache de fond, comme web/serve.sh.
+
+    A une difference pres, et elle a coute une demi-heure : on annonce
+    `no-store`. `http.server` n'envoie aucun `Cache-Control`, Chromium applique
+    alors sa mise en cache HEURISTIQUE, et un profil persistant garde donc les
+    modules de la session precedente. Le symptome est parfaitement trompeur —
+    « le module ne fournit pas d'export nomme X » alors que le fichier sur le
+    disque l'exporte — et il ne se produit QU'avec `--profil`, jamais en
+    `--repli`, qui repart d'un profil vide.
+    """
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        http.server.SimpleHTTPRequestHandler.end_headers(self)
+
     handler = type("H", (http.server.SimpleHTTPRequestHandler,),
                    {"directory": root,
+                    "end_headers": end_headers,
                     "log_message": lambda *a, **k: None})
     # un port laisse en TIME_WAIT par une execution precedente ne doit pas
     # empecher la suivante
@@ -116,7 +131,8 @@ def run_repli(url):
         exe = CHROMIUM if os.path.exists(CHROMIUM) else None
         browser = p.chromium.launch(executable_path=exe, args=args)
         page = browser.new_page(viewport={"width": 1280, "height": 720})
-        errors = []
+        errors = _ERREURS_PAGE
+        del errors[:]
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(url, wait_until="load", timeout=90000)
         # On saute le portique : il attend un fichier qu'on n'a pas, et ce n'est
@@ -225,10 +241,90 @@ def pixel_png(data, x, y):
     return (ligne[o], ligne[o + 1], ligne[o + 2])
 
 
+def extraction_perimee(profil):
+    """
+    L'extraction du profil est-elle plus vieille que le pipeline qui l'a faite ?
+
+    LE PIEGE, paye en docs/71. `--profil` sans `--zip` reutilise l'extraction
+    deja presente dans le stockage prive de l'origine. Un lot qui touche a un
+    EXTRACTEUR ne change alors rien a ce que la page lit : les controles neufs
+    mesurent les donnees d'avant, et ils echouent — ou pire, ils passent.
+
+    C'est le meme genre de silence que le cache HTTP de docs/62, une couche plus
+    loin : la page etait a jour, ses DONNEES ne l'etaient pas.
+
+    Le test est grossier a dessein — des dates de fichiers, pas un hachage du
+    contenu — et il suffit : ce qu'on veut attraper est « j'ai edite un
+    extracteur et j'ai oublie de refaire l'extraction ».
+
+    @returns une phrase a afficher, ou None si tout va bien
+    """
+    racine = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pipeline = os.path.join(racine, "web", "src", "pipeline")
+    plus_recent, quoi = 0, None
+    for base, _, fichiers in os.walk(pipeline):
+        for f in fichiers:
+            if not f.endswith((".js", ".json")):
+                continue
+            t = os.path.getmtime(os.path.join(base, f))
+            if t > plus_recent:
+                plus_recent, quoi = t, os.path.relpath(os.path.join(base, f), racine)
+    # L'OPFS de Chromium vit sous `Default/File System`, et LUI SEUL.
+    #
+    # La premiere version regardait aussi `WebStorage`, ou Chromium touche
+    # `QuotaManager-journal` A CHAQUE OUVERTURE du profil : la date etait donc
+    # toujours fraiche, et ce garde-fou n'a jamais rien dit — pas meme la fois
+    # ou il aurait du (docs/76-proximite.md). Un garde-fou qu'on n'a jamais vu
+    # parler n'est pas un garde-fou silencieux, c'est un garde-fou casse.
+    stockage = os.path.join(profil, "Default", "File System")
+    ecrit = 0
+    for base, _, fichiers in os.walk(stockage):
+        for f in fichiers:
+            try:
+                ecrit = max(ecrit, os.path.getmtime(os.path.join(base, f)))
+            except OSError:
+                pass
+    if not ecrit or not plus_recent or ecrit >= plus_recent:
+        return None
+    from datetime import datetime
+    d = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
+    return (f"extraction du {d(ecrit)}, "
+            f"{quoi} modifie le {d(plus_recent)}")
+
+
 def run(url, heavy, profil=None, zip_path=None):
+    """
+    Les controles navigateur, et ce qu'on montre quand ils s'arretent net.
+
+    UNE EXCEPTION DE PLAYWRIGHT CACHAIT LA VRAIE CAUSE. Une erreur dans la
+    boucle de rendu arrete l'image en cours : tout ce qui suit ne tourne plus,
+    et le premier controle qui s'en apercoit est trente lignes plus loin, sur un
+    objet sans rapport. Le message etait « impossible de lire `current` » — et la
+    faute etait vingt ecrans plus haut, dans un tout autre systeme.
+
+    Les erreurs de page etaient pourtant collectees depuis toujours, et n'etaient
+    lues qu'au DERNIER controle, celui qu'on n'atteint jamais dans ce cas
+    (docs/71-quantique.md).
+    """
+    try:
+        return _run(url, heavy, profil, zip_path)
+    except Exception:
+        for e in _ERREURS_PAGE[:6]:
+            print(f"  !!   erreur de page : {e}")
+        if _ERREURS_PAGE:
+            print("       ^ la cause est probablement la, pas dans le controle"
+                  " qui a leve.\n")
+        raise
+
+
+_ERREURS_PAGE = []
+
+
+def _run(url, heavy, profil=None, zip_path=None):
     from playwright.sync_api import sync_playwright
 
     rep = Report()
+    perime = None
     with sync_playwright() as p:
         args = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox"]
         exe = CHROMIUM if os.path.exists(CHROMIUM) else None
@@ -237,6 +333,28 @@ def run(url, heavy, profil=None, zip_path=None):
         # qui suit n'a de sens. C'est pourquoi ces controles ne se mesuraient
         # jusqu'ici que sur le systeme de substitution.
         if profil:
+            # Le cache HTTP du profil, et lui seul.
+            #
+            # `no-store` empeche Chromium de GARDER une reponse ; il n'efface
+            # pas celles qu'il garde deja. Un profil qui a servi a autre chose
+            # — une mise au point, une version d'avant — peut donc rendre un
+            # module perime sans meme demander au serveur, et le symptome est
+            # celui-la : « le module ne fournit pas d'export nomme X », alors
+            # que le fichier sur le disque l'exporte (docs/62-visee.md).
+            #
+            # On vide donc le cache et lui seul : l'extraction vit dans le
+            # stockage prive de l'origine, qui est ailleurs et qu'on garde.
+            for sous in ("Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage"):
+                shutil.rmtree(os.path.join(profil, "Default", sous), ignore_errors=True)
+            perime = extraction_perimee(profil)
+            if perime:
+                print(f"  !!   L'EXTRACTION DU PROFIL EST PLUS VIEILLE QUE LE PIPELINE.\n"
+                      f"       {perime}")
+                if zip_path:
+                    print("       --zip est fourni : l'extraction sera REFAITE.\n")
+                else:
+                    print("       Les controles vont mesurer d'ANCIENNES donnees.\n"
+                          "       Relancer avec --zip pour refaire l'extraction.\n")
             browser = p.chromium.launch_persistent_context(
                 profil, executable_path=exe, args=args,
                 viewport={"width": 1280, "height": 720})
@@ -244,7 +362,8 @@ def run(url, heavy, profil=None, zip_path=None):
         else:
             browser = p.chromium.launch(executable_path=exe, args=args)
             page = browser.new_page(viewport={"width": 1280, "height": 720})
-        errors = []
+        errors = _ERREURS_PAGE
+        del errors[:]
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         weight = {"total": 0}
@@ -264,6 +383,24 @@ def run(url, heavy, profil=None, zip_path=None):
         # moteur avec son systeme de substitution.
         page.wait_for_timeout(3000)
         if page.locator("#gate-play").count():
+            # UN `--zip` NE SUFFISAIT PAS. L'archive n'etait deposee que si la
+            # page ne montrait PAS deja une extraction — donc jamais, sur un
+            # profil rempli. Un lot qui touche a un extracteur relancait avec
+            # `--zip`, voyait l'ancienne extraction, et deux controles neufs
+            # tombaient sans que rien ne dise pourquoi (docs/76-proximite.md).
+            #
+            # Quand l'extraction est perimee ET qu'on a l'archive, on VIDE le
+            # stockage et on recommence. C'est le bouton que la page offre deja.
+            # `--zip` VEUT DIRE « refais l'extraction ». Il ne servait qu'a
+            # remplir un profil vide, et sur un profil plein il ne faisait
+            # RIEN : un lot qui touche a un extracteur relancait avec l'archive
+            # et mesurait quand meme les donnees d'avant. Deux controles neufs
+            # sont tombes deux fois de suite avant qu'on le voie.
+            if zip_path and page.locator("#gate-step-done").is_visible():
+                print("  ..   --zip fourni : on vide le stockage et on refait.")
+                page.click("#gate-reset")
+                page.wait_for_timeout(2000)
+                page.wait_for_selector("#gate-step-drop", state="visible", timeout=60000)
             if zip_path and not page.locator("#gate-step-done").is_visible():
                 page.set_input_files("#gate-file", zip_path)
                 page.wait_for_selector("#gate-step-done", state="visible",
@@ -335,11 +472,21 @@ def run(url, heavy, profil=None, zip_path=None):
         rep.at_least("degrades de couleur appliques", parts["couleur"], 1)
 
         # --- interface ---------------------------------------------------------
-        rep.at_least("invites affichees",
-                     page.evaluate("() => document.querySelectorAll('.ow-prompt').length"), 2)
-        rep.eq("icone de manette sur chaque invite",
-               page.evaluate("() => document.querySelectorAll('.ow-prompt-btn').length"),
-               page.evaluate("() => document.querySelectorAll('.ow-prompt').length"))
+        #
+        # CE CONTROLE GARDAIT UN BUG. Il demandait « au moins deux invites a
+        # l'ecran », et il passait parce que le portage affichait les invites du
+        # sac dorsal en PERMANENCE. Les pieds au sol, dans un champ de gravite,
+        # le build n'en montre aucune (docs/80-invites.md) — et zero est donc la
+        # bonne reponse.
+        #
+        # Ce qu'on voulait garder est que la COUCHE d'invites fonctionne. On le
+        # mesure donc la ou le build en pose vraiment : la carte, qui en pose
+        # trois. C'est la meme lecon que docs/49 — un invariant garde une
+        # mesure, pas une conclusion — et cette fois la conclusion etait
+        # « il devrait toujours y avoir des invites ».
+        rep.eq("les pieds au sol, aucune invite de sac dorsal",
+               page.evaluate("() => [...document.querySelectorAll("
+                             "'.ow-prompts-left .ow-prompt')].length"), 0)
         rep.eq("panneau de ressources present",
                page.evaluate("() => !!document.querySelector('.ow-res')"), True)
         # Une police ne se charge qu'a son premier usage : on attend la fin du
@@ -354,19 +501,26 @@ def run(url, heavy, profil=None, zip_path=None):
                }"""),
                ["OW Dialogue", "OW Helmet", "OW Menu", "OW Name"])
 
-        # les invites de la carte, de priorite 2, doivent evincer les autres
-        page.keyboard.press("KeyM")
+        # les invites de la carte, de priorite 2, doivent evincer les autres.
+        # La carte est sur ENTREE dans le build (canal `Map`), pas sur M
+        # (docs/61-commandes.md).
+        page.keyboard.press("Enter")
         page.wait_for_timeout(1200)
-        rep.eq("le tri par priorite evince les invites de reacteur",
+        rep.eq("la carte, elle, en pose trois",
                page.evaluate("() => [...document.querySelectorAll("
                              "'.ow-prompts-left .ow-prompt')].map(n=>n.textContent.trim())"),
                ["Close Map", "Zoom In/Out", "Pan View"])
+        # La couche d'invites fonctionne : c'est ce que l'ancien controle
+        # voulait dire, mesure la ou le build pose vraiment des invites.
+        rep.eq("icone de manette sur chaque invite",
+               page.evaluate("() => document.querySelectorAll('.ow-prompt-btn').length"),
+               page.evaluate("() => document.querySelectorAll('.ow-prompt').length"))
         page.evaluate("() => window.__map.pan(-0.5, -0.5, 1)")
         rep.check("le deplacement de la carte suit la distance de zoom",
                   page.evaluate("() => Math.abs(window.__map.focal[0]) > 1000"),
                   page.evaluate("() => Math.round(window.__map.focal[0])"), "!= 0")
         page.evaluate("() => window.__map.recenter()")
-        page.keyboard.press("KeyM")
+        page.keyboard.press("Enter")
         page.wait_for_timeout(600)
 
         # --- reglages ----------------------------------------------------------
@@ -552,10 +706,17 @@ def run(url, heavy, profil=None, zip_path=None):
         # On attend d'etre pose, puis on marche une seconde. Le joueur apparait
         # en l'air : sans appui, il n'y a pas de marche a mesurer, et le
         # controle le dit plutot que d'echouer sur un temps d'attente.
+        #
+        # Le delai est genereux, et il le faut : le temps SIMULE d'une image est
+        # plafonne a 0,05 s, et un rendu logiciel qui tient une image par
+        # seconde avance donc vingt fois moins vite qu'une montre. Depuis que le
+        # baton a guimauve est dans la main — huit maillages plein cadre, que
+        # swiftshader remplit pixel par pixel — la chute prend plusieurs
+        # dizaines de secondes de montre (docs/64-mains.md).
         pose = True
         try:
             page.wait_for_function("window.__player && window.__player.grounded",
-                                   timeout=30000)
+                                   timeout=180000)
         except Exception:
             pose = False
         rep.eq("le joueur finit par se poser", pose, True)
@@ -625,7 +786,9 @@ def run(url, heavy, profil=None, zip_path=None):
                       fuel1 >= carburant0 - 0.01, round(fuel1, 3),
                       f">= {round(carburant0, 3)}")
 
-            # Saut : la touche « haut » saute au sol, elle pousse en l'air.
+            # Saut : l'espace saute (`Jump`), la majuscule pousse (`Move Up`).
+            # Ce sont DEUX canaux du build, et le portage les avait sur une
+            # seule touche (docs/61-commandes.md).
             page.keyboard.press("Space")
             page.wait_for_timeout(120)
             rep.eq("le saut quitte le sol",
@@ -699,28 +862,889 @@ def run(url, heavy, profil=None, zip_path=None):
             # L'equipement se ramasse : la sonde n'est pas donnee.
             rep.eq("la sonde n'est pas donnee au depart", lots["equipement"], False)
 
-        # --- camera embarquee de la sonde ---------------------------------------
+        # --- le secteur majeur actif (docs/82-secteur-majeur.md) ----------------
         #
-        # Elle ne s'allume qu'une fois la sonde RAMASSEE (docs/46, lot 7) : le
-        # portage la donnait d'emblee, le build la met dans la cabine.
-        page.keyboard.press("KeyF")
-        page.wait_for_timeout(300)
+        # Ce controle-ci n'existe que dans un navigateur : il demande la
+        # position du moment, le declencheur du secteur ramene la ou sa planete
+        # se trouve, et une minicarte reellement montee dans la page.
+        #
+        # Le portage decidait « suis-je a moins de deux rayons de surface du
+        # corps dominant » et « le plus petit volume qui me contient ». Le build
+        # ne pose ni l'une ni l'autre : il tient une liste de spheres de
+        # declenchement et en retient la plus proche par le centre.
+        sect = page.evaluate("""() => {
+          const L = window.__lots, G = window.__gui;
+          if (!L || !G) return null;
+          const m = G.minimap;
+          return {
+            secteurs: L.majSecteurs.length,
+            spheres: L.majSecteurs.filter(x => x.volume &&
+                       x.volume.shape === "sphere" && x.volume.radius > 0).length,
+            sansMinicarte: L.majSecteurs.filter(x => !x.useMinimap)
+                             .map(x => x.name).sort(),
+            actif: L.etat.secteurMajeur,
+            porteMinicarte: L.etat.minicarteDuSecteur,
+            allumee: m.on, montree: m.shown,
+            evenements: m.events.slice(0, 1),
+          };
+        }""")
+        if sect:
+            rep.eq("secteurs majeurs poses", sect["secteurs"], 10)
+            rep.eq("tous portent un declencheur spherique",
+                   sect["spheres"], sect["secteurs"])
+            rep.eq("les trois sans minicarte", sect["sansMinicarte"],
+                   ["Sector_DB", "Sector_Derelict", "Sector_QuantumMoon"])
+            # LE controle du lot. Le declencheur de Timber Hearth fait 1 000
+            # unites ; le portage prenait `horizon x 1,5`, soit 300, et le
+            # joueur pose au village n'etait dans AUCUN secteur passe les
+            # premieres secondes de derive.
+            rep.eq("pose au village, on est dans le secteur de Timber Hearth",
+                   sect["actif"], "Sector_TH")
+            rep.eq("et ce secteur porte la minicarte", sect["porteMinicarte"], True)
+            rep.eq("le composant Minimap est donc allume", sect["allumee"], True)
+            rep.eq("avec l'evenement du build", sect["evenements"],
+                   ["MinimapEnabled"])
+            # ... mais on ne la VOIT pas : `MinimapHUD.AllowVisibility` exige en
+            # plus de l'avoir ramassee. Deux composants, deux etats.
+            rep.eq("sans l'avoir ramassee, rien a l'ecran", sect["montree"], False)
+            # Le seul ramassage qui porte la minicarte porte aussi la sonde :
+            # la prendre ici fausserait la section suivante, qui verifie
+            # justement qu'on n'a pas la sonde. On interroge donc la LOI sans
+            # toucher a l'etat — un controle ne doit rien changer.
+            rep.eq("ramassee, elle s'afficherait",
+                   page.evaluate("() => window.__gui.minimap.allowVisibility("
+                                 "{ helmetHUD: true, hasMinimap: true })"), True)
+
+        # --- la sonde, telle que le build la lance (docs/60-sonde.md) -----------
+        #
+        # Elle ne part qu'une fois RAMASSEE (docs/46, lot 7) : le portage la
+        # donnait d'emblee, le build la met dans la cabine. Et elle ne part plus
+        # a l'appui : on TIENT pour charger, on relache pour lancer.
+        #
+        # Le rythme d'images compte ici, et il a couche ce controle : sous
+        # swiftshader une image peut durer une seconde, et `keyboard.press()`
+        # fait l'appui et le relachement dans la meme milliseconde. Le moteur
+        # retient donc les relachements jusqu'a la fin de l'image — sinon la
+        # frappe entiere tombe entre deux images, comme dans Unity qui latche
+        # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
+        # geste avant de mesurer.
+        # ... et il tient aussi a CE QUI PRECEDE. Six controles de plus inseres
+        # avant lui — six `page.evaluate`, aucune attente ajoutee — ont suffi a
+        # faire refuser le tir, et a les remettre en fin de parcours il repasse.
+        # On ne sait donc pas ce que ce controle mesure au juste : la fenetre de
+        # cinq metres, ou l'orientation ou le joueur se trouve a cet instant-la.
+        # Tant qu'il n'aura pas ete rendu independant du regard — en visant
+        # explicitement avant de tirer — rien ne doit s'inserer avant lui. Le
+        # lot des seuils est alle en fin de parcours pour cette raison, et c'est
+        # une dette, pas une solution.
+        def sonde_geste(duree_ms, attente_ms=9000):
+            # Le bouton DROIT : `InputChannels.probe` est `mouse 1`, et les
+            # trois statiques d'`OWInput` qui lancent, photographient et
+            # rappellent sont construites dessus.
+            page.mouse.down(button="right")
+            page.wait_for_timeout(duree_ms)
+            page.mouse.up(button="right")
+            page.wait_for_timeout(attente_ms)
+
+        def etat_sonde():
+            return page.evaluate("""() => {
+              const t = window.__tools.probes, p = t.last;
+              return { active: t.active, launched: t.launched,
+                       ancree: !!(p && p.anchored),
+                       lanterne: p ? Math.round(p.lantern) : 0,
+                       vitesse: p ? Math.round(Math.hypot(...p.vel)) : 0,
+                       cams: (window.__scene || BABYLON.Engine.LastCreatedScene)
+                               .activeCameras.map(c => c.name) };
+            }""")
+
+        sonde_geste(120)
         # Tant que la vue de sonde n'est pas ouverte, la scene n'a pas de liste
         # de cameras actives : c'est `activeCamera` au singulier qui rend.
-        rep.eq("sans la sonde, la touche ne lance rien",
-               page.evaluate("() => (window.__scene || BABYLON.Engine.LastCreatedScene)"
-                             ".activeCameras.map(c => c.name)"),
-               [])
+        rep.eq("sans la sonde, la touche ne lance rien", etat_sonde()["cams"], [])
         page.evaluate("() => window.__lots.equipment.pickUp(window.__lots.pickups"
                       ".find(p => p.probe))")
-        page.keyboard.press("KeyF")
-        page.wait_for_timeout(600)
-        rep.eq("la sonde allume sa camera",
-               page.evaluate("() => (window.__scene || BABYLON.Engine.LastCreatedScene)"
-                             ".activeCameras.map(c => c.name)"),
-               ["cam", "probeCam"])
+        # La FENETRE DE TIR : tant que `KnowsHowProbesWork` est faux, le build
+        # exige DEUX CENTS metres de degage devant soi — c'est le garde-fou du
+        # premier lancement, qui refuse de laisser la sonde partir dans un mur
+        # ou elle ne montrerait rien. Debout au village, il refuse.
+        #
+        # Le savoir est PERSISTANT : une fois appris, il l'est pour le profil.
+        # On le remet a faux avant de mesurer, sinon ce controle ne passe qu'a
+        # la premiere execution sur un profil neuf — et un test qui ne passe
+        # qu'une fois est un test qui ment la seconde.
+        rep.eq("on ignore encore comment marchent les sondes",
+               page.evaluate("""() => { const d = window.__pdata;
+                 d.knowsHowProbesWork = false; d.save();
+                 return d.knows('knowsHowProbesWork'); }"""),
+               False)
+        sonde_geste(120)
+        rep.eq("et la fenetre de deux cents metres refuse le tir",
+               etat_sonde()["launched"], 0)
+        # Une fois le geste appris, cinq metres suffisent.
+        page.evaluate("() => window.__pdata.learn('knowsHowProbesWork')")
+        sonde_geste(120)
+        etat = etat_sonde()
+        rep.eq("une fois le geste appris, elle part", etat["launched"], 1)
+        rep.eq("et il n'y en a qu'UNE", etat["active"], 1)
+        rep.eq("la sonde allume sa camera", etat["cams"], ["cam", "probeCam"])
         rep.eq("cadre de la vue de sonde",
                page.evaluate("() => !document.querySelector('.ow-probeview').hidden"), True)
+        # Le meme bouton ne relance rien tant qu'une sonde existe : c'est
+        # `_activeProbe`, un champ et non une liste.
+        sonde_geste(120)
+        rep.eq("un second appui ne lance pas de seconde sonde",
+               etat_sonde()["launched"], 1)
+        # Maintenir RAPPELLE la sonde. Le seuil est de trois dixiemes de seconde
+        # de temps SIMULE, et le temps simule d'une image est plafonne a 0,05 :
+        # sous swiftshader, ou une image peut durer une seconde, trois dixiemes
+        # de jeu demandent plusieurs secondes de montre. On tient donc jusqu'a
+        # ce que ca arrive plutot que de parier sur un delai — le chiffre, lui,
+        # est garde par `tests/09-jeu.mjs`.
+        page.mouse.down(button="right")
+        try:
+            page.wait_for_function("() => window.__tools.probes.active === 0",
+                                   timeout=60000)
+        except Exception:
+            pass
+        finally:
+            page.mouse.up(button="right")
+        page.wait_for_timeout(2000)
+        apres = etat_sonde()
+        rep.eq("maintenir le bouton rappelle la sonde", apres["active"], 0)
+        # `['cam']` et non `[]` : une fois la liste de cameras actives etablie,
+        # `ProbeCamera` y LAISSE celle du joueur seule. Une liste vide donnerait
+        # un ecran noir, et c'est ecrit dans `tools.js`.
+        rep.eq("et la vue se referme", apres["cams"], ["cam"])
+        rep.eq("le cadre aussi",
+               page.evaluate("() => document.querySelector('.ow-probeview').hidden"), True)
+
+        # --- les commandes du build (docs/61-commandes.md) ----------------------
+        #
+        # Elles viennent de l'`InputManager` de `mainData`, extrait en
+        # `data/input.json`. Ce qui se verifie ICI et nulle part ailleurs, c'est
+        # qu'un VRAI bouton de souris arrive : Babylon appelle `preventDefault()`
+        # sur `pointerdown`, ce qui supprime les evenements souris de
+        # compatibilite, et un `mousedown` pose sur la fenetre ne se declenche
+        # jamais. Aucun test sans navigateur ne peut le voir.
+        rep.eq("les liaisons viennent du build, pas du repli",
+               page.evaluate("() => window.__commandes.fallback"), False)
+        rep.eq("vingt-deux canaux",
+               page.evaluate("() => [...window.__commandes.canaux.keys()]"
+                             ".filter(n => !window.__commandes.get(n).ajout).length"), 22)
+        rep.eq("le pas de physique du jeu",
+               page.evaluate("() => window.__commandes.fixedTimestep"), 0.016)
+        # La lunette est le clic du MILIEU, et c'est un vrai clic.
+        page.mouse.move(640, 360)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(600)
+        rep.eq("le clic du milieu ouvre la lunette",
+               page.evaluate("() => window.__tools.telescope.active"), True)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(600)
+        rep.eq("et la referme",
+               page.evaluate("() => window.__tools.telescope.active"), False)
+        # La lampe est sur F, pas sur L.
+        allumee = page.evaluate("() => window.__consoles.flashlight.on")
+        page.keyboard.press("KeyF")
+        page.wait_for_timeout(300)
+        rep.eq("F allume la lampe",
+               page.evaluate("() => window.__consoles.flashlight.on"), not allumee)
+        page.keyboard.press("KeyF")
+        page.wait_for_timeout(300)
+
+        # --- les lois enfin appelees (docs/68-lois.md) --------------------------
+        #
+        # `attachments.js` — six classes, une page de documentation, quarante
+        # verifications — n'etait importe par AUCUN module du moteur. Ces
+        # controles mesurent qu'il tourne maintenant.
+        att = page.evaluate("""() => {
+          const a = window.__attaches;
+          return { alignes: a.alignes.length, heritiers: a.heritiers.length,
+                   clignotants: a.clignotants.length,
+                   rattaches: a.clignotants.filter(c => c.node).length,
+                   noeuds: a.noeudsCasses.length, remous: a.remous.length,
+                   lanceurs: window.__meteores.launchers.length };
+        }""")
+        rep.eq("quatorze alignements sur un corps designe", att["alignes"], 14)
+        rep.eq("neuf heritiers de champ", att["heritiers"], 9)
+        rep.eq("deux clignotants", att["clignotants"], 2)
+        rep.eq("trois noeuds casses", att["noeuds"], 3)
+        rep.eq("un volume d'eclaboussure", att["remous"], 1)
+        rep.eq("quatre lanceurs de meteores", att["lanceurs"], 4)
+        # Les meteores partent tout seuls : cinq a vingt secondes de delai, et
+        # le temps simule d'une image plafonne a 0,05 — on force donc l'horloge
+        # plutot que d'attendre des minutes de montre.
+        meteo = page.evaluate("""() => {
+          const m = window.__meteores;
+          const avant = m.launched;
+          m.update(1, 1e6);              // largement au-dela de tout delai
+          const nes = m.launched - avant;
+          const vitesse = m.meteors.length
+            ? Math.round(Math.hypot(...m.meteors[m.meteors.length - 1].vel)) : 0;
+          return { nes, vitesse };
+        }""")
+        rep.eq("les quatre lanceurs tirent", meteo["nes"], 4)
+        rep.check("et le meteore part entre cent et deux cents",
+                  100 <= meteo["vitesse"] <= 200, meteo["vitesse"], "100..200")
+
+        # --- ce que le jeu annonce, lot 2 (docs/67-annonces.md) -----------------
+        #
+        # Manger une guimauve rend TOUTE la sante : deux lignes d'IL, et le
+        # soin du jeu. Le portage comptait les guimauves sans rien en faire.
+        soin = page.evaluate("""() => {
+          const r = window.__resources, m = window.__consoles.marshmallow;
+          const avant = r.health;
+          r.health = 20;
+          m.held = true; m.toast = 1;                 // assez grillee
+          const mange = m.eat();
+          const apres = r.health;
+          r.health = avant;
+          return { mange, apres, max: r.maxHealth };
+        }""")
+        rep.eq("la guimauve se mange", soin["mange"], True)
+        # Le soin passe par `command()`, pas par `eat()` : on mesure donc la
+        # regle a part, la ou elle est ecrite.
+        rep.eq("et manger rend toute la sante", page.evaluate(
+            "() => { const r = { health: 3, maxHealth: 100, dead: true };"
+            "  return [window.__soin(r), r.health, r.dead].join(','); }"),
+            "97,100,false")
+        # Le mur qui reclame la combinaison : il repousse tant qu'on n'en a pas.
+        # `barrierSolid` est une METHODE de l'equipement depuis
+        # docs/93-commandes.md : un objet nu ne suffit plus pour l'interroger,
+        # et c'est tant mieux — la regle n'a plus qu'une source.
+        rep.eq("le mur reclame la combinaison", page.evaluate(
+            "() => { const b = [{ kind: 'barrier', position: [0,0,0],"
+            "   volume: { shape: 'box', size: [10,10,10] } }];"
+            "  const E = window.__lots.equipment.constructor;"
+            "  const nu = new E({ suit: false }), vetu = new E({ suit: true });"
+            "  return [!!window.__mur(b, [4,0,0], nu),"
+            "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
+            "true,true")
+
+        # --- l'invulnerabilite du premier tour (docs/81-invulnerable.md) ---------
+        #
+        # `PlayerData.OnStartOfTimeLoop` : a la PREMIERE boucle, tant qu'on ne
+        # connait pas les codes de lancement, les degats ne portent pas. Et cela
+        # s'arrete a l'instant ou l'on monte dans le vaisseau.
+        inv = page.evaluate("""() => {
+          const d = window.__pdata, r = window.__resources;
+          if (!d || !r) return null;
+          const codes = d.knowsLaunchCodes;
+          const sante = r.health, prot = r.invulnerable;
+          d.knowsLaunchCodes = false;
+          const tour1 = d.startOfTimeLoop(1);
+          const tour2 = d.startOfTimeLoop(2);
+          d.knowsLaunchCodes = true;
+          const avecCodes = d.startOfTimeLoop(1);
+          // Les degats, protection posee.
+          r.invulnerable = true; r.health = 100; r.dead = false;
+          const perdu = r.hurt(40), resteA = r.health;
+          r.invulnerable = false; r.health = 100;
+          const perdu2 = r.hurt(40);
+          d.knowsLaunchCodes = codes; r.health = sante; r.invulnerable = prot;
+          return { tour1, tour2, avecCodes, perdu, resteA, perdu2 };
+        }""")
+        if inv:
+            rep.eq("premiere boucle sans les codes : protege", inv["tour1"], True)
+            rep.eq("deuxieme boucle : plus rien", inv["tour2"], False)
+            rep.eq("premiere boucle avec les codes : plus rien non plus",
+                   inv["avecCodes"], False)
+            rep.eq("protege, les degats ne retirent rien", inv["perdu"], 0)
+            rep.eq("et la sante est intacte", inv["resteA"], 100)
+            rep.eq("sans protection, ils portent", inv["perdu2"], 40)
+
+        # --- les invites du sac dorsal (docs/80-invites.md) ----------------------
+        #
+        # Elles n'existent qu'en APESANTEUR, et les trois poussees qu'a
+        # l'entrainement. Le portage les affichait des qu'on n'etait pas dans
+        # le vaisseau — c'est-a-dire presque toujours, et donc pour rien.
+        jp = page.evaluate("""() => {
+          const f = window.__jetpackPrompts;
+          if (!f) return null;
+          return {
+            auSol: f({ inField: true, training: true }).thrust,
+            libre: f({ inField: false, training: false }).thrust,
+            entrainement: f({ inField: false, training: true }).thrust,
+            visant: f({ inField: false, training: true, targeted: true }).thrust,
+            accord: f({ inField: false, targeted: true, localSpeed: 5 }).matchVelocity,
+            seul: f({ inField: false, training: true, targeted: true,
+                      localSpeed: 5 }).thrust,
+          };
+        }""")
+        if jp:
+            rep.eq("les pieds au sol, aucune invite de sac", jp["auSol"], False)
+            rep.eq("en apesanteur sans entrainement non plus", jp["libre"], False)
+            rep.eq("a l'entrainement, les trois viennent", jp["entrainement"], True)
+            rep.eq("mais pas si l'on vise", jp["visant"], False)
+            rep.eq("l'accord de vitesse vient quand on vise et qu'on bouge",
+                   jp["accord"], True)
+            rep.eq("et il est SEUL", jp["seul"], False)
+
+        # --- perdre la gravite (docs/79-alignement.md) ---------------------------
+        #
+        # Quitter un champ verrouille le regard le temps qu'on soit retourne :
+        # le seul moment du jeu ou les commandes ne repondent plus.
+        alg = page.evaluate("""() => {
+          const a = window.__alignement;
+          if (!a) return null;
+          const avant = { aligned: a.aligned, locked: a.locked,
+                          first: a.firstFrame, since: a.since, dur: a.duration };
+          a.firstFrame = false; a.aligned = true; a.locked = false;
+          const perdu = a.update(false, 1000, 90);
+          const verrouille = a.locked, duree = a.duration;
+          const repris = a.update(true, 1000.1, 0);
+          const rendu = !a.locked;
+          Object.assign(a, avant);
+          return { perdu, verrouille, duree, repris, rendu, taux: 50 };
+        }""")
+        if alg:
+            rep.eq("perdre le champ s'annonce", alg["perdu"], "break")
+            rep.eq("et prend les commandes du regard", alg["verrouille"], True)
+            rep.eq("pendant l'angle divise par cinquante", alg["duree"], 1.8)
+            rep.eq("le retrouver s'annonce aussi", alg["repris"], "init")
+            rep.eq("et rend les commandes sans attendre", alg["rendu"], True)
+
+        # --- le vaisseau miniature et l'enfant (docs/78-modele.md) ---------------
+        mod = page.evaluate("""() => {
+          const m = window.__modele;
+          if (!m || !m.vaisseau) return null;
+          return { pistes: m.pistes.length, nom: m.vaisseau.name,
+                   son: m.vaisseau.crashSound,
+                   arbres: m.arbres ? Object.values(m.arbres.trees)
+                                        .filter(Boolean).length : 0 };
+        }""")
+        if mod:
+            rep.eq("trois pistes pour le modele reduit", mod["pistes"], 3)
+            rep.eq("le vaisseau miniature est la", mod["nom"], "ModelShip_Body")
+            rep.eq("avec son son de crash", mod["son"], "ModelShipCrash_Explosion")
+            rep.eq("et l'enfant a ses trois arbres", mod["arbres"], 3)
+        # Il VOLE : la console deportee le pousse, et la gravite le fait tomber.
+        vol = page.evaluate("""() => {
+          const m = window.__modele;
+          if (!m || !m.vaisseau) return null;
+          const v = m.vaisseau;
+          const avant = v.pos.slice();
+          return { bouge: v.vel.some(x => x !== 0) || avant.some(x => x !== 0) };
+        }""")
+        if vol:
+            rep.eq("il a une position et une vitesse", vol["bouge"], True)
+        # L'enfant compte, et les crashs passent avant les reussites.
+        kid = page.evaluate("""() => {
+          const k = window.__modele.enfant;
+          const avant = { c: k.crashes, l: k.landings };
+          k.crashes = 5; k.landings = 1;
+          const a = k.tree();
+          const b = k.tree();
+          k.crashes = avant.c; k.landings = avant.l;
+          return { a, b };
+        }""")
+        if kid:
+            rep.eq("cinq crashs et une reussite : le reproche d'abord",
+                   kid["a"], "tooManyCrashes")
+            rep.eq("et la reussite attend son tour", kid["b"], "successfulLanding")
+
+        # --- les huit sons d'interface (docs/77-sons.md) -------------------------
+        #
+        # Le portage n'en jouait AUCUN : avancer un dialogue, le finir, viser
+        # un referentiel, allumer sa lampe — tout en silence.
+        son = page.evaluate("""() => {
+          const u = window.__sonsUI;
+          if (!u) return null;
+          const f = (n) => { const s = u.fire(n); return s ? s.file : null; };
+          return { avance: f("AdvanceText"), fin: f("ExitDialogueMode"),
+                   lampeOn: f("TurnOnFlashlight"), lampeOff: f("TurnOffFlashlight"),
+                   vise: f("TargetReferenceFrame"),
+                   lache: f("UntargetReferenceFrame"),
+                   volume: u.fire("AdvanceText") ? u.fire("AdvanceText").volume : null,
+                   repAir: (u.startRepair(true) || {}).file,
+                   repVide: (u.startRepair(false) || {}).file };
+        }""")
+        if son:
+            rep.check("le son d'avance de texte existe", son["avance"] is not None,
+                      son["avance"], "!= None")
+            rep.check("et celui de fin est DIFFERENT",
+                      son["fin"] is not None and son["fin"] != son["avance"],
+                      son["fin"], f"!= {son['avance']}")
+            rep.eq("la lampe fait le meme bruit dans les deux sens",
+                   son["lampeOn"], son["lampeOff"])
+            rep.check("viser et lacher ne s'entendent pas pareil",
+                      son["vise"] != son["lache"], [son["vise"], son["lache"]],
+                      "differents")
+            rep.eq("a demi-volume", son["volume"], 0.5)
+            rep.check("on ne repare pas pareil dans le vide",
+                      son["repAir"] != son["repVide"],
+                      [son["repAir"], son["repVide"]], "differents")
+
+        # --- la proximite du vaisseau (docs/76-proximite.md) ---------------------
+        prox = page.evaluate("""() => {
+          const p = window.__proximite;
+          return p ? { n: p.zones.length,
+                       rayon: p.zones[0] ? p.zones[0].volume.radius : 0 } : null;
+        }""")
+        if prox:
+            rep.eq("une zone de proximite du vaisseau", prox["n"], 1)
+            rep.eq("de treize unites", prox["rayon"], 13)
+        # Le tutoriel de la sonde est a usage unique.
+        tut = page.evaluate("""() => {
+          const i = window.__invites;
+          return i ? { detruites: i.detruites, reste: i.sonde.length } : null;
+        }""")
+        if tut:
+            rep.eq("les invites de sonde sont encore la", tut["detruites"], False)
+            rep.eq("les cinq", tut["reste"], 5)
+
+        # --- la fin de la liste (docs/75-chaleur.md) -----------------------------
+        #
+        # `heatSources` cherchait des classes dont le NOM contient « heat » : il
+        # n'y en a AUCUNE dans ce build. La liste etait vide, et la guimauve ne
+        # chauffait jamais — docs/67 a bati le soin du jeu par-dessus.
+        ch = page.evaluate("""() => {
+          const c = window.__chaleur;
+          if (!c) return null;
+          return { sources: c.sources.length,
+                   surLeFeu: c.sur ? Math.round(c.sur) : 0 };
+        }""")
+        if ch:
+            rep.eq("huit feux de camp", ch["sources"], 8)
+            rep.eq("et cent de chaleur sur le premier", ch["surLeFeu"], 100)
+        # La sonde ancienne avance, et rien ne l'arrete.
+        anc = page.evaluate("""() => {
+          const a = window.__sondeAncienne;
+          if (!a) return null;
+          return { v: Math.hypot(a.vel[0], a.vel[1], a.vel[2]) };
+        }""")
+        if anc:
+            rep.check("la sonde ancienne a pris de la vitesse", anc["v"] > 0,
+                      round(anc["v"], 1), "> 0")
+        # Les quatre invites de sonde, avec leur regard.
+        iv = page.evaluate("""() => {
+          const i = window.__invites;
+          return i ? { n: i.sonde.length,
+                       angles: [...new Set(i.sonde.map(x => x.minAngle))] } : null;
+        }""")
+        if iv:
+            rep.eq("cinq invites de sonde et de lunette", iv["n"], 5)
+            rep.eq("a quarante-cinq degres et trois cent soixante",
+                   sorted(iv["angles"]), [45, 360])
+
+        # --- la queue des lois (docs/74-etalons.md) ------------------------------
+        #
+        # Les phares du vaisseau : le portage n'en avait AUCUN, et
+        # `shiplightRange` etait ecrite, eprouvee, appelee par personne.
+        ph = page.evaluate("""() => {
+          const p = window.__phares;
+          const s = window.__shipRef;
+          if (!p || !s) return null;
+          const avant = s.boarded;
+          s.boarded = false;
+          return { existe: true, portee: p.range, avant };
+        }""")
+        if ph:
+            rep.eq("les phares du vaisseau existent", ph["existe"], True)
+            rep.eq("a six cents unites de portee", ph["portee"], 600)
+        # La carte suit `MapMarker.LateUpdate`, et non une moitie de la regle.
+        carte = page.evaluate("""() => {
+          const m = window.__map;
+          return { derelict: m.derelict === false || m.derelict === undefined };
+        }""")
+        rep.eq("la carte connait la zone brouillee", carte["derelict"], True)
+
+        # --- les passages, les coquilles, le sol qui tourne (docs/73) ------------
+        ep = page.evaluate("""() => {
+          const e = window.__epaves;
+          return { n: e.count,
+                   noms: e.warps.map(w => w.data.name),
+                   surSortie: e.warps.filter(w => w.data.onExit).length,
+                   jumeaux: e.warps.filter(w => w.jumeau).length };
+        }""")
+        rep.eq("trois passages de Dark Bramble", ep["n"], 3)
+        rep.eq("dont le raccourci depuis Timber Hearth",
+               "DarkBrambleShortcut" in ep["noms"], True)
+        rep.eq("un seul part sur la SORTIE", ep["surSortie"], 1)
+        rep.eq("et les trois connaissent leur jumeau", ep["jumeaux"], 3)
+        # Trois secondes, pas a l'instant : la moitie de `_warpDuration`.
+        saut = page.evaluate("""() => {
+          const e = window.__epaves;
+          const w = e.warps.find(x => x.data.name === "DarkBrambleShortcut");
+          const p = w.data.position;
+          const a = e.update(0.1, 1000, p);
+          const b = e.update(0.1, 1002, p);
+          const c = e.update(0.1, 1003, p);
+          e.drain();
+          return { a: a !== null, b: b !== null, c: c !== null,
+                   vers: c ? c.receiver.body : null,
+                   vitesse: c ? Math.round(Math.hypot(...c.velocity)) : 0 };
+        }""")
+        rep.eq("entrer ne suffit pas", saut["a"], False)
+        rep.eq("ni deux secondes", saut["b"], False)
+        rep.eq("a trois secondes, on part", saut["c"], True)
+        rep.eq("vers Dark Bramble", saut["vers"], "DarkBramble_Body")
+        rep.eq("et en mouvement", saut["vitesse"], 10)
+        # Les coquilles sonores, appariees a leur source par position.
+        coq = page.evaluate("""() => {
+          const c = window.__coquilles;
+          if (!c) return null;
+          return { n: c.count, appariees: c.paired,
+                   rayons: c.shells.map(s => Math.round(s.data.volume.radius)) };
+        }""")
+        if coq:
+            rep.eq("deux coquilles sonores", coq["n"], 2)
+            rep.eq("concentriques sur Giant's Deep", sorted(coq["rayons"]), [205, 498])
+            rep.at_least("appariees a leur source", coq["appariees"], 1)
+        # On part avec le sol : la vitesse initiale n'est pas zero.
+        sol = page.evaluate("""() => {
+          const p = window.__player;
+          return p ? Math.hypot(p.vel.x, p.vel.y, p.vel.z) : null;
+        }""")
+        if sol is not None:
+            rep.check("le joueur ne part pas immobile sur un sol qui tourne",
+                      sol > 0, round(sol, 3), "> 0")
+
+        # --- les lois qui n'etaient qu'importees (docs/72-poussiere.md) ---------
+        #
+        # Quatre lois ecrites, eprouvees, documentees — et presentes dans une
+        # seule ligne d'`import`. `lois.mjs` les declarait vivantes pour cette
+        # raison, jusqu'a ce qu'il cesse de compter un import pour un appel.
+        sable = page.evaluate("""() => {
+          const t = window.__tempete;
+          return { volumes: t.volumes.length, cylindres: t.cylindres.length,
+                   rayons: t.cylindres.map(c => Math.round(c.volume.radius * 10) / 10),
+                   actif: t.active };
+        }""")
+        rep.eq("une tempete de sable posee", sable["volumes"], 1)
+        rep.eq("faite de quatre cylindres", sable["cylindres"], 4)
+        rep.eq("de rayons decroissants", sable["rayons"], [31.6, 28.0, 23.8, 21.4])
+        rep.eq("et on n'est pas dedans", sable["actif"], False)
+        # Le volume compose : une entree, une sortie, quel que soit le nombre de
+        # cylindres traverses.
+        passage = page.evaluate("""() => {
+          const t = window.__tempete;
+          const c = t.cylindres;
+          const e1 = t.update(c[0].position);
+          const suivant = t.update(c[1].position);
+          const s1 = t.update([1e6, 1e6, 1e6]);
+          const s2 = t.update([1e6, 1e6, 1e6]);
+          return { e1, suivant, s1, s2, reste: t.active };
+        }""")
+        rep.eq("entrer annonce une fois", passage["e1"], "enter")
+        rep.eq("passer au cylindre suivant n'annonce rien", passage["suivant"], None)
+        rep.eq("sortir annonce une fois", passage["s1"], "exit")
+        rep.eq("et pas deux", passage["s2"], None)
+        rep.eq("l'ecran est calme en sortant", passage["reste"], False)
+        # La toile du regard : deux anneaux, retrouves dans le glTF.
+        toile = page.evaluate("""() => {
+          const t = window.__regard.toiles;
+          return { n: t.length,
+                   anneaux: t[0] ? [t[0].inner, t[0].outer] : [] };
+        }""")
+        rep.eq("un animateur de toile", toile["n"], 1)
+        rep.eq("et ses deux anneaux nommes", toile["anneaux"], ["innerWeb", "outerWeb"])
+
+        # --- ce qui bouge quand on ne le regarde pas (docs/71-quantique.md) -----
+        #
+        # Cinq objets sur la lune quantique — trois pins, une cabane, un
+        # panneau — et une tete ancienne au musee. Ni la statue ni le parent
+        # des cinq n'etaient EXTRAITS : ils etaient dans la scene depuis
+        # toujours, et le recensement ne les comptait meme pas.
+        qo = page.evaluate("""() => {
+          const q = window.__quantiques;
+          return { objets: q.objets.length, statues: q.statues.length,
+                   noms: q.objets.map(o => o.name).sort(),
+                   corps: q.objets.every(o => o.body === "QuantumMoon_Body"),
+                   morceaux: q.statues[0] ? q.statues[0].parts : [] };
+        }""")
+        rep.eq("cinq objets quantiques planaires", qo["objets"], 5)
+        rep.eq("trois pins, une cabane, un panneau", qo["noms"],
+               ["Pine_Thick", "Pine_Thick", "Pine_Thick", "QuantumCabin", "Sign01"])
+        rep.eq("tous sur la lune quantique", qo["corps"], True)
+        rep.eq("une statue au musee", qo["statues"], 1)
+        rep.eq("avec la tete ancienne", qo["morceaux"], ["AncientHeadStatue"])
+        # L'effondrement se declenche sur la TRANSITION visible -> non visible,
+        # et une place VISIBLE est refusee.
+        col = page.evaluate("""() => {
+          const o = window.__quantiques.objets[0];
+          const avant = o.collapses;
+          o.wasVisible = false;
+          const regarde = o.update(true);          // on le regarde : rien
+          const detourne = o.update(false, () => [1, 2, 3]);
+          const encore = o.update(false, () => [9, 9, 9]);
+          // Toutes les places proposees sont refusees : il reste ou il est.
+          o.update(true);
+          const place = o.position.join(",");
+          const bloque = o.update(false, () => null);
+          const apres = o.position.join(",");
+          return { regarde, detourne, encore, bloque, bouge: place !== apres,
+                   n: o.collapses - avant };
+        }""")
+        rep.eq("regarde, il ne bouge pas", col["regarde"], False)
+        rep.eq("a l'instant ou il sort du champ, il bouge", col["detourne"], True)
+        rep.eq("et pas une seconde fois hors du champ", col["encore"], False)
+        rep.eq("sans place invisible, il ne bouge pas", col["bloque"], False)
+        rep.eq("et il est reste ou il etait", col["bouge"], False)
+        # La sonde VERROUILLE : photographier a bonne distance et dans le cadre.
+        ver = page.evaluate("""() => {
+          const o = window.__quantiques.objets[1];
+          const loin = o.snapshot(500, true);
+          const horsCadre = o.snapshot(50, false);
+          const dedans = o.snapshot(50, true);
+          o.wasVisible = true;
+          const fige = o.update(false, () => [0, 0, 0]);
+          o.retrieveProbe();
+          o.wasVisible = true;
+          const libre = o.update(false, () => [0, 0, 0]);
+          return { loin, horsCadre, dedans, fige, libre };
+        }""")
+        rep.eq("photographier de loin ne verrouille pas", ver["loin"], False)
+        rep.eq("hors du cadre non plus", ver["horsCadre"], False)
+        rep.eq("dans le cadre et a portee, oui", ver["dedans"], True)
+        rep.eq("et un objet verrouille ne s'effondre plus", ver["fige"], False)
+        rep.eq("rappeler la sonde le libere", ver["libre"], True)
+
+        # --- ce qui se commande, et quand (docs/70-modes.md) --------------------
+        #
+        # `OWInput` echange un ensemble de canaux actifs a chaque changement de
+        # mode. Le portage lisait les vingt-deux en permanence.
+        mo = page.evaluate("""() => {
+          const m = window.__modes;
+          return { mode: m.mode, actifs: m.actif.size,
+                   lampe: m.permet("Flashlight"), pilote: m.permet("Autopilot") };
+        }""")
+        rep.eq("a pied, dix-huit canaux sur vingt-deux", mo["actifs"], 18)
+        rep.eq("la lampe repond", mo["lampe"], True)
+        rep.eq("et l'autopilote, non", mo["pilote"], False)
+        # La lunette ROOTE le joueur : ni marche, ni saut. C'est le controle qui
+        # se sent le plus, et le portage laissait marcher.
+        page.mouse.move(640, 360)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(300)
+        lun = page.evaluate("""() => {
+          const m = window.__modes;
+          return { mode: m.mode, n: m.actif.size, marche: m.permet("Move Z"),
+                   saut: m.permet("Jump"), zoom: m.permet("Zoom In") };
+        }""")
+        rep.eq("a la lunette, six canaux", lun["n"], 6)
+        rep.eq("on ne marche plus", lun["marche"], False)
+        rep.eq("on ne saute plus", lun["saut"], False)
+        rep.eq("et le zoom repond", lun["zoom"], True)
+        # Et la MEME touche ne fait plus rien : le filtre vit dans `Commandes`.
+        rep.eq("la touche de marche ne rend plus rien", page.evaluate(
+            "() => window.__cmds.axis('Move Z', { keys: { KeyW: true } })"), 0)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(300)
+        rep.eq("lunette refermee, on remarche", page.evaluate(
+            "() => window.__cmds.axis('Move Z', { keys: { KeyW: true } })"), 1)
+        rep.eq("et on est rendu a dix-huit canaux",
+               page.evaluate("() => window.__modes.actif.size"), 18)
+
+        # --- s'asseoir (docs/69-assise.md) --------------------------------------
+        #
+        # Les quatre `PlayerAttachPoint` : le portage ne s'asseyait nulle part,
+        # et `attachPoints` etait ecrit, eprouve, et appele par personne.
+        assise = page.evaluate("""() => {
+          const a = window.__assise.points;
+          const profils = a.points.map(p => [p.name, p.lockPlayerTurning,
+                                             p.matchRotation, p.centerCamera].join("/"));
+          return { n: a.count, profils, cibles: window.__assise.cibles.length };
+        }""")
+        rep.eq("quatre points d'accrochage", assise["n"], 4)
+        rep.eq("dont le poste de pilotage, qui prend tout",
+               "FlightConsole/true/true/true" in assise["profils"], True)
+        rep.eq("et l'ascenseur, qui ne prend rien",
+               assise["profils"].count("AttachPoint/false/false/false"), 1)
+        rep.eq("deux verrouillages de camera poses", assise["cibles"], 2)
+        # La duree du demi-tour est un ANGLE divise par un taux : dos tourne au
+        # siege, 1,8 s ; de face, aucune. C'est ce que le portage n'avait pas.
+        duree = page.evaluate("""() => {
+          const a = window.__assise.points;
+          const p = a.points.find(x => x.name === "FlightConsole");
+          p.follow({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+          p.attach({ position: [0, 0, -1], rotation: [0, 1, 0, 0] }, 0);
+          const dos = p.turnDuration;
+          p.detach();
+          p.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+          const face = p.turnDuration;
+          // On se leve avec la vitesse du siege, jamais zero.
+          const leve = p.detach([0, 0, 200]);
+          p.follow(null);
+          a.current = null;
+          a.drain();
+          return { dos: Math.round(dos * 100) / 100, face, emporte: leve.velocity[2] };
+        }""")
+        # ET ON S'ASSIED POUR DE VRAI, dans la boucle de rendu.
+        #
+        # Les controles ci-dessus appellent la loi a la main ; ils ne touchent
+        # jamais au chemin que la boucle emprunte. Une faute de PORTEE y a
+        # dormi un lot entier — `siegeVivant()` lisait le repere ancre depuis
+        # `boot()`, ou il n'existe pas — parce qu'aucun controle ne MONTAIT
+        # dans le vaisseau (docs/71-quantique.md).
+        assis = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return { saute: true };
+          const avant = { boarded: s.boarded };
+          s.boarded = true;
+          return { avant, saute: false };
+        }""")
+        if not assis["saute"]:
+            page.wait_for_timeout(800)
+            rep.eq("monter dans le vaisseau ne leve pas", _ERREURS_PAGE[:2], [])
+            rep.eq("et le moteur tourne toujours",
+                   page.evaluate("() => typeof window.__visee"), "object")
+            # Le vocabulaire des modes (docs/86-annonces-de-mode.md) : le
+            # portage faisait deja la bonne transition sous son propre nom, il
+            # la dit maintenant dans celui du jeu.
+            rep.eq("monter au poste annonce EnterFlightConsole",
+                   page.evaluate("() => window.__modes.events.slice(-1)"),
+                   ["EnterFlightConsole"])
+            rep.eq("et l'autopilote repond au poste",
+                   page.evaluate("() => window.__modes.permet('Autopilot')"), True)
+            page.evaluate("() => { window.__shipRef.boarded = false;"
+                          "  window.__assise.points.detach([0,0,0]);"
+                          "  window.__assise.points.drain(); }")
+            page.wait_for_timeout(300)
+
+        rep.eq("dos tourne, le demi-tour dure 1,8 s", duree["dos"], 1.8)
+        rep.eq("de face, aucune duree", duree["face"], 0)
+        rep.eq("et on se leve avec la vitesse du siege", duree["emporte"], 200)
+        # Le verrouillage de camera, RELU dans l'IL : le corps tourne en lacet
+        # a une vitesse proportionnelle a l'ecart, et le champ suit 500/d.
+        verrou = page.evaluate("""() => {
+          const v = window.__assise.verrou;
+          v.lockOn({ name: "test" }, { followRate: 2 });
+          const r = v.update(0.5, [10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 20, 70);
+          const rompu = v.breakLock();
+          return { yaw: r.yaw, fov: r.fov, snap: rompu.snapSeconds,
+                   apres: v.update(1, [10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 20, 70) };
+        }""")
+        rep.eq("le lacet vaut l'ecart fois le taux fois le temps", verrou["yaw"], 90)
+        rep.eq("et le champ, cinq cents sur la distance", verrou["fov"], 25)
+        rep.eq("la rupture ramene le champ en deux secondes", verrou["snap"], 2)
+        rep.eq("et plus rien ne suit", verrou["apres"], None)
+
+        # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
+        #
+        # Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME une seconde,
+        # et relacher annule. Ce controle mesure l'ETAT du modele, pas un vol —
+        # faire decoller le vaisseau demanderait d'y monter, et le temps simule
+        # d'une image plafonne a 0,05 s.
+        allumage = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return null;
+          const avant = { landed: s.landed, igniting: s.igniting };
+          s.landed = true;
+          const t0 = s.ignition(0.1, 1);         // l'appui allume
+          const debut = s.events.slice();
+          const t1 = s.ignition(0.5, 1);         // pendant, rien
+          const t2 = s.ignition(0.5, 1);         // la seconde passee, ca pousse
+          const fin = s.events.slice();
+          const t3 = s.ignition(0.1, 0);         // relacher, hors allumage
+          s.landed = avant.landed; s.igniting = avant.igniting;
+          s.ignitionTime = 0;
+          return { duree: s.ignitionDuration, t0, t1, t2, t3, debut, fin };
+        }""")
+        if allumage:
+            rep.eq("une seconde d'allumage", allumage["duree"], 1)
+            rep.eq("l'appui ne pousse pas encore", allumage["t0"], 0)
+            rep.eq("et l'annonce", allumage["debut"], ["StartShipIgnition"])
+            rep.eq("pendant l'allumage non plus", allumage["t1"], 0)
+            rep.eq("la seconde passee, ca pousse", allumage["t2"], 1)
+            rep.eq("et l'allumage est complet", allumage["fin"], ["CompleteShipIgnition"])
+
+        # --- l'onde de la lunette (docs/65-onde.md) -----------------------------
+        #
+        # `DrawSoundWave` : cinq cents points, un par image, dans une boite du
+        # coin de l'ecran. Au repos la ligne est plate au milieu ; elle ne se
+        # trace que lunette ouverte, et la lunette GROSSIT avec le champ.
+        rep.eq("l'onde est rangee lunette baissee",
+               page.evaluate("() => document.querySelector('.ow-soundwave').hidden"),
+               True)
+        page.mouse.move(640, 360)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(2500)
+        onde = page.evaluate(
+            "() => ({ cachee: document.querySelector('.ow-soundwave').hidden,"
+            "   largeur: document.querySelector('.ow-soundwave').width,"
+            "   lunette: window.__tools.telescope.active,"
+            "   echelle: Math.round(window.__mains.enMain.get('telescopegui')"
+            "              .racine.scaling.x * 100) / 100 })")
+        rep.eq("la lunette est ouverte", onde["lunette"], True)
+        rep.eq("l'onde se montre", onde["cachee"], False)
+        rep.eq("cinq cents points", onde["largeur"], 500)
+        # `TelescopeGUI.LateUpdate` : echelle = champ / 15. En entrant, le
+        # champ vise 33,33 degres et le suivi met deux secondes a l'atteindre —
+        # l'echelle est donc entre celle du repos (70/15) et celle de l'entree.
+        rep.check("la lunette grossit avec le champ",
+                  1 < onde["echelle"] <= 70 / 15 + 0.01, onde["echelle"],
+                  "entre 1 et 4,67")
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(1500)
+        rep.eq("et l'onde se range avec elle",
+               page.evaluate("() => document.querySelector('.ow-soundwave').hidden"),
+               True)
+
+        # --- ce qu'on tient dans la main (docs/64-mains.md) ---------------------
+        #
+        # Le baton a guimauve et la lunette pendent sous `PlayerCamera` dans le
+        # build : l'export partait des corps celestes, et aucun des deux n'etait
+        # porte. Le baton porte les quatre seuls clips qui ne bouclent pas.
+        mains = page.evaluate("""() => {
+          const m = window.__mains, b = m.baton;
+          const objet = m.enMain.get('marshmallowstick');
+          return { charges: [...m.enMain.keys()].sort(),
+                   dehors: b.out, clip: b.clip,
+                   clips: objet ? [...objet.parNom.keys()].sort() : [],
+                   lumieres: objet ? objet.lumieres.length : 0,
+                   maillages: objet ? objet.meshes.length : 0 };
+        }""")
+        rep.eq("les deux objets en main sont charges", mains["charges"],
+               ["marshmallowstick", "telescopegui"])
+        rep.eq("le baton porte ses quatre clips", mains["clips"],
+               ["PullOut", "PutBack", "Therm", "idle"])
+        # Le glTF n'emporte pas de lumieres : ces deux-la sont posees par le
+        # moteur, aux valeurs du prefabrique (`STICK_LIGHTS`).
+        rep.eq("et ses deux lumieres", mains["lumieres"], 2)
+        rep.at_least("avec de la geometrie", mains["maillages"], 5)
+        rep.eq("le baton commence dehors", mains["dehors"], True)
+        # `V` le range, et le build joue alors `PutBack`.
+        page.keyboard.press("KeyV")
+        page.wait_for_timeout(600)
+        range_ = page.evaluate("""() => { const b = window.__mains.baton;
+          return { dehors: b.out, clip: b.clip, lumieres: b.lights }; }""")
+        rep.eq("V range le baton", range_["dehors"], False)
+        rep.eq("et joue PutBack", range_["clip"], "PutBack")
+        rep.eq("les lumieres s'eteignent", range_["lumieres"], False)
+        page.keyboard.press("KeyV")
+        page.wait_for_timeout(600)
+        rep.eq("V le ressort", page.evaluate("() => window.__mains.baton.out"), True)
+
+        # --- viser un referentiel (docs/62-visee.md) ----------------------------
+        #
+        # La cible se REGARDE : un clic gauche verrouille ce qu'on a devant soi,
+        # un second sur la meme la relache. Le portage ne la choisissait que
+        # dans la carte, et les trois canaux de vol du build ne pilotaient rien.
+        page.mouse.move(640, 360)
+        page.mouse.down(button="left"); page.mouse.up(button="left")
+        page.wait_for_timeout(600)
+        visee = page.evaluate("""() => { const l = window.__visee;
+          return { cible: l.current ? l.current.name : null,
+                   crochets: Math.round(l.bracket * 100) / 100,
+                   carte: window.__map.selected ? window.__map.selected.name : null };
+        }""")
+        rep.check("le clic gauche vise un referentiel", visee["cible"] is not None,
+                  visee["cible"], "!= None")
+        rep.eq("et la carte tient la meme cible", visee["carte"], visee["cible"])
+        rep.eq("les crochets se sont fermes", visee["crochets"], 0)
+        page.mouse.down(button="left"); page.mouse.up(button="left")
+        page.wait_for_timeout(600)
+        rep.eq("un second clic la relache",
+               page.evaluate("() => window.__visee.current"), None)
+        rep.eq("et les crochets se rouvrent",
+               page.evaluate("() => Math.round(window.__visee.bracket)"), 1)
 
         # --- coupure passe-bas des emetteurs -------------------------------------
         rep.at_least("sources reliees a un emetteur",
@@ -748,13 +1772,14 @@ def run(url, heavy, profil=None, zip_path=None):
           t.onLook = (dx) => { tourne += dx; };
 
           // manche gauche pousse a fond vers l'avant : axe sature, et le cran
-          // de course s'allume comme si Maj etait tenue
+          // de course MONTE, depuis que l'accelerateur a disparu : le build
+          // n'en a pas, et la majuscule y est `Move Up` (docs/61-commandes.md)
           send('.tc-zone-move', 'pointerdown', 200, 500, 1);
           send('.tc-zone-move', 'pointermove', 200, 400, 1);
           const avant = +t.axes.forward.toFixed(2);
-          const course = t.axes.boost;
+          const course = t.axes.up;
           send('.tc-zone-move', 'pointerup', 200, 400, 1);
-          const relache = t.axes.forward, apresCourse = t.axes.boost;
+          const relache = t.axes.forward, apresCourse = t.axes.up;
 
           // manche droit tenu a fond : la camera tourne SANS que le doigt
           // bouge encore — c'est une vitesse, en pixels par seconde
@@ -808,9 +1833,9 @@ def run(url, heavy, profil=None, zip_path=None):
                   pouceGauche, pouceDroit};
         }""")
         rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
-        rep.eq("a fond devant : le cran de course prend", tactile["course"], True)
+        rep.eq("a fond devant : le cran de course fait MONTER", tactile["course"], True)
         rep.eq("manche relache : axe a zero", tactile["relache"], 0)
-        rep.eq("manche relache : course finie", tactile["apresCourse"], False)
+        rep.eq("manche relache : la montee s'arrete", tactile["apresCourse"], False)
         rep.eq("un manche par pouce", tactile["manches"], 2)
         rep.eq("empreinte sous chaque pouce", tactile["empreintes"], 2)
         rep.eq("glisser au manche droit garde son effet direct",
@@ -827,14 +1852,17 @@ def run(url, heavy, profil=None, zip_path=None):
                "tc-zone-move" in tactile["pouceGauche"], True)
         rep.eq("le pouce droit atteint sa zone",
                "tc-zone-look" in tactile["pouceDroit"], True)
+        # La disposition suit les canaux du build : plus d'accelerateur (il
+        # n'existe pas), une DESCENTE au sac dorsal (elle existe et manquait),
+        # et le saut a sa propre place — `Jump` et `Move Up` sont deux canaux.
         rep.eq("la manette en vol", tactile["enVol"],
-               ["Telescope", "Sonde", "Carte du systeme", "Ordinateur de bord",
-                "Affichage", "Menu", "Monter", "Accelerer", "Lampe",
-                "Interagir, parler"])
+               ["Telescope", "Sonde", "Carte du systeme", "Lampe",
+                "Ordinateur de bord", "Affichage", "Menu",
+                "Monter", "Descendre", "Sauter", "Interagir, parler"])
         rep.eq("un menu la remplace par la croix et les deux reponses",
                tactile["enMenu"],
                ["Haut", "Gauche", "Droite", "Bas", "Valider", "Retour"])
-        rep.eq("boutons tactiles en tout", tactile["boutons"], 18)
+        rep.eq("boutons tactiles en tout", tactile["boutons"], 19)
 
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------
@@ -860,6 +1888,267 @@ def run(url, heavy, profil=None, zip_path=None):
                          page.evaluate("() => window.__lod.meshLOD.hidden"), 1)
             rep.at_least("maillages examines par image",
                          page.evaluate("() => window.__lod.meshLOD.tested"), 1)
+
+        # --- les seuils et les zones sans soleil (docs/83-seuils.md) ------------
+        #
+        # `DarkZone` n'etait pas `SunlessZone` : deux classes, deux evenements,
+        # deux auditeurs. L'ambiance ne s'eteignait dans aucune grotte.
+        seuils = page.evaluate("""() => {
+          const L = window.__lots;
+          if (!L || !L.zonesSansSoleil) return null;
+          const z = L.zonesSansSoleil;
+          return {
+            zones: z.zones.length,
+            portes: z.portes.length,
+            contenances: z.contenants.length,
+            compte: z.count,
+            teinte: L.etat.secteurAmbiant,
+          };
+        }""")
+        if seuils:
+            rep.eq("zones sans soleil montees", seuils["zones"], 5)
+            rep.eq("portes suivies", seuils["portes"], 8)
+            rep.eq("et une seule zone qui vaut par contenance",
+                   seuils["contenances"], 1)
+            # Debout au village, dehors : aucune zone franchie.
+            rep.eq("au village, il fait jour", seuils["compte"], 0)
+            # Timber Hearth porte `_ambientLight = 1` : le bleu de nuit.
+            rep.eq("et le secteur est en bleu de nuit", seuils["teinte"], 1)
+            rep.eq("la lumiere ambiante en porte la teinte",
+                   page.evaluate("() => { const s = window.__scene ||"
+                                 " BABYLON.Engine.LastCreatedScene;"
+                                 " const a = s.lights.find(l => l.name === 'amb');"
+                                 " return a ? Math.round(a.diffuse.b * 1000) /"
+                                 " Math.round(a.diffuse.r * 1000) > 1 : null; }"), True)
+
+        # --- les zones d'ambiance et leurs seuils (docs/84-ambiance.md) --------
+        #
+        # Six des dix-sept zones n'ont pas de collider. L'extraction leur en
+        # fabriquait un avec la premiere boite d'enfant trouvee : la grotte aux
+        # quatre portes se reduisait a UNE porte de onze metres.
+        amb = page.evaluate("""() => {
+          const a = window.__audio && window.__audio.ambience;
+          if (!a) return null;
+          const z = a.zones;
+          return {
+            zones: z.length,
+            sansForme: z.filter(x => !x.volume).length,
+            portes: z.reduce((n, x) => n + (x.entryways || []).length, 0),
+            grotte: (z.find(x => x.name === "CaveVolume01") || {}).entryways
+                      ? z.find(x => x.name === "CaveVolume01").entryways.length : -1,
+            couches: a.playing.map(l => l.name).sort(),
+          };
+        }""")
+        if amb:
+            rep.eq("zones d'ambiance montees", amb["zones"], 17)
+            rep.eq("dont six sans forme propre", amb["sansForme"], 6)
+            rep.eq("quatorze seuils leur sont joints", amb["portes"], 14)
+            rep.eq("et la grotte aux quatre portes les a toutes", amb["grotte"], 4)
+            # Debout au village : l'atmosphere et la musique du village, pas la
+            # grotte d'en face.
+            rep.check("au village, aucune ambiance de grotte ne joue",
+                      all("Cave" not in (n or "") for n in amb["couches"]),
+                      amb["couches"], "aucune Cave*")
+            rep.at_least("et au moins une couche sonne", len(amb["couches"]), 1)
+
+        # --- ce que les seuils commandent encore (docs/85-chambre.md) ----------
+        #
+        # Les deux derniers seuils orphelins : la chambre en apesanteur du
+        # village, et le champ de la station meteo. Ni l'une ni l'autre n'a de
+        # collider — le portage les ecartait toutes les deux.
+        chambre = page.evaluate("""() => {
+          const L = window.__lots;
+          if (!L || !L.presencesZeroG) return null;
+          const sans = L.presencesZeroG.filter(p => !p.zone.volume);
+          return {
+            champs: L.presencesZeroG.length,
+            sansForme: sans.length,
+            portesChambre: sans.length ? sans[0].portes.length : -1,
+            champsParSeuils: L.champsParSeuils.length,
+            portesMeteo: L.champsParSeuils.length
+              ? L.champsParSeuils[0].portes.length : -1,
+            meteoPresente: L.champsParSeuils.length
+              ? !!L.champsParSeuils[0].zone.present : null,
+          };
+        }""")
+        if chambre:
+            rep.eq("champs d'apesanteur montes", chambre["champs"], 4)
+            rep.eq("dont un sans forme", chambre["sansForme"], 1)
+            rep.eq("et il a sa porte", chambre["portesChambre"], 1)
+            rep.eq("un champ directionnel par seuils",
+                   chambre["champsParSeuils"], 1)
+            rep.eq("avec ses deux portes", chambre["portesMeteo"], 2)
+            # Au village de Timber Hearth, on n'est pas dans la station meteo
+            # de Brittle Hollow.
+            rep.eq("et on n'y est pas", chambre["meteoPresente"], False)
+
+        # --- la vue d'atterrissage (docs/87-atterrissage.md) -------------------
+        #
+        # Le canal `Landing Camera` au poste de pilotage : le regard bascule a
+        # l'appui, la camera 0,45 s plus tard, et le manche change de main.
+        page.evaluate("() => { window.__shipRef.boarded = true; }")
+        page.wait_for_timeout(400)
+        att0 = page.evaluate("""() => {
+          const a = window.__atterrissage;
+          return a ? { on: a.on, roule: a.rollByDefault, flip: a.flipRollFactor,
+                       mode: a.mode } : null;
+        }""")
+        if att0:
+            rep.eq("au poste, la vue d'atterrissage est fermee", att0["on"], False)
+            rep.eq("le manche lace", att0["roule"], False)
+            rep.eq("et le roulis n'est pas inverse", att0["flip"], 1)
+            page.keyboard.press("KeyR")
+            page.wait_for_timeout(200)
+            att1 = page.evaluate("() => ({ on: window.__atterrissage.on,"
+                                 " transition: window.__atterrissage.transition,"
+                                 " roule: window.__atterrissage.rollByDefault,"
+                                 " flip: window.__atterrissage.flipRollFactor })")
+            # Les 0,45 s de transition ne sont PAS observables ici : sous
+            # swiftshader une image peut durer une seconde, et la premiere
+            # image apres l'appui tombe deja au-dela du delai. Ce que ce
+            # controle mesure est donc ce qui est synchrone de l'appui — les
+            # commandes — et le delai lui-meme est garde par tests/09-jeu.mjs.
+            rep.eq("le manche roule des l'appui", att1["roule"], True)
+            rep.eq("et le roulis est inverse", att1["flip"], -1)
+            page.wait_for_timeout(900)
+            att2 = page.evaluate("""() => {
+              const a = window.__atterrissage;
+              return { on: a.on, annonces: a.events.slice(-2),
+                       mode: window.__modes.mode };
+            }""")
+            rep.eq("passe le delai, la vue s'ouvre", att2["on"], True)
+            rep.eq("avec les deux annonces du build", att2["annonces"],
+                   ["SwitchActiveCamera", "EnterLandingView"])
+            rep.eq("et le jeu de commandes change", att2["mode"], "atterrissage")
+            page.keyboard.press("KeyR")
+            page.wait_for_timeout(300)
+            att3 = page.evaluate("() => ({ on: window.__atterrissage.on,"
+                                 " roule: window.__atterrissage.rollByDefault,"
+                                 " flip: window.__atterrissage.flipRollFactor })")
+            rep.eq("ressortir la referme", att3["on"], False)
+            rep.eq("le manche relace", att3["roule"], False)
+            rep.eq("et le roulis reprend son sens", att3["flip"], 1)
+        page.evaluate("() => { window.__shipRef.boarded = false; }")
+        page.wait_for_timeout(300)
+
+        # --- la boucle, lue et non devinee (docs/88-boucle.md) ----------------
+        boucle = page.evaluate("""() => {
+          const l = window.__loop;
+          if (!l) return null;
+          return { minutes: Math.round(l.duration / 60),
+                   prevenue: l.preventSupernova,
+                   annonces: l.events.slice(0, 2),
+                   codes: !!window.__pdata.knows("knowsLaunchCodes") };
+        }""")
+        if boucle:
+            rep.eq("la boucle dure dix-huit minutes", boucle["minutes"], 18)
+            rep.eq("la premiere annonce est celle du build",
+                   boucle["annonces"][:1], ["StartOfTimeLoop"])
+            # `TimeLoop.Start` : la prevention suit les codes de lancement, et
+            # le profil des controles les a appris — les deux doivent donc
+            # s'accorder, quel que soit l'etat du profil.
+            rep.eq("la fin des temps est suspendue si et seulement si les codes"
+                   " sont inconnus", boucle["prevenue"], not boucle["codes"])
+
+        # --- ce que « pose » veut dire (docs/89-pose.md) ----------------------
+        #
+        # `padLanding` etait ecrite, eprouvee, et appelee par personne : le
+        # portage declarait « pose » au contact au sol, sans exiger que les
+        # trois capteurs touchent le meme corps ni qu'on soit assez lent.
+        pose = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return null;
+          return { pose: s.onPad, corps: s.padBody,
+                   vitesse: Math.round(s.speed * 100) / 100,
+                   annonces: s.pads.events.slice(0, 2) };
+        }""")
+        if pose:
+            # Le vaisseau commence pose sur la piste de Timber Hearth.
+            rep.eq("au demarrage, le vaisseau est pose", pose["pose"], True)
+            rep.at_most("et il ne bouge pas", pose["vitesse"], 5)
+            rep.eq("le toucher s'est annonce", pose["annonces"][:1],
+                   ["ShipTouchdown"])
+            # Le lancer a plus de cinq unites : on ne se pose plus, on glisse.
+            lance = page.evaluate("""() => {
+              const s = window.__shipRef;
+              s.vel.x += 40;
+              return true;
+            }""")
+            page.wait_for_timeout(700)
+            apres = page.evaluate("() => ({ pose: window.__shipRef.onPad,"
+                                 " annonces: window.__shipRef.pads.events.slice(-1) })")
+            rep.eq("lance a quarante unites, il ne l'est plus", apres["pose"], False)
+            rep.eq("et le decollage s'annonce", apres["annonces"], ["ShipTakeoff"])
+
+        # --- la sphere de l'observatoire (docs/91-remise-a-zero.md) -----------
+        raz = page.evaluate("""() => {
+          const r = window.__remiseAZero;
+          if (!r) return null;
+          return { forme: !!r.volume, rayon: r.volume && r.volume.volume
+                     ? r.volume.volume.radius : null,
+                   armee: r.armed, tiree: r.fired,
+                   codes: !!window.__pdata.knows("knowsLaunchCodes"),
+                   tour: window.__loop.loopCount };
+        }""")
+        if raz:
+            rep.eq("la sphere de remise a zero est montee", raz["forme"], True)
+            rep.eq("et elle mesure 5,196", raz["rayon"], 5.196)
+            # `OnStartOfTimeLoop` : armee au PREMIER tour seulement, et
+            # seulement tant qu'on ignore les codes. Le profil des controles
+            # les connait, donc elle doit etre desarmee.
+            rep.eq("armee si et seulement si premier tour sans les codes",
+                   raz["armee"], raz["tour"] + 1 == 1 and not raz["codes"])
+
+        # --- la tour de lancement, de bout en bout (docs/92-tour.md) ----------
+        tour = page.evaluate("""() => {
+          const t = window.__tour;
+          if (!t) return null;
+          return { bornes: t.bornesTour.length,
+                   declencheurs: t.declencheursTour.length,
+                   cabines: t.ascenseurs.length,
+                   ouverte: t.ascenseurs.some(a => a.unlocked),
+                   servie: t.terminal.used };
+        }""")
+        if tour:
+            rep.eq("une borne de lancement montee", tour["bornes"], 1)
+            rep.eq("un declencheur d'en haut", tour["declencheurs"], 1)
+            rep.eq("une cabine", tour["cabines"], 1)
+            # `LaunchElevatorController.Start` ferme les commandes : tant que la
+            # borne n'a pas ete pressee, la cabine ne repond pas.
+            rep.eq("la cabine nait verrouillee", tour["ouverte"], False)
+            rep.eq("et la borne n'a pas servi", tour["servie"], False)
+            # La presser sans les codes refuse ; avec, elle ouvre la cabine.
+            ouvert = page.evaluate("""() => {
+              const t = window.__tour, d = window.__pdata;
+              const avant = d.knowsLaunchCodes;
+              d.knowsLaunchCodes = false;
+              const refus = t.terminal.pressInteract(false);
+              d.knowsLaunchCodes = true;
+              const ok = t.terminal.pressInteract(true);
+              if (ok === "activate") t.ascenseurs.forEach(a => a.activateControls());
+              d.knowsLaunchCodes = avant;
+              return { refus, ok, ouverte: t.ascenseurs.some(a => a.unlocked) };
+            }""")
+            rep.eq("sans les codes, la borne refuse", ouvert["refus"], "refuse")
+            rep.eq("avec, elle actionne la tour", ouvert["ok"], "activate")
+            rep.eq("et la cabine repond", ouvert["ouverte"], True)
+
+        # --- les deux sensibilites (docs/93-commandes.md) ---------------------
+        rep.eq("regler la sensibilite de vol change le facteur de vol",
+               page.evaluate("""() => {
+                 const s = window.__gui.settings;
+                 const avant = s.values.flightSensitivity;
+                 s.values.flightSensitivity = 10;
+                 const double = s.flightFactor();
+                 s.values.flightSensitivity = 1;
+                 const petit = s.flightFactor();
+                 s.values.flightSensitivity = avant;
+                 return [double, Math.round(petit * 100) / 100];
+               }"""), [2, 0.2])
+
+        # --- les deux tables de manette (docs/94-manette.md) ------------------
+        rep.eq("les deux tables de manette s'accordent dans la page",
+               page.evaluate("() => window.__padAccord"), [])
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()

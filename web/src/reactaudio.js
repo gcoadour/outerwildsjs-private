@@ -280,3 +280,106 @@ export function eventAudio(audio) {
     },
   };
 }
+
+// --- ce que l'interface fait entendre (docs/77-sons.md) --------------------
+//
+// @lit UIAudioController, RepairAudioController, SpacesuitAudioController
+//
+// Huit sons d'interface, tous joues en `PlayOneShot(clip, 0.5)` — le meme
+// demi-volume partout, ce qui est une decision et pas un hasard : ces sons ne
+// doivent jamais couvrir le monde.
+//
+// Le portage n'en jouait AUCUN. Avancer un dialogue, le finir, viser un
+// referentiel, le relacher, allumer sa lampe : tout cela se faisait en silence,
+// et le silence d'une interface se remarque moins qu'un son manquant dans le
+// monde — c'est pour cela que ce lot est arrive tard.
+//
+// DEUX SONS POUR VISER, ET DEUX POUR L'ETEINDRE. `_targetReferenceFrame` et
+// `_untargetReferenceFrame` sont deux clips differents : verrouiller et lacher
+// ne s'entendent pas pareil. La lampe, elle, partage `_switch01` dans les deux
+// sens — un interrupteur fait le meme bruit a l'aller et au retour.
+
+/** `PlayOneShot(clip, 0.5)` : le demi-volume de toute l'interface. */
+export const UI_VOLUME = 0.5;
+
+/** L'evenement du build, et le champ de clip qu'il joue. */
+export const UI_SOUNDS = {
+  AdvanceText: "_advanceTextClip",
+  ExitDialogueMode: "_finishTextClip",
+  PlayAffirmativeUISound: "_affirmative01",
+  PlayNegativeUISound: "_negative01",
+  PlaySuitWarningSound: "_jetpackWarning",
+  TargetReferenceFrame: "_targetReferenceFrame",
+  UntargetReferenceFrame: "_untargetReferenceFrame",
+  TurnOnFlashlight: "_switch01",
+  TurnOffFlashlight: "_switch01",
+};
+
+/** `OWAudioSource.FadeIn/FadeOut(0.2)` de la boucle de reparation. */
+export const REPAIR_FADE = 0.2;
+
+/**
+ * Les sons d'interface, et ceux de la reparation.
+ *
+ * ON NE REPARE PAS PAREIL DANS LE VIDE. `RepairAudioController` choisit entre
+ * `_repairLoop` et `_spaceRepairLoop` — puis entre `_repairFinish` et
+ * `_spaceRepairFinish` — selon que le detecteur d'oxygene trouve quelque chose.
+ * Reparer sa coque en apesanteur, sans air, ne fait pas le meme bruit que la
+ * reparer posee au village, et le build a enregistre les deux.
+ */
+export class UISounds {
+  constructor(events = null) {
+    this.events = events;
+    this.loop = null;      // le clip de boucle en cours, ou null
+  }
+
+  /** Le fichier d'un champ de clip sur un script donne, ou null. */
+  clip(script, champ, body = null) {
+    if (!this.events) return null;
+    const e = this.events.of(script, body);
+    return (e && e.clips && e.clips[champ]) || null;
+  }
+
+  /**
+   * @returns {{file:string, volume:number}|null} le coup a jouer, ou null
+   */
+  fire(evenement) {
+    const champ = UI_SOUNDS[evenement];
+    if (!champ) return null;
+    const f = this.clip("UIAudioController", champ);
+    return f ? { file: f, volume: UI_VOLUME } : null;
+  }
+
+  /**
+   * La boucle de reparation : elle MONTE, elle ne claque pas.
+   *
+   * @param oxygene le detecteur d'oxygene trouve-t-il quelque chose
+   * @returns {{file:string, fade:number}|null}
+   */
+  startRepair(oxygene) {
+    const f = this.clip("RepairAudioController",
+                        oxygene ? "_repairLoop" : "_spaceRepairLoop");
+    this.loop = f || null;
+    return f ? { file: f, fade: REPAIR_FADE } : null;
+  }
+
+  stopRepair() {
+    const f = this.loop;
+    this.loop = null;
+    return f ? { file: f, fade: REPAIR_FADE } : null;
+  }
+
+  /** La fin : la boucle s'ARRETE net, et un coup la remplace. */
+  finishRepair(oxygene) {
+    this.loop = null;
+    const f = this.clip("RepairAudioController",
+                        oxygene ? "_repairFinish" : "_spaceRepairFinish");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** `OnRefillOxygen` : le plein d'oxygene s'entend, et a plein volume. */
+  refillOxygen() {
+    const f = this.clip("SpacesuitAudioController", "_refillOxygenClip");
+    return f ? { file: f, volume: 1 } : null;
+  }
+}

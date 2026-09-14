@@ -57,7 +57,42 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
-- [`59-etat.md`](59-etat.md) — **où en est le portage : 1 356 des 1 390 instances du build sont lues (97,6 %), et les 34 restantes sont nommées**
+- [`94-manette.md`](94-manette.md) — **deux tables pour une manette, et un champ qui était un commentaire déguisé en donnée**
+- [`93-commandes.md`](93-commandes.md) — **quatre lois de commande qui ne commandaient rien, dont une sensibilité qu'on pouvait régler sans rien sentir**
+- [`92-tour.md`](92-tour.md) — **la tour de lancement : la cabine était portée, la borne et le déclencheur manquaient, et rien ne bougeait**
+- [`91-remise-a-zero.md`](91-remise-a-zero.md) — **armée quand on ne sait pas, elle ne tire que quand on sait : le geste qui fait commencer la partie**
+- [`90-methodes.md`](90-methodes.md) — **le dénominateur qui ne voyait pas les méthodes : de zéro à trente-cinq lois mortes, sans qu'une ligne ait régressé**
+- [`89-pose.md`](89-pose.md) — **une loi écrite, commentée, testée et jamais appelée : trois bugs en série sous ce que « posé » veut dire**
+- [`88-boucle.md`](88-boucle.md) — **trois nombres écrits de mémoire, deux faux : dix-huit minutes, une onde cubique, et une fin des temps qui attend**
+- [`87-atterrissage.md`](87-atterrissage.md) — **la caméra qui regarde le sol, le manche qui change de main, et la poussée qui refuse de vous mettre en orbite**
+- [`86-annonces-de-mode.md`](86-annonces-de-mode.md) — **dix-neuf chaînes pour une mécanique déjà portée : faire la bonne chose sans jamais dire celle du jeu**
+- [`85-chambre.md`](85-chambre.md) — **les deux dernières mécaniques que le portage écartait en le disant : la chambre en apesanteur et le champ de la station météo**
+- [`84-ambiance.md`](84-ambiance.md) — **les zones sonores n'ont pas de forme non plus : une grotte à quatre portes réduite à une seule, et un test qui l'a bénie**
+- [`83-seuils.md`](83-seuils.md) — **les seuils : une grotte n'a pas de forme, elle a des portes — et l'ambiance ne s'éteignait dans aucune**
+- [`82-secteur-majeur.md`](82-secteur-majeur.md) — **le secteur majeur actif : une question, cinq réponses inventées — et la minicarte qui s'éteint aux trois endroits où l'on est perdu**
+- [`81-invulnerable.md`](81-invulnerable.md) — **on ne peut pas mourir avant d'être monté dans le vaisseau : une mécanique entière, invisible, et jamais portée**
+- [`80-invites.md`](80-invites.md) — **les invites qui ne devaient pas être là, et un contrôle qui gardait le bug**
+- [`79-alignement.md`](79-alignement.md) — **perdre la gravité vous prend les commandes : 50°/s, et la toute première image est alignée quoi qu'il arrive**
+- [`78-modele.md`](78-modele.md) — **le vaisseau miniature vole, et l'enfant compte : cinq crashs valent un reproche, et il passe avant la réussite**
+- [`77-sons.md`](77-sons.md) — **les huit sons que l'interface ne faisait pas, et une réparation qui ne s'entend pas pareil dans le vide**
+- [`76-proximite.md`](76-proximite.md) — **le tableau de bord ne parle que de près, le tutoriel ne se rejoue pas, et un garde-fou qui n'avait jamais parlé**
+- [`75-chaleur.md`](75-chaleur.md) — **la chaleur qui n'existait pas : un motif qui ne trouvait rien, une guimauve qui ne cuisait jamais, et la liste des lois fermée**
+- [`74-etalons.md`](74-etalons.md) — **les étalons, les lois vides, et une question trop simple : un compte qui ne distingue pas « pas fait » de « rien à faire »**
+- [`73-passages.md`](73-passages.md) — **trois passages de Dark Bramble, deux coquilles sonores, et un sol qui tourne sous les pieds au premier instant**
+- [`72-poussiere.md`](72-poussiere.md) — **quatre lois qui n'étaient qu'importées : la poussière de vitesse, le grillage qui se rompt, la toile qui tourne, la tempête de sable**
+- [`71-quantique.md`](71-quantique.md) — **ce qui bouge quand on ne le regarde pas : cinq objets sur la lune, une statue au musée, et un import qui comptait pour un appel**
+- [`70-modes.md`](70-modes.md) — **ce qui se commande, et quand : dix ensembles de canaux, une case qui n'est pas une pile, et un mort qui ne commande rien**
+- [`69-assise.md`](69-assise.md) — **s'asseoir : les quatre points d'accrochage, une caméra dont la loi était une paraphrase, et un compteur tombé dans le piège qu'il était né pour éviter**
+- [`68-lois.md`](68-lois.md) — **les lois écrites que rien n'appelait : un module entier, éprouvé, documenté et vert, qu'aucun module du moteur n'importait**
+- [`67-annonces.md`](67-annonces.md) — **trois annonces lues : la guimauve soigne, le mur réclame la combinaison, la lampe se propose**
+- [`66-allumage.md`](66-allumage.md) — **ce que le jeu annonce : 124 événements, et l'allumage du vaisseau qu'aucun compte de classes ne montrait**
+- [`65-onde.md`](65-onde.md) — **l'onde de la lunette, la lunette qui grossit, et une classe lue depuis toujours sans être nommée**
+- [`64-mains.md`](64-mains.md) — **ce qu'on tient dans la main : le bâton à guimauve, sa lunette, et un thermomètre qui est une pose d'animation**
+- [`63-boucles.md`](63-boucles.md) — **ce qui boucle et ce qui ne boucle pas : le portage jouait seize clips en boucle, le build en boucle treize**
+- [`62-visee.md`](62-visee.md) — **viser un référentiel du regard, s'accorder à sa vitesse, y aller : les trois canaux de vol que rien ne pilotait**
+- [`61-commandes.md`](61-commandes.md) — **les commandes du jeu, lues dans l'`InputManager` : le portage avait inventé ses touches, et sa manette était fausse quatre fois sur six**
+- [`60-sonde.md`](60-sonde.md) — **la sonde, et la moitié du jeu que le recensement ne lisait pas : le préfabriqué existait depuis toujours**
+- [`59-etat.md`](59-etat.md) — où en est le portage : le compte de `level0`, corrigé par [`60`](60-sonde.md) (1 413 des 1 451 instances, 97,4 %)
 - [`08-reste-a-faire.md`](08-reste-a-faire.md) — ce qui manque pour un portage complet
 - [`34-actions.md`](34-actions.md) — le jeu et le portage face à face : les actions à mener
 - [`35-monde.md`](35-monde.md) — le monde qu'on ne lisait pas : rotation, lumières, fluides, champs, manette

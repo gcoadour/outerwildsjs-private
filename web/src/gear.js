@@ -115,6 +115,50 @@ export function suitVolumeStep(volumes, worldPoint, equipment, shiftOf = null) {
   return null;
 }
 
+/**
+ * Le mur qui reclame la combinaison.
+ *
+ * `SuitBarrier` n'est pas un volume qui declenche : c'est un COLLIDER qu'on
+ * allume et qu'on eteint. `OnRemoveSuit` l'allume, `OnSuitUp` l'eteint — sans
+ * combinaison, on ne sort pas du village, et c'est tout ce que fait la classe.
+ *
+ * Le portage ne peut pas s'en remettre a Havok pour ce mur-la : `InvisibleWall`
+ * porte un `BoxCollider` et AUCUN maillage, et l'export glTF ne fabrique de
+ * collider que pour ce qui se dessine. Le mur n'existe donc nulle part dans la
+ * scene du portage. On le rend ici comme ce qu'il est pour un joueur qui
+ * marche — une poussee vers l'exterieur de la boite — plutot que de reconstruire
+ * un agregat Havok pour un cube (docs/67-annonces.md).
+ *
+ * @returns la correction a appliquer a la position, ou null
+ */
+export function suitBarrierPush(volumes, worldPoint, equipment, shiftOf = null) {
+  for (const v of volumes) {
+    if (v.kind !== "barrier" || !v.volume || v.volume.shape !== "box") continue;
+    // Le collider est ETEINT tant qu'on porte la combinaison. La question se
+    // pose a l'equipement, qui sait y repondre : la poser ici en lisant son
+    // champ faisait deux sources pour une seule regle, et `barrierSolid` etait
+    // ecrite, eprouvee, appelee par personne (docs/93-commandes.md).
+    if (!equipment.barrierSolid()) continue;
+    const p = shiftOf ? restingPoint(worldPoint, shiftOf(v)) : worldPoint;
+    const c = v.position;
+    const demi = v.volume.size.map((x) => x / 2);
+    const d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+    if (Math.abs(d[0]) > demi[0] || Math.abs(d[1]) > demi[1]
+        || Math.abs(d[2]) > demi[2]) continue;
+    // On sort par la face la plus PROCHE : c'est ce que fait un contact, et
+    // c'est ce qui evite de traverser la boite en diagonale.
+    let axe = 0, jeu = demi[0] - Math.abs(d[0]);
+    for (let i = 1; i < 3; i++) {
+      const j = demi[i] - Math.abs(d[i]);
+      if (j < jeu) { jeu = j; axe = i; }
+    }
+    const push = [0, 0, 0];
+    push[axe] = (d[axe] >= 0 ? 1 : -1) * (jeu + 1e-3);
+    return push;
+  }
+  return null;
+}
+
 /** Les quatre points d'accrochage du joueur (pilotage, ordinateur, lift…). */
 export function attachPoints(gameplay) {
   return ((gameplay.placed || {}).PlayerAttachPoint || []).map((c) => {
@@ -204,31 +248,99 @@ export function lockOnTargets(gameplay) {
 /**
  * Un verrouillage de camera : `PlayerLockOnTargeting`.
  *
- * Le build interpole l'orientation vers la cible a `_followRate` et zoome a
- * `_zoomSpeed` (1 au constructeur). Ni l'un ni l'autre n'est serialise : les
- * deux instances posees ne portent aucun champ, tout est passe a l'appel.
- * On garde donc la MECANIQUE et son reglage par defaut.
+ * CETTE CLASSE ETAIT UNE PARAPHRASE. Elle interpolait un `progress` de 0 a 1 a
+ * `_followRate`, ce qui avait l'air raisonnable et n'etait pas ce que le build
+ * fait. Personne ne l'appelait, donc rien ne l'a jamais contredite : une loi
+ * sans appelant n'est pas seulement inutile, elle n'est pas non plus verifiee
+ * (docs/69-assise.md). L'IL, lui, dit ceci, dans `FixedUpdate` :
+ *
+ *   versLa   = cible.TransformPoint(_localOffset) - joueur.position
+ *   aplati   = versLa - Project(versLa, joueur.up)
+ *   angle    = Angle(joueur.forward, aplati) * Sign(Dot(aplati, joueur.right))
+ *   joueur.rotation = AngleAxis(angle * _followRate * dt, joueur.up) * rotation
+ *
+ * Ce n'est pas la camera qui tourne : c'est le CORPS du joueur, en lacet
+ * seulement, autour de son propre haut. Le tangage reste a la main — on peut
+ * lever les yeux pendant que le corps s'aligne. Et la vitesse est
+ * proportionnelle a l'ecart, donc l'approche est exponentielle : jamais tout a
+ * fait arrivee, et sans a-coup a la fin.
+ *
+ * LE ZOOM EST UNE HYPERBOLE, PAS UNE INTERPOLATION :
+ *
+ *   d > 10  ->  champ de vision = max(500 / d, 20)
+ *   d <= 10 ->  retour au champ initial, en 2 s
+ *
+ * A vingt-cinq unites le champ est deja au minimum de 20°, contre 70° normaux
+ * (docs/47) : le verrouillage est une longue-vue autant qu'une visee. Et le
+ * plancher de 20° est ce qui empeche de zoomer a l'infini sur une cible
+ * lointaine.
  */
+export const LOCK_ON = { fovNumerator: 500, minFOV: 20, nearDistance: 10,
+                         breakSeconds: 2, zoomSpeed: 1 };
+
+/**
+ * L'ecart de lacet, en degres signes, entre l'avant du joueur et la cible.
+ *
+ * Aplati DANS le plan du joueur : sur une planete, viser quelque chose qui est
+ * plus haut que soi ne doit pas faire tourner le corps de travers.
+ */
+export function lockYawError(versLaCible, avant, haut, droite) {
+  const d = versLaCible[0] * haut[0] + versLaCible[1] * haut[1] + versLaCible[2] * haut[2];
+  const plat = [versLaCible[0] - haut[0] * d, versLaCible[1] - haut[1] * d,
+                versLaCible[2] - haut[2] * d];
+  const l = Math.hypot(plat[0], plat[1], plat[2]);
+  if (!l) return 0;
+  const u = [plat[0] / l, plat[1] / l, plat[2] / l];
+  const la = Math.hypot(avant[0], avant[1], avant[2]) || 1;
+  const cos = (u[0] * avant[0] + u[1] * avant[1] + u[2] * avant[2]) / la;
+  const angle = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+  const cote = u[0] * droite[0] + u[1] * droite[1] + u[2] * droite[2];
+  // `Mathf.Sign(0)` vaut 1 : une cible pile devant ou pile derriere tourne a
+  // droite, et le derriere est le seul cas ou cela se voit.
+  return angle * (cote < 0 ? -1 : 1);
+}
+
+/** `max(500 / d, 20)` au-dela de dix unites, sinon le champ initial. */
+export function lockFOV(distance, initFOV = 70, cfg = LOCK_ON) {
+  if (!(distance > cfg.nearDistance)) return initFOV;
+  return Math.max(cfg.fovNumerator / distance, cfg.minFOV);
+}
+
+/** Un verrouillage de camera en cours. */
 export class CameraLock {
-  constructor(followRate = 1, zoomSpeed = 1) {
+  constructor(followRate = 1, zoomSpeed = LOCK_ON.zoomSpeed) {
     this.followRate = followRate;
     this.zoomSpeed = zoomSpeed;
+    this.useZoom = false;
     this.target = null;
-    this.progress = 0;
+    this.localOffset = [0, 0, 0];
   }
 
-  lockOn(target, followRate = this.followRate) {
+  get locked() { return this.target !== null; }
+
+  lockOn(target, { offset = [0, 0, 0], followRate = this.followRate,
+                   useZoom = true, zoomSpeed = this.zoomSpeed } = {}) {
     this.target = target;
+    this.localOffset = offset;
     this.followRate = followRate;
-    this.progress = 0;
+    this.useZoom = useZoom;
+    this.zoomSpeed = zoomSpeed;
   }
 
-  breakLock() { this.target = null; this.progress = 0; }
+  /** `BreakLock` : la vue revient au champ initial en deux secondes. */
+  breakLock() {
+    this.target = null;
+    return { snapSeconds: LOCK_ON.breakSeconds };
+  }
 
-  /** @returns {number} 0 au verrouillage, 1 quand la camera y est. */
-  update(dt) {
-    if (!this.target) return 0;
-    this.progress = Math.min(1, this.progress + dt * this.followRate);
-    return this.progress;
+  /**
+   * @returns {{yaw:number, fov:number}|null} le lacet a appliquer CETTE image,
+   *   en degres, et le champ de vision vise.
+   */
+  update(dt, versLaCible, avant, haut, droite, distance, initFOV = 70) {
+    if (!this.target) return null;
+    const ecart = lockYawError(versLaCible, avant, haut, droite);
+    return { yaw: ecart * this.followRate * dt,
+             fov: this.useZoom ? lockFOV(distance, initFOV) : initFOV };
   }
 }

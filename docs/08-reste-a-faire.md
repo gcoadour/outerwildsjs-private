@@ -10,7 +10,22 @@ lisait**.
 > l'autre bout — **ce que l'alpha pose et que le portage ne nomme pas** — et en
 > fait des lots ordonnés, prêts à écrire. Ses chiffres viennent du recensement
 > refait sur le build ([`45-recensement-mesure.md`](45-recensement-mesure.md)) :
-> **109 classes et 413 instances n'ont toujours aucun lecteur**.
+> **109 classes et 413 instances n'avaient alors aucun lecteur**.
+>
+> **Où en sont les trois dénominateurs**, aujourd'hui. Le dépôt en tient trois,
+> et chacun a été ouvert quand le précédent a cessé de dire quelque chose
+> ([`66`](66-allumage.md), [`68`](68-lois.md)) :
+>
+> | | |
+> |---|---|
+> | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
+> | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
+> | `lois.mjs` — ce que le portage **appelle** | **20** methodes sans appelant ([`90`](90-methodes.md)) |
+>
+> Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
+> flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
+> [`69`](69-assise.md), [`71`](71-quantique.md), [`74`](74-etalons.md),
+> [`75`](75-chaleur.md), [`76`](76-proximite.md).
 
 Inventaire fondé sur les composants et assets réellement présents dans le
 build, pas sur une impression. Ce document dit honnêtement où en est le
@@ -41,7 +56,7 @@ portage.
 | lune quantique | 4 orbites hôtes, effondrement à la perte de vue |
 | trou noir / trou blanc | capture, éjection en cône, effondrement de croûte |
 | Dark Bramble | prédateurs sensibles au bruit, croissance des ronces |
-| secteurs | bascule géométrie/substitution **et téléchargement**, 3 corps sur 12 |
+| secteurs | bascule géométrie/substitution **et téléchargement**, 3 corps sur 12 ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md)) |
 | poids au démarrage | 60,0 Mo pour la première image, contre 199,6 avant |
 | pilote auto et dégâts | 4 phases, seuils d'impact 15/30/300 |
 | carte du système | orbites, marqueurs, sélection de cible |
@@ -54,7 +69,7 @@ portage.
 | jauges et invites | textures du casque, 46 invites triées par priorité |
 | brouillards | Dark Bramble et coque quantique, masquage et lumières |
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
-| minicarte | globe du secteur, traces de 100 points |
+| minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |
 | réglages | 7 options, sauvegarde distincte de la partie |
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
@@ -89,7 +104,7 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
-| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit |
+| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |
 | référentiels déclarés | 14 volumes : le build dit l'ancre, la gravité complète |
 | distances du pilote auto | 1 000 / 2 500 et l'alignement, lus dans le build |
 | décor vivant | 15 panneaux, 8 visages, 10 buses, 6 passages anciens |
@@ -120,7 +135,49 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **112/112**, mesurée après la série ([`59`](59-etat.md)) |
+| vérification avec le build | **267/267** ([`81`](81-invulnerable.md)) |
+| la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
+| **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
+| viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
+| boucles d'animation | 13 clips bouclent, 4 s'arrêtent — la règle d'Unity en deux étages ([`63`](63-boucles.md)) |
+| objets tenus en main | le bâton à guimauve et la lunette, exportés et animés ([`64`](64-mains.md)) |
+| onde de la lunette | 500 points, un par image, plate au milieu sans signal ([`65`](65-onde.md)) |
+| allumage du vaisseau | **une seconde de poussée tenue** avant de décoller, et relâcher annule ([`66`](66-allumage.md)) |
+| la guimauve **soigne** | manger rend toute la santé : le feu de camp est l'infirmerie ([`67`](67-annonces.md)) |
+| mur de combinaison | on ne quitte pas le village sans elle ([`67`](67-annonces.md)) |
+| attaches **appelées** | le module existait, éprouvé et documenté ; aucun moteur ne l'importait ([`68`](68-lois.md)) |
+| météores de Brittle Hollow | quatre lanceurs, délai **retiré à chaque tir**, 50 de dégâts au contact ([`68`](68-lois.md)) |
+| **s'asseoir** | les 4 points d'accrochage : une durée tirée de l'angle, et on se lève avec la vitesse du siège ([`69`](69-assise.md)) |
+| verrouillage de caméra | le corps tourne en lacet, le champ suit `500/d` borné à 20° ([`69`](69-assise.md)) |
+| **modes d'entrée** | 10 ensembles de canaux : la lunette **enracine**, le poste n'a pas de lampe, un mort ne commande rien ([`70`](70-modes.md)) |
+| objets quantiques | 5 sur la lune (3 pins, une cabane, un panneau) et la statue du musée : ils bougent **à l'instant** où l'on détourne les yeux ([`71`](71-quantique.md)) |
+| la sonde **épingle** | photographier un objet quantique à portée et dans le cadre le fige ([`71`](71-quantique.md)) |
+| marqueur de sonde | où elle est, à quelle distance, dans quel état ([`71`](71-quantique.md)) |
+| poussière de vitesse | **rien** sous 30 u/s, puis des traits de plus en plus courts ([`72`](72-poussiere.md)) |
+| grillage rompu | on ne grille pas à plus de 4 unités du feu ([`72`](72-poussiere.md)) |
+| toile du regard | deux anneaux en sens inverse, au **cube** des fractions ([`72`](72-poussiere.md)) |
+| tempête de sable | 4 cylindres, **une** entrée, **une** sortie ([`72`](72-poussiere.md)) |
+| passages de Dark Bramble | 3 volumes, départ **3 s après l'entrée**, et l'épave se quitte par son **bord** ([`73`](73-passages.md)) |
+| coquilles sonores | entrer la **tête** dans l'océan coupe le bruit de l'océan ([`73`](73-passages.md)) |
+| **on part avec le sol** | le joueur se réveille à la vitesse du sol qui tourne, pas à zéro ([`73`](73-passages.md)) |
+| phares du vaisseau | 600 unités, bridés à **100** dans la dimension abandonnée ([`74`](74-etalons.md)) |
+| marqueurs de carte | la règle entière : le vaisseau, le joueur qui ne se masque jamais, l'épave qui efface tout ([`74`](74-etalons.md)) |
+| **la chaleur des feux** | 8 émetteurs de rayonnement : la guimauve ne cuisait **jamais** ([`75`](75-chaleur.md)) |
+| invite de sonde | elle vient parce qu'on **regarde** quelque part, pas parce qu'on est là ([`75`](75-chaleur.md)) |
+| sonde ancienne | 50 d'accélération locale, pour toujours ([`75`](75-chaleur.md)) |
+| voyants d'avarie | ils ne parlent que **dans les 13 unités** du vaisseau ([`76`](76-proximite.md)) |
+| tutoriel de la sonde | lancer depuis une invite les détruit **toutes les quatre** ([`76`](76-proximite.md)) |
+| **sons d'interface** | les 8 de `UIAudioController`, à demi-volume ([`77`](77-sons.md)) |
+| son de réparation | l'air ou le vide, et le vide est le **passe-bas** de l'air ([`77`](77-sons.md)) |
+| **le vaisseau miniature vole** | 3 pistes, crash au-delà de 10 u/s, et il faut être **immobile** pour se poser ([`78`](78-modele.md)) |
+| l'enfant aux fusées | 3 arbres : 5 crashs valent un reproche, et il passe **avant** la réussite ([`78`](78-modele.md)) |
+| **perdre la gravité** | le regard est **verrouillé** le temps d'être retourné, à 50°/s ([`79`](79-alignement.md)) |
+| invites du sac dorsal | **seulement en apesanteur**, et les 3 poussées seulement à l'entraînement ([`80`](80-invites.md)) |
+| le bâton sort au feu | `BeginRoasting` / `StopRoasting` : une touche inventée en moins ([`80`](80-invites.md)) |
+| **invulnérable au premier tour** | tant qu'on n'a pas les codes et qu'on n'est pas monté dans le vaisseau ([`81`](81-invulnerable.md)) |
+| tutoriel de la sonde | **3 photos en vol** puis la sonde détruite, et non le premier tir ([`81`](81-invulnerable.md)) |
+| réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
+| les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
 | vérification | `tools/15_verify.py` en navigateur, `tests/09-jeu.mjs` sans le jeu |
 
@@ -156,12 +213,12 @@ dans l'alpha.
 | manque | ce que le build en dit |
 |---|---|
 | l'espace replié de Dark Bramble | aucun volume de distorsion ; le conteneur s'appelle `DarkBramble_TestBed` |
-| quatre des cinq savoirs | un seul a une source vivante ; les autres sont du code mort |
+| ~~quatre des cinq savoirs~~ | **trop sévère, relu** ([`81`](81-invulnerable.md)) : **deux** ont une source vivante — l'entraînement en apesanteur, et le tutoriel de la sonde (trois photos en vol puis la sonde détruite). Les deux sont branchées. `CompleteTelescopeTutorial` est écouté et émis par personne, et `CompleteShipProbeTutorial` vient d'une classe `_Old` : ces deux-là, oui |
 | le déblocage par branche de dialogue | les 20 attributs `eventbased` valent tous `"false"` |
 | les machines à états d'animation | 11 états, **zéro transition** dans tout le build |
 | ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |
 | les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
-| le modèle de sonde | `_probePrefab` n'est pas résolu |
+| ~~le modèle de sonde~~ | **faux, mesuré** ([`60`](60-sonde.md)) : `_probePrefab` vise `sharedassets1.assets:2295` et s'y résout du premier coup. Le recensement ne lisait que `level0`, et l'alpha range les préfabriqués ailleurs. Dix nœuds, huit classes, deux caméras |
 | les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
 | la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
 | ~~l'entraînement et le ciblage~~ | **faux, mesuré** : `PlayerLockOnTargeting` ×2 (dont une sur `Player_Body`) et `ZeroGTrainingManager` sont dans le build ([`45`](45-recensement-mesure.md)) |
@@ -170,6 +227,8 @@ dans l'alpha.
 > `RocketKidConvoController` **est** dans le build, lisible, et porte trois
 > arbres (`_introduction`, `_successfulLanding`, `_tooManyCrashes`). Il sort
 > donc de cette liste : c'est un manque du portage, pas de l'alpha.
+> **Et il est comblé depuis [`78`](78-modele.md)** : le modèle réduit vole, ses
+> trois pistes comptent, et l'enfant choisit son arbre.
 >
 > **Et une deuxième fois** ([`45-recensement-mesure.md`](45-recensement-mesure.md)).
 > Le ciblage et l'entraînement y sont aussi. Deux lignes de ce tableau sur dix
@@ -229,21 +288,20 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
   pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
   est écrit dans le ciel.
-- **13 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
-  compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
-  de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
-  **commentaires** avant de compter, et c'est un commentaire qui avait caché
-  toute la pile d'effets d'image ([`47`](47-effets-image.md)).
-  La série du compte : 170 en [`42`](42-lumieres.md), 109 avant les six lots de
-  [`46`](46-migration-lots.md), 59 après, 77 une fois les commentaires retirés.
-  Puis **62** après la queue de [`49`](49-queue.md), et **13** après la série
-  [`50`](50-regard.md)–[`58`](58-suivi.md). Sur les **1 390 instances** posées
-  dans `level0`, **1 356 sont lues — 97,6 %**. Les 34 qui restent sont nommées
-  une par une en fin de [`58`](58-suivi.md) : quatorze calibrateurs de tenseur
-  d'inertie, sept outils de studio, sept mises en page, trois singletons de
-  câblage, une bibliothèque d'explosion tierce et un tracé d'onde.
-  `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
-  de ce qui reste.
+- **12 classes sur 295 n'ont aucun lecteur** — 15 instances sur 1 451 — et 5 de
+  plus sont **extraites sans être lues**. Les douze sont des outils de studio et
+  des mises en page ; `node scripts/recensement.mjs` en redonne la liste à jour.
+  Ce dénominateur est **fermé** depuis [`65`](65-onde.md) : il ne dit plus rien
+  d'utile, et c'est pour cela que [`66`](66-allumage.md) en a ouvert un autre.
+  L'historique du compte vaut d'être gardé, parce qu'il **monte** une fois :
+  170 en [`42`](42-lumieres.md), 109 avant les six lots de
+  [`46`](46-migration-lots.md), 59 après — puis **77**, quand
+  `scripts/recensement.mjs` s'est mis à retirer les **commentaires** avant de
+  compter. C'est un commentaire qui avait caché toute la pile d'effets d'image
+  ([`47`](47-effets-image.md)). Puis **62** après la queue de
+  [`49`](49-queue.md), **13** après la série [`50`](50-regard.md)–[`58`](58-suivi.md),
+  et **12** depuis, le recensement portant désormais sur les **cinq** fichiers
+  sérialisés et non sur `level0` seul ([`60`](60-sonde.md)).
 - ~~**Les impostures de planète**~~ **Fermé** ([`56`](56-impostures.md)), et la
   mesure a démenti la page : sur les cinq caméras, **deux n'ont aucun plan** et
   une troisième vise un `HomePlanet_graybox`. Le système est un chantier de
@@ -324,6 +382,60 @@ extrait et que rien ne lisait**. Elle est comblée
 
 Ce qui reste tient en une phrase : **le contenu que l'alpha n'a pas, et le
 jugement qu'une machine ne rend pas**. Le premier ne se comble pas ; le second
-demande quelqu'un qui joue, regarde et écoute. S'y ajoute, pour un temps, une
-troisième chose : **des comptes à relever sur un vrai build**, que les
-extracteurs neufs sortiront à la première extraction.
+demande quelqu'un qui joue, regarde et écoute.
+
+Une troisième nature de manque est apparue depuis, et c'est la plus instructive
+des trois : **du travail fait qui ne s'exécutait pas**. Un module entier importé
+par personne ([`68`](68-lois.md)), des lois présentes dans une ligne d'`import`
+et nulle part ailleurs ([`71`](71-quantique.md)), un motif qui posait une
+question au build sans lire la réponse ([`75`](75-chaleur.md)), un garde-fou qui
+n'avait jamais parlé ([`76`](76-proximite.md)). On l'a crue comblée — `lois.mjs`
+comptait **zéro** — et elle ne l'était pas : le compte ne regardait que les
+fonctions exportées.
+
+`scripts/lois.mjs` a montré sa limite avec [`89`](89-pose.md) : il comptait les
+**fonctions exportées**, et `Ship.padLanding` était une **méthode** — écrite,
+commentée, éprouvée par un test, et appelée par personne pendant tout ce temps.
+Il voit les méthodes depuis [`90`](90-methodes.md), et il en a trouvé
+**trente-cinq** que rien n'appelait, dont vingt-deux qu'un test faisait pourtant
+tourner. Trois n'étaient lues que par `tools/15_verify.py` — un contrôle
+navigateur est un appelant, et c'est la deuxième fois que l'extension du fichier
+appelant le cachait à ce compte. Deux autres attendaient la sphère de
+l'observatoire ([`91`](91-remise-a-zero.md)), quatre la borne de la tour de
+lancement ([`92`](92-tour.md)), quatre étaient des règles de commande jamais
+branchées ([`93`](93-commandes.md)), et deux confrontent désormais les deux
+tables de la manette ([`94`](94-manette.md)). **Il en reste vingt**, et c'est le front
+ouvert : ce ne sont pas des lois à écrire, ce sont des lois écrites à brancher —
+et chaque fois qu'on cherche ce qui devrait les appeler, on trouve une mécanique
+entière.
+
+Une **quatrième** nature est apparue avec [`82`](82-secteur-majeur.md), et elle
+est la plus discrète : **la constante inventée**. Le portage décidait du secteur
+courant par un `horizon × 1,5` — un nombre plausible, écrit de bonne foi, et
+faux de cinq fois. Il n'avait pas été inventé par paresse : la vraie mesure, la
+sphère de déclenchement du secteur, n'était pas extraite. **Une constante
+inventée est presque toujours la trace d'un champ non extrait**, et c'est là
+qu'il faut chercher avant d'écrire une formule. Cinq lois en dépendaient — la
+minicarte, la poussée, l'ambiance, la lampe, les phares — et aucune n'avait de
+test qui aurait pu le dire, parce qu'on ne teste pas ce qu'on a inventé.
+
+La teinte de l'ambiance par secteur, que ce lot avait laissée ouverte, est
+portée depuis [`83`](83-seuils.md) : `_ambientLight` est une énumération, pas un
+nombre. Les seuils, eux, servent maintenant les cinq zones sans soleil, la zone
+sombre, les six zones sonores sans forme, la chambre en apesanteur et le champ
+de la station météo : **dix-huit sur dix-huit** ([`83`](83-seuils.md),
+[`84`](84-ambiance.md), [`85`](85-chambre.md)).
+
+Et une cinquième nature de manque, découverte par [`84`](84-ambiance.md) :
+**le commentaire exact posé sur un code approximatif**. L'extracteur audio
+décrivait correctement ce qu'il aurait fallu faire — « la forme est celle des
+`EntrywayTrigger` posés sous l'objet » — au-dessus d'un code qui prenait la
+première boîte d'enfant et la servait comme contenance. Aucun test ne
+l'interrogeait, parce que le commentaire tenait lieu de preuve. C'est plus
+difficile à voir qu'un commentaire faux.
+
+Reste le dénominateur des **annonces** : 45 des 124 chaînes de `GlobalMessenger`
+ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
+un événement non nommé peut correspondre à un comportement porté sous un autre
+nom — mais c'est **la carte de ce qu'il reste à lire**, et chaque piste s'y
+vérifie en une lecture d'IL. C'est par là que passe la suite.

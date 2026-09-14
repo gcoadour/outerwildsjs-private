@@ -111,6 +111,13 @@ déjà à propos de ses compteurs d'essais — les six buses restent éteintes. 
 est écrite et éprouvée, sa liste d'entrées est vide, et on le dit : c'est le même
 choix que pour les dix-huit bouffées de [`46`](46-migration-lots.md).
 
+> **Plus vrai depuis [`78`](78-modele.md).** Le modèle réduit vole : la console
+> déportée existe, son jeu de commandes aussi ([`70`](70-modes.md)), et les six
+> buses ont une entrée à lire. La phrase ci-dessus était juste **au moment où
+> elle a été écrite**, et elle est devenue fausse sans que rien ne bouge dans le
+> fichier qui la portait. C'est le risque des justifications : elles
+> vieillissent en silence.
+
 > Les six systèmes s'appellent **tous** `Thruster_Small`. Troisième endroit du
 > portage où le nom du build ne suffit pas, après les nuages
 > ([`48`](48-ciel-mesure.md)) et les pivots de tornade ([`49`](49-queue.md)) —

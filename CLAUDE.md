@@ -34,6 +34,8 @@ OW_BUILD=... node scripts/recensement.mjs   # ce que le build pose, ce qu'on lit
 OW_BUILD=... node scripts/il.mjs <Classe>[.<Methode>]   # l'IL, sans SDK .NET
 OW_BUILD=... node scripts/il.mjs --enum <Enumeration>
 OW_BUILD=... node scripts/composants.mjs <Classe>       # les instances de la scene
+OW_BUILD=... node scripts/evenements.mjs   # ce que le jeu annonce, et ce qu'on en nomme
+node scripts/lois.mjs              # ce que le portage a ecrit, et ce qu'il appelle
 
 # Servir la page telle qu'elle sera publiee (web/ est la racine du site)
 web/fetch-deps.sh                  # Babylon.js + Havok dans web/vendor/, non versionne
@@ -45,8 +47,11 @@ tools/01_fetch.sh Linux            # telecharge le build dans work/ (gitignore)
 # Invariants mesures dans un vrai Chromium (Playwright). Le moteur ne demarre
 # qu'une fois le build fourni a la PAGE : l'extraction vit dans le stockage
 # prive de l'origine, donc dans un profil, et le port fait partie de l'origine.
+# `--zip` veut dire REFAIS L'EXTRACTION : il vide le stockage du profil. Tout
+# lot qui touche a `web/src/pipeline/` doit le passer, sinon les controles
+# mesurent les donnees d'avant (docs/76-proximite.md).
 python3 tools/15_verify.py --profil work/profil --zip work/downloads/OuterWilds_Alpha_1_2_Linux.zip
-python3 tools/15_verify.py --profil work/profil [--lourd]   # ensuite, le profil suffit
+python3 tools/15_verify.py --profil work/profil [--lourd]   # sans toucher au pipeline, le profil suffit
 # Sans le build : le moteur demarre quand meme, sur ses replis. C'est le seul
 # controle NAVIGATEUR qui tourne sans les 289 Mo, et il attrape ce que
 # check-modules.mjs ne peut pas voir — une erreur d'execution dans boot().
@@ -147,6 +152,13 @@ README : quand un chiffre bouge, les trois bougent ensemble.
   touchée avec les valeurs du build", r.part, 0)` gardait un raisonnement sous
   les dehors d'un chiffre, et se serait défendu contre sa propre correction
   ([`docs/49`](docs/49-queue.md)).
+- Une loi que **rien n'appelle** est signalée par `scripts/lois.mjs`. Deux cas
+  sont légitimes et se marquent sur la ligne au-dessus de l'export :
+  `// @mesure` pour un **étalon** — un régime vers lequel une intégration
+  converge, écrit pour être vérifié de l'extérieur et non appelé — et
+  `// @vide <raison>` pour une loi dont la liste d'entrées est **vide dans ce
+  build** (la raison est obligatoire). Tout le reste est du travail à faire
+  ([`docs/74`](docs/74-etalons.md)).
 - Une classe que le moteur lit **sous un nom français** se déclare par un
   marqueur `// @lit NomDeLaClasse` : c'est ce que `scripts/recensement.mjs`
   compte, et il retire les commentaires avant de compter — une classe citée en

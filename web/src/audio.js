@@ -16,6 +16,8 @@
 //   - instancier 92 sources d'un coup est inutile. Une source n'est creee que
 //     lorsque l'auditeur entre dans sa portee, et liberee en sortant.
 
+import { insideVolume } from "./gravity.js";
+
 const NEAR = 1.4;          // marge d'instanciation, en multiple de la portee
 const LOOPED = new Set(["Ambience", "Music", "Signal"]);
 
@@ -232,7 +234,7 @@ export class AudioField {
    * @param mixer AudioMixer, dont le volume de piste multiplie celui de chaque
    *              source : c'est ainsi que la supernova coupe musique et ambiance
    */
-  update(listener, toFrame, mixer = null) {
+  update(listener, toFrame, mixer = null, shellGains = null) {
     if (!this.engine) return;
     if (this.engine.listener) {
       try {
@@ -273,7 +275,7 @@ export class AudioField {
       // source porte une `rolloffCustomCurve`, par le gain de cette courbe a
       // la distance courante. WebAudio ne connait que trois modeles de
       // distance ; la courbe se rend donc a la main.
-      if ((mixer || s.rolloffCurve) && this.live.has(i)) {
+      if ((mixer || s.rolloffCurve || shellGains) && this.live.has(i)) {
         const snd = this.live.get(i);
         if (snd) {
           let v = s.volume ?? 1;
@@ -281,6 +283,9 @@ export class AudioField {
           if (s.rolloffCurve) {
             v *= curveGain(s.rolloffCurve, d, s.minDistance ?? 1, s.range || 60);
           }
+          // Les coquilles sonores : entrer la TETE dans l'une d'elles etouffe
+          // sa source en une seconde, et en ressortir la remonte.
+          if (shellGains && shellGains.has(i)) v *= shellGains.get(i);
           try { snd.volume = v; }
           catch (e) { /* certaines versions n'exposent pas le setter */ }
         }
@@ -637,4 +642,61 @@ export function audioShells(gameplay) {
 export function shellGain(inside, secondsSinceChange, fade = SHELL_FADE) {
   const u = fade > 0 ? Math.max(0, Math.min(1, secondsSinceChange / fade)) : 1;
   return inside > 0 ? 1 - u : u;
+}
+
+/**
+ * Les coquilles posees, et le gain qu'elles imposent a LEUR source.
+ *
+ * `AudioShell.Awake` prend la source par `GetComponent` : la coquille etouffe
+ * celle qui est sur le MEME objet, pas les autres. Les deux du build sont
+ * concentriques sur Giant's Deep — l'ocean a 498 unites, la membrane corrosive
+ * a 205 — et la source qu'elles commandent est a leur centre exact.
+ *
+ * On les apparie donc par POSITION, comme les dix visages de nuage : c'est le
+ * seul lien que l'extraction conserve entre un composant et le sien.
+ *
+ * CE QUE CELA FAIT AU JEU, et c'est contre-intuitif : entrer la tete dans
+ * l'ocean COUPE le bruit de l'ocean. On l'entend du dessus, et plus une fois
+ * dedans — ou le son d'immersion prend le relais.
+ */
+export class AudioShells {
+  constructor(shells = [], sources = [], tolerance = 1) {
+    this.shells = shells.map((sh) => {
+      let index = -1, best = tolerance * tolerance;
+      for (let i = 0; i < sources.length; i++) {
+        const p = sources[i].position;
+        if (!p) continue;
+        const d = (p[0] - sh.position[0]) ** 2 + (p[1] - sh.position[1]) ** 2
+                + (p[2] - sh.position[2]) ** 2;
+        if (d <= best) { best = d; index = i; }
+      }
+      return { data: sh, index, inside: false, since: SHELL_FADE };
+    });
+  }
+
+  get count() { return this.shells.length; }
+  get paired() { return this.shells.filter((s) => s.index >= 0).length; }
+
+  /**
+   * @param ear     position de l'OREILLE — la camera, pas le corps : le build
+   *                teste le tag `PlayerCameraDetector`
+   * @returns {Map<number, number>} index de source -> gain a appliquer
+   */
+  update(dt, ear, shiftOf = null) {
+    const out = new Map();
+    for (const sh of this.shells) {
+      const v = sh.data.volume;
+      if (!v) continue;
+      const d = shiftOf ? (shiftOf(sh.data) || [0, 0, 0]) : [0, 0, 0];
+      const p = [ear[0] - d[0], ear[1] - d[1], ear[2] - d[2]];
+      const dedans = insideVolume(sh.data, p);
+      if (dedans !== sh.inside) { sh.inside = dedans; sh.since = 0; }
+      else sh.since += dt;
+      if (sh.index >= 0) {
+        const g = shellGain(sh.inside ? 1 : 0, sh.since);
+        out.set(sh.index, Math.min(out.has(sh.index) ? out.get(sh.index) : 1, g));
+      }
+    }
+    return out;
+  }
 }

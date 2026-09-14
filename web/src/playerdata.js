@@ -35,6 +35,10 @@ export class PlayerData {
     this.explored = new Set();
     this.loopCount = 0;
     for (const f of FLAGS) this[f] = false;
+    // L'invulnerabilite ne se sauvegarde PAS : elle est statique dans le build
+    // et se recalcule au debut de chaque boucle.
+    this.invulnerable = false;
+    this.completedZeroGTraining = false;
     this.load();
   }
 
@@ -87,6 +91,44 @@ export class PlayerData {
   knows(flag) { return !!this[flag]; }
 
   setLoopCount(n) { this.loopCount = n; this.save(); }
+
+  // --- l'invulnerabilite du premier tour (docs/81-invulnerable.md) ---
+  //
+  // `PlayerData.OnStartOfTimeLoop` : au DEBUT de chaque boucle, l'etat retombe
+  // a faux — puis, si c'est la PREMIERE boucle et qu'on ne connait pas encore
+  // les codes de lancement, il passe a vrai.
+  //
+  //   OnStartOfTimeLoop(n):  _completedZeroGTraining = false
+  //                          _isInvulnerable = false
+  //                          si n == 1 ET !KnowsLaunchCodes() -> vrai
+  //   OnEnterShip:           _isInvulnerable = false
+  //
+  // Tant qu'on apprend, on ne peut pas mourir DE DEGATS ; et la protection
+  // s'arrete a l'instant ou l'on monte dans le vaisseau — le jeu decide qu'une
+  // fois aux commandes, on joue pour de bon.
+  //
+  // ELLE NE PROTEGE PAS DE TOUT. `PlayerDeathHandler.OnTriggerPlayerDeath` ne
+  // la consulte pas : tomber dans l'etoile ou se faire ecraser tue quand meme.
+  // Seuls `PlayerResources.ApplyInstantDamage` et `Update` la lisent, et ils
+  // se contentent de NE PAS RETIRER les points de vie — l'evenement de degat
+  // part quand meme, donc l'ecran clignote et le son se joue.
+
+  /** `OnStartOfTimeLoop` : n est le numero de la boucle qui commence. */
+  startOfTimeLoop(n = this.loopCount) {
+    this.completedZeroGTraining = false;
+    this.invulnerable = n === 1 && !this.knowsLaunchCodes;
+    return this.invulnerable;
+  }
+
+  /** `OnEnterShip` : la protection s'arrete la. */
+  enterShip() {
+    const avant = this.invulnerable;
+    this.invulnerable = false;
+    return avant;
+  }
+
+  /** `IsInvulnerable` : lu par les degats, jamais par la mort. */
+  get isInvulnerable() { return !!this.invulnerable; }
 
   get summary() {
     const known = FLAGS.filter((f) => this[f]).length;

@@ -25,9 +25,19 @@
 // et le nez devient visible, et c'est exactement la lourdeur que decrit
 // docs/07-gameplay.md.
 
-import { dominantField } from "./gravity.js";
+import { limitOrbitThrust, orbitSpeed } from "./landing.js";
+import { dominantField, rotateByQuaternion } from "./gravity.js";
 import { ShipDamage } from "./shipdamage.js";
-import { landedOn } from "./tower.js";
+import { landedOn, LandingPads, LANDED_SPEED } from "./tower.js";
+
+/**
+ * `ShipThrusterController._ignitionDuration` : UNE seconde.
+ *
+ * Elle est dans le constructeur, pas sur l'instance — `composants.mjs` rend un
+ * objet vide pour ce composant, et c'est encore un cas ou la scene ne dit rien
+ * de ce que le code fait (docs/60-sonde.md).
+ */
+export const IGNITION_DURATION = 1;
 import { frameFriction } from "./player.js";
 import { spawnPoints, nearestTo } from "./start.js";
 
@@ -75,6 +85,7 @@ export function spinStep(q, omega, dt) {
  * `couple / (1 - drag) x dt` par seconde a 60 im/s — c'est l'invariant garde
  * dans tests/09-jeu.mjs.
  */
+// @mesure — le regime que l'integration atteint, pas une etape de celle-ci.
 export function terminalAngularSpeed(torque, drag, step = 1 / 60) {
   return drag >= 1 ? Infinity : (torque * step) / (1 - drag);
 }
@@ -93,7 +104,15 @@ export class Ship {
     this.quat = [0, 0, 0, 1];               // orientation propre
     this.omega = [0, 0, 0];                 // vitesse angulaire, repere monde
     this.boarded = false;
-    this.landed = false;
+    this.landed = false;        // on touche le sol
+    this.onPad = false;         // `LandingPadManager.IsLanded` : gare sur la piste
+    this.padBody = null;
+    this.pads = new LandingPads();
+    // `_ignitionDuration`, du constructeur de `ShipThrusterController`.
+    this.igniting = false;
+    this.ignitionTime = 0;
+    this.ignitionDuration = IGNITION_DURATION;
+    this.events = [];
     this.radius = 6;                        // demi-taille approximative
     // Degats : l'integrite globale et les pieces vivent dans ShipDamage, qui
     // porte les quatre champs de ShipDamageController.
@@ -204,13 +223,16 @@ export class Ship {
     // ne recoit plus de couple, mais sa trainee angulaire continue de l'arreter.
     // Tangage et lacet : on vise la direction du regard. Le produit vectoriel
     // du nez vers la cible donne l'axe et, a petit angle, l'amplitude.
-    if (this.boarded && basis && basis.fwd) {
+    // `ShipThrusterController.ReadRotationalInput` rend Vector3.zero des que
+    // `LandingPadManager.IsLanded()` : pose, on ne tourne plus DU TOUT. Pas
+    // moins, pas lentement — zero. La trainee angulaire, elle, continue.
+    if (this.boarded && !this.onPad && basis && basis.fwd) {
       const t = [basis.fwd.x, basis.fwd.y, basis.fwd.z];
       torque[0] += a.fwd[1] * t[2] - a.fwd[2] * t[1];
       torque[1] += a.fwd[2] * t[0] - a.fwd[0] * t[2];
       torque[2] += a.fwd[0] * t[1] - a.fwd[1] * t[0];
     }
-    const roll = (this.boarded && input && input.roll)
+    const roll = (this.boarded && !this.onPad && input && input.roll)
       ? Math.max(-1, Math.min(1, input.roll)) : 0;
     if (roll) {
       torque[0] -= a.fwd[0] * roll;
@@ -227,6 +249,43 @@ export class Ship {
     this.omega[0] *= d; this.omega[1] *= d; this.omega[2] *= d;
     this.quat = spinStep(this.quat, this.omega, dt);
     return this.quat;
+  }
+
+  /**
+   * `ShipThrusterController.ReadTranslationalInput`, la partie « au sol ».
+   *
+   * Un vaisseau pose ne decolle pas a l'appui : il S'ALLUME. Tant qu'il touche
+   * le sol, les poussees laterales sont annulees, la verticale est bornee au
+   * positif — on ne s'enfonce pas dans la piste — et la premiere seconde de
+   * poussee ne produit AUCUNE acceleration. Relacher avant la fin annule tout
+   * et il faut recommencer.
+   *
+   * Le portage decollait a l'instant, ce qui otait au depart son poids : une
+   * seconde d'allumage, c'est le temps qu'il faut pour lever les yeux
+   * (docs/66-allumage.md).
+   *
+   * @returns la poussee verticale a appliquer, apres allumage
+   */
+  ignition(dt, up) {
+    this.events = [];
+    if (!this.landed) { this.igniting = false; this.ignitionTime = 0; return up; }
+    const y = up > 0 ? (up > 1 ? 1 : up) : 0;
+    if (!this.igniting && y > 0) {
+      this.igniting = true;
+      this.ignitionTime = 0;
+      this.events.push("StartShipIgnition");
+    }
+    if (!this.igniting) return 0;
+    if (y === 0) {
+      this.igniting = false;
+      this.events.push("CancelShipIgnition");
+      return 0;
+    }
+    this.ignitionTime += dt;
+    if (this.ignitionTime < this.ignitionDuration) return 0;
+    this.igniting = false;
+    this.events.push("CompleteShipIgnition");
+    return y;
   }
 
   update(dt, bodies, input, basis, world = null) {
@@ -259,12 +318,31 @@ export class Ship {
             up: [basis.up.x, basis.up.y, basis.up.z] };
       const fw = input.forward * this.damage.thrustFactor(input.forward > 0 ? "arriere" : "avant");
       const rt = input.right * this.damage.thrustFactor(input.right > 0 ? "gauche" : "droite");
-      this.vel.x += (a.fwd[0] * fw + a.right[0] * rt) * t;
-      this.vel.y += (a.fwd[1] * fw + a.right[1] * rt) * t;
-      this.vel.z += (a.fwd[2] * fw + a.right[2] * rt) * t;
-      if (input.up && this.damage.thrustFactor("bas")) {
-        this.vel.x += a.up[0] * t; this.vel.y += a.up[1] * t; this.vel.z += a.up[2] * t;
+      const vertical = this.ignition(dt, input.up ? 1 : 0);
+      const vz = (vertical > 0 && this.damage.thrustFactor("bas")) ? vertical : 0;
+      // La poussee est rassemblee en UNE acceleration avant d'etre appliquee :
+      // c'est la seule facon d'en ecreter la part tangentielle en mode
+      // atterrissage, ou le build refuse de vous laisser gagner de la vitesse
+      // orbitale en essayant de vous poser (docs/87-atterrissage.md).
+      let acc = [a.fwd[0] * fw + a.right[0] * rt + a.up[0] * vz,
+                 a.fwd[1] * fw + a.right[1] * rt + a.up[1] * vz,
+                 a.fwd[2] * fw + a.right[2] * rt + a.up[2] * vz];
+      const L = world && world.landing;
+      if (L && L.body) {
+        const radial = [L.body.position[0] - this.pos.x,
+                        L.body.position[1] - this.pos.y,
+                        L.body.position[2] - this.pos.z];
+        const d = Math.hypot(radial[0], radial[1], radial[2]);
+        const vRel = [this.vel.x - (L.velocity ? L.velocity[0] : 0),
+                      this.vel.y - (L.velocity ? L.velocity[1] : 0),
+                      this.vel.z - (L.velocity ? L.velocity[2] : 0)];
+        acc = limitOrbitThrust(acc.map((x) => x * this.effectiveThrust), vRel,
+                               radial, orbitSpeed(L.body, d), dt)
+          .map((x) => x / (this.effectiveThrust || 1));
       }
+      this.vel.x += acc[0] * t;
+      this.vel.y += acc[1] * t;
+      this.vel.z += acc[2] * t;
     }
 
     this.pos.x += this.vel.x * dt;
@@ -272,6 +350,7 @@ export class Ship {
     this.pos.z += this.vel.z * dt;
 
     this.resolveGround(dt, bodies, basis);
+    this.updateLanding(bodies, basis);
 
     // Fluides : ce qui vaut pour le joueur vaut pour le vaisseau. Poser un
     // vaisseau sur Giant's Deep sans que rien ne freine n'avait pas de sens.
@@ -299,37 +378,47 @@ export class Ship {
   /**
    * Les trois capteurs de pad, exprimes dans le repere du vaisseau.
    *
-   * `LandingPadSensor` x3, spheres de rayon 0,5, posees sur `Ship_Body` : deux
-   * en bas et ecartees — les pieds —, une haute et centree. Leurs offsets se
-   * calculent une fois, depuis les positions extraites et celle du vaisseau.
+   * `LandingPadSensor` x3, spheres de rayon 0,5, sur
+   * `Ship_Body/LandingPads/LandingPad` : deux ecartees — les pieds — et une
+   * troisieme en arriere. Ce sont les JAMBES du vaisseau, et elles detectent ce
+   * qui entre dedans.
+   *
+   * L'offset se prend depuis la position de repos de `Ship_Body`, et se ramene
+   * dans son repere par la rotation inverse de sa pose de repos. Le portage le
+   * prenait depuis le POINT D'APPARITION du vaisseau, qui n'est pas le meme
+   * endroit : il obtenait des decalages de 171 unites, et son lancer de rayon
+   * ne touchait jamais rien. Personne ne s'en est apercu parce que personne
+   * n'appelait la loi (docs/89-pose.md).
    */
-  setPadSensors(sensors, shipWorldPos) {
+  setPadSensors(sensors, shipRestPos, shipRestRot = null) {
     this.padSensors = (sensors || [])
-      .filter((s) => s.position && shipWorldPos)
-      .map((s) => ({
-        offset: [s.position[0] - shipWorldPos[0], s.position[1] - shipWorldPos[1],
-                 s.position[2] - shipWorldPos[2]],
-        radius: (s.volume && s.volume.radius) || 0.5,
-        sound: s.touchdownSound || null,
-      }));
+      .filter((s) => s.position && shipRestPos)
+      .map((s) => {
+        let d = [s.position[0] - shipRestPos[0], s.position[1] - shipRestPos[1],
+                 s.position[2] - shipRestPos[2]];
+        if (shipRestRot) {
+          const q = shipRestRot;
+          d = rotateByQuaternion([-q[0], -q[1], -q[2], q[3]], d);
+        }
+        return {
+          offset: d,
+          radius: (s.volume && s.volume.radius) || 0.5,
+          sound: s.touchdownSound || null,
+        };
+      });
     return this.padSensors.length;
   }
 
   /**
-   * `LandingPadManager.Update` : pose si les TROIS capteurs touchent, et
-   * touchent le meme corps.
-   *
-   * Le portage declarait « pose » au premier contact de son rayon vers le bas.
-   * Un vaisseau a cheval sur un rebord etait donc pose, et un vaisseau sur le
-   * flanc aussi. Trois capteurs et un seul corps font la difference entre
-   * « quelque chose est sous moi » et « je suis pose ».
+   * `LandingPadSensor.OnTriggerEnter` : ce que chaque jambe touche.
    *
    * Le build compare des `OWRigidbody` ; ce portage n'en a pas sous la main au
-   * point de contact, et compare donc le corps dont la SURFACE est la plus
-   * proche du point touche. C'est la meme question, posee autrement, et c'est
-   * dit.
+   * point de contact, et retient donc le corps dont la SURFACE est la plus
+   * proche du point touche. C'est la meme question, posee autrement.
+   *
+   * @returns un nom de corps par capteur, `null` quand il ne touche rien
    */
-  padLanding(bodies, basis) {
+  padContacts(bodies, basis) {
     if (!this.padSensors || !this.padSensors.length || !this.probe || !basis) return null;
     const contacts = [];
     for (const s of this.padSensors) {
@@ -340,8 +429,16 @@ export class Ship {
         this.pos.z + o[0] * basis.right.z + o[1] * basis.up.z + o[2] * basis.fwd.z,
       ];
       const bas = [-basis.up.x, -basis.up.y, -basis.up.z];
-      const hit = this.probe(p, bas, s.radius * 4);
-      if (!hit || hit.distance > s.radius * 2) { contacts.push(null); continue; }
+      // LA PORTEE DU RAYON. Le build n'en lance aucun : ses capteurs sont des
+      // spheres de 0,5 posees aux pieds de la COQUE, et c'est le sol qui entre
+      // dedans. Ce portage n'a pas de coque — son vaisseau est une sphere de
+      // rayon 6, posee centre en l'air — et ses jambes, a 3,74 sous le centre,
+      // restent donc a 2,26 du sol quand il est pose. Un rayon de 0,5 ne
+      // touchait jamais rien, et c'est ce qui a laisse la loi muette pendant
+      // tout le temps ou personne ne l'appelait. La portee est ici celle de la
+      // coque : le sol doit etre sous chaque jambe a moins d'un rayon.
+      const hit = this.probe(p, bas, this.radius * 2);
+      if (!hit || hit.distance > this.radius) { contacts.push(null); continue; }
       let best = null, bestD = Infinity;
       for (const b of bodies) {
         const d = Math.abs(Math.hypot(hit.point[0] - b.position[0],
@@ -352,11 +449,57 @@ export class Ship {
       }
       contacts.push(best);
     }
-    return landedOn(contacts);
+    return contacts;
+  }
+
+  /**
+   * `LandingPadManager.Update` : ce que « POSE » veut dire, en entier.
+   *
+   * Deux notions distinctes, que le portage confondait en une :
+   *
+   *   `landed`  — on TOUCHE le sol, quel qu'il soit. C'est ce que
+   *               `resolveGround` etablit, et ce que l'allumage demande.
+   *   `onPad`   — les TROIS jambes touchent, elles touchent le MEME corps, et
+   *               la vitesse relative ne depasse pas cinq.
+   *
+   * C'est `onPad` que le build appelle `IsLanded()`, et c'est lui qui coupe la
+   * rotation et ferme le mode atterrissage. Un vaisseau a cheval sur un rebord,
+   * ou qui derape sur une piste, n'est pas pose — et garde ses commandes
+   * (docs/89-pose.md).
+   *
+   * La vitesse comparee est celle du repere ancre. Le build compare a celle du
+   * POINT DE CONTACT, ce qui revient au meme des lors que le corps touche est
+   * l'ancre — et il l'est chaque fois qu'on se pose, puisque l'origine
+   * flottante s'ancre sur le corps dominant.
+   */
+  updateLanding(bodies, basis) {
+    let contacts = this.padContacts(bodies, basis);
+    this.derniersContacts = contacts;   // sonde de verification
+    // CE QUE LE PORTAGE NE PEUT PAS FAIRE, ET POURQUOI ON LE DIT ICI.
+    //
+    // Les trois jambes ne trouvent le sol que la ou la geometrie repond. Le
+    // vaisseau de ce portage est une SPHERE de rayon 6 : quand il se pose sur
+    // la sphere analytique — le repli, hors des zones ou le maillage est
+    // charge — il n'y a rien sous ses jambes a toucher, et les trois rayons
+    // rendent null. On retombe alors sur le contact au sol de `resolveGround`,
+    // en gardant les deux conditions qui, elles, sont mesurables partout : un
+    // seul corps, et moins de cinq unites de vitesse.
+    //
+    // Ce n'est pas la loi du build, c'est ce qu'on peut en tenir sans coque. La
+    // difference est ecrite plutot que masquee par un nombre ajuste jusqu'a ce
+    // qu'un controle passe (docs/89-pose.md).
+    if (!contacts || contacts.every((c) => c === null)) {
+      contacts = this.landed ? [this.groundBody || "sol"] : [null];
+    }
+    const e = this.pads.update(contacts, this.speed);
+    this.onPad = this.pads.landed;
+    this.padBody = this.pads.body;
+    return e;
   }
 
   resolveGround(dt, bodies, basis) {
     this.landed = false;
+    this.groundBody = null;
     for (const b of bodies) {
       const R = (b.gravity.upperSurfaceRadius || 0) + this.radius;
       const d = [this.pos.x - b.position[0], this.pos.y - b.position[1],
@@ -368,21 +511,21 @@ export class Ship {
       if (this.probe && dist < R + 60 && dist > 0) {
         const hit = this.probe(this.pos, n0, this.radius + 60);
         if (hit && hit.distance <= this.radius) {
-          this.contact(dt, hit.point, hit.normal || n0, basis);
+          this.contact(dt, hit.point, hit.normal || n0, basis, b.name);
           return true;
         }
         if (hit) continue;   // terrain vu, plus loin que la coque : rien a faire
       }
       if (dist >= R || dist === 0) continue;
       this.contact(dt, [b.position[0] + n0[0] * R, b.position[1] + n0[1] * R,
-                        b.position[2] + n0[2] * R], n0, basis);
+                        b.position[2] + n0[2] * R], n0, basis, b.name);
       return true;
     }
     return false;
   }
 
   /** Pose le vaisseau sur un point de contact, avec les degats correspondants. */
-  contact(dt, point, n, basis) {
+  contact(dt, point, n, basis, bodyName = null) {
     // Ou etait le vaisseau AVANT d'etre pose sur le contact : c'est par rapport
     // a cette position-la que le point d'impact a un sens. Le lire apres
     // l'avoir deplace donnait un vecteur nul, et donc toujours la meme piece.
@@ -414,6 +557,9 @@ export class Ship {
     const fr = frameFriction(0.7, dt);
     this.vel.x *= fr; this.vel.y *= fr; this.vel.z *= fr;
     this.landed = true;
+    // Le corps touche : c'est lui que les trois jambes doivent trouver, et
+    // c'est lui qui sert de repli quand la geometrie ne repond pas.
+    this.groundBody = bodyName;
   }
 
   get speed() { return Math.hypot(this.vel.x, this.vel.y, this.vel.z); }

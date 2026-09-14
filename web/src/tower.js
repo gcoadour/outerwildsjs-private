@@ -165,6 +165,49 @@ export class LaunchTerminal {
   reset() { this.announced = false; this.used = false; }
 }
 
+/**
+ * La tour de lancement, telle que la scene la pose.
+ *
+ * @lit LaunchTerminal
+ * @lit LaunchElevatorController
+ *
+ * Trois objets dans `LaunchZone`, et il fallait les trois pour que l'ascenseur
+ * bouge (docs/92-tour.md) :
+ *
+ *   LaunchTerminal      une sphere de 0,42 — la borne qu'on presse
+ *   ElevatorController  une sphere de DIX — le declencheur d'en haut
+ *   Elevator            la cabine, avec son point d'accrochage
+ *
+ * Le portage avait la cabine, ses deux clips, sa course de 31,5 en cinq
+ * secondes, et son point d'accrochage. Il n'avait ni la borne ni le
+ * declencheur : `activateControls`, `pressInteract` et `returnToStart` etaient
+ * ecrites et appelees par personne.
+ */
+export function launchTerminals(gameplay) {
+  return ((gameplay.placed || {}).LaunchTerminal || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position,
+    rotation: c.rotation || null, volume: c.volume || null,
+  }));
+}
+
+/** Le declencheur d'en haut : y entrer renvoie la cabine en bas. */
+export function elevatorControllers(gameplay) {
+  return ((gameplay.placed || {}).LaunchElevatorController || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position,
+    rotation: c.rotation || null, volume: c.volume || null,
+  }));
+}
+
+/**
+ * `LaunchElevatorController.OnTriggerEnter` : au-dessus de 0,9, on redescend.
+ *
+ * Le seuil n'est pas decoratif — la sphere fait dix unites et la course
+ * trente et une : en bas, on est DEDANS, et sans le seuil la cabine repartirait
+ * vers le bas des qu'on s'en approche. C'est le meme genre de garde que le
+ * « on ne tire que quand on sait » de la sphere de l'observatoire.
+ */
+export const RETURN_ABOVE = 0.9;
+
 /** Les capteurs de pad poses dans la scene. */
 export function landingPadSensors(gameplay) {
   return ((gameplay.placed || {}).LandingPadSensor || []).map((c) => ({
@@ -186,7 +229,9 @@ export function landingPadSensors(gameplay) {
  * rebord n'est pas pose — c'est la difference entre « quelque chose est sous
  * moi » et « je suis pose ».
  */
-export function landedOn(contacts) {
+export const LANDED_SPEED = 5;   // vitesse relative au-dela de laquelle on glisse
+
+export function landedOn(contacts, relSpeed = 0) {
   if (!contacts || !contacts.length) return null;
   let corps = null;
   for (const c of contacts) {
@@ -194,7 +239,40 @@ export function landedOn(contacts) {
     if (corps === null) corps = c;
     else if (corps !== c) return null;
   }
+  // La TROISIEME condition, qui manquait : le build compare la vitesse du
+  // vaisseau a celle du point de contact, et au-dela de cinq unites on n'est
+  // pas pose — on GLISSE. La nuance compte depuis que « pose » coupe toute
+  // rotation (docs/89-pose.md) : sans elle, un vaisseau qui derape sur une
+  // piste perdait ses commandes.
+  if (relSpeed > LANDED_SPEED) return null;
   return corps;
+}
+
+/**
+ * `LandingPadManager.Update` : les deux annonces du toucher et du decollage.
+ *
+ * Elles ne sont ecoutees par personne dans l'assembly — et c'est justement ce
+ * qui les rend interessantes a poser : le build les emet quand meme, et un
+ * portage qui les emet aussi pourra les brancher sans rien rouvrir.
+ */
+export class LandingPads {
+  constructor() {
+    this.landed = false;
+    this.body = null;
+    this.events = [];
+  }
+
+  /** @returns {"ShipTouchdown"|"ShipTakeoff"|null} */
+  update(contacts, relSpeed = 0) {
+    const corps = landedOn(contacts, relSpeed);
+    const pose = corps !== null;
+    this.body = corps;
+    if (pose === this.landed) return null;
+    this.landed = pose;
+    const e = pose ? "ShipTouchdown" : "ShipTakeoff";
+    this.events.push(e);
+    return e;
+  }
 }
 
 /**
