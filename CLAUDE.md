@@ -35,6 +35,7 @@ OW_BUILD=... node scripts/il.mjs <Classe>[.<Methode>]   # l'IL, sans SDK .NET
 OW_BUILD=... node scripts/il.mjs --enum <Enumeration>
 OW_BUILD=... node scripts/composants.mjs <Classe>       # les instances de la scene
 OW_BUILD=... node scripts/evenements.mjs   # ce que le jeu annonce, et ce qu'on en nomme
+node scripts/lois.mjs              # ce que le portage a ecrit, et ce qu'il appelle
 
 # Servir la page telle qu'elle sera publiee (web/ est la racine du site)
 web/fetch-deps.sh                  # Babylon.js + Havok dans web/vendor/, non versionne

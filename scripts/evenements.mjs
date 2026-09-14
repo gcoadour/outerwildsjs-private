@@ -68,14 +68,27 @@ export function evenements() {
   return { emis, ecoutes };
 }
 
-/** Le texte de tout `web/src/`, d'un bloc. */
+/**
+ * Le texte de tout `web/src/`, d'un bloc, SANS ses commentaires.
+ *
+ * Sans ce retrait, ce compte se ment de la meme facon que le recensement des
+ * classes s'est menti ([`docs/47`](../docs/47-effets-image.md)) : citer
+ * `AttachPlayerToPoint` en prose au-dessus d'une classe suffisait a le declarer
+ * nomme. Un evenement CITE n'est pas un evenement nomme, et cette fonction
+ * etait ecrite sans la lecon que le depot avait deja payee deux fois
+ * ([`docs/69`](../docs/69-assise.md)).
+ */
 function sources() {
   let texte = "";
   (function walk(d) {
     for (const e of readdirSync(d)) {
       const p = join(d, e);
       if (statSync(p).isDirectory()) walk(p);
-      else if (e.endsWith(".js")) texte += readFileSync(p, "utf8");
+      else if (e.endsWith(".js")) {
+        texte += readFileSync(p, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, " ")
+          .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+      }
     }
   })(SRC);
   return texte;

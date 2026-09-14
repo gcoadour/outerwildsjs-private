@@ -27,11 +27,11 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-function lister(dir, out = []) {
+function lister(dir, out = [], exts = [".js", ".mjs"]) {
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) lister(p, out);
-    else if (e.endsWith(".js") || e.endsWith(".mjs")) out.push(p);
+    if (statSync(p).isDirectory()) lister(p, out, exts);
+    else if (exts.some((x) => e.endsWith(x))) out.push(p);
   }
   return out;
 }
@@ -53,7 +53,13 @@ export function lois() {
   const moteur = src.filter((f) => !f.includes("/pipeline/"));
   const tests = lister(join(ROOT, "tests"));
   const outils = lister(join(ROOT, "scripts"));
-  const txt = new Map([...src, ...tests, ...outils]
+  // Les PAGES appellent, elles aussi. `index.html` importe `initGate` et
+  // l'appelle en trois lignes ; ce compte le declarait mort parce qu'il ne
+  // regardait que des `.js`. Un appelant qui n'a pas la bonne extension est un
+  // appelant quand meme, et c'est la quatrieme fois que ce depot se ment sur
+  // ce qu'il mesure ([`docs/69`](../docs/69-assise.md)).
+  const pages = lister(join(ROOT, "web"), [], [".html"]);
+  const txt = new Map([...src, ...tests, ...outils, ...pages]
     .map((f) => [f, sansCommentaires(readFileSync(f, "utf8"))]));
 
   const out = [];
@@ -63,8 +69,8 @@ export function lois() {
     for (const m of brut.matchAll(/^export (?:async )?function (\w+)/gm)) noms.add(m[1]);
     for (const m of brut.matchAll(/^export class (\w+)/gm)) noms.add(m[1]);
     for (const nom of noms) {
-      // Appelee ailleurs dans le moteur ou le pipeline ?
-      if (src.some((g) => g !== f && compte(txt.get(g), nom) > 0)) continue;
+      // Appelee ailleurs dans le moteur, le pipeline, ou une page ?
+      if ([...src, ...pages].some((g) => g !== f && compte(txt.get(g), nom) > 0)) continue;
       // Appelee dans son PROPRE fichier, au-dela de sa definition ? Une
       // fonction interne exportee pour les tests est legitime.
       if (compte(txt.get(f), nom) > 1) continue;

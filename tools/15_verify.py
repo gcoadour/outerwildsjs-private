@@ -933,6 +933,58 @@ def run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- s'asseoir (docs/69-assise.md) --------------------------------------
+        #
+        # Les quatre `PlayerAttachPoint` : le portage ne s'asseyait nulle part,
+        # et `attachPoints` etait ecrit, eprouve, et appele par personne.
+        assise = page.evaluate("""() => {
+          const a = window.__assise.points;
+          const profils = a.points.map(p => [p.name, p.lockPlayerTurning,
+                                             p.matchRotation, p.centerCamera].join("/"));
+          return { n: a.count, profils, cibles: window.__assise.cibles.length };
+        }""")
+        rep.eq("quatre points d'accrochage", assise["n"], 4)
+        rep.eq("dont le poste de pilotage, qui prend tout",
+               "FlightConsole/true/true/true" in assise["profils"], True)
+        rep.eq("et l'ascenseur, qui ne prend rien",
+               assise["profils"].count("AttachPoint/false/false/false"), 1)
+        rep.eq("deux verrouillages de camera poses", assise["cibles"], 2)
+        # La duree du demi-tour est un ANGLE divise par un taux : dos tourne au
+        # siege, 1,8 s ; de face, aucune. C'est ce que le portage n'avait pas.
+        duree = page.evaluate("""() => {
+          const a = window.__assise.points;
+          const p = a.points.find(x => x.name === "FlightConsole");
+          p.follow({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+          p.attach({ position: [0, 0, -1], rotation: [0, 1, 0, 0] }, 0);
+          const dos = p.turnDuration;
+          p.detach();
+          p.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+          const face = p.turnDuration;
+          // On se leve avec la vitesse du siege, jamais zero.
+          const leve = p.detach([0, 0, 200]);
+          p.follow(null);
+          a.current = null;
+          a.drain();
+          return { dos: Math.round(dos * 100) / 100, face, emporte: leve.velocity[2] };
+        }""")
+        rep.eq("dos tourne, le demi-tour dure 1,8 s", duree["dos"], 1.8)
+        rep.eq("de face, aucune duree", duree["face"], 0)
+        rep.eq("et on se leve avec la vitesse du siege", duree["emporte"], 200)
+        # Le verrouillage de camera, RELU dans l'IL : le corps tourne en lacet
+        # a une vitesse proportionnelle a l'ecart, et le champ suit 500/d.
+        verrou = page.evaluate("""() => {
+          const v = window.__assise.verrou;
+          v.lockOn({ name: "test" }, { followRate: 2 });
+          const r = v.update(0.5, [10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 20, 70);
+          const rompu = v.breakLock();
+          return { yaw: r.yaw, fov: r.fov, snap: rompu.snapSeconds,
+                   apres: v.update(1, [10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 20, 70) };
+        }""")
+        rep.eq("le lacet vaut l'ecart fois le taux fois le temps", verrou["yaw"], 90)
+        rep.eq("et le champ, cinq cents sur la distance", verrou["fov"], 25)
+        rep.eq("la rupture ramene le champ en deux secondes", verrou["snap"], 2)
+        rep.eq("et plus rien ne suit", verrou["apres"], None)
+
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #
         # Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME une seconde,

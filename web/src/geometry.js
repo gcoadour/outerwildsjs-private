@@ -219,16 +219,6 @@ export function bootFiles(homeBodyName) {
   return [...new Set(files.filter(Boolean))];
 }
 
-/**
- * Charge tous les fichiers d'un coup. Conserve pour les outils hors jeu
- * (`gltf-viewer.html`) et pour les mesures avant/apres.
- */
-export async function loadGeometry(BABYLON, scene, files = BODY_FILES) {
-  const store = new GeometryStore(BABYLON, scene);
-  await store.load(files);
-  return store.entries;
-}
-
 /** Noeud d'un corps precis dans un lot (ex. "TimberHearth_Body"), ou null. */
 export function findBodyNode(entry, bodyName) {
   return (entry && entry.nodes && entry.nodes.get(bodyName)) || null;
@@ -253,18 +243,6 @@ export function meshesForBody(entry, bodyName, excludeRoots = []) {
   }
   const list = sub.filter((m) => m.getTotalVertices() > 0 && !excluded.has(m));
   return list.length ? list : (entry ? entry.meshes : []);
-}
-
-/** Centre geometrique mesure d'un lot, en coordonnees monde de la scene. */
-export function measureCenter(BABYLON, entry) {
-  const cs = entry.meshes.map((m) => {
-    m.computeWorldMatrix(true);
-    return m.getBoundingInfo().boundingBox.centerWorld;
-  });
-  if (!cs.length) return null;
-  const c = cs.reduce((a, v) => a.add(v), BABYLON.Vector3.Zero()).scale(1 / cs.length);
-  entry.center = c;
-  return c;
 }
 
 /**

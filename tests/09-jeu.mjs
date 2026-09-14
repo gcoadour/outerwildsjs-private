@@ -66,9 +66,12 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
          EndOfTimeMusic, END_OF_TIME, eventAudio } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
-         zoneFaced, ZeroGTraining, CameraLock,
+         zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
 import { Interactables } from "../web/src/interact.js";
+import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
+         slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
+         toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
@@ -2762,11 +2765,38 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("les trois, oui", entrainement.update(), true);
   check("et on ne l'annonce qu'une fois", entrainement.update(), false);
 
+  // Le verrouillage de camera, RELU dans l'IL : les trois verifications qui
+  // etaient ici gardaient une paraphrase — un `progress` de 0 a 1 qui
+  // n'existe nulle part dans le build (docs/69-assise.md).
   const lock = new CameraLock();
-  lock.lockOn({ name: "Projector" }, 2);
-  check("le verrouillage progresse a son rythme", lock.update(0.25), 0.5);
-  lock.breakLock();
-  check("et se rompt", lock.update(1), 0);
+  check("sans cible, rien", lock.update(1, [1, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5), null);
+  lock.lockOn({ name: "Projector" }, { followRate: 2 });
+  {
+    // Cible a 90 degres sur la droite, joueur regardant +Z, haut +Y.
+    const r = lock.update(0.5, [10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5);
+    check("le lacet vaut l'ecart, fois le taux, fois le temps", r.yaw, 90);
+    check("et sous dix unites, le champ ne bouge pas", r.fov, 70);
+  }
+  {
+    // La meme cible, mais a gauche : le signe vient de `Dot(aplati, right)`.
+    const r = lock.update(0.5, [-10, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5);
+    check("a gauche, le lacet est negatif", r.yaw, -90);
+  }
+  {
+    // Une cible HAUTE, mais pile devant : le lacet est nul, car l'ecart est
+    // aplati dans le plan du joueur avant d'etre mesure.
+    const r = lock.update(1, [0, 50, 3], [0, 0, 1], [0, 1, 0], [1, 0, 0], 50);
+    check("ce qui est plus haut ne fait pas tourner le corps", Math.round(r.yaw), 0);
+    check("et a cinquante unites, le champ est au plancher", r.fov, 20);
+  }
+  check("l'ecart brut se mesure aussi seul, en degres signes",
+        Math.round(lockYawError([0, 0, -10], [0, 0, 1], [0, 1, 0], [1, 0, 0])), 180);
+  check("a vingt unites, cinq cents divise par la distance", lockFOV(20), 25);
+  check("et le plancher tient a vingt-cinq", lockFOV(25), 20);
+  check("juste sous dix, le champ initial revient", lockFOV(10), 70);
+  check("la rupture ramene le champ en deux secondes",
+        lock.breakLock().snapSeconds, 2);
+  check("et plus rien ne suit", lock.update(1, [1, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], 5), null);
 }
 
 {
@@ -4262,6 +4292,149 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   vieux.update(1, 6);
   vieux.step(METEOR.life + 1, null);
   check("et il finit par disparaitre", vieux.meteors.length, 0);
+}
+
+{
+  // --- S'ASSEOIR (docs/69-assise.md) ---
+  //
+  // Les quatre `PlayerAttachPoint` : le portage ne s'asseyait nulle part, et
+  // `attachPoints` etait lu par personne.
+
+  check("le taux du constructeur", ATTACHE.rotationRate, 100);
+  check("et le glissement", ATTACHE.translationRate, 2);
+
+  // La duree du demi-tour est une DISTANCE ANGULAIRE divisee par un taux.
+  check("arriver de face ne prend aucun temps",
+        turnDuration([0, 0, 1], [0, 0, 1]), 0);
+  check("arriver de dos prend 1,8 s a cent degres par seconde",
+        turnDuration([0, 0, -1], [0, 0, 1]), 1.8);
+  check("un quart de tour, 0,9 s",
+        Math.round(turnDuration([1, 0, 0], [0, 0, 1]) * 1000) / 1000, 0.9);
+
+  // Le SmoothStep, et le cas ou la duree est nulle : `ble.un` du build.
+  check("duree nulle, on y est deja", turnFraction(0, 0), 1);
+  check("a mi-duree, la moitie du chemin", turnFraction(0.9, 1.8), 0.5);
+  check("au quart, moins que le quart (SmoothStep)",
+        turnFraction(0.45, 1.8) < 0.25, true);
+
+  // Le glissement est une fraction PAR IMAGE, bornee.
+  check("a soixante images, un trentieme",
+        Math.round(slideFraction(1 / 60) * 10000) / 10000, 0.0333);
+  check("une image trop longue ne depasse pas la cible", slideFraction(10), 1);
+
+  // `CenterCamera(rate)` est `SnapToDegrees(0, 0, rate)`.
+  check("recentrer depuis (30, 40) prend un demi-tour de seconde",
+        snapDuration(30, 40, 0, 0, 100), 0.5);
+  check("et depuis le centre, aucun temps", snapDuration(0, 0, 0, 0, 100), 0);
+  check("a mi-duree, la moitie des degres",
+        snapDegrees([30, 40], [0, 0], 0.25, 0.5)[0], 15);
+
+  // Le repere du point : aller et retour.
+  const point = { position: [10, 0, 0], rotation: [0, 0.707107, 0, 0.707107] };
+  const local = toLocal(point, [10, 0, 5]);
+  // Le point regarde +X ; ce qui est cinq unites devant lui en monde (+Z)
+  // est donc a -5 sur SON axe X, et non a +5 : c'est la rotation inverse.
+  check("le repere du point tourne bien avec lui", Math.round(local[0]), -5);
+  const retour = toWorld(point, local);
+  check("et l'aller-retour retombe sur ses pieds", Math.round(retour[2]), 5);
+
+  // Le slerp prend le chemin court, meme entre quaternions opposes.
+  const q = qslerp([0, 0, 0, 1], [0, 0, 0, -1], 0.5);
+  check("le chemin court entre deux ecritures de la meme pose",
+        Math.abs(q[3]), 1);
+
+  // Le poste de pilotage : les trois drapeaux, et une assise complete.
+  const pilotage = new AttachPoint({
+    name: "FlightConsole", body: "Ship_Body", position: [0, 0, 0],
+    rotation: [0, 0, 0, 1], lockTurning: true, matchRotation: true,
+    centerCamera: true, rotationRate: 100 });
+  const joueur = { position: [0, 0, -2], rotation: [0, 1, 0, 0] };  // dos tourne
+  const demande = pilotage.attach(joueur, 0);
+  check("le poste recentre la camera", demande.centerCamera, true);
+  check("au taux du point", demande.rate, 100);
+  check("et verrouille le tour du joueur", demande.lock, true);
+  check("dos tourne, le demi-tour dure 1,8 s",
+        Math.round(pilotage.turnDuration * 100) / 100, 1.8);
+  // Une image plus tard : le joueur a glisse vers le point, sans y etre.
+  const p1 = pilotage.update(0.1, 0.1);
+  check("il glisse vers le siege", p1.position[2] > -2, true);
+  check("sans y etre deja", p1.position[2] < 0, true);
+  // Et au bout de la duree, il est aligne sur le point : rotation identite.
+  pilotage.update(0.1, 5);
+  const fin = pilotage.update(0.1, 5);
+  check("passe la duree, il regarde ou le siege regarde",
+        Math.round(Math.abs(fin.rotation[3]) * 1000) / 1000, 1);
+
+  // On se leve avec la vitesse DU POINT, jamais zero.
+  const assis = new AttachPoint({ name: "FlightConsole", body: "Ship_Body",
+                                  position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+  assis.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  check("s'asseoir s'annonce", assis.events[0], "AttachPlayerToPoint");
+  check("et l'annonce sait a quoi", assis.body, "Ship_Body");
+  const leve = assis.detach([0, 0, 200]);
+  check("se lever aussi", assis.events[1], "DetachPlayerFromPoint");
+  check("et on emporte la vitesse du point", leve.velocity[2], 200);
+  check("plus rien ne suit une fois debout", assis.update(0.1, 1), null);
+
+  // L'ascenseur : le seul point qui ne prend RIEN.
+  const lift = new AttachPoint({ name: "AttachPoint", body: "TimberHearth_Body",
+                                 position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                                 lockTurning: false, matchRotation: false,
+                                 centerCamera: false });
+  const monte = lift.attach({ position: [0, 1, 0], rotation: [0, 1, 0, 0] }, 0);
+  check("monter ne recentre pas la camera", monte.centerCamera, false);
+  check("ni ne verrouille le tour", monte.lock, false);
+  check("et l'orientation reste au joueur", lift.update(0.1, 1).rotation, null);
+
+  // Le porteur bouge : le point suit, et le joueur avec.
+  const suivi = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+  suivi.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  const porte = suivi.update(1, 1, [100, 0, 0]);
+  check("le joueur part avec son porteur", porte.position[0] > 50, true);
+
+  // Le porteur TOURNE : c'est le cas du vaisseau, et le decalage seul ne le
+  // dit pas. Le repere vivant remplace alors la pose au repos.
+  const coque = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                                  matchRotation: true });
+  coque.follow({ position: [0, 500, 0], rotation: [0, 1, 0, 0] });
+  check("le siege prend le repere de sa coque",
+        Math.round(coque.forward()[2]), -1);
+  coque.attach({ position: [0, 499, 0], rotation: [0, 1, 0, 0] }, 0);
+  check("et le joueur y est porte", Math.round(coque.update(1, 9).position[1]), 500);
+  coque.follow(null);
+  check("rendu, le point retrouve sa pose au repos", coque.forward()[2], 1);
+
+  // La lunette suspend l'assise, et en sortir RECOMMENCE le demi-tour.
+  const lunette = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                                    matchRotation: true });
+  lunette.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  check("entrer dans la lunette suspend le suivi",
+        lunette.enterTelescope() && lunette.matchRotation, false);
+  check("et n'y entre pas deux fois", lunette.enterTelescope(), false);
+  lunette.exitTelescope({ position: [0, 0, -1], rotation: [0, 1, 0, 0] }, 9);
+  check("en sortir le restaure", lunette.matchRotation, true);
+  check("et redemarre le demi-tour depuis maintenant", lunette.since, 9);
+
+  // Un seul point a la fois.
+  const tous = new AttachPoints([
+    { name: "FlightConsole", position: [0, 0, 0], rotation: [0, 0, 0, 1] },
+    { name: "ShipComputer", position: [0, -6, 0], rotation: [0, 0, 0, 1] },
+  ]);
+  check("les deux points sont poses", tous.count, 2);
+  check("on trouve celui de la zone", tous.at([0, -6, 0.2]).name, "ShipComputer");
+  check("et rien la ou il n'y en a pas", tous.at([0, 50, 0]), null);
+  tous.attach(tous.at([0, 0, 0]), { position: [0, 0, -1], rotation: [0, 0, 0, 1] }, 0);
+  check("on est assis", tous.attached, true);
+  tous.attach(tous.at([0, -6, 0]), { position: [0, -6, -1], rotation: [0, 0, 0, 1] }, 1);
+  check("passer a l'autre libere le premier",
+        tous.points[0].attached, false);
+  check("et le second tient", tous.points[1].attached, true);
+  tous.detach();
+  check("se lever libere tout", tous.attached, false);
+  // Les annonces se drainent d'un bloc, comme celles du vaisseau.
+  const annonces = tous.drain();
+  check("les quatre annonces sont passees", annonces.length, 4);
+  check("et le drainage vide", tous.drain().length, 0);
 }
 
 report();

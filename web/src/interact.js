@@ -11,7 +11,7 @@
 // les lisait. La loi de leur fenetre de vue vit dans `gear.js`, avec le reste
 // de ce lot-la.
 
-import { zoneFaced } from "./gear.js";
+import { zoneFaced, interactZones } from "./gear.js";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
@@ -55,14 +55,19 @@ export class Interactables {
     // `_viewingWindow` est l'angle, en degres, autour de l'avant de la zone :
     // 60 pour la trappe, 90 pour les commandes, 360 pour ce qui se prend de
     // n'importe ou. Il vaut un demi-angle une fois compare (docs/46, lot 4).
-    for (const x of placed.InteractZone || []) {
-      const f = x.fields || {};
+    //
+    // La LECTURE de ces zones vit dans `gear.js`, avec le reste du lot. Elle y
+    // etait deja, exportee et eprouvee, et ce module en tenait une SECONDE
+    // copie ecrite a la main. Deux lectures du meme champ divergent tot ou
+    // tard ; celle-ci n'avait pas d'appelant du tout (docs/69-assise.md).
+    for (const z of interactZones({ placed })) {
       this.items.push({
-        kind: "zone", name: x.name, world: x.position, body: x.body || null,
-        range: (x.volume && x.volume.radius) || 2,
-        prompt: f._prompt || null,
-        viewingWindow: f._viewingWindow ?? 360,
-        rotation: x.rotation || null,
+        kind: "zone", name: z.name, world: z.position, body: z.body,
+        range: (z.volume && z.volume.radius) || 2,
+        prompt: z.prompt || null,
+        resetOnLoseFocus: z.resetOnLoseFocus,
+        viewingWindow: z.viewingWindow,
+        rotation: z.rotation,
       });
     }
   }

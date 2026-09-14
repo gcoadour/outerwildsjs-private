@@ -33,8 +33,8 @@ import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
-import { Ship, shipSpawn } from "./ship.js";
-import { startPose, walkToShip, horizonBasis, EYE_HEIGHT } from "./start.js";
+import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
+import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT } from "./start.js";
 import { loadAudioMap, AudioField, AudioMixer, signalStrength } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
@@ -114,11 +114,14 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          meteorLaunchers, MeteorLaunchers, METEOR,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
-         qrot as qrotDecor } from "./decor.js";
+         qrot as qrotDecor, lookRotation } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, signalVolumes, signalZoneAt } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
-         ZeroGTraining } from "./gear.js";
+         ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
+         LOCK_ON } from "./gear.js";
+import { AttachPoints, snapDuration, snapDegrees,
+         turnFraction } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
@@ -1296,6 +1299,46 @@ async function boot() {
   // enfants de la zone. Trois unites est donc la hauteur de cette capsule, pas
   // un nombre choisi.
   const GEAR_REACH = 3;
+
+  // §J S'ASSEOIR (docs/69-assise.md).
+  //
+  // Les quatre `PlayerAttachPoint` du build sont les quatre endroits ou le jeu
+  // prend le joueur en charge, et ils tombent exactement sur quatre zones
+  // d'interaction : « Buckle Up » au poste de pilotage, « Boot Up » a
+  // l'ordinateur de bord, « Fly Model Ship » a l'observatoire, « Activate
+  // Lift » au pied de la tour. Le portage n'en lisait aucun : `attachPoints`
+  // etait ecrit, eprouve, et appele par personne.
+  const pointsAttache = new AttachPoints(attachPoints(gameplay));
+  const siegePilotage = pointsAttache.points.find((p) => p.name === "FlightConsole")
+                     || null;
+  // Le verrouillage de camera : deux instances posees, dont celle des commandes
+  // du projecteur de l'observatoire. La classe a ete RELUE dans l'IL a cette
+  // occasion — celle du portage etait une paraphrase que rien n'appelait.
+  const verrouCamera = new CameraLock();
+  const ciblesVerrou = lockOnTargets(gameplay);
+  window.__assise = { points: pointsAttache, verrou: verrouCamera,
+                      cibles: ciblesVerrou };
+
+  /**
+   * Le repere du poste de pilotage, en coordonnees monde, cette image.
+   *
+   * `ship.quat` part de l'identite sur la scene AU REPOS : la pose du siege
+   * s'obtient donc en tournant son ecart au centre du vaisseau par ce
+   * quaternion, et en composant les deux orientations.
+   */
+  function siegeVivant() {
+    if (!ship || !shipRest || !siegePilotage) return null;
+    const d = [siegePilotage.position[0] - shipRest[0],
+               siegePilotage.position[1] - shipRest[1],
+               siegePilotage.position[2] - shipRest[2]];
+    const r = quatRotate(ship.quat, d);
+    return {
+      position: [ship.pos.x + anchorPos[0] + r[0],
+                 ship.pos.y + anchorPos[1] + r[1],
+                 ship.pos.z + anchorPos[2] + r[2]],
+      rotation: quatMul(ship.quat, siegePilotage.rotation),
+    };
+  }
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   // Le champ de repos du telescope n'est pas un champ du telescope : c'est
   // celui de la camera, que `SnapToInitFieldOfView` retrouve en sortant.
@@ -1435,6 +1478,18 @@ async function boot() {
   // Le lacet part de l'orientation du point d'apparition : c'est elle qui
   // decide de la premiere image du jeu.
   let yaw = yaw0, pitch = 0;
+  // `CenterCamera` : le recentrage n'est pas un saut, c'est une DUREE tiree
+  // d'une distance angulaire — `Sqrt(dx^2 + dy^2) / rate` — puis un SmoothStep
+  // par-dessus (docs/69-assise.md). Le meme calcul que le demi-tour du corps,
+  // au meme taux : les deux arrivent ensemble.
+  let recentrage = null;
+  // Le lacet d'ou part le demi-tour du siege. Garde separement parce que la
+  // fraction s'applique a l'ECART, et qu'un ecart se mesure depuis un depart.
+  let lacetSiege = null;
+  // Le champ que le verrouillage demande, ou null. Il ne s'ecrit pas ici :
+  // la lunette a le dernier mot sur `camera.fov`, et les deux ne se melangent
+  // pas plus dans le build que dans le portage.
+  let verrouFOV = null;
   // Le roulis vient du MEME mouvement de souris que le lacet, aiguille par la
   // touche alt (`Swap Roll/Yaw`). Il s'accumule ici et se consomme a l'image.
   let rollInput = 0;
@@ -1724,6 +1779,19 @@ async function boot() {
     const hb = horizonBasis([up.x, up.y, up.z]);
     const east = new BABYLON.Vector3(hb.east[0], hb.east[1], hb.east[2]);
     const north = new BABYLON.Vector3(hb.north[0], hb.north[1], hb.north[2]);
+    // `CenterCamera(_rotationRate)` : le regard revient au centre du siege sur
+    // une DUREE, pas d'un coup. Le build recentre les deux degres ; ici le
+    // lacet du corps est deja repris par `_matchRotation`, et il ne reste que
+    // le tangage — le seul des deux que le portage tienne separement.
+    if (recentrage) {
+      const ecoule = now - recentrage.debut;
+      // `UpdateSnapping` interpole les DEUX degres sous un meme SmoothStep. Le
+      // couple est garde tel quel — le lacet en second, toujours nul ici —
+      // pour que la loi reste celle du build et non une moitie de loi.
+      const d = snapDegrees(recentrage.depart, [0, 0], ecoule, recentrage.duree);
+      pitch = d[0] * Math.PI / 180;
+      if (turnFraction(ecoule, recentrage.duree) >= 1) recentrage = null;
+    }
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
@@ -1946,13 +2014,47 @@ async function boot() {
       }
       ship.sync(BABYLON);
       if (ship.boarded) {
-        // Le joueur voyage avec le vaisseau, et desormais dans SON repere : le
-        // poste de pilotage est trois unites au-dessus du plancher, donc le
-        // long de l'axe propre du vaisseau et non d'un « haut » de camera.
-        const a = ship.axes;
-        player.pos.x = ship.pos.x + a.up[0] * 3;
-        player.pos.y = ship.pos.y + a.up[1] * 3;
-        player.pos.z = ship.pos.z + a.up[2] * 3;
+        // Le joueur voyage avec le vaisseau — et depuis docs/69, il s'ASSIED :
+        // le poste de pilotage est un `PlayerAttachPoint`, et le portage se
+        // contentait de coller le joueur trois unites au-dessus du plancher.
+        //
+        // Le siege prend le repere VIVANT de la coque : sa pose au repos ne dit
+        // rien de l'assiette du moment, et un siege qui ne tourne pas avec son
+        // vaisseau est un siege dont on tombe des le premier tonneau.
+        const cible = siegeVivant();
+        if (cible && siegePilotage) {
+          siegePilotage.follow(cible);
+          const etat = pointsAttache.update(dt, now);
+          if (etat) {
+            player.pos.x = etat.position[0] - anchorPos[0];
+            player.pos.y = etat.position[1] - anchorPos[1];
+            player.pos.z = etat.position[2] - anchorPos[2];
+            // `_matchRotation` : le corps pivote vers l'avant du siege, sur la
+            // duree tiree de l'angle de depart. Le portage tient le regard en
+            // deux scalaires plutot qu'en quaternion : c'est donc le LACET que
+            // l'on mene, et l'azimut du siege se lit dans le repere d'horizon
+            // du moment — celui-la meme qui sert au point d'apparition.
+            if (etat.rotation && lacetSiege !== null) {
+              const vise = yawFor(qrotDecor(etat.rotation, [0, 0, 1]),
+                                  [up.x, up.y, up.z]);
+              if (vise !== null) {
+                // Par le plus court chemin : sans ce repli dans [-pi, pi], un
+                // siege a l'ouest se rejoint par l'est, en frolant le tour.
+                let ecart = vise - lacetSiege;
+                while (ecart > Math.PI) ecart -= 2 * Math.PI;
+                while (ecart < -Math.PI) ecart += 2 * Math.PI;
+                yaw = lacetSiege + ecart
+                    * turnFraction(now - siegePilotage.since,
+                                   siegePilotage.turnDuration);
+              }
+            }
+          }
+        } else {
+          const a = ship.axes;
+          player.pos.x = ship.pos.x + a.up[0] * 3;
+          player.pos.y = ship.pos.y + a.up[1] * 3;
+          player.pos.z = ship.pos.z + a.up[2] * 3;
+        }
         player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
@@ -1981,12 +2083,48 @@ async function boot() {
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
+          // ON SE LEVE AVEC LA VITESSE DU SIEGE, jamais avec zero :
+          // `SetVelocity(attachedOWRigidbody.GetPointVelocity(point))`. Sans
+          // cette ligne, quitter le poste d'un vaisseau qui file a deux cents
+          // unites par seconde vous laisse sur place, et le vaisseau part sans
+          // vous. C'est elle qui rend le fait de se lever en vol possible.
+          const leve = pointsAttache.detach([ship.vel.x, ship.vel.y, ship.vel.z]);
+          if (leve) {
+            player.vel.x = leve.velocity[0];
+            player.vel.y = leve.velocity[1];
+            player.vel.z = leve.velocity[2];
+          }
+          if (siegePilotage) siegePilotage.follow(null);
+          lacetSiege = null;
           const a = ship.axes;
           player.pos.x += a.up[0] * 4; player.pos.y += a.up[1] * 4;
           player.pos.z += a.up[2] * 4;
         } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
                    pdata.knowsLaunchCodes) {
           ship.boarded = true;
+          // S'asseoir prend du TEMPS : la duree du demi-tour est l'angle entre
+          // l'avant du joueur et celui du siege, divise par cent degres par
+          // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
+          // et arriver de face n'en demande aucune.
+          const cible = siegeVivant();
+          if (cible && siegePilotage) {
+            siegePilotage.follow(cible);
+            lacetSiege = yaw;
+            const demande = pointsAttache.attach(siegePilotage, {
+              position: [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                         player.pos.z + anchorPos[2]],
+              forward: fwd,
+              rotation: lookRotation(fwd, up),
+            }, now);
+            // `_centerCamera` : le regard revient au centre du siege, a la
+            // meme vitesse que le corps — les deux arrivent ensemble.
+            if (demande && demande.centerCamera) {
+              recentrage = { debut: now,
+                             duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                                 demande.rate),
+                             depart: [pitch * 180 / Math.PI, 0] };
+            }
+          }
         }
       }
     }
@@ -2018,6 +2156,83 @@ async function boot() {
     // comportement d'avant.
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
+
+    // §J LES DEUX POINTS D'ACCROCHAGE DE TIMBER HEARTH.
+    //
+    // « Fly Model Ship » a l'observatoire, « Activate Lift » au pied de la
+    // tour : deux zones d'interaction posees exactement sur un
+    // `PlayerAttachPoint`, et le portage ne s'y accrochait pas.
+    //
+    // Le second est le plus parlant du lot : il ne verrouille rien, ne recentre
+    // rien, ne suit aucune rotation. On est PORTE, et on regarde ou l'on veut —
+    // c'est ce que veut dire monter dans un ascenseur, et c'est exactement ce
+    // que la scene dit de ce point-la.
+    if (!ship || !ship.boarded) {
+      const assis = pointsAttache.current;
+      if (assis && assis !== siegePilotage) {
+        const etat = pointsAttache.update(dt, now,
+                                          decalageDuCorps(assis.body, anchorPos));
+        if (etat) {
+          player.pos.x = etat.position[0] - anchorPos[0];
+          player.pos.y = etat.position[1] - anchorPos[1];
+          player.pos.z = etat.position[2] - anchorPos[2];
+          player.vel.x = player.vel.y = player.vel.z = 0;
+          if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
+        }
+        if (interactPressed && !dialogue.active) {
+          // On se leve avec la vitesse du point. Une planete qui tourne en
+          // porte une, et c'est elle qu'on emporte — pas zero.
+          pointsAttache.detach([0, 0, 0]);
+        }
+      } else if (interactPressed && !dialogue.active && focus
+                 && focus.kind === "zone") {
+        const point = pointsAttache.at(focus.world);
+        if (point && point !== siegePilotage) {
+          lacetSiege = yaw;
+          const demande = pointsAttache.attach(point, {
+            position: playerW, forward: fwd, rotation: lookRotation(fwd, up),
+          }, now, decalageDuCorps(point.body, anchorPos));
+          if (demande && demande.centerCamera) {
+            recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
+                           duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                               demande.rate) };
+          }
+          console.log(`accroche : ${focus.prompt || point.name}`);
+        }
+      }
+    }
+    // Les annonces du build, drainees comme celles du vaisseau.
+    for (const e of pointsAttache.drain()) console.log(`annonce : ${e}`);
+
+    // §J LE VERROUILLAGE DE CAMERA. Deux `PlayerLockOnTargeting` poses, dont
+    // celui des commandes du projecteur : s'en servir tourne le corps vers
+    // elles et RESSERRE le champ, `500 / distance` borne a vingt degres.
+    //
+    // Le corps tourne en LACET seulement, a une vitesse proportionnelle a
+    // l'ecart : l'approche est exponentielle, sans a-coup a la fin, et le
+    // tangage reste a la main pendant ce temps.
+    {
+      const surCible = consoles.active
+        ? ciblesVerrou.find((c) => Math.hypot(c.position[0] - consoles.active.position[0],
+                                              c.position[1] - consoles.active.position[1],
+                                              c.position[2] - consoles.active.position[2]) < 2)
+        : null;
+      if (surCible && !verrouCamera.locked) verrouCamera.lockOn(surCible);
+      else if (!surCible && verrouCamera.locked) verrouCamera.breakLock();
+      if (verrouCamera.locked) {
+        const dec = decalageDuCorps(surCible.body, anchorPos) || [0, 0, 0];
+        const versLa = [surCible.position[0] + dec[0] - playerW[0],
+                        surCible.position[1] + dec[1] - playerW[1],
+                        surCible.position[2] + dec[2] - playerW[2]];
+        const r = verrouCamera.update(dt, versLa, [fwd.x, fwd.y, fwd.z],
+                                      [up.x, up.y, up.z],
+                                      [right.x, right.y, right.z],
+                                      Math.hypot(versLa[0], versLa[1], versLa[2]),
+                                      reglagesCam.fov || 70);
+        if (r) { yaw += r.yaw * Math.PI / 180; verrouFOV = r.fov; }
+      } else verrouFOV = null;
+    }
+
     const zone = oxygen.length
       ? inOxygenZone(oxygen, playerW, oxyDet ? oxyDet.reach : 0) : null;
     // Le carburant etait consomme EN MARCHANT : `thrusting` valait vrai des
@@ -2543,6 +2758,13 @@ async function boot() {
       ? ((cmds.held("Zoom In", etatCmd) ? 1 : 0)
          - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
     camera.fov = telescope.update(dt, zoomAxe);
+    // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
+    // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
+    // image que l'assise, et la meme dependance a la cadence.
+    if (verrouFOV !== null && !telescope.active) {
+      const vise = verrouFOV * Math.PI / 180;
+      camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
+    }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
