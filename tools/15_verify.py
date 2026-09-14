@@ -1017,6 +1017,40 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- la fin de la liste (docs/75-chaleur.md) -----------------------------
+        #
+        # `heatSources` cherchait des classes dont le NOM contient « heat » : il
+        # n'y en a AUCUNE dans ce build. La liste etait vide, et la guimauve ne
+        # chauffait jamais — docs/67 a bati le soin du jeu par-dessus.
+        ch = page.evaluate("""() => {
+          const c = window.__chaleur;
+          if (!c) return null;
+          return { sources: c.sources.length,
+                   surLeFeu: c.sur ? Math.round(c.sur) : 0 };
+        }""")
+        if ch:
+            rep.eq("huit feux de camp", ch["sources"], 8)
+            rep.eq("et cent de chaleur sur le premier", ch["surLeFeu"], 100)
+        # La sonde ancienne avance, et rien ne l'arrete.
+        anc = page.evaluate("""() => {
+          const a = window.__sondeAncienne;
+          if (!a) return null;
+          return { v: Math.hypot(a.vel[0], a.vel[1], a.vel[2]) };
+        }""")
+        if anc:
+            rep.check("la sonde ancienne a pris de la vitesse", anc["v"] > 0,
+                      round(anc["v"], 1), "> 0")
+        # Les quatre invites de sonde, avec leur regard.
+        iv = page.evaluate("""() => {
+          const i = window.__invites;
+          return i ? { n: i.sonde.length,
+                       angles: [...new Set(i.sonde.map(x => x.minAngle))] } : null;
+        }""")
+        if iv:
+            rep.eq("cinq invites de sonde et de lunette", iv["n"], 5)
+            rep.eq("a quarante-cinq degres et trois cent soixante",
+                   sorted(iv["angles"]), [45, 360])
+
         # --- la queue des lois (docs/74-etalons.md) ------------------------------
         #
         # Les phares du vaisseau : le portage n'en avait AUCUN, et

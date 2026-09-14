@@ -120,7 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **228/228** ([`74`](74-etalons.md)) |
+| vérification avec le build | **233/233** ([`75`](75-chaleur.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -147,6 +147,9 @@ portage.
 | **on part avec le sol** | le joueur se réveille à la vitesse du sol qui tourne, pas à zéro ([`73`](73-passages.md)) |
 | phares du vaisseau | 600 unités, bridés à **100** dans la dimension abandonnée ([`74`](74-etalons.md)) |
 | marqueurs de carte | la règle entière : le vaisseau, le joueur qui ne se masque jamais, l'épave qui efface tout ([`74`](74-etalons.md)) |
+| **la chaleur des feux** | 8 émetteurs de rayonnement : la guimauve ne cuisait **jamais** ([`75`](75-chaleur.md)) |
+| invite de sonde | elle vient parce qu'on **regarde** quelque part, pas parce qu'on est là ([`75`](75-chaleur.md)) |
+| sonde ancienne | 50 d'accélération locale, pour toujours ([`75`](75-chaleur.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

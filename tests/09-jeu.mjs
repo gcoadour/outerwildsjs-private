@@ -53,7 +53,7 @@ import { ambienceZones, activeZones, winnersByLayer, clipOf,
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, probePrompts, radiationEmitters,
          radiationAt, CompoundTrigger, sandstormVolumes,
-         childTriggers, Sandstorm } from "../web/src/volumes.js";
+         childTriggers, Sandstorm, promptFaced } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
@@ -4973,6 +4973,73 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("s'il se retire, elle tombe", o.update([0, 0, 0], null, false), "exit");
     check("et l'ecran se calme", o.active, false);
   }
+}
+
+{
+  // --- LA FIN DE LA LISTE (docs/75-chaleur.md) ---
+
+  // LA CHALEUR QUI N'EXISTAIT PAS. `heatSources` ramassait les classes dont le
+  // NOM contient « heat » — il n'y en a AUCUNE dans ce build.
+  check("aucune classe de nom thermique", heatSources({ placed: {
+    SomethingElse: [{ name: "x", position: [0, 0, 0], volume: { radius: 3 } }],
+  } }).length, 0);
+  // La chaleur est ailleurs : huit emetteurs de rayonnement de type 1.
+  const gpR = { placed: { RadiationEmitter: [
+    { name: "Campfire", body: "TimberHearth_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 2.36, center: [0, 0, 0] },
+      fields: { radiationType: 1, magnitude: 100, falloffMode: 1,
+                CustomFalloff: { customFalloff: { m_Curve: [
+                  { time: 10, value: 1 }, { time: 45, value: 0 }] } } } },
+    { name: "Sun", body: "Sun_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 30000, center: [0, 0, 0] },
+      fields: { radiationType: 0, magnitude: 100, falloffMode: 0 } },
+  ] } };
+  const emet = radiationEmitters(gpR);
+  check("deux emetteurs", emet.length, 2);
+  check("dont un seul thermique", emet.filter((e) => e.type === 1).length, 1);
+  const feux = heatSources(gpR, emet);
+  check("une seule source de chaleur", feux.length, 1);
+  check("et c'est le feu de camp", feux[0].name, "Campfire");
+  // La courbe tient 100 jusqu'a dix unites, puis tombe a zero a quarante-cinq.
+  check("sur le feu, cent", heatAt(feux, [0, 0, 0]), 100);
+  check("a dix unites, encore cent", heatAt(feux, [10, 0, 0]), 100);
+  check("a quarante-cinq, plus rien", Math.round(heatAt(feux, [45, 0, 0])), 0);
+  check("a mi-chemin, la moitie",
+        Math.round(heatAt(feux, [27.5, 0, 0])), 50);
+  // LE COLLIDER DE 2,36 N'EST PAS LA PORTEE : c'est la forme du feu. Le
+  // portage avait pris l'un pour l'autre, et n'avait donc AUCUNE chaleur.
+  check("le collider ne borne pas la chaleur",
+        heatAt(feux, [5, 0, 0]) > 0, true);
+
+  // L'INVITE DE SONDE : un ecart maximal, pas un cone de vue.
+  {
+    const inv = { gaze: [0, 0, 1], minAngle: 45 };
+    check("pile dans l'axe, l'invite vient",
+          promptFaced(inv, [0, 0, 1], [0, 0, 1]), true);
+    check("a quarante degres, encore",
+          promptFaced(inv, [Math.sin(0.698), 0, Math.cos(0.698)], [0, 0, 1]), true);
+    check("a cinquante, non",
+          promptFaced(inv, [Math.sin(0.873), 0, Math.cos(0.873)], [0, 0, 1]), false);
+    check("et une invite sans regard vient toujours",
+          promptFaced({ gaze: null }, [1, 0, 0], [0, 0, 1]), true);
+  }
+
+  // LA SONDE ANCIENNE : cinquante d'acceleration locale, vers l'avant.
+  check("cinquante de poussee", ANCIENT_PROBE_THRUST, 50);
+  {
+    const a = ancientProbeAcceleration([0, 0, 1]);
+    check("et elle pousse vers l'avant", a.join(","), "0,0,50");
+  }
+
+  // LA REGLETTE DE ZOOM.
+  check("au champ minimal, la fleche est en bas", zoomArrowFraction(15), 0);
+  check("au champ maximal, plus haut", zoomArrowFraction(60) > 0.7, true);
+  check("et elle ne sort pas de sa reglette", zoomArrowFraction(9999), 1);
+
+  // `SelfDestruct` : cinq secondes pour la supernova lointaine, pas une.
+  check("avant le delai, l'effet vit", selfDestructed(4.9, 5), false);
+  check("apres, il s'efface", selfDestructed(5.1, 5), true);
+  check("et le delai par defaut est d'une seconde", selfDestructed(1.1), true);
 }
 
 report();

@@ -7,6 +7,8 @@
 // @lit MarshmallowStick, ShipComputerCamera, RemoteFlightConsole
 // L'ordinateur de bord, la lampe et la guimauve.
 
+import { radiationAt } from "./volumes.js";
+
 /**
  * Ordinateur de bord.
  *
@@ -160,11 +162,31 @@ export const MIN_TOAST = 0.6;
  *
  * La guimauve grillait SUR COMMANDE : on appuyait, elle cuisait, ou qu'on soit.
  * Le feu de camp existe pourtant, et la formule du jeu prend une chaleur en
- * entree. On la lit donc la ou elle est — le composant et son volume — et la
- * guimauve ne cuit plus qu'au-dessus des braises.
+ * entree. On la lit donc la ou elle est.
+ *
+ * CETTE FONCTION NE TROUVAIT RIEN. Elle ramassait les classes dont le NOM
+ * contient « heat », et il n'y en a aucune dans ce build — pas plus qu'il n'y
+ * a de classe `HeatSource`. Elle rendait donc une liste vide, la guimauve ne
+ * chauffait jamais, et `docs/67` a bati le soin du jeu par-dessus sans que
+ * personne ne s'en apercoive : les controles posaient `toast` a la main.
+ *
+ * La chaleur du build est ailleurs, et elle est nommee : huit
+ * `RadiationEmitter` de `radiationType` 1, magnitude 100, avec une courbe qui
+ * va de 1 a dix unites a 0 a quarante-cinq. Ce sont les feux de camp — un sur
+ * la lune, deux a Timber Hearth, un sur chaque jumelle, deux sur Brittle
+ * Hollow, un sur l'asteroide en beignet (docs/75-chaleur.md).
+ *
+ * Le motif est garde pour ce qu'il pourrait trouver ailleurs, et il est
+ * desormais SECOND : les emetteurs passent d'abord.
  */
-export function heatSources(gameplay = {}) {
+export function heatSources(gameplay = {}, emitters = []) {
   const out = [];
+  // Les emetteurs de rayonnement THERMIQUE : la vraie source.
+  for (const e of emitters) {
+    if (e.type !== 1) continue;
+    out.push({ name: e.name, position: e.position, body: e.body,
+               emitter: e, radius: 0, heat: e.magnitude });
+  }
   for (const [cls, list] of Object.entries(gameplay.placed || {})) {
     if (!/heat/i.test(cls)) continue;
     for (const e of list) {
@@ -188,11 +210,18 @@ export function heatSources(gameplay = {}) {
  * Decroissance lineaire jusqu'au bord du volume : c'est ce que fait une lumiere
  * ponctuelle d'Unity 4 en mode simple, et le jeu ne donne pas d'autre courbe.
  */
-export function heatAt(sources, world) {
+export function heatAt(sources, world, shiftOf = null) {
   let best = 0;
   for (const s of sources) {
-    const d = Math.hypot(world[0] - s.position[0], world[1] - s.position[1],
-                         world[2] - s.position[2]);
+    const dec = shiftOf ? (shiftOf(s) || [0, 0, 0]) : [0, 0, 0];
+    const d = Math.hypot(world[0] - s.position[0] - dec[0],
+                         world[1] - s.position[1] - dec[1],
+                         world[2] - s.position[2] - dec[2]);
+    // Un emetteur porte SA courbe : ni lineaire, ni bornee par son collider.
+    // Celle des feux de camp tient 100 jusqu'a dix unites puis tombe a zero a
+    // quarante-cinq — le collider de 2,36, lui, est la forme du feu, pas sa
+    // portee, et c'est ce que le portage avait pris pour une portee.
+    if (s.emitter) { best = Math.max(best, radiationAt(s.emitter, d)); continue; }
     if (d >= s.radius) continue;
     best = Math.max(best, s.heat * (1 - d / s.radius));
   }

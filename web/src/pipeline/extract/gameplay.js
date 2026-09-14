@@ -116,7 +116,11 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // scene depuis toujours ; aucun des deux n'etait extrait, donc
                 // le recensement ne les comptait ni lus ni non lus — ils
                 // n'etaient simplement pas la.
-                "QuantumStatue", "MakeChildrenPlanarQuantum"];
+                "QuantumStatue", "MakeChildrenPlanarQuantum",
+                // La sonde ancienne : UNE instance, et son `FixedUpdate` tient
+                // en une ligne — cinquante d'acceleration locale vers l'avant,
+                // pour toujours (docs/75-chaleur.md).
+                "AncientProbeController"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -296,6 +300,15 @@ export function extractGameplay(ctx) {
     // n'a aucun champ du tout (docs/71-quantique.md).
     if (cls === "MakeChildrenPlanarQuantum" || cls === "QuantumStatue") {
       entry.children = ctx.childrenOf(gid);
+    }
+    // La sonde ancienne designe son corps par pointeur, et c'est SUR ce corps
+    // que l'acceleration s'applique — pas sur le controleur.
+    if (cls === "AncientProbeController") {
+      const brut = ctx.scriptFields(obj) || {};
+      const info = ctx.ownerInfo(brut._probeBody);
+      if (info) entry.probeBody = info;
+      const [, rot] = ctx.world(gid);
+      entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
     }
     (placed[cls] ||= []).push(entry);
   }

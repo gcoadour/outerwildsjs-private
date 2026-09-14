@@ -614,3 +614,21 @@ body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
 }
 .ow-probe-marker[data-icon="danger"] { color: #ff6b4a; }
 .ow-probe-marker[data-icon="anchor"] { color: #ffd9a0; }
+
+/* La réglette de zoom de la lunette : la hauteur de la flèche dit le champ
+   courant entre le minimum et le maximum (docs/75-chaleur.md). */
+.ow-zoom {
+  position: absolute; right: 6%; top: 30%; width: 6px; height: 40%;
+  pointer-events: none;
+  background: linear-gradient(rgba(185,230,255,.35), rgba(185,230,255,.08));
+  border: 1px solid rgba(185,230,255,.45);
+  border-radius: 3px;
+}
+.ow-zoom > i {
+  position: absolute; left: -7px; width: 0; height: 0;
+  bottom: var(--fleche, 0%);
+  border-left: 8px solid #b9e6ff;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  transform: translateY(50%);
+}

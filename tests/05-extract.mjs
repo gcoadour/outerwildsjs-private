@@ -22,6 +22,7 @@ import { gearPickups, suitVolumes, interactZones, attachPoints, lockOnTargets,
          ZeroGTraining } from "../web/src/gear.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
+import { heatSources } from "../web/src/consoles.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
@@ -106,6 +107,39 @@ check("points d'apparition", n("SpawnPoint"), 16);
   // AUCUNE des deux n'est sensible a la lumiere : la loi de la lampe est
   // portee, et son entree est vide. Le build le dit, pas le portage.
   check("et elle n'est pas sensible a la lumiere", statues[0].lightSensitive, false);
+}
+
+// La chaleur des feux de camp (docs/75-chaleur.md). `heatSources` cherchait des
+// classes dont le NOM contient « heat » : il n'y en a AUCUNE dans ce build, la
+// liste etait vide, et la guimauve ne chauffait jamais.
+{
+  const emet = radiationEmitters(gp);
+  check("neuf emetteurs de rayonnement", emet.length, 9);
+  check("dont huit feux de camp", emet.filter((e) => e.type === 1).length, 8);
+  check("et l'etoile", emet.filter((e) => e.type === 0).length, 1);
+  check("le motif ne trouve aucune classe thermique",
+        heatSources(gp).length, 0);
+  const feux = heatSources(gp, emet);
+  check("les huit feux sont la chaleur du jeu", feux.length, 8);
+  // Tous portent la MEME courbe : cent jusqu'a dix unites, zero a quarante-cinq.
+  check("tous a magnitude cent", feux.every((f) => f.heat === 100), true);
+  check("et tous a la meme courbe",
+        new Set(emet.filter((e) => e.type === 1)
+          .map((e) => JSON.stringify(e.curve))).size, 1);
+  // La sonde ancienne : une, et elle n'etait pas extraite.
+  const anc = (gp.placed.AncientProbeController || []);
+  check("une sonde ancienne", anc.length, 1);
+  check("posee sur son propre corps", anc[0].body, "AncientProbe_Body");
+  check("avec son orientation", Array.isArray(anc[0].rotation), true);
+  // Les quatre invites de sonde, et leur regard.
+  const inv = probePrompts(gp);
+  check("cinq invites en tout", inv.length, 5);
+  check("quatre pour la sonde", inv.filter((i) => i.kind === "probe").length, 4);
+  check("toutes a quarante-cinq degres",
+        inv.filter((i) => i.kind === "probe").every((i) => i.minAngle === 45), true);
+  check("toutes sur la premiere jumelle",
+        inv.filter((i) => i.kind === "probe").every((i) => i.body === "Twin01_Body"),
+        true);
 }
 
 // Le point d'apparition ne dit pas seulement OU l'on nait, mais dans quelle

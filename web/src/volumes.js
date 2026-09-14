@@ -348,6 +348,30 @@ export function probePrompts(gameplay) {
   return out;
 }
 
+/**
+ * L'invite de sonde se montre-t-elle ?
+ *
+ * `ProbePromptTrigger.Update` cache l'invite a chaque image et ne la remontre
+ * que si l'angle entre l'avant de la CAMERA et la direction de regard du
+ * declencheur, exprimee en monde, est SOUS `_minGazeAngle`.
+ *
+ * L'angle se compare tel quel, et non a sa moitie : ce n'est pas un cone de
+ * vue comme `_viewingWindow` (docs/46, lot 4), c'est un ecart maximal. A
+ * quarante-cinq degres, la fenetre fait donc quatre-vingt-dix de large.
+ *
+ * @param avantCamera direction du regard, normalisee
+ * @param regardMonde direction de regard du declencheur, en monde
+ */
+export function promptFaced(prompt, avantCamera, regardMonde) {
+  if (!prompt || !prompt.gaze || !regardMonde) return true;
+  const la = Math.hypot(avantCamera[0], avantCamera[1], avantCamera[2]) || 1;
+  const lb = Math.hypot(regardMonde[0], regardMonde[1], regardMonde[2]) || 1;
+  const cos = (avantCamera[0] * regardMonde[0] + avantCamera[1] * regardMonde[1]
+             + avantCamera[2] * regardMonde[2]) / (la * lb);
+  const angle = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+  return angle < (prompt.minAngle ?? 45);
+}
+
 /** Les zones sans lumiere (`DarkZone`) et les brouilleurs (`InterferenceVolume`). */
 export function signalVolumes(gameplay) {
   const placed = gameplay.placed || {};

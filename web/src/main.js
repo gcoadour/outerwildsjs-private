@@ -19,7 +19,7 @@ import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
 import { buildOrbits, advance, currentPosition, period,
          frameVelocity } from "./orbits.js";
-import { loadGameplay } from "./config.js";
+import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
@@ -67,11 +67,11 @@ import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE,
-         telescopeScale } from "./tools.js";
+         telescopeScale, zoomArrowFraction } from "./tools.js";
 // La sonde entiere vient du prefabrique `sharedassets1.assets:2295`, que le
 // recensement ne voyait pas : il ne lisait que `level0` (docs/60-sonde.md).
 import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
-         probeReadout } from "./probe.js";
+         probeReadout, selfDestructed } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
@@ -81,7 +81,8 @@ import { GamepadControls, padAvailable } from "./gamepad.js";
 import { loadCommandes } from "./input.js";
 import { Modes } from "./modes.js";
 import { SpinField, sunElevation, spinPeriod } from "./spin.js";
-import { directionalFields, polarFields } from "./gravity.js";
+import { directionalFields, polarFields, insideVolume,
+         dominantField } from "./gravity.js";
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
 // Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
 // `_isTonemappingActive` faux par defaut du manager ; les decalcomanies passent
@@ -92,7 +93,8 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
-import { LockOn, aimedFrame, canFlyTo, matchedVelocity } from "./tracker.js";
+import { LockOn, aimedFrame, canFlyTo, matchedVelocity,
+         ancientProbeAcceleration } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
 // existait, ses quarante verifications passaient, et aucun module du moteur ne
 // l'importait (docs/68-lois.md).
@@ -126,7 +128,8 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          qrot as qrotDecor, lookRotation } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, signalVolumes, signalZoneAt, sandstormVolumes,
-         childTriggers, Sandstorm } from "./volumes.js";
+         childTriggers, Sandstorm, radiationEmitters, probePrompts,
+         promptFaced } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
          LOCK_ON } from "./gear.js";
@@ -146,6 +149,10 @@ async function boot() {
   const data = await loadSolarSystem();
   // charge avant le calcul du point d'apparition, qui s'appuie dessus
   const gameplay = await loadGameplay();
+  // §P Les prefabriques, et les dix delais de `SelfDestruct` qu'ils portent.
+  const prefabs = await loadPrefabs();
+  // `DistantSupernova` : cinq secondes, et c'est le build qui le dit.
+  const dureeSupernova = (prefabs.selfDestruct || {}).DistantSupernova ?? 1;
   const resources = new Resources(
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
@@ -692,7 +699,38 @@ async function boot() {
   // `OxygenDetector` : une capsule r=0,5 h=2 portee par le joueur. Elle etait
   // extraite et jamais lue, et le test de zone restait ponctuel.
   const oxyDet = oxygenDetector(gameplay);
-  const heat = heatSources(gameplay);
+  // §P LA CHALEUR DES FEUX DE CAMP. `heatSources` cherchait des classes dont le
+  // NOM contient « heat », et il n'y en a aucune dans ce build : la liste etait
+  // VIDE, et la guimauve ne chauffait jamais (docs/75-chaleur.md).
+  //
+  // La chaleur est ailleurs, et nommee : huit `RadiationEmitter` de type 1,
+  // magnitude 100, avec une courbe qui tient jusqu'a dix unites et tombe a zero
+  // a quarante-cinq.
+  // §P Les quatre invites de sonde et l'invite de lunette, avec leur regard.
+  const invitesSonde = probePrompts(gameplay);
+  let inviteSondeVisible = false;
+  window.__invites = { sonde: invitesSonde };
+  // §P LA SONDE ANCIENNE. Une seule instance, et son `FixedUpdate` tient en une
+  // ligne : `AddLocalAcceleration(forward * 50)`. Elle ne vise rien, ne
+  // s'arrete pas, et n'a pas de carburant — elle part, et c'est tout.
+  //
+  // Elle est posee pres de Giant's Deep, tournee vers l'exterieur du systeme.
+  const sondeAncienne = ((gameplay.placed || {}).AncientProbeController || [])[0]
+    ? (() => {
+        const c = gameplay.placed.AncientProbeController[0];
+        return { name: c.name, pos: c.position.slice(),
+                 rotation: c.rotation || [0, 0, 0, 1],
+                 vel: [0, 0, 0], node: undefined };
+      })()
+    : null;
+  window.__sondeAncienne = sondeAncienne;
+  const emetteurs = radiationEmitters(gameplay);
+  const heat = heatSources(gameplay, emetteurs);
+  console.log(`${heat.length} sources de chaleur, dont `
+    + `${emetteurs.filter((e) => e.type === 1).length} feux de camp`);
+  // Sonde de verification : la chaleur EXISTE, et sur un feu elle vaut cent.
+  window.__chaleur = { sources: heat,
+                       sur: heat.length ? heatAt(heat, heat[0].position) : 0 };
   const controllers = convoControllers(gameplay);
   window.__world = { lighting: placedLights, dirFields, polFields, fluids, oxygen,
                      heat, controllers };
@@ -1703,6 +1741,15 @@ async function boot() {
     uiRoot.appendChild(ondeEl);
   }
   const ondeCtx = ondeEl ? ondeEl.getContext("2d") : null;
+  // §P La reglette de zoom de la lunette : une barre, une fleche, et la hauteur
+  // de la fleche dit le champ. `zoomArrowFraction` etait ecrite et eprouvee.
+  const zoomEl = uiRoot ? document.createElement("div") : null;
+  if (zoomEl) {
+    zoomEl.className = "ow-zoom";
+    zoomEl.hidden = true;
+    zoomEl.innerHTML = '<i></i>';
+    uiRoot.appendChild(zoomEl);
+  }
 
   // §L LE MARQUEUR DE SONDE (docs/71-quantique.md).
   //
@@ -2781,6 +2828,24 @@ async function boot() {
       }
     }
 
+    // §P Dans quelle invite de sonde est-on, et la regarde-t-on ?
+    if (invitesSonde.length) {
+      inviteSondeVisible = false;
+      for (const inv of invitesSonde) {
+        if (!inv.volume) continue;
+        const dec = decalageDuCorps(inv.body, anchorPos) || [0, 0, 0];
+        const p = [playerW[0] - dec[0], playerW[1] - dec[1], playerW[2] - dec[2]];
+        if (!insideVolume(inv, p)) continue;
+        // La direction de regard est LOCALE : elle se tourne par l'orientation
+        // du declencheur pour valoir quelque chose en monde.
+        const monde = inv.gaze
+          ? qrotDecor(inv.rotation || [0, 0, 0, 1], inv.gaze) : null;
+        if (promptFaced(inv, [fwd.x, fwd.y, fwd.z], monde)) {
+          inviteSondeVisible = true;
+          break;
+        }
+      }
+    }
     if (prompts) {
       // Au centre : l'objet vise. InteractVolume construit son invite avec le
       // texte de la scene, d'ou le passage explicite.
@@ -2812,7 +2877,15 @@ async function boot() {
       } else {
         left.push(P("JetpackPromptController._upThrustPrompt"),
                   P("JetpackPromptController._horizontalThrustPrompt"));
-        left.push(P("ProbePromptController._launchPrompt"));
+        // §P L'INVITE DE SONDE NE S'AFFICHE PAS PARTOUT. Les quatre
+        // `ProbePromptTrigger` du build sont poses sur la premiere jumelle, et
+        // chacun porte une DIRECTION DE REGARD : l'invite ne vient pas parce
+        // qu'on est la, mais parce qu'on regarde quelque part — le fond du
+        // canyon, le camp vu d'en haut. Le portage l'affichait en permanence,
+        // ce qui est la meme chose que ne rien dire (docs/75-chaleur.md).
+        if (invitesSonde.length === 0 || inviteSondeVisible) {
+          left.push(P("ProbePromptController._launchPrompt"));
+        }
         // `Flashlight.CheckPromptStatus` : SEPT conditions, toutes
         // necessaires, et la derniere est un OU — une zone sombre, ou la face
         // nuit. Le portage n'affichait pas cette invite du tout
@@ -3223,6 +3296,17 @@ async function boot() {
       }
     }
     if (ondeEl) ondeEl.hidden = !telescope.active || guiMode.hidden;
+    // §P LA REGLETTE DE ZOOM. `TelescopeGUI` pose une fleche sur une reglette,
+    // dont la hauteur dit le champ courant entre le minimum et le maximum. Le
+    // portage montrait la lunette et son onde, et pas ou l'on en etait du zoom.
+    if (zoomEl) {
+      const montre = telescope.active && !guiMode.hidden;
+      zoomEl.hidden = !montre;
+      if (montre) {
+        zoomEl.style.setProperty("--fleche",
+          `${(zoomArrowFraction(telescope.fov) * 100).toFixed(1)}%`);
+      }
+    }
 
     // §L LE MARQUEUR DE SONDE. `WorldToScreenPoint` a son origine en BAS a
     // gauche, `GUI` en haut : d'ou la soustraction a la hauteur, et les trente
@@ -3428,7 +3512,8 @@ async function boot() {
     // chaleur vient du HeatSource le plus proche.
     let chaleurBaton = 0;
     if (heat.length) {
-      const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z]);
+      const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z],
+                       (x) => decalageDuCorps(x.body, anchorPos));
       chaleurBaton = h;
       marshmallow.held = h > 0 || marshmallow.toast > 0;
       marshmallow.update(dt, h);
@@ -3772,10 +3857,18 @@ async function boot() {
         // et on le dit plutot que de le laisser croire porte.
         const [cr, cg, cb] = starField.color;
         starFlash = starFlash.filter(({ i, t }) => {
-          const u = (now - t) / 1;
+          const depuis = now - t;
           const p = starPCS.particles[i];
           if (!p) return false;
-          if (u >= 1) { p.color.set(0, 0, 0, 0); return false; }
+          // §P LA DUREE EST CELLE DU BUILD. `SelfDestruct` la porte sur le
+          // prefabrique : `DistantSupernova` vit CINQ secondes, pas une. Le
+          // portage avait choisi une seconde faute de l'avoir sous la main —
+          // et elle etait dans `data/prefabs.json` depuis docs/60.
+          if (selfDestructed(depuis, dureeSupernova)) {
+            p.color.set(0, 0, 0, 0);
+            return false;
+          }
+          const u = depuis / dureeSupernova;
           const k = u < 0.15 ? 1 + u * 20 : (1 - (u - 0.15) / 0.85) * 4;
           p.color.set(cr * k, cg * k, cb * k, 1);
           return true;
@@ -3925,6 +4018,34 @@ async function boot() {
       if (ev === "exit") console.log("annonce : ExitSandstorm");
       const ps = systemeSable();
       if (ps) ps.emitRate = tempete.active ? 400 : 0;
+    }
+    // §P La sonde ancienne avance, et rien ne l'arrete. L'acceleration est
+    // LOCALE — l'avant de la sonde — et le champ dominant s'y ajoute comme
+    // pour tout le reste : elle tombe aussi.
+    if (sondeAncienne) {
+      const av = qrotDecor(sondeAncienne.rotation, [0, 0, 1]);
+      const a = ancientProbeAcceleration(av);
+      const g = dominantField(bodies, {
+        x: sondeAncienne.pos[0] - anchorPos[0],
+        y: sondeAncienne.pos[1] - anchorPos[1],
+        z: sondeAncienne.pos[2] - anchorPos[2] });
+      for (let i = 0; i < 3; i++) {
+        const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;
+        sondeAncienne.vel[i] += (a[i] + gi) * dt;
+        sondeAncienne.pos[i] += sondeAncienne.vel[i] * dt;
+      }
+      if (sondeAncienne.node === undefined) {
+        sondeAncienne.node = null;
+        for (const e of geo) {
+          const n = e.nodes.get(sondeAncienne.name);
+          if (n) { sondeAncienne.node = n; break; }
+        }
+      }
+      if (sondeAncienne.node) {
+        sondeAncienne.node.setAbsolutePosition(new BABYLON.Vector3(
+          sondeAncienne.pos[0] - anchorPos[0], sondeAncienne.pos[1] - anchorPos[1],
+          sondeAncienne.pos[2] - anchorPos[2]));
+      }
     }
     for (const p of portes) p.update(now);
     // Le casque suit le regard avec un vingtieme de retard, et seulement quand

@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`75-chaleur.md`](75-chaleur.md) — **la chaleur qui n'existait pas : un motif qui ne trouvait rien, une guimauve qui ne cuisait jamais, et la liste des lois fermée**
 - [`74-etalons.md`](74-etalons.md) — **les étalons, les lois vides, et une question trop simple : un compte qui ne distingue pas « pas fait » de « rien à faire »**
 - [`73-passages.md`](73-passages.md) — **trois passages de Dark Bramble, deux coquilles sonores, et un sol qui tourne sous les pieds au premier instant**
 - [`72-poussiere.md`](72-poussiere.md) — **quatre lois qui n'étaient qu'importées : la poussière de vitesse, le grillage qui se rompt, la toile qui tourne, la tempête de sable**
