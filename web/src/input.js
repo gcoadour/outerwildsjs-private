@@ -73,8 +73,14 @@ export const AJOUTS = {
   "Ship Computer": { pos: ["n"] },
   Marshmallow: { pos: ["b"] },
   // Sortir ou ranger le baton a guimauve. `ToggleStick` n'a pas de canal dans
-  // l'alpha : c'est le tutoriel du feu de camp qui l'appelle, et le tutoriel
-  // n'est pas porte. La touche est donc du portage (docs/64-mains.md).
+  // l'alpha, et docs/64 en concluait que le tutoriel du feu de camp, non porte,
+  // etait le seul appelant.
+  //
+  // C'ETAIT FAUX. `RoastPromptEvent` est une zone d'INTERACTION, pas un
+  // tutoriel : on appuie pres du feu, le baton sort ; on s'eloigne, il se
+  // range (docs/80-invites.md). Cette touche est donc un raccourci du portage
+  // et non un manque du build — elle reste parce qu'elle est commode, et parce
+  // que le baton se range aussi tout seul quand on a mange.
   Stick: { pos: ["v"] },
   "Display Mode": { pos: ["g"] },
   "Recenter Map": { pos: ["c"] },

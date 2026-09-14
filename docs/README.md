@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`80-invites.md`](80-invites.md) — **les invites qui ne devaient pas être là, et un contrôle qui gardait le bug**
 - [`79-alignement.md`](79-alignement.md) — **perdre la gravité vous prend les commandes : 50°/s, et la toute première image est alignée quoi qu'il arrive**
 - [`78-modele.md`](78-modele.md) — **le vaisseau miniature vole, et l'enfant compte : cinq crashs valent un reproche, et il passe avant la réussite**
 - [`77-sons.md`](77-sons.md) — **les huit sons que l'interface ne faisait pas, et une réparation qui ne s'entend pas pareil dans le vide**

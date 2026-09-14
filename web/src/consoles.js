@@ -210,6 +210,41 @@ export function heatSources(gameplay = {}, emitters = []) {
  * Decroissance lineaire jusqu'au bord du volume : c'est ce que fait une lumiere
  * ponctuelle d'Unity 4 en mode simple, et le jeu ne donne pas d'autre courbe.
  */
+/**
+ * Les quatre invites du sac dorsal : lesquelles, et quand.
+ *
+ * @lit JetpackPromptController
+ *
+ * ELLES N'EXISTENT QU'EN APESANTEUR. `OnBreakPlayerFieldAlignment` allume le
+ * composant et pose ses quatre invites ; `OnInitPlayerFieldAlignment` l'eteint
+ * et les retire. Poser le pied sur une planete les fait donc disparaitre
+ * toutes, et le portage les affichait des qu'on n'etait pas dans le vaisseau.
+ *
+ * ET LES TROIS POUSSEES NE VIENNENT QU'A L'ENTRAINEMENT. `_isTrainingMode` est
+ * pose par `OnEnterZeroGTraining` : ce sont les invites du satellite casse, pas
+ * celles du vol libre. Une fois qu'on a appris, le jeu ne les remontre plus —
+ * et il ne les montre pas non plus tant qu'on vise un referentiel, parce que
+ * viser veut dire qu'on sait deja ou l'on va.
+ *
+ * L'ACCORD DE VITESSE, LUI, EXCLUT LES AUTRES. Il demande une cible visee et
+ * plus d'une unite par seconde de vitesse relative, et quand il s'affiche il
+ * est SEUL : le jeu ne propose qu'une chose a la fois.
+ *
+ * @returns {{matchVelocity:boolean, thrust:boolean}}
+ */
+export function jetpackPrompts({
+  inField = true, mapView = false, autopilotAllowed = true,
+  targeted = false, localSpeed = 0, training = false,
+} = {}) {
+  const rien = { matchVelocity: false, thrust: false };
+  if (inField || mapView) return rien;
+  if (autopilotAllowed && targeted && Math.abs(localSpeed) > 1) {
+    return { matchVelocity: true, thrust: false };
+  }
+  if (training && !targeted) return { matchVelocity: false, thrust: true };
+  return rien;
+}
+
 export function heatAt(sources, world, shiftOf = null) {
   let best = 0;
   for (const s of sources) {

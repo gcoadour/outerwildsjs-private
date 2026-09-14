@@ -28,7 +28,8 @@ import { Minimap } from "./minimap.js";
 import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatSources, heatAt, remoteConsoles, RemoteConsoles,
-         eatMarshmallowHeals, flashlightPromptVisible } from "./consoles.js";
+         eatMarshmallowHeals, flashlightPromptVisible,
+         jetpackPrompts } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust } from "./crust.js";
@@ -61,7 +62,8 @@ import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
 import { elevators, Elevator, LaunchTerminal, landingPadSensors,
          museumEntryways } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
-         roastPrompts, roastBroken, shipProximity } from "./helmet.js";
+         roastPrompts, roastBroken, shipProximity,
+         RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
@@ -598,6 +600,8 @@ async function boot() {
   const voyants = new DamageDisplay();
   const notifications = new Notifications();
   const invitesGuimauve = roastPrompts(gameplay);
+  // Chacune tient son etat : appuyer une fois sort le baton, s'eloigner le range.
+  const invitesRoast = invitesGuimauve.map((d) => ({ data: d, etat: new RoastPrompt(d) }));
   // §Q La zone de proximite du vaisseau : treize unites, et les voyants
   // d'avarie ne parlent que dedans.
   const zonesVaisseau = shipProximity(gameplay);
@@ -1586,10 +1590,14 @@ async function boot() {
   // que le demi-tour d'un siege (docs/79-alignement.md).
   const alignement = new FieldAlignment();
   window.__alignement = alignement;
+  // Sonde de verification : la loi des invites de sac, telle qu'elle est.
+  window.__jetpackPrompts = jetpackPrompts;
   // Le plein d'oxygene ne s'annonce qu'une fois par remplissage.
   let refaitLePlein = false;
   // L'avertissement du sac dorsal, une fois au passage a sec.
   let sacASec = false;
+  // `_isTrainingMode` : a portee d'un noeud du satellite casse.
+  let entrainementEnCours = false;
 
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
@@ -2907,8 +2915,17 @@ async function boot() {
     }
     // L'entrainement en apesanteur : les trois noeuds du satellite casse.
     if (training.total && !(ship && ship.boarded)) {
+      // §U `OnEnterZeroGTraining` / `OnExitZeroGTraining` : etre A PORTEE d'un
+      // noeud, c'est etre en mode entrainement — et c'est ce mode, et lui
+      // seul, qui fait venir les trois invites de poussee.
       const noeud = training.nodes.find((r) => !r.done &&
         r.inRange(restingPoint(playerW, decalageDuCorps(r.volume.body, anchorPos))));
+      const dedans = !!noeud || training.nodes.some((r) =>
+        r.inRange(restingPoint(playerW, decalageDuCorps(r.volume.body, anchorPos))));
+      if (dedans !== entrainementEnCours) {
+        entrainementEnCours = dedans;
+        console.log(`annonce : ${dedans ? "EnterZeroGTraining" : "ExitZeroGTraining"}`);
+      }
       if (noeud) {
         if (cmds.held("Interact", etatCmd)) noeud.press(); else noeud.release();
         noeud.update(dt);
@@ -3018,8 +3035,28 @@ async function boot() {
                   P("ShipPromptController._mapPrompt"),
                   P("ShipPromptController._autopilotPrompt"));
       } else {
-        left.push(P("JetpackPromptController._upThrustPrompt"),
-                  P("JetpackPromptController._horizontalThrustPrompt"));
+        // §U LES INVITES DU SAC DORSAL N'EXISTENT QU'EN APESANTEUR, et les
+        // trois poussees qu'a l'ENTRAINEMENT. Le portage les affichait des
+        // qu'on n'etait pas dans le vaisseau — c'est-a-dire presque toujours,
+        // et donc pour rien (docs/80-invites.md).
+        {
+          const jp = jetpackPrompts({
+            inField: !!player.field, mapView: solarMap.open,
+            autopilotAllowed: true, targeted: !!lockOn.current,
+            localSpeed: Math.hypot(player.vel.x, player.vel.y, player.vel.z),
+            training: entrainementEnCours,
+          });
+          if (jp.thrust) {
+            left.push(P("JetpackPromptController._upThrustPrompt"),
+                      P("JetpackPromptController._downThrustPrompt"),
+                      P("JetpackPromptController._horizontalThrustPrompt"));
+          }
+          // L'accord de vitesse est SEUL quand il vient : le jeu ne propose
+          // qu'une chose a la fois.
+          if (jp.matchVelocity) {
+            left.push(P("JetpackPromptController._matchVelocityPrompt"));
+          }
+        }
         // §P L'INVITE DE SONDE NE S'AFFICHE PAS PARTOUT. Les quatre
         // `ProbePromptTrigger` du build sont poses sur la premiere jumelle, et
         // chacun porte une DIRECTION DE REGARD : l'invite ne vient pas parce
@@ -3681,6 +3718,30 @@ async function boot() {
     // qu'on s'eloigne de plus de quatre unites du feu — c'est ce qui empeche de
     // partir la guimauve a la main et de la voir cuire en marchant. Les huit
     // invites du build portent la distance, et toutes la meme.
+    // §U LE BATON SORT EN APPUYANT PRES DU FEU. `RoastPromptEvent` annonce
+    // `BeginRoasting`, que `MarshmallowStick` ecoute pour le sortir ; s'eloigner
+    // annonce `StopRoasting` et le range. Le portage avait une touche a lui
+    // (docs/64), faute d'avoir vu le declencheur (docs/80-invites.md).
+    if (invitesGuimauve.length) {
+      const pw = [playerWorld.x, playerWorld.y, playerWorld.z];
+      for (const inv of invitesRoast) {
+        const dec = decalageDuCorps(inv.data.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(pw[0] - inv.data.position[0] - dec[0],
+                             pw[1] - inv.data.position[1] - dec[1],
+                             pw[2] - inv.data.position[2] - dec[2]);
+        if (interactPressed && !dialogue.active && d <= inv.data.distance) {
+          if (inv.etat.press() && !baton.out) {
+            baton.toggle();
+            console.log("annonce : BeginRoasting");
+          }
+        }
+        if (inv.etat.update(d)) {
+          // `OnStopRoasting` ne range le baton QUE s'il est sorti.
+          if (baton.out) baton.toggle();
+          console.log("annonce : StopRoasting");
+        }
+      }
+    }
     if (invitesGuimauve.length && marshmallow.toast > 0) {
       const pw = [playerWorld.x, playerWorld.y, playerWorld.z];
       let proche = null, best = Infinity;

@@ -472,11 +472,21 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.at_least("degrades de couleur appliques", parts["couleur"], 1)
 
         # --- interface ---------------------------------------------------------
-        rep.at_least("invites affichees",
-                     page.evaluate("() => document.querySelectorAll('.ow-prompt').length"), 2)
-        rep.eq("icone de manette sur chaque invite",
-               page.evaluate("() => document.querySelectorAll('.ow-prompt-btn').length"),
-               page.evaluate("() => document.querySelectorAll('.ow-prompt').length"))
+        #
+        # CE CONTROLE GARDAIT UN BUG. Il demandait « au moins deux invites a
+        # l'ecran », et il passait parce que le portage affichait les invites du
+        # sac dorsal en PERMANENCE. Les pieds au sol, dans un champ de gravite,
+        # le build n'en montre aucune (docs/80-invites.md) — et zero est donc la
+        # bonne reponse.
+        #
+        # Ce qu'on voulait garder est que la COUCHE d'invites fonctionne. On le
+        # mesure donc la ou le build en pose vraiment : la carte, qui en pose
+        # trois. C'est la meme lecon que docs/49 — un invariant garde une
+        # mesure, pas une conclusion — et cette fois la conclusion etait
+        # « il devrait toujours y avoir des invites ».
+        rep.eq("les pieds au sol, aucune invite de sac dorsal",
+               page.evaluate("() => [...document.querySelectorAll("
+                             "'.ow-prompts-left .ow-prompt')].length"), 0)
         rep.eq("panneau de ressources present",
                page.evaluate("() => !!document.querySelector('.ow-res')"), True)
         # Une police ne se charge qu'a son premier usage : on attend la fin du
@@ -496,10 +506,15 @@ def _run(url, heavy, profil=None, zip_path=None):
         # (docs/61-commandes.md).
         page.keyboard.press("Enter")
         page.wait_for_timeout(1200)
-        rep.eq("le tri par priorite evince les invites de reacteur",
+        rep.eq("la carte, elle, en pose trois",
                page.evaluate("() => [...document.querySelectorAll("
                              "'.ow-prompts-left .ow-prompt')].map(n=>n.textContent.trim())"),
                ["Close Map", "Zoom In/Out", "Pan View"])
+        # La couche d'invites fonctionne : c'est ce que l'ancien controle
+        # voulait dire, mesure la ou le build pose vraiment des invites.
+        rep.eq("icone de manette sur chaque invite",
+               page.evaluate("() => document.querySelectorAll('.ow-prompt-btn').length"),
+               page.evaluate("() => document.querySelectorAll('.ow-prompt').length"))
         page.evaluate("() => window.__map.pan(-0.5, -0.5, 1)")
         rep.check("le deplacement de la carte suit la distance de zoom",
                   page.evaluate("() => Math.abs(window.__map.focal[0]) > 1000"),
@@ -1041,6 +1056,33 @@ def _run(url, heavy, profil=None, zip_path=None):
             "  return [!!window.__mur(b, [4,0,0], nu),"
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
+
+        # --- les invites du sac dorsal (docs/80-invites.md) ----------------------
+        #
+        # Elles n'existent qu'en APESANTEUR, et les trois poussees qu'a
+        # l'entrainement. Le portage les affichait des qu'on n'etait pas dans
+        # le vaisseau — c'est-a-dire presque toujours, et donc pour rien.
+        jp = page.evaluate("""() => {
+          const f = window.__jetpackPrompts;
+          if (!f) return null;
+          return {
+            auSol: f({ inField: true, training: true }).thrust,
+            libre: f({ inField: false, training: false }).thrust,
+            entrainement: f({ inField: false, training: true }).thrust,
+            visant: f({ inField: false, training: true, targeted: true }).thrust,
+            accord: f({ inField: false, targeted: true, localSpeed: 5 }).matchVelocity,
+            seul: f({ inField: false, training: true, targeted: true,
+                      localSpeed: 5 }).thrust,
+          };
+        }""")
+        if jp:
+            rep.eq("les pieds au sol, aucune invite de sac", jp["auSol"], False)
+            rep.eq("en apesanteur sans entrainement non plus", jp["libre"], False)
+            rep.eq("a l'entrainement, les trois viennent", jp["entrainement"], True)
+            rep.eq("mais pas si l'on vise", jp["visant"], False)
+            rep.eq("l'accord de vitesse vient quand on vise et qu'on bouge",
+                   jp["accord"], True)
+            rep.eq("et il est SEUL", jp["seul"], False)
 
         # --- perdre la gravite (docs/79-alignement.md) ---------------------------
         #

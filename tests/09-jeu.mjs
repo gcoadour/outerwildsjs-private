@@ -20,7 +20,7 @@ import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
-         roastPrompts, roastBroken, shipProximity, helmetSettings,
+         roastPrompts, roastBroken, shipProximity, RoastPrompt, helmetSettings,
          HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
          ROAST_DISTANCE } from "../web/src/helmet.js";
@@ -77,7 +77,8 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
          slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
          toWorld } from "../web/src/attach.js";
-import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
+import { eatMarshmallowHeals, flashlightPromptVisible,
+         jetpackPrompts } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT } from "../web/src/modes.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
@@ -5282,6 +5283,63 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("rend les commandes sans attendre", al2.locked, false);
   // Et la transition ne se rejoue pas tant que l'etat ne change pas.
   check("rester dans le champ n'annonce rien", al2.update(true, 2, 0), null);
+}
+
+{
+  // --- LES INVITES DU SAC DORSAL, ET LE BATON (docs/80-invites.md) ---
+
+  // ELLES N'EXISTENT QU'EN APESANTEUR.
+  check("les pieds au sol, aucune invite",
+        jetpackPrompts({ inField: true, training: true }).thrust, false);
+  check("ni l'accord de vitesse",
+        jetpackPrompts({ inField: true, targeted: true, localSpeed: 99 })
+          .matchVelocity, false);
+  check("sur la carte non plus",
+        jetpackPrompts({ inField: false, mapView: true, training: true }).thrust,
+        false);
+
+  // LES TROIS POUSSEES NE VIENNENT QU'A L'ENTRAINEMENT.
+  check("en apesanteur sans entrainement, rien",
+        jetpackPrompts({ inField: false, training: false }).thrust, false);
+  check("a l'entrainement, les trois",
+        jetpackPrompts({ inField: false, training: true }).thrust, true);
+  // Et pas tant qu'on vise : viser veut dire qu'on sait ou l'on va.
+  check("mais pas si l'on vise une cible",
+        jetpackPrompts({ inField: false, training: true, targeted: true,
+                         localSpeed: 0 }).thrust, false);
+
+  // L'ACCORD DE VITESSE EXCLUT LES AUTRES.
+  {
+    const p = jetpackPrompts({ inField: false, training: true, targeted: true,
+                               localSpeed: 5 });
+    check("il vient quand on vise et qu'on bouge", p.matchVelocity, true);
+    check("et il est SEUL", p.thrust, false);
+  }
+  check("sous une unite par seconde, non",
+        jetpackPrompts({ inField: false, targeted: true, localSpeed: 0.5 })
+          .matchVelocity, false);
+  check("pile a une unite non plus",
+        jetpackPrompts({ inField: false, targeted: true, localSpeed: 1 })
+          .matchVelocity, false);
+  check("sans cible visee, non plus",
+        jetpackPrompts({ inField: false, targeted: false, localSpeed: 99 })
+          .matchVelocity, false);
+  check("et sans autopilote autorise",
+        jetpackPrompts({ inField: false, targeted: true, localSpeed: 99,
+                         autopilotAllowed: false }).matchVelocity, false);
+
+  // LE BATON SORT EN APPUYANT PRES DU FEU.
+  const inv = new RoastPrompt({ distance: 4 });
+  check("le premier appui annonce", inv.press(), "BeginRoasting");
+  check("le second ne re-annonce pas", inv.press(), null);
+  check("pres du feu, rien ne s'arrete", inv.update(3), null);
+  check("s'eloigner annonce", inv.update(5), "StopRoasting");
+  check("et une seule fois", inv.update(5), null);
+  // Et on peut recommencer.
+  check("revenir et appuyer ressort le baton", inv.press(), "BeginRoasting");
+  // Sans avoir appuye, s'eloigner ne dit rien.
+  const inv2 = new RoastPrompt({ distance: 4 });
+  check("sans avoir appuye, s'eloigner est muet", inv2.update(99), null);
 }
 
 report();

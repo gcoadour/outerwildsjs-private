@@ -233,6 +233,45 @@ export function roastPrompts(gameplay) {
   }));
 }
 
+/**
+ * Le grillage commence par une INTERACTION, et le baton sort tout seul.
+ *
+ * `RoastPromptEvent.OnPressInteract` annonce `BeginRoasting` — que
+ * `MarshmallowStick` ecoute pour SORTIR le baton — puis se met a surveiller la
+ * distance. Des qu'on depasse `_roastDistance`, il annonce `StopRoasting`, et
+ * le baton se range.
+ *
+ * Le portage sortait le baton sur une touche a lui (docs/64), faute d'avoir vu
+ * le declencheur. Il est la, et il tient en deux evenements : on s'approche du
+ * feu, on appuie, le baton sort ; on s'eloigne, il se range.
+ *
+ * L'etat `checkDist` compte : tant qu'il est faux, appuyer ANNONCE ; une fois
+ * vrai, appuyer ne re-annonce plus. On ne ressort pas un baton deja sorti.
+ */
+export class RoastPrompt {
+  constructor(prompt = null) {
+    this.prompt = prompt;
+    this.checkDist = false;
+  }
+
+  /** @returns {"BeginRoasting"|null} */
+  press() {
+    if (this.checkDist) return null;
+    this.checkDist = true;
+    return "BeginRoasting";
+  }
+
+  /** @returns {"StopRoasting"|null} */
+  update(distance) {
+    if (!this.checkDist) return null;
+    if (!roastBroken(distance, this.prompt)) return null;
+    this.checkDist = false;
+    return "StopRoasting";
+  }
+
+  reset() { this.checkDist = false; }
+}
+
 /** S'est-on trop eloigne du feu pour continuer a griller ? */
 export function roastBroken(distance, prompt) {
   return distance > (prompt ? prompt.distance : ROAST_DISTANCE);
