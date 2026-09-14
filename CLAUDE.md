@@ -47,8 +47,11 @@ tools/01_fetch.sh Linux            # telecharge le build dans work/ (gitignore)
 # Invariants mesures dans un vrai Chromium (Playwright). Le moteur ne demarre
 # qu'une fois le build fourni a la PAGE : l'extraction vit dans le stockage
 # prive de l'origine, donc dans un profil, et le port fait partie de l'origine.
+# `--zip` veut dire REFAIS L'EXTRACTION : il vide le stockage du profil. Tout
+# lot qui touche a `web/src/pipeline/` doit le passer, sinon les controles
+# mesurent les donnees d'avant (docs/76-proximite.md).
 python3 tools/15_verify.py --profil work/profil --zip work/downloads/OuterWilds_Alpha_1_2_Linux.zip
-python3 tools/15_verify.py --profil work/profil [--lourd]   # ensuite, le profil suffit
+python3 tools/15_verify.py --profil work/profil [--lourd]   # sans toucher au pipeline, le profil suffit
 # Sans le build : le moteur demarre quand meme, sur ses replis. C'est le seul
 # controle NAVIGATEUR qui tourne sans les 289 Mo, et il attrape ce que
 # check-modules.mjs ne peut pas voir — une erreur d'execution dans boot().

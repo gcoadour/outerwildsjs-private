@@ -269,13 +269,16 @@ def extraction_perimee(profil):
             t = os.path.getmtime(os.path.join(base, f))
             if t > plus_recent:
                 plus_recent, quoi = t, os.path.relpath(os.path.join(base, f), racine)
-    # L'OPFS de Chromium vit sous le profil ; on prend la date la plus recente
-    # qu'on y trouve, sans supposer le detail de son arborescence.
-    stockage = os.path.join(profil, "Default")
+    # L'OPFS de Chromium vit sous `Default/File System`, et LUI SEUL.
+    #
+    # La premiere version regardait aussi `WebStorage`, ou Chromium touche
+    # `QuotaManager-journal` A CHAQUE OUVERTURE du profil : la date etait donc
+    # toujours fraiche, et ce garde-fou n'a jamais rien dit — pas meme la fois
+    # ou il aurait du (docs/76-proximite.md). Un garde-fou qu'on n'a jamais vu
+    # parler n'est pas un garde-fou silencieux, c'est un garde-fou casse.
+    stockage = os.path.join(profil, "Default", "File System")
     ecrit = 0
     for base, _, fichiers in os.walk(stockage):
-        if "File System" not in base and "WebStorage" not in base:
-            continue
         for f in fichiers:
             try:
                 ecrit = max(ecrit, os.path.getmtime(os.path.join(base, f)))
@@ -321,6 +324,7 @@ def _run(url, heavy, profil=None, zip_path=None):
     from playwright.sync_api import sync_playwright
 
     rep = Report()
+    perime = None
     with sync_playwright() as p:
         args = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox"]
         exe = CHROMIUM if os.path.exists(CHROMIUM) else None
@@ -343,11 +347,14 @@ def _run(url, heavy, profil=None, zip_path=None):
             for sous in ("Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage"):
                 shutil.rmtree(os.path.join(profil, "Default", sous), ignore_errors=True)
             perime = extraction_perimee(profil)
-            if perime and not zip_path:
+            if perime:
                 print(f"  !!   L'EXTRACTION DU PROFIL EST PLUS VIEILLE QUE LE PIPELINE.\n"
-                      f"       {perime}\n"
-                      f"       Les controles vont mesurer d'ANCIENNES donnees, et passer.\n"
-                      f"       Relancer avec --zip pour refaire l'extraction.\n")
+                      f"       {perime}")
+                if zip_path:
+                    print("       --zip est fourni : l'extraction sera REFAITE.\n")
+                else:
+                    print("       Les controles vont mesurer d'ANCIENNES donnees.\n"
+                          "       Relancer avec --zip pour refaire l'extraction.\n")
             browser = p.chromium.launch_persistent_context(
                 profil, executable_path=exe, args=args,
                 viewport={"width": 1280, "height": 720})
@@ -376,6 +383,24 @@ def _run(url, heavy, profil=None, zip_path=None):
         # moteur avec son systeme de substitution.
         page.wait_for_timeout(3000)
         if page.locator("#gate-play").count():
+            # UN `--zip` NE SUFFISAIT PAS. L'archive n'etait deposee que si la
+            # page ne montrait PAS deja une extraction — donc jamais, sur un
+            # profil rempli. Un lot qui touche a un extracteur relancait avec
+            # `--zip`, voyait l'ancienne extraction, et deux controles neufs
+            # tombaient sans que rien ne dise pourquoi (docs/76-proximite.md).
+            #
+            # Quand l'extraction est perimee ET qu'on a l'archive, on VIDE le
+            # stockage et on recommence. C'est le bouton que la page offre deja.
+            # `--zip` VEUT DIRE « refais l'extraction ». Il ne servait qu'a
+            # remplir un profil vide, et sur un profil plein il ne faisait
+            # RIEN : un lot qui touche a un extracteur relancait avec l'archive
+            # et mesurait quand meme les donnees d'avant. Deux controles neufs
+            # sont tombes deux fois de suite avant qu'on le voie.
+            if zip_path and page.locator("#gate-step-done").is_visible():
+                print("  ..   --zip fourni : on vide le stockage et on refait.")
+                page.click("#gate-reset")
+                page.wait_for_timeout(2000)
+                page.wait_for_selector("#gate-step-drop", state="visible", timeout=60000)
             if zip_path and not page.locator("#gate-step-done").is_visible():
                 page.set_input_files("#gate-file", zip_path)
                 page.wait_for_selector("#gate-step-done", state="visible",
@@ -1016,6 +1041,24 @@ def _run(url, heavy, profil=None, zip_path=None):
             "  return [!!window.__mur(b, [4,0,0], nu),"
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
+
+        # --- la proximite du vaisseau (docs/76-proximite.md) ---------------------
+        prox = page.evaluate("""() => {
+          const p = window.__proximite;
+          return p ? { n: p.zones.length,
+                       rayon: p.zones[0] ? p.zones[0].volume.radius : 0 } : null;
+        }""")
+        if prox:
+            rep.eq("une zone de proximite du vaisseau", prox["n"], 1)
+            rep.eq("de treize unites", prox["rayon"], 13)
+        # Le tutoriel de la sonde est a usage unique.
+        tut = page.evaluate("""() => {
+          const i = window.__invites;
+          return i ? { detruites: i.detruites, reste: i.sonde.length } : null;
+        }""")
+        if tut:
+            rep.eq("les invites de sonde sont encore la", tut["detruites"], False)
+            rep.eq("les cinq", tut["reste"], 5)
 
         # --- la fin de la liste (docs/75-chaleur.md) -----------------------------
         #

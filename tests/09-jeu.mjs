@@ -20,7 +20,8 @@ import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
-         roastPrompts, roastBroken, helmetSettings, HELMET_LAG, HELMET_LAG_CTOR,
+         roastPrompts, roastBroken, shipProximity, helmetSettings,
+         HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
          ROAST_DISTANCE } from "../web/src/helmet.js";
 import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
@@ -5040,6 +5041,37 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("avant le delai, l'effet vit", selfDestructed(4.9, 5), false);
   check("apres, il s'efface", selfDestructed(5.1, 5), true);
   check("et le delai par defaut est d'une seconde", selfDestructed(1.1), true);
+}
+
+{
+  // --- LA PROXIMITE DU VAISSEAU, ET LE TUTORIEL A USAGE UNIQUE (docs/76) ---
+
+  // Les voyants d'avarie ne parlent que de PRES : `TurnOffIcons` a la sortie.
+  const zones = shipProximity({ placed: { ShipProximityVolume: [
+    { name: "ShipZone", body: "Ship_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 13, center: [0, 0, 0] }, fields: {} },
+  ] } });
+  check("une zone de proximite", zones.length, 1);
+  check("de treize unites", zones[0].volume.radius, 13);
+  check("sur le vaisseau", zones[0].body, "Ship_Body");
+  check("sans rien de pose, rien", shipProximity({}).length, 0);
+
+  {
+    const v = new DamageDisplay(0.5);
+    // De pres : le voyant general en continu, les autres qui clignotent.
+    const a = v.update(0, true, [true, false], true);
+    check("le voyant general s'allume", a[0], true);
+    const b = v.update(0.6, true, [true, false], true);
+    check("et les autres clignotent", b[1], true);
+    // De loin : TOUT est eteint, general compris.
+    const c = v.update(1.2, true, [true, false], false);
+    check("de loin, plus un voyant", c.every((x) => x === false), true);
+    // Le battement continue de tourner : revenir ne le rattrape pas a
+    // contretemps.
+    const avant = v.blinkOn;
+    v.update(1.9, true, [true], false);
+    check("mais le battement continue", v.blinkOn !== avant, true);
+  }
 }
 
 report();

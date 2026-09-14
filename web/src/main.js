@@ -61,7 +61,7 @@ import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
 import { elevators, Elevator, LaunchTerminal, landingPadSensors,
          museumEntryways } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
-         roastPrompts, roastBroken } from "./helmet.js";
+         roastPrompts, roastBroken, shipProximity } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
@@ -595,6 +595,11 @@ async function boot() {
   const voyants = new DamageDisplay();
   const notifications = new Notifications();
   const invitesGuimauve = roastPrompts(gameplay);
+  // §Q La zone de proximite du vaisseau : treize unites, et les voyants
+  // d'avarie ne parlent que dedans.
+  const zonesVaisseau = shipProximity(gameplay);
+  let presDuVaisseau = true;
+  window.__proximite = { zones: zonesVaisseau, get pres() { return presDuVaisseau; } };
   // Une seule annonce par eloignement, pas une par image.
   let grillageRompu = false;
   // Les six buses du vaisseau miniature : homonymes, donc pilotees par POSITION.
@@ -707,9 +712,12 @@ async function boot() {
   // magnitude 100, avec une courbe qui tient jusqu'a dix unites et tombe a zero
   // a quarante-cinq.
   // §P Les quatre invites de sonde et l'invite de lunette, avec leur regard.
-  const invitesSonde = probePrompts(gameplay);
+  let invitesSonde = probePrompts(gameplay);
   let inviteSondeVisible = false;
-  window.__invites = { sonde: invitesSonde };
+  // `DestroyAllProbePromptTriggers` : une fois lancee depuis une invite, les
+  // quatre disparaissent pour de bon. Le tutoriel ne se rejoue pas.
+  let invitesDetruites = false;
+  window.__invites = { sonde: invitesSonde, detruites: false };
   // §P LA SONDE ANCIENNE. Une seule instance, et son `FixedUpdate` tient en une
   // ligne : `AddLocalAcceleration(forward * 50)`. Elle ne vise rien, ne
   // s'arrete pas, et n'a pas de carburant — elle part, et c'est tout.
@@ -2883,7 +2891,10 @@ async function boot() {
         // qu'on est la, mais parce qu'on regarde quelque part — le fond du
         // canyon, le camp vu d'en haut. Le portage l'affichait en permanence,
         // ce qui est la meme chose que ne rien dire (docs/75-chaleur.md).
-        if (invitesSonde.length === 0 || inviteSondeVisible) {
+        // Une fois les quatre detruites, l'invite ne revient JAMAIS. Sans
+        // declencheur pose — un build sans ces donnees — on retombe sur
+        // l'affichage permanent du portage.
+        if (!invitesDetruites && (invitesSonde.length === 0 || inviteSondeVisible)) {
           left.push(P("ProbePromptController._launchPrompt"));
         }
         // `Flashlight.CheckPromptStatus` : SEPT conditions, toutes
@@ -3418,6 +3429,19 @@ async function boot() {
         // ProbeLauncher accorde ce savoir dans le build
         if (pdata.learn("knowsHowProbesWork")) {
           console.log("fonctionnement des sondes appris");
+        }
+        // §Q `DestroyAllProbePromptTriggers` : lancer une sonde depuis une
+        // invite les DETRUIT TOUTES — pas seulement celle-la. Les quatre
+        // invites sont un tutoriel a usage unique : une fois qu'on a compris,
+        // le jeu ne le redit jamais. Le portage les aurait remontrees a chaque
+        // passage (docs/76-proximite.md).
+        if (invitesSonde.length && inviteSondeVisible) {
+          invitesSonde = [];
+          invitesDetruites = true;
+          inviteSondeVisible = false;
+          window.__invites.sonde = invitesSonde;
+          window.__invites.detruites = true;
+          console.log("annonce : DestroyAllProbePromptTriggers");
         }
       }
       if (e === "ProbeLaunchAborted") console.log("tir de sonde refuse : pas de fenetre");
@@ -4063,8 +4087,15 @@ async function boot() {
       const frac = ship.damage.total > 0 ? ship.damage.integrity / ship.damage.total : 1;
       const crie = alarme.update(frac);
       if (resHUD) resHUD.setAlarm(crie);
+      // La zone suit le vaisseau : elle est posee SUR lui, et il vole.
+      presDuVaisseau = zonesVaisseau.length === 0 || !!ship.boarded
+        || zonesVaisseau.some((z) => z.volume && Math.hypot(
+             playerWorld.x - ship.pos.x - anchorPos[0],
+             playerWorld.y - ship.pos.y - anchorPos[1],
+             playerWorld.z - ship.pos.z - anchorPos[2]) <= z.volume.radius);
       voyants.update(now, ship.damage.integrity < ship.damage.total,
-                     Object.values(ship.damage.parts).map((p) => p.dead));
+                     Object.values(ship.damage.parts).map((p) => p.dead),
+                     presDuVaisseau);
     }
     const avis = notifications.update(now);
     if (resHUD) resHUD.setNotice(avis);

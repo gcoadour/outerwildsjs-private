@@ -23,6 +23,7 @@ import { gearPickups, suitVolumes, interactZones, attachPoints, lockOnTargets,
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
 import { heatSources } from "../web/src/consoles.js";
+import { shipProximity } from "../web/src/helmet.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
@@ -140,6 +141,12 @@ check("points d'apparition", n("SpawnPoint"), 16);
   check("toutes sur la premiere jumelle",
         inv.filter((i) => i.kind === "probe").every((i) => i.body === "Twin01_Body"),
         true);
+  // La zone de proximite du vaisseau : treize unites, et les voyants d'avarie
+  // ne parlent que dedans (docs/76-proximite.md).
+  const zp = shipProximity(gp);
+  check("une zone de proximite du vaisseau", zp.length, 1);
+  check("de treize unites", zp[0].volume.radius, 13);
+  check("posee sur le vaisseau", zp[0].body, "Ship_Body");
 }
 
 // Le point d'apparition ne dit pas seulement OU l'on nait, mais dans quelle

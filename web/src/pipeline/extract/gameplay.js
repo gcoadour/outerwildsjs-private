@@ -120,7 +120,10 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // La sonde ancienne : UNE instance, et son `FixedUpdate` tient
                 // en une ligne — cinquante d'acceleration locale vers l'avant,
                 // pour toujours (docs/75-chaleur.md).
-                "AncientProbeController"];
+                "AncientProbeController",
+                // La zone de proximite du vaisseau : l'affichage des avaries
+                // ne s'allume QUE dedans (docs/76-proximite.md).
+                "ShipProximityVolume"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
