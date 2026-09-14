@@ -85,6 +85,9 @@ export class Resources {
     this.health = this.maxHealth;
     this.suit = this.maxSuit;
     this.dead = false;
+    // `PlayerData.IsInvulnerable`, pose par la boucle : la premiere, tant
+    // qu'on n'a ni les codes ni mis le pied dans le vaisseau.
+    this.invulnerable = false;
   }
 
   /**
@@ -117,8 +120,20 @@ export class Resources {
    * Separe de `applyImpact`, qui part d'une VITESSE : ici les points sont deja
    * comptes par le volume (vingt par seconde pour la colonne de sable).
    */
+  /**
+   * @param points degats a retirer
+   * @returns {number} les points REELLEMENT perdus
+   *
+   * `PlayerData.IsInvulnerable` : pendant la premiere boucle, tant qu'on ne
+   * connait pas les codes de lancement et qu'on n'est pas monte dans le
+   * vaisseau, les degats ne retirent RIEN — mais l'evenement part quand meme
+   * dans le build (`OnInstantDamage.Invoke` est hors du test), donc l'ecran
+   * clignote et le son se joue. On rend zero, et l'appelant voit qu'il ne
+   * s'est rien passe (docs/81-invulnerable.md).
+   */
   hurt(points) {
     if (!(points > 0) || this.dead) return 0;
+    if (this.invulnerable) return 0;
     const before = this.health;
     this.health = Math.max(0, this.health - points);
     if (this.health <= 0) this.dead = true;

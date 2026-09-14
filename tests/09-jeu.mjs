@@ -137,7 +137,8 @@ import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
          NIGHT_FADE } from "../web/src/lights.js";
-import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
+import { oxygenZones, inOxygenZone,
+         Resources as Ressources } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
          Marshmallow } from "../web/src/consoles.js";
 import { lodThresholds } from "../web/src/lod.js";
@@ -5340,6 +5341,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Sans avoir appuye, s'eloigner ne dit rien.
   const inv2 = new RoastPrompt({ distance: 4 });
   check("sans avoir appuye, s'eloigner est muet", inv2.update(99), null);
+}
+
+{
+  // --- L'INVULNERABILITE DU PREMIER TOUR (docs/81-invulnerable.md) ---
+
+  const d = new PlayerData();
+  d.wipe();
+  check("premiere boucle, sans les codes : invulnerable",
+        d.startOfTimeLoop(1), true);
+  check("et le savoir d'entrainement retombe", d.completedZeroGTraining, false);
+  // Monter dans le vaisseau y met fin.
+  check("monter dans le vaisseau y met fin", d.enterShip(), true);
+  check("et cela ne revient pas", d.isInvulnerable, false);
+  check("le signaler deux fois ne dit plus rien", d.enterShip(), false);
+  // Deuxieme boucle : plus de protection, meme sans les codes.
+  check("deuxieme boucle, plus de protection", d.startOfTimeLoop(2), false);
+  // Premiere boucle MAIS on connait deja les codes : plus de protection non
+  // plus. Les codes se retiennent d'une partie a l'autre.
+  d.learn("knowsLaunchCodes");
+  check("premiere boucle avec les codes : rien", d.startOfTimeLoop(1), false);
+
+  // ELLE NE PROTEGE QUE DES DEGATS.
+  const r = new Ressources({ _maxHealth: 100 });
+  r.invulnerable = true;
+  check("les degats ne retirent rien", r.hurt(40), 0);
+  check("la sante est intacte", r.health, 100);
+  check("et l'on n'est pas mort", r.dead, false);
+  r.invulnerable = false;
+  check("une fois la protection finie, ils portent", r.hurt(40), 40);
+  // La mort par volume, elle, ne consulte pas la protection : c'est
+  // `PlayerDeathHandler` qui l'emet, et il ne la lit pas.
+  const r2 = new Ressources({ _maxHealth: 100 });
+  r2.invulnerable = true;
+  r2.dead = true;
+  check("un mort reste mort, protege ou non", r2.hurt(10), 0);
+  check("et il l'est toujours", r2.dead, true);
 }
 
 report();

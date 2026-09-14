@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`81-invulnerable.md`](81-invulnerable.md) — **on ne peut pas mourir avant d'être monté dans le vaisseau : une mécanique entière, invisible, et jamais portée**
 - [`80-invites.md`](80-invites.md) — **les invites qui ne devaient pas être là, et un contrôle qui gardait le bug**
 - [`79-alignement.md`](79-alignement.md) — **perdre la gravité vous prend les commandes : 50°/s, et la toute première image est alignée quoi qu'il arrive**
 - [`78-modele.md`](78-modele.md) — **le vaisseau miniature vole, et l'enfant compte : cinq crashs valent un reproche, et il passe avant la réussite**

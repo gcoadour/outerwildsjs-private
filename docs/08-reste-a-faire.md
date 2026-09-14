@@ -135,7 +135,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **261/261** ([`80`](80-invites.md)) |
+| vérification avec le build | **267/267** ([`81`](81-invulnerable.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -174,6 +174,8 @@ portage.
 | **perdre la gravité** | le regard est **verrouillé** le temps d'être retourné, à 50°/s ([`79`](79-alignement.md)) |
 | invites du sac dorsal | **seulement en apesanteur**, et les 3 poussées seulement à l'entraînement ([`80`](80-invites.md)) |
 | le bâton sort au feu | `BeginRoasting` / `StopRoasting` : une touche inventée en moins ([`80`](80-invites.md)) |
+| **invulnérable au premier tour** | tant qu'on n'a pas les codes et qu'on n'est pas monté dans le vaisseau ([`81`](81-invulnerable.md)) |
+| tutoriel de la sonde | **3 photos en vol** puis la sonde détruite, et non le premier tir ([`81`](81-invulnerable.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
@@ -211,7 +213,7 @@ dans l'alpha.
 | manque | ce que le build en dit |
 |---|---|
 | l'espace replié de Dark Bramble | aucun volume de distorsion ; le conteneur s'appelle `DarkBramble_TestBed` |
-| quatre des cinq savoirs | un seul a une source vivante ; les autres sont du code mort |
+| ~~quatre des cinq savoirs~~ | **trop sévère, relu** ([`81`](81-invulnerable.md)) : **deux** ont une source vivante — l'entraînement en apesanteur, et le tutoriel de la sonde (trois photos en vol puis la sonde détruite). Les deux sont branchées. `CompleteTelescopeTutorial` est écouté et émis par personne, et `CompleteShipProbeTutorial` vient d'une classe `_Old` : ces deux-là, oui |
 | le déblocage par branche de dialogue | les 20 attributs `eventbased` valent tous `"false"` |
 | les machines à états d'animation | 11 états, **zéro transition** dans tout le build |
 | ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |

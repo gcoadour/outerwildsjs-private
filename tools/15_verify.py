@@ -1057,6 +1057,38 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- l'invulnerabilite du premier tour (docs/81-invulnerable.md) ---------
+        #
+        # `PlayerData.OnStartOfTimeLoop` : a la PREMIERE boucle, tant qu'on ne
+        # connait pas les codes de lancement, les degats ne portent pas. Et cela
+        # s'arrete a l'instant ou l'on monte dans le vaisseau.
+        inv = page.evaluate("""() => {
+          const d = window.__pdata, r = window.__resources;
+          if (!d || !r) return null;
+          const codes = d.knowsLaunchCodes;
+          const sante = r.health, prot = r.invulnerable;
+          d.knowsLaunchCodes = false;
+          const tour1 = d.startOfTimeLoop(1);
+          const tour2 = d.startOfTimeLoop(2);
+          d.knowsLaunchCodes = true;
+          const avecCodes = d.startOfTimeLoop(1);
+          // Les degats, protection posee.
+          r.invulnerable = true; r.health = 100; r.dead = false;
+          const perdu = r.hurt(40), resteA = r.health;
+          r.invulnerable = false; r.health = 100;
+          const perdu2 = r.hurt(40);
+          d.knowsLaunchCodes = codes; r.health = sante; r.invulnerable = prot;
+          return { tour1, tour2, avecCodes, perdu, resteA, perdu2 };
+        }""")
+        if inv:
+            rep.eq("premiere boucle sans les codes : protege", inv["tour1"], True)
+            rep.eq("deuxieme boucle : plus rien", inv["tour2"], False)
+            rep.eq("premiere boucle avec les codes : plus rien non plus",
+                   inv["avecCodes"], False)
+            rep.eq("protege, les degats ne retirent rien", inv["perdu"], 0)
+            rep.eq("et la sante est intacte", inv["resteA"], 100)
+            rep.eq("sans protection, ils portent", inv["perdu2"], 40)
+
         # --- les invites du sac dorsal (docs/80-invites.md) ----------------------
         #
         # Elles n'existent qu'en APESANTEUR, et les trois poussees qu'a

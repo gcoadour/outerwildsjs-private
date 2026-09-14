@@ -381,6 +381,14 @@ async function boot() {
   const dialogue = new DialogueSystem(await loadDialogue());
   const pdata = new PlayerData();
   window.__pdata = pdata;
+  // §V La boucle qui commence est la suivante : `OnStartOfTimeLoop` la recoit
+  // deja incrementee dans le build. Au tout premier demarrage, `loopCount`
+  // vaut zero et la boucle qui s'ouvre est donc la premiere.
+  resources.invulnerable = pdata.startOfTimeLoop(pdata.loopCount + 1);
+  if (resources.invulnerable) {
+    console.log("premier tour : les degats ne portent pas tant qu'on n'a pas "
+      + "les codes, et jusqu'a ce qu'on monte dans le vaisseau");
+  }
 
   // Nom de secteur (Sector.SectorName) correspondant a un corps.
   const SECTOR_OF = {
@@ -1598,6 +1606,8 @@ async function boot() {
   let sacASec = false;
   // `_isTrainingMode` : a portee d'un noeud du satellite casse.
   let entrainementEnCours = false;
+  // `_midairSnapshotCount` : les photos prises EN VOL depuis le tir.
+  let photosEnVol = 0;
 
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
@@ -1643,6 +1653,11 @@ async function boot() {
     resources.health = resources.maxHealth;
     resources.suit = resources.maxSuit;
     resources.dead = false;
+    // §V L'INVULNERABILITE DU PREMIER TOUR. `OnStartOfTimeLoop` la recalcule a
+    // chaque boucle : vraie a la PREMIERE, tant qu'on ne connait pas les codes
+    // de lancement (docs/81-invulnerable.md).
+    resources.invulnerable = pdata.startOfTimeLoop(pdata.loopCount + 1);
+    if (resources.invulnerable) console.log("premier tour : les degats ne portent pas");
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
     // §N ON PART AVEC LE SOL. `MatchInitialMotion` est pose sur vingt-sept
     // corps, `Player_Body` et `Ship_Body` compris : un corps qui se reveille
@@ -2693,6 +2708,12 @@ async function boot() {
         } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
                    pdata.knowsLaunchCodes) {
           ship.boarded = true;
+          // `OnEnterShip` : la protection du premier tour s'arrete la. Le jeu
+          // decide qu'une fois aux commandes, on joue pour de bon.
+          if (pdata.enterShip()) {
+            resources.invulnerable = false;
+            console.log("annonce : EnterShip — les degats portent desormais");
+          }
           // S'asseoir prend du TEMPS : la duree du demi-tour est l'angle entre
           // l'avant du joueur et celui du siege, divise par cent degres par
           // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
@@ -2934,7 +2955,13 @@ async function boot() {
         const son = (events.of("ZeroGTrainingManager") || { clips: {} })
           .clips._systemsBackOnlineClip;
         if (son) audio.playOneShot(son);
-        console.log("entrainement : systemes du satellite retablis");
+        // §V `CompleteZeroGTraining` : `PlayerData` le retient — et le remet a
+        // faux au debut de chaque boucle, contrairement aux autres savoirs qui
+        // sont ecrits sur le disque. Reparer le satellite ne se retient que
+        // pour le tour en cours.
+        pdata.completedZeroGTraining = true;
+        pdata.learn("hasCompletedTraining");
+        console.log("annonce : CompleteZeroGTraining — systemes du satellite retablis");
       }
     }
     interactPressed = false;
@@ -3598,10 +3625,6 @@ async function boot() {
         // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
         // d'un coup, qui retombe en une seconde.
         dernierLancement = now;
-        // ProbeLauncher accorde ce savoir dans le build
-        if (pdata.learn("knowsHowProbesWork")) {
-          console.log("fonctionnement des sondes appris");
-        }
         // §Q `DestroyAllProbePromptTriggers` : lancer une sonde depuis une
         // invite les DETRUIT TOUTES — pas seulement celle-la. Les quatre
         // invites sont un tutoriel a usage unique : une fois qu'on a compris,
@@ -3615,6 +3638,22 @@ async function boot() {
           window.__invites.detruites = true;
           console.log("annonce : DestroyAllProbePromptTriggers");
         }
+      }
+      // §V LE TUTORIEL DE LA SONDE NE S'ACQUIERT PAS AU LANCEMENT.
+      //
+      // `ProbePromptController.OnProbeDestroyed` : le savoir vient quand la
+      // sonde est DETRUITE, et seulement si l'on a pris PLUS DE DEUX photos en
+      // vol d'ici la. Trois photos en l'air, puis la sonde qui meurt — voila ce
+      // que « comprendre les sondes » veut dire pour ce jeu.
+      //
+      // Le portage l'accordait au premier tir, ce qui est exactement le
+      // contraire : il suffisait d'appuyer une fois (docs/81-invulnerable.md).
+      if (e === "MidairProbeSnapshot") photosEnVol++;
+      if (e === "ProbeDestroyed" || e === "RetrieveProbe") {
+        if (photosEnVol > 2 && pdata.learn("knowsHowProbesWork")) {
+          console.log("annonce : CompleteProbeTutorial — fonctionnement des sondes appris");
+        }
+        photosEnVol = 0;
       }
       if (e === "ProbeLaunchAborted") console.log("tir de sonde refuse : pas de fenetre");
       if (e === "ProbeSnapshot" && probes.lastSnapshot) {
