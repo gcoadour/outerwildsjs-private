@@ -134,8 +134,11 @@ export function suitVolumeStep(volumes, worldPoint, equipment, shiftOf = null) {
 export function suitBarrierPush(volumes, worldPoint, equipment, shiftOf = null) {
   for (const v of volumes) {
     if (v.kind !== "barrier" || !v.volume || v.volume.shape !== "box") continue;
-    // Le collider est ETEINT tant qu'on porte la combinaison.
-    if (equipment.suit) continue;
+    // Le collider est ETEINT tant qu'on porte la combinaison. La question se
+    // pose a l'equipement, qui sait y repondre : la poser ici en lisant son
+    // champ faisait deux sources pour une seule regle, et `barrierSolid` etait
+    // ecrite, eprouvee, appelee par personne (docs/93-commandes.md).
+    if (!equipment.barrierSolid()) continue;
     const p = shiftOf ? restingPoint(worldPoint, shiftOf(v)) : worldPoint;
     const c = v.position;
     const demi = v.volume.size.map((x) => x / 2);

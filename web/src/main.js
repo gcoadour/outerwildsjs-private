@@ -390,7 +390,8 @@ async function boot() {
   // §V La boucle qui commence est la suivante : `OnStartOfTimeLoop` la recoit
   // deja incrementee dans le build. Au tout premier demarrage, `loopCount`
   // vaut zero et la boucle qui s'ouvre est donc la premiere.
-  resources.invulnerable = pdata.startOfTimeLoop(pdata.loopCount + 1);
+  pdata.startOfTimeLoop(pdata.loopCount + 1);
+  resources.invulnerable = pdata.isInvulnerable;
   if (resources.invulnerable) {
     console.log("premier tour : les degats ne portent pas tant qu'on n'a pas "
       + "les codes, et jusqu'a ce qu'on monte dans le vaisseau");
@@ -1726,7 +1727,8 @@ async function boot() {
     // §V L'INVULNERABILITE DU PREMIER TOUR. `OnStartOfTimeLoop` la recalcule a
     // chaque boucle : vraie a la PREMIERE, tant qu'on ne connait pas les codes
     // de lancement (docs/81-invulnerable.md).
-    resources.invulnerable = pdata.startOfTimeLoop(pdata.loopCount + 1);
+    pdata.startOfTimeLoop(pdata.loopCount + 1);
+    resources.invulnerable = pdata.isInvulnerable;
     if (resources.invulnerable) console.log("premier tour : les degats ne portent pas");
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
     // §N ON PART AVEC LE SOL. `MatchInitialMotion` est pose sur vingt-sept
@@ -2283,7 +2285,13 @@ async function boot() {
     // La bascule de la vue d'atterrissage prend le tangage le temps du
     // mouvement : `SnapToDegrees` ne se laisse pas interrompre.
     if (snapRegard !== null) return;
-    const f = settings.lookFactor();
+    // DEUX SENSIBILITES, et le portage n'en appliquait qu'une. Le menu du build
+    // en pose deux — `lookSensitivity` et `flightSensitivity` — et le second
+    // n'avait aucun effet : on reglait la sensibilite de vol, et rien ne
+    // changeait. Aux commandes du vaisseau, c'est elle qui vaut
+    // (docs/93-commandes.md).
+    const f = (ship && ship.boarded) ? settings.flightFactor()
+                                     : settings.lookFactor();
     const w = Math.max(320, (window.innerWidth || 1280));
     const k = (TURN / w) * (telescope && telescope.active
       ? (player.c.telescopeTurnScalar ?? 0.5) : (player.c.suitTurnScalar ?? 1));
@@ -4646,8 +4654,10 @@ async function boot() {
       // `PlayerJetpackController.Update` : accorder sa vitesse demande une
       // cible, du carburant, et le canal `Match Velocity` — l'espace, celui du
       // saut. Au sol on saute ; en vol, on s'accorde.
+      // `canThrust` : du carburant ET vivant. Le portage ne testait que le
+      // carburant, et un mort accordait encore sa vitesse.
       if (matchPressed && lockOn.current && !player.grounded
-          && resources.fuel > 0) {
+          && resources.canThrust) {
         const t = lockOn.current.body;
         const v = frameVelocity(orbits, t);
         if (v) {

@@ -98,6 +98,7 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          selfDestructed, angleEntre } from "../web/src/probe.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
+import { Settings } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
@@ -278,6 +279,24 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et elle s'annonce", neuve.events.at(-1), "ResetSimulation");
   neuve.resume();
   check("reprendre ne recommence rien", neuve.events.at(-1), "ResumeSimulation");
+
+  // --- LES DEUX SENSIBILITES (docs/93-commandes.md) ----------------------
+  //
+  // Le menu du build en pose deux, et le portage n'en appliquait qu'une :
+  // regler la sensibilite de VOL ne changeait rien.
+  const reg = new Settings(null);
+  check("le neutre rend un facteur de un", reg.lookFactor(), 1);
+  check("et le vol aussi", reg.flightFactor(), 1);
+  reg.values.flightSensitivity = 10;
+  check("la sensibilite de vol double le facteur", reg.flightFactor(), 2);
+  check("sans toucher a celui du regard", reg.lookFactor(), 1);
+  // Une seule inversion dans le menu : elle vaut pour les deux.
+  reg.values.invertY = true;
+  check("l'inversion porte sur le regard", reg.lookFactor(), -1);
+  check("et sur le vol", reg.flightFactor(), -2);
+  // L'anneau : depasser dix ramene a un, pas a dix.
+  check("dix puis un", reg.step(10, 1), 1);
+  check("un puis dix", reg.step(1, -1), 10);
 
   // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------
   //

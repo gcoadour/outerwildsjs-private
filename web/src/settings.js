@@ -72,8 +72,16 @@ export class Settings {
            this.values.lookSensitivity / this.bounds.neutral;
   }
 
+  /**
+   * L'autre sensibilite, celle des commandes de VOL.
+   *
+   * L'inversion s'y applique aussi : le menu du build ne pose qu'un seul
+   * `invertY`, et il vaut pour les deux. La rendre ici plutot qu'a l'appel
+   * evite que les deux facteurs divergent — c'est ce qui les rend comparables.
+   */
   flightFactor() {
-    return this.values.flightSensitivity / this.bounds.neutral;
+    return (this.values.invertY ? -1 : 1) *
+           this.values.flightSensitivity / this.bounds.neutral;
   }
 
   /** Sensibilite suivante, en anneau : 10 puis 1. */

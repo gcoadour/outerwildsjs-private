@@ -20,7 +20,7 @@ lisait**.
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
-> | `lois.mjs` — ce que le portage **appelle** | **26** methodes sans appelant ([`90`](90-methodes.md)) |
+> | `lois.mjs` — ce que le portage **appelle** | **22** methodes sans appelant ([`90`](90-methodes.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -401,8 +401,9 @@ Il voit les méthodes depuis [`90`](90-methodes.md), et il en a trouvé
 tourner. Trois n'étaient lues que par `tools/15_verify.py` — un contrôle
 navigateur est un appelant, et c'est la deuxième fois que l'extension du fichier
 appelant le cachait à ce compte. Deux autres attendaient la sphère de
-l'observatoire ([`91`](91-remise-a-zero.md)), et quatre la borne de la tour de
-lancement ([`92`](92-tour.md)). **Il en reste vingt-six**, et c'est le front
+l'observatoire ([`91`](91-remise-a-zero.md)), quatre la borne de la tour de
+lancement ([`92`](92-tour.md)), et quatre étaient des règles de commande jamais
+branchées ([`93`](93-commandes.md)). **Il en reste vingt-deux**, et c'est le front
 ouvert : ce ne sont pas des lois à écrire, ce sont des lois écrites à brancher —
 et chaque fois qu'on cherche ce qui devrait les appeler, on trouve une mécanique
 entière.

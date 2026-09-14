@@ -1111,10 +1111,14 @@ def _run(url, heavy, profil=None, zip_path=None):
             "  return [window.__soin(r), r.health, r.dead].join(','); }"),
             "97,100,false")
         # Le mur qui reclame la combinaison : il repousse tant qu'on n'en a pas.
+        # `barrierSolid` est une METHODE de l'equipement depuis
+        # docs/93-commandes.md : un objet nu ne suffit plus pour l'interroger,
+        # et c'est tant mieux — la regle n'a plus qu'une source.
         rep.eq("le mur reclame la combinaison", page.evaluate(
             "() => { const b = [{ kind: 'barrier', position: [0,0,0],"
             "   volume: { shape: 'box', size: [10,10,10] } }];"
-            "  const nu = { suit: false }, vetu = { suit: true };"
+            "  const E = window.__lots.equipment.constructor;"
+            "  const nu = new E({ suit: false }), vetu = new E({ suit: true });"
             "  return [!!window.__mur(b, [4,0,0], nu),"
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
@@ -2128,6 +2132,19 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("sans les codes, la borne refuse", ouvert["refus"], "refuse")
             rep.eq("avec, elle actionne la tour", ouvert["ok"], "activate")
             rep.eq("et la cabine repond", ouvert["ouverte"], True)
+
+        # --- les deux sensibilites (docs/93-commandes.md) ---------------------
+        rep.eq("regler la sensibilite de vol change le facteur de vol",
+               page.evaluate("""() => {
+                 const s = window.__gui.settings;
+                 const avant = s.values.flightSensitivity;
+                 s.values.flightSensitivity = 10;
+                 const double = s.flightFactor();
+                 s.values.flightSensitivity = 1;
+                 const petit = s.flightFactor();
+                 s.values.flightSensitivity = avant;
+                 return [double, Math.round(petit * 100) / 100];
+               }"""), [2, 0.2])
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
