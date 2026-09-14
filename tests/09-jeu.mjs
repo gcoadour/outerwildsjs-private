@@ -51,8 +51,8 @@ import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, activeZones, winnersByLayer, clipOf,
          AmbienceMixer } from "../web/src/ambience.js";
-import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
-         gameSectorAt, probePrompts, radiationEmitters,
+import { hazardVolumes, Hazards, zeroGFields, zeroGAt,
+         probePrompts, radiationEmitters,
          radiationAt, CompoundTrigger, sandstormVolumes,
          childTriggers, Sandstorm, promptFaced } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
@@ -121,7 +121,10 @@ import { QuantumMoon, orbitTilt, bodyOccluder,
 import { Anglerfish, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
-import { ambientIntensity } from "../web/src/sectors.js";
+import { ambientIntensity, majorSectors, activeMajorSector,
+         sectorThrustLimit } from "../web/src/sectors.js";
+import { Minimap, localMapPosition, MARKER_RADIUS, TRAIL_ANGLE,
+         MINIMAP_EVENTS } from "../web/src/minimap.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
 import { envelope } from "../web/src/pipeline/extract/particles.js";
 import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
@@ -508,9 +511,17 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- eclairage ambiant par secteur --------------------------------------
 {
+  // `MajorSector.GetAmbientLight` est une MARCHE : la couleur pleine sous
+  // `_ambientLightRange`, le noir au-dela. Le portage en avait fait une pente,
+  // et le test gardait la pente — une conclusion, pas une mesure.
   check("secteur sans ambiance", round(ambientIntensity(0, 0), 3), 0.1);
   check("centre d'un secteur eclaire", round(ambientIntensity(0, 750), 3), 0.35);
-  check("a mi-portee", round(ambientIntensity(375, 750), 3), 0.225);
+  check("a mi-portee, la meme chose qu'au centre",
+        round(ambientIntensity(375, 750), 3), 0.35);
+  check("juste en deca de la portee, encore pleine",
+        round(ambientIntensity(749.9, 750), 3), 0.35);
+  check("a la portee exacte, la marche tombe",
+        round(ambientIntensity(750, 750), 3), 0.1);
   check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0.1);
 }
 
@@ -2848,20 +2859,87 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("dans le volume, on flotte", zeroGAt(champs, [10, 0, 0]).name, "ZeroGVolume");
   check("dehors, non", zeroGAt(champs, [1000, 0, 0]), null);
 
-  const secteurs = gameSectors({ placed: {
+  // --- LE SECTEUR MAJEUR ACTIF (docs/82-secteur-majeur.md) ---
+  //
+  // Trois classes, une seule qui porte la minicarte. Le rayon lu est celui du
+  // DECLENCHEUR, jamais `_horizonRadius`.
+  const secteurs = majorSectors({ placed: {
+    PlanetoidSector: [{ name: "Sector_TH", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 1000, center: [0, 0, 0] },
+      fields: { _sectorName: 3, _thrustLimit: 20, _ambientLightRange: 250,
+                _useMinimap: true, _horizonRadius: 200 } }],
     ZeroGSector: [{ name: "Sector_DB", position: [0, 0, 0],
       volume: { shape: "sphere", radius: 1500, center: [0, 0, 0] },
       fields: { _sectorName: 6, _thrustLimit: 20, _ambientLightRange: 1200 } }],
-    MajorSector: [{ name: "Sector_QuantumMoon", position: [0, 0, 0],
+    MajorSector: [{ name: "Sector_QuantumMoon", position: [100, 0, 0],
       volume: { shape: "sphere", radius: 120, center: [0, 0, 0] },
-      fields: { _sectorName: 7, _thrustLimit: 20 } }],
+      fields: { _sectorName: 7, _thrustLimit: 5 } }],
   } });
-  check("trois secteurs de jeu : ici deux", secteurs.length, 2);
-  check("la poussee y est limitee a 20", secteurs[0].thrustLimit, 20);
-  check("emboites, le plus petit gagne",
-        gameSectorAt(secteurs, [0, 0, 0]).name, "Sector_QuantumMoon");
-  check("plus loin, le grand reprend",
-        gameSectorAt(secteurs, [500, 0, 0]).name, "Sector_DB");
+  check("secteurs majeurs, les trois classes confondues", secteurs.length, 3);
+  check("le declencheur n'est pas l'horizon", secteurs[0].horizon, 200);
+  check("un PlanetoidSector porte la minicarte", secteurs[0].useMinimap, true);
+  check("un ZeroGSector n'en porte pas", secteurs[1].useMinimap, false);
+  check("un MajorSector nu non plus", secteurs[2].useMinimap, false);
+  // `CalculateActiveMajorSector` : le plus proche PAR LE CENTRE, non le plus
+  // petit. Au centre du grand, c'est le grand qui gagne meme si le petit le
+  // contient — ce que l'ancienne regle « le plus petit volume » inversait.
+  check("actif : le plus proche par le centre",
+        activeMajorSector(secteurs, [0, 0, 0]).name, "Sector_TH");
+  check("pres du petit, c'est lui",
+        activeMajorSector(secteurs, [110, 0, 0]).name, "Sector_QuantumMoon");
+  check("hors de tout declencheur, aucun",
+        activeMajorSector(secteurs, [5000, 0, 0]), null);
+  // `GetThrustLimit` : le minimum sur TOUS ceux qu'on touche, actif ou non.
+  check("la poussee prend le minimum de tous",
+        sectorThrustLimit(secteurs, [110, 0, 0]), 5);
+  check("hors du petit, les deux grands s'accordent",
+        sectorThrustLimit(secteurs, [500, 0, 0]), 20);
+  check("hors de tout, aucune limite",
+        sectorThrustLimit(secteurs, [5000, 0, 0]), null);
+
+  // --- LA MINICARTE ---
+  const globe = localMapPosition([0, 0, 0], [10, 0, 0]);
+  check("le marqueur vit sur le globe de 0,51", globe[0], MARKER_RADIUS);
+  check("et la distance n'y change rien",
+        localMapPosition([0, 0, 0], [1000, 0, 0])[0], MARKER_RADIUS);
+  const mm = new Minimap(null);
+  check("eteinte au depart", mm.on, false);
+  mm.switchMajorSector(secteurs[0]);
+  check("un secteur qui la porte l'allume", mm.on, true);
+  check("et l'evenement part", mm.events.join(","), MINIMAP_EVENTS.on);
+  // `AttemptActivation` ALLUME et ne peut pas eteindre : passer a un secteur
+  // qui ne la porte pas la laisse allumee. Un `setEnabled(condition)` par
+  // image effacait cette bizarrerie.
+  mm.switchMajorSector(secteurs[1]);
+  check("passer a un secteur sans minicarte ne l'eteint pas", mm.on, true);
+  check("mais la trace repart de zero", mm.trail.length, 0);
+  mm.switchMajorSector(null);
+  check("le vide, lui, l'eteint", mm.on, false);
+  check("deux evenements en tout", mm.events.length, 2);
+  mm.switchMajorSector(secteurs[0]);
+  mm.enterShip();
+  check("monter dans le vaisseau l'eteint", mm.on, false);
+  mm.exitShip();
+  check("en ressortir la rallume", mm.on, true);
+  mm.switchMajorSector(secteurs[1]);
+  mm.enterShip(); mm.exitShip();
+  check("ressortir dans un secteur sans minicarte ne rallume pas", mm.on, false);
+  // `MinimapHUD.AllowVisibility` : trois conditions, trois sources.
+  mm.switchMajorSector(secteurs[0]);
+  check("sans le paquetage, rien a l'ecran",
+        mm.allowVisibility({ helmetHUD: true, hasMinimap: false }), false);
+  check("casque baisse, rien non plus",
+        mm.allowVisibility({ helmetHUD: false, hasMinimap: true }), false);
+  check("les trois ensemble, on la voit",
+        mm.allowVisibility({ helmetHUD: true, hasMinimap: true }), true);
+  // La trace : un point de plus des que la direction bouge de plus de 5 degres.
+  const tourne = (deg) => [Math.cos(deg * Math.PI / 180), Math.sin(deg * Math.PI / 180), 0];
+  mm.reset();
+  mm.sample(mm.trail, "trailIndex", "last", tourne(0));
+  mm.sample(mm.trail, "trailIndex", "last", tourne(TRAIL_ANGLE - 1));
+  check("sous cinq degres, pas de point de plus", mm.trail.length, 1);
+  mm.sample(mm.trail, "trailIndex", "last", tourne(TRAIL_ANGLE + 1));
+  check("au-dela, un point de plus", mm.trail.length, 2);
 
   const invites = probePrompts({ placed: { ProbePromptTrigger: [
     { name: "ProbePromptTrigger", position: [0, 0, 0],

@@ -862,6 +862,59 @@ def _run(url, heavy, profil=None, zip_path=None):
             # L'equipement se ramasse : la sonde n'est pas donnee.
             rep.eq("la sonde n'est pas donnee au depart", lots["equipement"], False)
 
+        # --- le secteur majeur actif (docs/82-secteur-majeur.md) ----------------
+        #
+        # Ce controle-ci n'existe que dans un navigateur : il demande la
+        # position du moment, le declencheur du secteur ramene la ou sa planete
+        # se trouve, et une minicarte reellement montee dans la page.
+        #
+        # Le portage decidait « suis-je a moins de deux rayons de surface du
+        # corps dominant » et « le plus petit volume qui me contient ». Le build
+        # ne pose ni l'une ni l'autre : il tient une liste de spheres de
+        # declenchement et en retient la plus proche par le centre.
+        sect = page.evaluate("""() => {
+          const L = window.__lots, G = window.__gui;
+          if (!L || !G) return null;
+          const m = G.minimap;
+          return {
+            secteurs: L.majSecteurs.length,
+            spheres: L.majSecteurs.filter(x => x.volume &&
+                       x.volume.shape === "sphere" && x.volume.radius > 0).length,
+            sansMinicarte: L.majSecteurs.filter(x => !x.useMinimap)
+                             .map(x => x.name).sort(),
+            actif: L.etat.secteurMajeur,
+            porteMinicarte: L.etat.minicarteDuSecteur,
+            allumee: m.on, montree: m.shown,
+            evenements: m.events.slice(0, 1),
+          };
+        }""")
+        if sect:
+            rep.eq("secteurs majeurs poses", sect["secteurs"], 10)
+            rep.eq("tous portent un declencheur spherique",
+                   sect["spheres"], sect["secteurs"])
+            rep.eq("les trois sans minicarte", sect["sansMinicarte"],
+                   ["Sector_DB", "Sector_Derelict", "Sector_QuantumMoon"])
+            # LE controle du lot. Le declencheur de Timber Hearth fait 1 000
+            # unites ; le portage prenait `horizon x 1,5`, soit 300, et le
+            # joueur pose au village n'etait dans AUCUN secteur passe les
+            # premieres secondes de derive.
+            rep.eq("pose au village, on est dans le secteur de Timber Hearth",
+                   sect["actif"], "Sector_TH")
+            rep.eq("et ce secteur porte la minicarte", sect["porteMinicarte"], True)
+            rep.eq("le composant Minimap est donc allume", sect["allumee"], True)
+            rep.eq("avec l'evenement du build", sect["evenements"],
+                   ["MinimapEnabled"])
+            # ... mais on ne la VOIT pas : `MinimapHUD.AllowVisibility` exige en
+            # plus de l'avoir ramassee. Deux composants, deux etats.
+            rep.eq("sans l'avoir ramassee, rien a l'ecran", sect["montree"], False)
+            # Le seul ramassage qui porte la minicarte porte aussi la sonde :
+            # la prendre ici fausserait la section suivante, qui verifie
+            # justement qu'on n'a pas la sonde. On interroge donc la LOI sans
+            # toucher a l'etat — un controle ne doit rien changer.
+            rep.eq("ramassee, elle s'afficherait",
+                   page.evaluate("() => window.__gui.minimap.allowVisibility("
+                                 "{ helmetHUD: true, hasMinimap: true })"), True)
+
         # --- la sonde, telle que le build la lance (docs/60-sonde.md) -----------
         #
         # Elle ne part qu'une fois RAMASSEE (docs/46, lot 7) : le portage la

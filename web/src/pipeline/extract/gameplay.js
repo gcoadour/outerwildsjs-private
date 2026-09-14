@@ -159,7 +159,12 @@ const PLACED_PATTERNS = [
  */
 const WANT_VOLUME = new RegExp([
   "forcefield|fluid|ocean|oxygen|heatsource|zone|volume",
-  "|^(ZeroGField|ZeroGSector|MajorSector|SuitBarrier|ProbePromptTrigger",
+  // `PlanetoidSector` manquait, et c'est ce trou qui a fait inventer au
+  // portage un « horizon x 1,5 » : la sphere de declenchement du secteur
+  // etait la, mesuree dans la scene, et l'extraction ne la sortait pas
+  // (docs/82-secteur-majeur.md).
+  "|^(PlanetoidSector|ZeroGField|ZeroGSector|MajorSector|SuitBarrier",
+  "|ProbePromptTrigger",
   "|TelescopePromptTrigger|AncientTeleporter|AncientTeleportReceiver",
   "|RadiationEmitter|DerelictWarp|GearPickup|LandingPadSensor",
   "|PlayerAttachPoint|LODCameraSnapshot",

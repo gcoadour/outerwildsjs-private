@@ -281,47 +281,6 @@ export function zeroGAt(fields, worldPoint, shiftOf = null) {
 }
 
 /**
- * Les secteurs de jeu : `ZeroGSector` x2 et `MajorSector` x1.
- *
- * Ce ne sont pas les `PlanetoidSector` que le portage lit deja pour son budget
- * de rendu : ce sont des reglages de JEU attaches a un lieu. Dark Bramble
- * limite la poussee a 20 et pose une lumiere ambiante jusqu'a 1 200 unites ; la
- * dimension abandonnee limite en plus la portee des phares du vaisseau a 100.
- * `_flashlightRangeLimit` est nul partout : la lampe du joueur garde sa portee.
- */
-export function gameSectors(gameplay) {
-  const placed = gameplay.placed || {};
-  const map = (list, kind) => (list || []).map((c) => {
-    const f = c.fields || {};
-    return {
-      kind, name: c.name, body: c.body || null, position: c.position,
-      rotation: c.rotation || null, volume: c.volume || null,
-      sector: f._sectorName ?? null,
-      ambient: f._ambientLight ?? 0,
-      ambientRange: f._ambientLightRange ?? 0,
-      thrustLimit: f._thrustLimit ?? null,
-      flashlightLimit: f._flashlightRangeLimit ?? null,
-      shiplightLimit: f._shiplightRangeLimit ?? null,
-      probePrompt: !!f._triggersShipProbePrompt,
-    };
-  });
-  return [...map(placed.ZeroGSector, "zerog"), ...map(placed.MajorSector, "major")];
-}
-
-/** Le secteur de jeu ou l'on se trouve : le plus petit qui contient le point. */
-export function gameSectorAt(sectors, worldPoint, shiftOf = null) {
-  let best = null;
-  for (const s of sectors) {
-    if (!s.volume) continue;
-    const p = shiftOf ? restingPoint(worldPoint, shiftOf(s)) : worldPoint;
-    if (!insideVolume(s, p)) continue;
-    const r = s.volume.radius || Infinity;
-    if (!best || r < (best.volume.radius || Infinity)) best = s;
-  }
-  return best;
-}
-
-/**
  * Les quatre invites de sonde, et leur regard.
  *
  * `_localGazeDirection` et `_minGazeAngle` (45 partout) disent que l'invite ne

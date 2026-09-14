@@ -53,7 +53,8 @@ import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
          QUANTIQUE } from "./quantumobj.js";
 import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
-import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
+import { Sectors, sectorMap, ambientIntensity, majorSectors,
+         activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents } from "./shipdamage.js";
@@ -130,8 +131,8 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor, lookRotation } from "./decor.js";
-import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
-         gameSectorAt, signalVolumes, signalZoneAt, sandstormVolumes,
+import { hazardVolumes, Hazards, zeroGFields, zeroGAt,
+         signalVolumes, signalZoneAt, sandstormVolumes,
          childTriggers, Sandstorm, radiationEmitters, probePrompts,
          promptFaced } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
@@ -670,7 +671,11 @@ async function boot() {
   // §4 les volumes de jeu : ce qui blesse, ce qui fait flotter, ce qui limite.
   const hazards = new Hazards(hazardVolumes(gameplay));
   const zeroGVolumes = zeroGFields(gameplay);
-  const playSectors = gameSectors(gameplay);
+  // Les secteurs MAJEURS, avec leur declencheur : c'est eux que la minicarte
+  // interroge, et eux seuls qui repondent a `GetUseMinimap`.
+  const majSecteurs = majorSectors(gameplay);
+  // Le secteur majeur actif de l'image courante, pour les controles navigateur.
+  let secteurMajeur = null;
   // §7 l'equipement se RAMASSE : le portage le donnait d'emblee.
   const pickups = gearPickups(gameplay);
   const suits = suitVolumes(gameplay);
@@ -717,10 +722,13 @@ async function boot() {
   console.log(`meteores : ${meteores.launchers.length} lanceurs`);
   window.__meteores = meteores;
 
-  window.__lots = { declared, decor, passages, hazards, zeroGVolumes, playSectors,
-                    pickups, suits, equipment, training, events,
+  window.__lots = { declared, decor, passages, hazards, zeroGVolumes,
+                    majSecteurs, pickups, suits, equipment, training, events,
                     get etat() {
                       return { referentiel: declared.current && declared.current.body,
+                               secteurMajeur: secteurMajeur && secteurMajeur.name,
+                               minicarteDuSecteur: !!(secteurMajeur &&
+                                                      secteurMajeur.useMinimap),
                                equipement: { combinaison: equipment.suit,
                                              sonde: equipment.probe,
                                              minicarte: equipment.minimap },
@@ -2789,6 +2797,29 @@ async function boot() {
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
 
+    // LE SECTEUR MAJEUR ACTIF, une fois pour l'image.
+    //
+    // `SectorDetector` est le carrefour du build : la minicarte, la limite de
+    // poussee, l'eclairage ambiant, la portee de la lampe et celle des phares
+    // lui demandent tous la meme chose. Le portage posait cinq questions
+    // differentes — une distance ici, un « plus petit volume » la, un
+    // `horizon x 1,5` ailleurs. Il n'y en a qu'une : quels declencheurs touche-t-on
+    // (docs/82-secteur-majeur.md).
+    const secteurDe = (w) => (majSecteurs.length
+      ? activeMajorSector(majSecteurs, w, (x) => decalageDuCorps(x.body, anchorPos))
+      : null);
+    const secMaj = secteurDe(playerW);
+    secteurMajeur = secMaj;
+    // La zone sans soleil se lit ici parce que l'invite de lampe, plus haut
+    // dans l'image, la demande : la declarer plus bas la laissait dans sa zone
+    // morte temporelle, et le portage avait donc mis a la place
+    // `sectorState.secteur.sunless` — un champ qu'aucune extraction ne pose.
+    // La condition ne s'est jamais verifiee une seule fois.
+    const zoneSombre = zonesSignal.length
+      ? signalZoneAt(zonesSignal, "dark", playerW,
+                     (z) => decalageDuCorps(z.body, anchorPos))
+      : null;
+
     // §J LES DEUX POINTS D'ACCROCHAGE DE TIMBER HEARTH.
     //
     // « Fly Model Ship » a l'observatoire, « Activate Lift » au pied de la
@@ -2994,23 +3025,41 @@ async function boot() {
       readout.update(now, !guiMode.hidden && !guiMode.capture);
     }
 
-    // --- minicarte : hors du vaisseau, dans un secteur qui la porte ---
+    // --- minicarte : le declencheur du secteur majeur, et rien d'autre ---
     if (minimap) {
-      // Minimap.AttemptActivation : hors du vaisseau, et seulement si le
-      // secteur majeur actif declare l'utiliser. Les sept secteurs du build ont
-      // tous _useMinimap a vrai, mais c'est bien le drapeau qui decide.
-      const body = player.field && player.field.body;
-      const sec = sectorState.secteur;
-      const near = body && player.field.distance <
-        (body.gravity.upperSurfaceRadius || 200) * 2;
-      // La minicarte aussi se ramasse : meme paquetage, meme drapeau.
-      minimap.setEnabled(!!near && !!(sec ? sec.useMinimap : true) &&
-                         equipment.minimap &&
-                         !(ship && ship.boarded) && !guiMode.hidden);
-      if (minimap.on) {
-        minimap.update(body.position, player.pos, {
-          ship: ship && !ship.boarded ? [ship.pos.x, ship.pos.y, ship.pos.z] : null,
-          probe: probes.last ? probes.last.pos : null,
+      // Le portage demandait « suis-je a moins de deux rayons de surface du
+      // corps dominant ». Le build ne pose jamais cette question : il tient une
+      // LISTE de secteurs majeurs dont on touche la sphere de declenchement, en
+      // retient le plus proche par le centre (`CalculateActiveMajorSector`), et
+      // `AttemptActivation` interroge SA CLASSE. D'ou l'ecart qu'aucune
+      // distance n'aurait donne : la minicarte s'eteint sur la lune quantique,
+      // dont le secteur est un `MajorSector` nu (docs/82-minicarte.md).
+      if (secMaj !== minimap.sector) minimap.switchMajorSector(secMaj);
+      const enCabine = !!(ship && ship.boarded);
+      if (enCabine !== minimap.insideShip) {
+        if (enCabine) minimap.enterShip(); else minimap.exitShip();
+      }
+      // `Minimap` dit si la carte existe, `MinimapHUD` si on la voit : deux
+      // composants dans le build, deux appels ici.
+      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden,
+                                                hasMinimap: equipment.minimap }));
+      if (minimap.on && secMaj) {
+        // Tout se compare AU REPOS du secteur : c'est le seul repere ou sa
+        // position extraite ait un sens, et c'est ce que fait
+        // `InverseTransformPoint` sur un secteur enfant de sa planete.
+        const dec = decalageDuCorps(secMaj.body, anchorPos);
+        const repos = (w) => restingPoint(w, dec);
+        const monde = (x, y, z) =>
+          [x + anchorPos[0], y + anchorPos[1], z + anchorPos[2]];
+        const shipW = ship && !ship.boarded
+          ? monde(ship.pos.x, ship.pos.y, ship.pos.z) : null;
+        const probeW = probes.last
+          ? monde(probes.last.pos[0], probes.last.pos[1], probes.last.pos[2]) : null;
+        minimap.update(secMaj.position, repos(playerW), {
+          ship: shipW ? repos(shipW) : null,
+          shipSector: shipW ? secteurDe(shipW) : null,
+          probe: probeW ? repos(probeW) : null,
+          probeSector: probeW ? secteurDe(probeW) : null,
         });
       }
     }
@@ -3104,7 +3153,7 @@ async function boot() {
           on: flashlight.on, suit: equipment.suit,
           inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
           attached: !!consoles.active, satelliteCam: false,
-          inDarkZone: !!(sectorState.secteur && sectorState.secteur.sunless),
+          inDarkZone: !!zoneSombre,
           onDaySide: !night,
         })) {
           // Le texte, lui, n'est pas extractible : `_flashlightPrompt` est un
@@ -3217,19 +3266,14 @@ async function boot() {
       }
       // La limite de poussee du secteur s'applique enfin au vaisseau : 20
       // partout, 200 sur la premiere jumelle, illimitee sur Giant's Deep.
-      // Les secteurs de JEU (`ZeroGSector` x2, `MajorSector`) portent eux aussi
-      // une limite de poussee — 20 partout — et c'est la plus basse des deux
-      // qui vaut : Dark Bramble ne se traverse pas a pleine puissance
-      // (docs/46, lot 4).
-      let limite = sectors.thrustLimit;
-      const secteurJeu = playSectors.length
-        ? gameSectorAt(playSectors, playerW,
-                       (x) => decalageDuCorps(x.body, anchorPos))
-        : null;
-      if (secteurJeu && secteurJeu.thrustLimit != null) {
-        limite = limite == null ? secteurJeu.thrustLimit
-                                : Math.min(limite, secteurJeu.thrustLimit);
-      }
+      //
+      // `SectorDetector.GetThrustLimit` prend le MINIMUM sur toute la liste des
+      // secteurs touches, pas sur le seul secteur actif : l'epave est dans Dark
+      // Bramble, et la plus basse des deux limites tient quel que soit celui
+      // des deux qui est actif. Le portage minait deux listes differentes avec
+      // deux regles differentes pour arriver a peu pres la.
+      const limite = sectorThrustLimit(majSecteurs, playerW,
+                                       (x) => decalageDuCorps(x.body, anchorPos));
       if (ship) ship.thrustLimit = limite;
       // Les phares suivent la coque et s'eteignent des qu'on la quitte.
       if (ship) {
@@ -3241,8 +3285,10 @@ async function boot() {
                               ship.pos.y + a.fwd[1] * 2,
                               ship.pos.z + a.fwd[2] * 2);
           phares.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          // `SectorDetector.GetShiplightRangeLimit` : le secteur ACTIF, et lui
+          // seul. Giant's Deep bride les phares a 200, l'epave a 100.
           phares.range = shiplightRange(
-            secteurJeu ? secteurJeu.shiplightLimit : null, !!secteurJeu);
+            secMaj ? secMaj.shiplightLimit : null, !!secMaj);
         }
       }
       // L'eclairage ambiant suit `_ambientLightRange`, mesure depuis le centre
@@ -3252,22 +3298,21 @@ async function boot() {
       // secteur qu'a trois conditions : aucune zone sans soleil, un secteur
       // majeur actif, et la carte fermee. Puis il y FOND, a `deltaTime` du
       // chemin restant — une grotte s'assombrit, elle ne s'eteint pas.
-      const sec = sectorState.secteur;
-      const zoneSombre = zonesSignal.length
-        ? signalZoneAt(zonesSignal, "dark", playerW,
-                       (z) => decalageDuCorps(z.body, anchorPos))
-        : null;
+      //
+      // `_distanceToMajorSector` se mesure jusqu'au centre du secteur ACTIF, au
+      // repos : c'est la seule distance que `GetAmbientLight` regarde.
       let vise = 0;
-      if (sec) {
-        const d = Math.hypot(sec.position[0] - anchorPos[0] - player.pos.x,
-                             sec.position[1] - anchorPos[1] - player.pos.y,
-                             sec.position[2] - anchorPos[2] - player.pos.z);
-        vise = ambientIntensity(d, sec.lightRange);
+      if (secMaj) {
+        const dec = decalageDuCorps(secMaj.body, anchorPos);
+        const p = restingPoint(playerW, dec);
+        const d = Math.hypot(p[0] - secMaj.position[0], p[1] - secMaj.position[1],
+                             p[2] - secMaj.position[2]);
+        vise = ambientIntensity(d, secMaj.lightRange);
       } else {
         vise = ambientIntensity(0, 0);
       }
       ambient.intensity = ambientStep(ambient.intensity,
-        ambientTarget(vise, { sunless: !!zoneSombre, inMajorSector: !!sec,
+        ambientTarget(vise, { sunless: !!zoneSombre, inMajorSector: !!secMaj,
                               onMapCamera: !!solarMap.open }), dt);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
@@ -3737,8 +3782,12 @@ async function boot() {
     // conversation : le jeu appelle TurnOff sur chacun de ces evenements.
     if (ship && ship.boarded) flashlight.forceOff();
     if (solarMap.open || dialogue.active) flashlight.forceOff();
-    flashlight.update(camera, fwd,
-      sectorState.secteur ? sectorState.secteur.lightRange || null : null);
+    // `SectorDetector.GetFlashlightRangeLimit` lit `_flashlightRangeLimit` sur
+    // le secteur actif. Le portage lui passait `_ambientLightRange`, qui est
+    // une autre grandeur pour un autre usage : la lampe se trouvait bridee a
+    // 250 sur Timber Hearth et a 750 sur Giant's Deep, alors qu'AUCUN des dix
+    // secteurs ne la bride (les dix `_flashlightRangeLimit` sont nuls).
+    flashlight.update(camera, fwd, secMaj ? secMaj.flashlightLimit : null);
     // Face nuit : la hauteur du soleil au-dessus de l'horizon local. Elle n'a
     // de sens que depuis que les corps tournent sur eux-memes — sur une planete
     // figee, la face nuit ne le devenait jamais.

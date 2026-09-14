@@ -12,9 +12,10 @@ import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
 import { signalVolumes } from "../web/src/volumes.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
-         zeroGFields, gameSectors, probePrompts,
+         zeroGFields, probePrompts,
          radiationEmitters } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.js";
+import { majorSectors, activeMajorSector } from "../web/src/sectors.js";
 import { billboards, talkingFaces, thrusterNozzles, particleBursts,
          meteorLaunchers, teleporters, warps } from "../web/src/decor.js";
 import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
@@ -587,12 +588,59 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   check("champs d'apesanteur", zg.length, 4);
   check("dont un sans forme, qui vit de ses declencheurs",
         zg.filter((f) => !f.volume && f.entryways).length, 1);
-  const secteurs = gameSectors(gp);
-  check("secteurs de jeu", secteurs.length, 3);
-  check("tous limitent la poussee a vingt",
-        secteurs.every((x) => x.thrustLimit === 20), true);
-  check("aucun ne limite la lampe du joueur",
-        secteurs.every((x) => x.flashlightLimit === null), true);
+  // Les secteurs MAJEURS : sept PlanetoidSector, deux ZeroGSector, un
+  // MajorSector nu (docs/82-secteur-majeur.md).
+  const secteurs = majorSectors(gp);
+  check("secteurs majeurs", secteurs.length, 10);
+  check("sept portent la minicarte, trois non",
+        secteurs.filter((x) => x.useMinimap).length, 7);
+  // La poussee : vingt partout SAUF deux — la premiere jumelle en autorise
+  // dix fois plus, Giant's Deep n'en limite aucune.
+  check("la poussee est bridee a vingt dans huit secteurs",
+        secteurs.filter((x) => x.thrustLimit === 20).length, 8);
+  check("la premiere jumelle autorise deux cents",
+        secteurs.find((x) => x.name === "Sector_HT_1").thrustLimit, 200);
+  check("Giant's Deep n'en limite aucune",
+        secteurs.find((x) => x.name === "Sector_GD").thrustLimit, null);
+  // LA LAMPE. Un seul secteur la bride, et le portage lui passait
+  // `_ambientLightRange` : il bridait la lampe partout, avec le mauvais
+  // nombre, et laissait passer le seul endroit ou le build la bride vraiment.
+  check("un seul secteur bride la lampe du joueur",
+        secteurs.filter((x) => x.flashlightLimit !== null).map((x) => x.name)
+          .join(","), "Sector_HT_2");
+  check("... et il la bride a vingt",
+        secteurs.find((x) => x.name === "Sector_HT_2").flashlightLimit, 20);
+  check("tous portent un declencheur spherique",
+        secteurs.every((x) => x.volume && x.volume.shape === "sphere" &&
+                              x.volume.radius > 0), true);
+  // La minicarte suit la CLASSE : les trois qui ne sont pas des
+  // PlanetoidSector ne la portent pas, et ce sont les trois endroits ou l'on
+  // ne sait plus ou l'on est.
+  check("secteurs sans minicarte",
+        secteurs.filter((x) => !x.useMinimap).map((x) => x.name).sort().join(","),
+        "Sector_DB,Sector_Derelict,Sector_QuantumMoon");
+  // Le declencheur n'est PAS l'horizon : le portage prenait `horizon x 1,5`.
+  const th = secteurs.find((x) => x.name === "Sector_TH");
+  check("Timber Hearth : 200 d'horizon", th.horizon, 200);
+  check("... et 1000 de declencheur", th.volume.radius, 1000);
+  check("aucun declencheur n'egale son horizon",
+        secteurs.some((x) => x.horizon && x.volume.radius === x.horizon), false);
+  check("l'epave bride les phares a cent",
+        secteurs.find((x) => x.name === "Sector_Derelict").shiplightLimit, 100);
+  // `CalculateActiveMajorSector` sur la scene au repos. Le secteur de la lune
+  // est EMBOITE dans celui de Timber Hearth (son centre est a 450 unites du
+  // sien, pour un declencheur de 1000) : c'est le cas ou les deux regles
+  // possibles se departagent, et celle du build retient le plus proche.
+  const lune = secteurs.find((x) => x.name === "Sector_Moon");
+  check("au centre du secteur de la lune, c'est lui qui est actif",
+        activeMajorSector(secteurs, lune.position).name, "Sector_Moon");
+  check("et la minicarte s'y allume", activeMajorSector(secteurs, lune.position)
+        .useMinimap, true);
+  const lq = secteurs.find((x) => x.name === "Sector_QuantumMoon");
+  check("sur la lune quantique, la minicarte s'eteint",
+        activeMajorSector(secteurs, lq.position).useMinimap, false);
+  check("loin de tout, aucun secteur majeur",
+        activeMajorSector(secteurs, [0, 100000, 0]), null);
 
   check("zones d'interaction", interactZones(gp).length, 7);
   check("trois fenetres de vue distinctes",

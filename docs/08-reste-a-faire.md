@@ -19,7 +19,7 @@ lisait**.
 > | | |
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, sur 295 / 1 451 |
-> | `evenements.mjs` — ce que le build **annonce** | **34** des 124 nommés |
+> | `evenements.mjs` — ce que le build **annonce** | **46** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** loi sans appelant ([`75`](75-chaleur.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
@@ -56,7 +56,7 @@ portage.
 | lune quantique | 4 orbites hôtes, effondrement à la perte de vue |
 | trou noir / trou blanc | capture, éjection en cône, effondrement de croûte |
 | Dark Bramble | prédateurs sensibles au bruit, croissance des ronces |
-| secteurs | bascule géométrie/substitution **et téléchargement**, 3 corps sur 12 |
+| secteurs | bascule géométrie/substitution **et téléchargement**, 3 corps sur 12 ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md)) |
 | poids au démarrage | 60,0 Mo pour la première image, contre 199,6 avant |
 | pilote auto et dégâts | 4 phases, seuils d'impact 15/30/300 |
 | carte du système | orbites, marqueurs, sélection de cible |
@@ -69,7 +69,7 @@ portage.
 | jauges et invites | textures du casque, 46 invites triées par priorité |
 | brouillards | Dark Bramble et coque quantique, masquage et lumières |
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
-| minicarte | globe du secteur, traces de 100 points |
+| minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |
 | réglages | 7 options, sauvegarde distincte de la partie |
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
@@ -393,7 +393,22 @@ n'avait jamais parlé ([`76`](76-proximite.md)). Elle est comblée — `lois.mjs
 compte **zéro** — et les outils qui l'ont trouvée sont désormais plus sévères
 que le dépôt ne l'était.
 
-Reste le dénominateur des **annonces** : 90 des 124 chaînes de `GlobalMessenger`
+Une **quatrième** nature est apparue avec [`82`](82-secteur-majeur.md), et elle
+est la plus discrète : **la constante inventée**. Le portage décidait du secteur
+courant par un `horizon × 1,5` — un nombre plausible, écrit de bonne foi, et
+faux de cinq fois. Il n'avait pas été inventé par paresse : la vraie mesure, la
+sphère de déclenchement du secteur, n'était pas extraite. **Une constante
+inventée est presque toujours la trace d'un champ non extrait**, et c'est là
+qu'il faut chercher avant d'écrire une formule. Cinq lois en dépendaient — la
+minicarte, la poussée, l'ambiance, la lampe, les phares — et aucune n'avait de
+test qui aurait pu le dire, parce qu'on ne teste pas ce qu'on a inventé.
+
+Une seule chose du lot reste ouverte : `_ambientLight` est une énumération que
+`MajorSector.Awake` convertit en **couleur** (noir, un bleu de nuit, un vert),
+et le portage n'a qu'une intensité. La teinte de l'ambiance par secteur est à
+porter.
+
+Reste le dénominateur des **annonces** : 78 des 124 chaînes de `GlobalMessenger`
 ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
 un événement non nommé peut correspondre à un comportement porté sous un autre
 nom — mais c'est **la carte de ce qu'il reste à lire**, et chaque piste s'y
