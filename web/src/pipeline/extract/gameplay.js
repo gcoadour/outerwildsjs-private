@@ -3,7 +3,9 @@
 
 const SINGLETONS = ["PlayerResources", "JetpackThrusterModel", "ShipThrusterModel",
                     "ThrusterModel", "ShipDamageController", "PlayerCharacterController",
-                    "Autopilot", "ShipBody", "PlayerBody"];
+                    // `_loopDurationInMinutes` vaut 18 dans la scene, et le
+                    // portage avait ecrit 20 de memoire (docs/88-boucle.md).
+                    "Autopilot", "ShipBody", "PlayerBody", "TimeLoop"];
 const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "OWAudioSource", "Conversation", "AudioTransmitter", "SpawnPoint",
                 "QuantumMoon", "QuantumOrbit", "QuantumFogBoundary", "FogVolume",

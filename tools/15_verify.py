@@ -2027,6 +2027,25 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.evaluate("() => { window.__shipRef.boarded = false; }")
         page.wait_for_timeout(300)
 
+        # --- la boucle, lue et non devinee (docs/88-boucle.md) ----------------
+        boucle = page.evaluate("""() => {
+          const l = window.__loop;
+          if (!l) return null;
+          return { minutes: Math.round(l.duration / 60),
+                   prevenue: l.preventSupernova,
+                   annonces: l.events.slice(0, 2),
+                   codes: !!window.__pdata.knows("knowsLaunchCodes") };
+        }""")
+        if boucle:
+            rep.eq("la boucle dure dix-huit minutes", boucle["minutes"], 18)
+            rep.eq("la premiere annonce est celle du build",
+                   boucle["annonces"][:1], ["StartOfTimeLoop"])
+            # `TimeLoop.Start` : la prevention suit les codes de lancement, et
+            # le profil des controles les a appris — les deux doivent donc
+            # s'accorder, quel que soit l'etat du profil.
+            rep.eq("la fin des temps est suspendue si et seulement si les codes"
+                   " sont inconnus", boucle["prevenue"], not boucle["codes"])
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

@@ -1608,7 +1608,18 @@ async function boot() {
   window.__bramble = { fish, thorns, noise, corruption, derelicts };
 
   // --- boucle temporelle ---
-  const loop = new TimeLoop();
+  // `TimeLoop._loopDurationInMinutes` : 18, lu dans la scene et non devine
+  // (docs/88-boucle.md). Le repli explicite porte la meme valeur.
+  const loop = new TimeLoop(
+    ((gameplay.singletons || {}).TimeLoop || {}).fields
+      ?._loopDurationInMinutes ?? undefined);
+  // `TimeLoop.Start` : la statique `_startTimeLoopOnReload` nait a VRAI, donc
+  // le tout premier chargement annonce deja `StartOfTimeLoop` et calcule la
+  // prevention. Sur une partie neuve, l'etoile n'explose donc pas tant qu'on
+  // n'a pas appris les codes de lancement — le compte a rebours tourne, la fin
+  // des temps attend (docs/88-boucle.md).
+  loop.start(pdata.knows("knowsLaunchCodes"));
+  if (loop.preventSupernova) console.log("fin des temps suspendue : codes inconnus");
   // le compteur persiste doit etre RESTAURE au demarrage : sans cela, la
   // premiere synchronisation ecrasait la valeur sauvegardee par un zero
   loop.loopCount = pdata.loopCount || 0;
@@ -1668,7 +1679,9 @@ async function boot() {
   window.__death = death;
 
   function respawn() {
-    loop.restart();
+    // `TimeLoop.Start` recalcule `_preventSupernova` : tant qu'on ne connait
+    // pas les codes de lancement, l'etoile n'explose pas.
+    loop.restart(pdata.knows("knowsLaunchCodes"));
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
     if (starPCS) {

@@ -1140,6 +1140,10 @@ check("et un manipulateur", (gp.placed.FirstPersonManipulator || []).length, 1);
 
 // Ce qui pilote la lumiere GLOBALE (docs/54-lumiere.md).
 check("un gestionnaire d'ambiance", (gp.placed.AmbientLightManager || []).length, 1);
+// La boucle : dix-huit minutes, lues sur `SolarSystemRoot` et non devinees
+// (docs/88-boucle.md). Le portage avait ecrit vingt.
+check("la duree de boucle vient du build",
+      gp.singletons.TimeLoop.fields._loopDurationInMinutes, 18);
 check("deux phares exterieurs", (gp.placed.ExternalLightController || []).length, 2);
 check("une lumiere a fondu", (gp.placed.FadeLight || []).length, 1);
 check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length, 1);

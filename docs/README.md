@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`88-boucle.md`](88-boucle.md) — **trois nombres écrits de mémoire, deux faux : dix-huit minutes, une onde cubique, et une fin des temps qui attend**
 - [`87-atterrissage.md`](87-atterrissage.md) — **la caméra qui regarde le sol, le manche qui change de main, et la poussée qui refuse de vous mettre en orbite**
 - [`86-annonces-de-mode.md`](86-annonces-de-mode.md) — **dix-neuf chaînes pour une mécanique déjà portée : faire la bonne chose sans jamais dire celle du jeu**
 - [`85-chambre.md`](85-chambre.md) — **les deux dernières mécaniques que le portage écartait en le disant : la chambre en apesanteur et le champ de la station météo**

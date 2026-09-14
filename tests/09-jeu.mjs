@@ -97,7 +97,8 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          selfDestructed, angleEntre } from "../web/src/probe.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
-import { TimeLoop } from "../web/src/timeloop.js";
+import { TimeLoop, LOOP_MINUTES, SHOCKWAVE_SECONDS, SHOCKWAVE_RADIUS,
+         shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
          engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
@@ -217,9 +218,65 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   loop.preventSupernova = false;
   loop.update(1, 1e9);
   check("elle repart des qu'on la laisse", loop.supernova, true);
-  // l'onde de choc rattrape ce qui est assez pres
+  // L'onde rattrape ce qui est assez pres — mais pas tout de suite. Avec la
+  // courbe CUBIQUE du build, il lui faut 2,24 s pour atteindre cent unites, la
+  // ou la lineaire d'avant les couvrait en un vingtieme de seconde.
   loop.update(1, 100);
-  check("l'onde tue ce qu'elle rattrape", loop.deathCause, "supernova");
+  check("une seconde apres, l'onde n'a pas encore cent unites",
+        loop.deathCause, null);
+  check("elle n'en a que neuf", Math.round(loop.shockwaveRadius), 9);
+  loop.update(1.5, 100);
+  check("deux secondes et demie plus tard, elle rattrape",
+        loop.deathCause, "supernova");
+
+  // --- LA BOUCLE DANS LES MOTS DU BUILD (docs/88-boucle.md) -------------
+  //
+  // Dix-huit minutes, pas vingt : `TimeLoop._loopDurationInMinutes` est pose
+  // sur `SolarSystemRoot`, et le portage l'avait devinee.
+  check("la boucle dure dix-huit minutes", LOOP_MINUTES, 18);
+  check("et le repli explicite porte la meme valeur",
+        new TimeLoop().duration, 18 * 60);
+
+  // L'ONDE N'EST PAS LINEAIRE. Les deux courbes ne se rejoignent qu'a la fin.
+  check("au depart, l'onde est au centre", shockwaveRadius(0), 0);
+  check("au bout des quinze secondes, trente mille unites",
+        shockwaveRadius(SHOCKWAVE_SECONDS), SHOCKWAVE_RADIUS);
+  check("a mi-chemin, un huitieme du rayon — pas la moitie",
+        shockwaveRadius(SHOCKWAVE_SECONDS / 2), SHOCKWAVE_RADIUS / 8);
+  check("au tiers du temps, un vingt-septieme",
+        round(shockwaveRadius(SHOCKWAVE_SECONDS / 3), 6),
+        round(SHOCKWAVE_RADIUS / 27, 6));
+  check("et elle ne depasse pas son rayon",
+        shockwaveRadius(SHOCKWAVE_SECONDS * 10), SHOCKWAVE_RADIUS);
+
+  // `TimeLoop.Start` recalcule la prevention a partir des codes de lancement.
+  const neuve = new TimeLoop(1);
+  neuve.start(false);
+  check("sans les codes, la fin des temps attend", neuve.preventSupernova, true);
+  check("et l'annonce du build part", neuve.events.join(","), "StartOfTimeLoop");
+  neuve.elapsed = neuve.duration + 1;
+  neuve.update(1, 1e9);
+  check("l'etoile n'explose donc pas", neuve.supernova, false);
+  // Apprendre les codes EN COURS de boucle ne change rien : la prevention est
+  // calculee au demarrage, une fois.
+  neuve.update(1, 1e9);
+  check("apprendre les codes en cours de boucle n'y change rien",
+        neuve.supernova, false);
+  neuve.restart(true);
+  check("la boucle suivante, elle, explose", neuve.preventSupernova, false);
+  check("avec les deux annonces, dans l'ordre",
+        neuve.events.slice(-2).join(","), "RestartTimeLoop,StartOfTimeLoop");
+  check("et le compte de boucles a monte", neuve.loopCount, 1);
+  neuve.elapsed = neuve.duration;
+  neuve.update(1, 1e9);
+  check("l'effondrement et l'explosion s'annoncent",
+        neuve.events.slice(-2).join(","), "TriggerSupernova,SunExploded");
+  // `ResetSimulation` : on repart de zero, boucle comprise.
+  neuve.resetSimulation();
+  check("la remise a zero efface le compte", neuve.loopCount, 0);
+  check("et elle s'annonce", neuve.events.at(-1), "ResetSimulation");
+  neuve.resume();
+  check("reprendre ne recommence rien", neuve.events.at(-1), "ResumeSimulation");
 }
 
 // --- mise en scene de la supernova --------------------------------------
