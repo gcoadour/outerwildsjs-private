@@ -1589,6 +1589,14 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("monter dans le vaisseau ne leve pas", _ERREURS_PAGE[:2], [])
             rep.eq("et le moteur tourne toujours",
                    page.evaluate("() => typeof window.__visee"), "object")
+            # Le vocabulaire des modes (docs/86-annonces-de-mode.md) : le
+            # portage faisait deja la bonne transition sous son propre nom, il
+            # la dit maintenant dans celui du jeu.
+            rep.eq("monter au poste annonce EnterFlightConsole",
+                   page.evaluate("() => window.__modes.events.slice(-1)"),
+                   ["EnterFlightConsole"])
+            rep.eq("et l'autopilote repond au poste",
+                   page.evaluate("() => window.__modes.permet('Autopilot')"), True)
             page.evaluate("() => { window.__shipRef.boarded = false;"
                           "  window.__assise.points.detach([0,0,0]);"
                           "  window.__assise.points.drain(); }")

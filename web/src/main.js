@@ -84,7 +84,7 @@ import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes } from "./input.js";
-import { Modes } from "./modes.js";
+import { Modes, annonceDe } from "./modes.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
          modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod } from "./spin.js";
@@ -2394,17 +2394,26 @@ async function boot() {
         ["ordinateur", !!computer.open],
         ["vaisseau", !!(ship && ship.boarded)],
       ];
+      // Les transitions passent par l'ANNONCE du build quand il y en a une :
+      // `EnterMapView`, `ExitFlightConsole`… Le portage faisait deja la bonne
+      // chose sous ses propres noms ; il la dit maintenant dans celui du jeu.
+      const bascule = (nom, sens) => {
+        const dit = annonceDe(nom, sens);
+        if (dit) modes.annonce(dit);
+        else if (sens === "entre") modes.entre(nom);
+        else modes.sort(nom);
+      };
       for (let i = etats.length - 1; i >= 0; i--) {
         const [nom, on] = etats[i];
-        if (!on && modes.dedans.has(nom)) { modes.dedans.delete(nom); modes.sort(nom); }
+        if (!on && modes.dedans.has(nom)) { modes.dedans.delete(nom); bascule(nom, "sort"); }
       }
       for (const [nom, on] of etats) {
-        if (on && !modes.dedans.has(nom)) { modes.dedans.add(nom); modes.entre(nom); }
+        if (on && !modes.dedans.has(nom)) { modes.dedans.add(nom); bascule(nom, "entre"); }
       }
       // `OnPlayerDeath` pose un ensemble VIDE : un mort ne commande rien du
       // tout, pas meme d'ouvrir le menu. Le portage coupait deja le
       // deplacement ; il laissait la lampe, la carte et la sonde.
-      if (death.dead && !modes.mort) modes.meurt();
+      if (death.dead && !modes.mort) modes.annonce("PlayerDeath");
       else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
     }
 

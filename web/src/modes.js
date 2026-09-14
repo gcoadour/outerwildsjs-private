@@ -118,6 +118,52 @@ export const AJOUTS_HORS_MODE = new Set(["Ship Computer", "Marshmallow",
                                          "Recenter Map"]);
 
 /**
+ * Ce que le build ANNONCE quand un mode change.
+ *
+ * `OWInput.AddListeners` abonne dix-neuf chaines de `GlobalMessenger`, une par
+ * transition, et chacune porte le nom de la methode qui la traite
+ * (`OnEnterMapView`, `OnExitTelescopeView`…) : la correspondance n'est pas
+ * devinee, elle est ecrite deux fois dans l'assembly.
+ *
+ * Le portage tenait deja les dix ensembles et leurs transitions, mais sous ses
+ * propres noms : il faisait la bonne chose sans jamais dire celle du jeu. La
+ * table est ici pour que le vocabulaire soit celui du build — et pour qu'un
+ * lecteur qui cherche `EnterFlightConsole` le trouve.
+ *
+ * `EnterLandingMode` / `ExitLandingMode` n'y sont PAS : ces deux-la ne parlent
+ * pas des commandes mais de la poussee (`ShipThrusterController`).
+ */
+export const EVENEMENTS = {
+  EnterSatelliteCameraMode: ["satellite", "entre"],
+  ExitSatelliteCameraMode: ["satellite", "sort"],
+  EnterLandingView: ["atterrissage", "entre"],
+  ExitLandingView: ["atterrissage", "sort"],
+  EnterMenuMode: ["menu", "entre"],
+  ExitMenuMode: ["menu", "sort"],
+  EnterShipComputer: ["ordinateur", "entre"],
+  ExitShipComputer: ["ordinateur", "sort"],
+  EnterDialogueMode: ["dialogue", "entre"],
+  ExitDialogueMode: ["dialogue", "sort"],
+  EnterMapView: ["carte", "entre"],
+  ExitMapView: ["carte", "sort"],
+  EnterFlightConsole: ["vaisseau", "entre"],
+  ExitFlightConsole: ["vaisseau", "sort"],
+  EnterRemoteFlightConsole: ["modele", "entre"],
+  ExitRemoteFlightConsole: ["modele", "sort"],
+  EnterTelescopeView: ["lunette", "entre"],
+  ExitTelescopeView: ["lunette", "sort"],
+  PlayerDeath: ["mort", "meurt"],
+};
+
+/** L'annonce qui correspond a une transition du portage, ou null. */
+export function annonceDe(mode, sens) {
+  for (const [nom, [m, s]] of Object.entries(EVENEMENTS)) {
+    if (m === mode && s === sens) return nom;
+  }
+  return null;
+}
+
+/**
  * `OWInput` : l'ensemble actif, et sa case de sauvegarde.
  *
  * Les cinq canaux que le portage ajoute (docs/61) ne sont dans aucun ensemble
@@ -135,6 +181,26 @@ export class Modes {
     // TRANSITIONS et non des appels. Le build n'en a pas besoin : ses
     // evenements sont deja des transitions.
     this.dedans = new Set();
+ 
+    // Les annonces du build, dans l'ordre ou elles seraient parties.
+    this.events = [];
+  }
+
+  /**
+   * Une annonce du build, telle qu'elle arrive sur `GlobalMessenger`.
+   *
+   * C'est l'entree que le jeu utilise, et elle est plus sure que `entre`/`sort`
+   * appeles a la main : un nom inconnu ne fait rien, et le sens vient de la
+   * table plutot que de l'appelant.
+   */
+  annonce(evenement) {
+    const e = EVENEMENTS[evenement];
+    if (!e) return false;
+    const [mode, sens] = e;
+    if (sens === "meurt") { this.meurt(); this.events.push(evenement); return true; }
+    const fait = sens === "entre" ? this.entre(mode) : this.sort(mode);
+    if (fait) this.events.push(evenement);
+    return fait;
   }
 
   /** `_activeInputs.Contains` — la seule question que pose `GetAxis`. */

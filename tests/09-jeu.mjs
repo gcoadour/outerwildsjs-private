@@ -80,7 +80,8 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
-import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT } from "../web/src/modes.js";
+import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
+         annonceDe } from "../web/src/modes.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
          modelLandingSpots, modelShipBody,
          rocketKids } from "../web/src/modelship.js";
@@ -4783,6 +4784,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   lu.sort("lunette");
   check("c'est en la refermant qu'on retrouve le poste",
         lu.permet("Autopilot"), true);
+
+  // LE VOCABULAIRE DU BUILD (docs/86-annonces-de-mode.md).
+  //
+  // `OWInput.AddListeners` abonne dix-neuf chaines, une par transition, et
+  // chacune porte le nom de la methode qui la traite : la correspondance est
+  // ecrite deux fois dans l'assembly, elle n'est pas devinee.
+  check("dix-neuf annonces de mode", Object.keys(EVENEMENTS).length, 19);
+  check("neuf modes y entrent",
+        new Set(Object.values(EVENEMENTS).filter(([, s]) => s === "entre")
+          .map(([m]) => m)).size, 9);
+  check("et les neuf en sortent",
+        new Set(Object.values(EVENEMENTS).filter(([, s]) => s === "sort")
+          .map(([m]) => m)).size, 9);
+  check("chaque annonce vise un ensemble qui existe",
+        Object.values(EVENEMENTS).every(([m]) => m === "mort" || !!ENSEMBLES[m]),
+        true);
+  check("l'annonce d'entree a la carte", annonceDe("carte", "entre"), "EnterMapView");
+  check("et celle de sortie du poste",
+        annonceDe("vaisseau", "sort"), "ExitFlightConsole");
+  check("un mode sans annonce n'en invente pas",
+        annonceDe("personnage", "entre"), null);
+
+  const an = new Modes();
+  check("une annonce inconnue ne fait rien", an.annonce("PasUnEvenement"), false);
+  an.annonce("EnterFlightConsole");
+  check("l'annonce du build pose l'ensemble", an.permet("Autopilot"), true);
+  check("et elle est retenue", an.events.join(","), "EnterFlightConsole");
+  an.annonce("EnterTelescopeView");
+  check("sortir du poste sous la lunette echoue, comme a la main",
+        an.annonce("ExitFlightConsole"), false);
+  check("et rien n'a ete retenu de ce refus", an.events.length, 2);
+  an.annonce("ExitTelescopeView");
+  check("puis le poste revient", an.permet("Autopilot"), true);
+  // `PlayerDeath` est dans la meme table, et pose l'ensemble vide.
+  an.annonce("PlayerDeath");
+  check("l'annonce de mort vide l'ensemble", an.actif.size, 0);
 
   // Un mort ne commande RIEN — pas meme d'ouvrir le menu.
   const mo = new Modes();
