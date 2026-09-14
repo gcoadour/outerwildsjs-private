@@ -138,6 +138,7 @@ import { envelope } from "../web/src/pipeline/extract/particles.js";
 import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
          LOOK_DEAD_ZONE, SPRINT_AT } from "../web/src/touch.js";
 import { padState, padEdges, deadZone, padLookCurve, PAD_BUTTONS,
+         padDisagreements, UNITY_VERS_NAVIGATEUR,
          PAD_DEAD_ZONE } from "../web/src/gamepad.js";
 import { bodySpin, spinPeriod, rotateAbout, SpinField,
          sunElevation } from "../web/src/spin.js";
@@ -1508,6 +1509,29 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         padEdges(press(8), padEdges(press(0), first.state).state).codes.join(","),
         "Enter");
   check("chaque bouton porte le nom du build", PAD_BUTTONS[5].build, "RightBumper");
+
+  // LES DEUX TABLES DISENT-ELLES LA MEME CHOSE ? (docs/94-manette.md)
+  //
+  // `input.js` porte la liaison `pad` de chaque canal en numeros d'Unity,
+  // `gamepad.js` la sienne en numeros du navigateur. Deux tables ecrites a la
+  // main depuis le meme `InputManager`, et le portage s'est deja trompe sur
+  // quatre lignes de six.
+  check("les deux tables de manette s'accordent",
+        padDisagreements(new Commandes(null)).length, 0);
+  // Un canal deplace se voit tout de suite : c'est ce que le controle attrape.
+  {
+    const fausse = new Commandes(null);
+    fausse.get("Jump").pad = { button: 1 };
+    const d = padDisagreements(fausse);
+    check("deplacer un canal fait un desaccord", d.length, 1);
+    check("et il nomme le canal", d[0].canal, "Jump");
+    check("avec le bouton attendu", d[0].attendu,
+          UNITY_VERS_NAVIGATEUR.boutons[1]);
+  }
+  // La LAMPE est le cas particulier : un axe d'Unity, quatre boutons pour le
+  // navigateur, et deux lignes de la table pour un seul canal.
+  check("la lampe passe par la croix directionnelle",
+        UNITY_VERS_NAVIGATEUR.axes[6].dpad.join(","), "14,15");
 }
 
 // --- Ogg Opus : le conteneur -------------------------------------------

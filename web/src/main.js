@@ -82,7 +82,7 @@ import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
-import { GamepadControls, padAvailable } from "./gamepad.js";
+import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
@@ -2343,6 +2343,19 @@ async function boot() {
     console.log("manette branchee :", e.gamepad && e.gamepad.id);
   });
   if (padAvailable()) console.log("manette detectee au demarrage");
+  // LES DEUX TABLES DOIVENT DIRE LA MEME CHOSE. `input.js` porte la liaison
+  // `pad` de chaque canal en numeros d'Unity, `gamepad.js` la sienne en numeros
+  // du navigateur : deux tables ecrites a la main depuis le meme
+  // `InputManager`, et rien ne les obligeait a rester d'accord. Le portage s'y
+  // est deja trompe sur quatre lignes de six (docs/61). Le desaccord se dit au
+  // demarrage plutot que de se sentir a la manette (docs/94-manette.md).
+  {
+    const desaccords = padDisagreements(cmds);
+    window.__padAccord = desaccords;
+    if (desaccords.length) {
+      console.warn("manette : les deux tables ne s'accordent pas", desaccords);
+    }
+  }
   // En paysage de telephone, le coin bas-droit revient aux boutons d'action :
   // la vue de sonde passe a gauche, sous les jauges.
   if (touch.enabled) probeCam.setViewport(0.02, 0.42, 0.26, 0.3);

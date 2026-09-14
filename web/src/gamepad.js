@@ -80,6 +80,60 @@ export const PAD_BUTTONS = {
   15: { code: "KeyF", build: "DPadRight", canal: "Flashlight" },
 };
 
+/**
+ * Les deux tables disent-elles la meme chose ?
+ *
+ * `input.js` porte la liaison `pad` de chaque canal, en numeros d'`Unity` ;
+ * cette table-ci porte les numeros du NAVIGATEUR. Les deux viennent du meme
+ * `InputManager` (docs/61), ecrites a la main a deux endroits, et rien ne les
+ * obligeait a rester d'accord — le champ `canal` ci-dessus n'etait lu par
+ * personne, c'est-a-dire qu'il etait un commentaire deguise en donnee.
+ *
+ * Cette fonction les confronte par `padButton` et `padAxis`, qui etaient eux
+ * aussi ecrits et appeles par personne (docs/93-commandes.md). Un desaccord se
+ * dit au demarrage : c'est exactement le genre d'erreur que le portage a deja
+ * commise quatre fois sur six lignes de cette table.
+ *
+ * @returns la liste des desaccords, vide quand tout concorde
+ */
+export function padDisagreements(cmds) {
+  const out = [];
+  if (!cmds || !cmds.padButton) return out;
+  for (const [i, spec] of Object.entries(PAD_BUTTONS)) {
+    if (!spec.canal) continue;
+    const unity = cmds.padButton(spec.canal);
+    if (unity !== null && unity !== undefined) {
+      const nav = UNITY_VERS_NAVIGATEUR.boutons[unity];
+      if (nav !== Number(i)) {
+        out.push({ bouton: Number(i), canal: spec.canal,
+                   unity, attendu: nav, genre: "bouton" });
+      }
+      continue;
+    }
+    // La LAMPE n'est pas un bouton pour Unity : c'est l'axe 6, la croix
+    // directionnelle, que le navigateur eclate en quatre boutons. Un canal lie
+    // a un axe `dpad` couvre donc legitimement deux numeros de bouton, et c'est
+    // la seule ligne de cette table dans ce cas.
+    const a = cmds.padAxis(spec.canal);
+    const d = a && UNITY_VERS_NAVIGATEUR.axes[a.axis];
+    if (d && Array.isArray(d.dpad) && d.dpad.includes(Number(i))) continue;
+    out.push({ bouton: Number(i), canal: spec.canal,
+               unity: null, attendu: d ? d.dpad : null, genre: "bouton" });
+  }
+  // Les deux gachettes sont des AXES pour Unity et des boutons a valeur pour le
+  // navigateur : la traduction passe par `trigger`, et c'est la ligne que le
+  // portage avait fausse en montant au bouton A.
+  for (const [canal, attendu] of [["Move Up", RIGHT_TRIGGER],
+                                  ["Move Down", LEFT_TRIGGER]]) {
+    const a = cmds.padAxis(canal);
+    const t = a && UNITY_VERS_NAVIGATEUR.axes[a.axis];
+    if (!t || t.trigger !== attendu) {
+      out.push({ canal, attendu, obtenu: t ? t.trigger : null, genre: "gachette" });
+    }
+  }
+  return out;
+}
+
 /** Gachettes, qui ne sont pas des boutons mais des axes tenus. */
 export const LEFT_TRIGGER = 6, RIGHT_TRIGGER = 7;
 

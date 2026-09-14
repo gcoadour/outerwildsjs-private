@@ -2146,6 +2146,10 @@ def _run(url, heavy, profil=None, zip_path=None):
                  return [double, Math.round(petit * 100) / 100];
                }"""), [2, 0.2])
 
+        # --- les deux tables de manette (docs/94-manette.md) ------------------
+        rep.eq("les deux tables de manette s'accordent dans la page",
+               page.evaluate("() => window.__padAccord"), [])
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep
