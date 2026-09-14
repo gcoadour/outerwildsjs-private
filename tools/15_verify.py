@@ -1017,6 +1017,46 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- les lois qui n'etaient qu'importees (docs/72-poussiere.md) ---------
+        #
+        # Quatre lois ecrites, eprouvees, documentees — et presentes dans une
+        # seule ligne d'`import`. `lois.mjs` les declarait vivantes pour cette
+        # raison, jusqu'a ce qu'il cesse de compter un import pour un appel.
+        sable = page.evaluate("""() => {
+          const t = window.__tempete;
+          return { volumes: t.volumes.length, cylindres: t.cylindres.length,
+                   rayons: t.cylindres.map(c => Math.round(c.volume.radius * 10) / 10),
+                   actif: t.active };
+        }""")
+        rep.eq("une tempete de sable posee", sable["volumes"], 1)
+        rep.eq("faite de quatre cylindres", sable["cylindres"], 4)
+        rep.eq("de rayons decroissants", sable["rayons"], [31.6, 28.0, 23.8, 21.4])
+        rep.eq("et on n'est pas dedans", sable["actif"], False)
+        # Le volume compose : une entree, une sortie, quel que soit le nombre de
+        # cylindres traverses.
+        passage = page.evaluate("""() => {
+          const t = window.__tempete;
+          const c = t.cylindres;
+          const e1 = t.update(c[0].position);
+          const suivant = t.update(c[1].position);
+          const s1 = t.update([1e6, 1e6, 1e6]);
+          const s2 = t.update([1e6, 1e6, 1e6]);
+          return { e1, suivant, s1, s2, reste: t.active };
+        }""")
+        rep.eq("entrer annonce une fois", passage["e1"], "enter")
+        rep.eq("passer au cylindre suivant n'annonce rien", passage["suivant"], None)
+        rep.eq("sortir annonce une fois", passage["s1"], "exit")
+        rep.eq("et pas deux", passage["s2"], None)
+        rep.eq("l'ecran est calme en sortant", passage["reste"], False)
+        # La toile du regard : deux anneaux, retrouves dans le glTF.
+        toile = page.evaluate("""() => {
+          const t = window.__regard.toiles;
+          return { n: t.length,
+                   anneaux: t[0] ? [t[0].inner, t[0].outer] : [] };
+        }""")
+        rep.eq("un animateur de toile", toile["n"], 1)
+        rep.eq("et ses deux anneaux nommes", toile["anneaux"], ["innerWeb", "outerWeb"])
+
         # --- ce qui bouge quand on ne le regarde pas (docs/71-quantique.md) -----
         #
         # Cinq objets sur la lune quantique — trois pins, une cabane, un

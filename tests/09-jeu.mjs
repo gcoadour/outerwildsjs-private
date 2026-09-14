@@ -18,7 +18,7 @@ import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
-         webSpeeds, webAlpha, GAZE, WEB } from "../web/src/gaze.js";
+         webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
          roastPrompts, roastBroken, helmetSettings, HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
@@ -52,7 +52,8 @@ import { ambienceZones, activeZones, winnersByLayer, clipOf,
          AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
          gameSectorAt, probePrompts, radiationEmitters,
-         radiationAt, CompoundTrigger, sandstormVolumes } from "../web/src/volumes.js";
+         radiationAt, CompoundTrigger, sandstormVolumes,
+         childTriggers, Sandstorm } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
@@ -4694,6 +4695,102 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("sans place libre, il ne bouge pas", o.update(false, () => null), false);
     check("et reste ou il etait", o.position.join(","), avant);
   }
+}
+
+{
+  // --- LES LOIS QUI N'ETAIENT QU'IMPORTEES (docs/72-poussiere.md) ---
+
+  // LA POUSSIERE DE VITESSE. Rien sous trente unites par seconde.
+  check("trente unites par seconde, le seuil", DUST.minSpeed, 30);
+  check("sous le seuil, aucune trace", motionDust(29).alpha, 0);
+  check("mais le systeme emet quand meme", motionDust(29).emitting, true);
+  // `s x 0,01` borne a 0,2 atteint le plafond des vingt unites par seconde, et
+  // le seuil en coupe trente : entre les deux lois, l'alpha ne prend QUE deux
+  // valeurs, 0 et 0,2. La rampe existe dans le code du build et n'est jamais
+  // parcourue — c'est le build qui le dit, pas le portage qui simplifie.
+  check("au-dessus du seuil, l'alpha est au plafond", motionDust(31).alpha, 0.2);
+  check("et beaucoup plus vite, toujours au plafond", motionDust(500).alpha, 0.2);
+  check("et il plafonne a un cinquieme", motionDust(9999).alpha, DUST.maxAlpha);
+  // La duree de vie DIMINUE quand le debit augmente.
+  check("a trente, la vie est de cinq secondes", motionDust(30).lifetime, 5);
+  check("a cent, elle est au plancher", motionDust(100).lifetime, DUST.minLifetime);
+  check("et le debit a monte", motionDust(100).rate > motionDust(30).rate, true);
+  check("sans cible visee, rien n'est seme",
+        motionDust(500, { targeting: false }).emitting, false);
+  check("et sur la carte non plus",
+        motionDust(500, { mapView: true }).emitting, false);
+
+  // ON NE GRILLE PAS DE LOIN.
+  check("quatre unites", ROAST_DISTANCE, 4);
+  check("a trois unites, on grille encore", roastBroken(3, null), false);
+  check("a cinq, c'est fini", roastBroken(5, null), true);
+  check("et l'invite du build a le dernier mot",
+        roastBroken(9, { distance: 10 }), false);
+
+  // LA TOILE : deux anneaux en sens INVERSE, au cube des fractions.
+  const anim = webAnimators({ placed: { GazeWebAnimator: [
+    { name: "GazeVolume", body: "Twin01_Body", position: [0, 0, 0], fields: {},
+      targets: { _innerWeb: { name: "innerWeb" }, _outerWeb: { name: "outerWeb" },
+                 _gazeSwitch: { name: "GazeVolume" } } },
+  ] } });
+  check("un animateur de toile", anim.length, 1);
+  check("qui nomme ses deux anneaux",
+        [anim[0].inner, anim[0].outer].join(","), "innerWeb,outerWeb");
+  check("et l'interrupteur qui les commande", anim[0].gazeSwitch, "GazeVolume");
+  check("sans rien poser, rien", webAnimators({}).length, 0);
+  {
+    const v = webSpeeds(0, 0);
+    check("au repos, rien ne tourne", v.outer + v.inner, 0);
+    const q = webSpeeds(0.5, 0);
+    const p2 = webSpeeds(1, 0);
+    // Au CUBE : a mi-regard, un huitieme de la vitesse, pas la moitie.
+    check("a mi-regard, un huitieme de la vitesse", q.outer / p2.outer, 0.125);
+    const c = webSpeeds(1, 1);
+    check("les deux anneaux tournent en sens INVERSE", c.inner < 0 && c.outer > 0, true);
+  }
+  check("la toile s'efface en deux secondes", webAlpha(2), 0);
+  check("a mi-chemin, a moitie", webAlpha(1), 0.5);
+  check("et jamais en dessous de zero", webAlpha(10), 0);
+
+  // LA TEMPETE DE SABLE : quatre cylindres, UNE entree, UNE sortie.
+  const gpSable = { placed: {
+    SandstormVolume: [{ name: "FluidVolume", body: "SandFunnel_Body",
+                        position: [0, 0, 0], fields: {} }],
+    ChildTriggerVolume: [
+      { name: "FluidCylinder", body: "SandFunnel_Body", position: [0, 0, 0],
+        rotation: [0, 0, 0, 1],
+        volume: { shape: "capsule", radius: 30, height: 400, axis: 1, center: [0, 0, 0] } },
+      { name: "FluidCylinder", body: "SandFunnel_Body", position: [40, 0, 0],
+        rotation: [0, 0, 0, 1],
+        volume: { shape: "capsule", radius: 25, height: 300, axis: 1, center: [0, 0, 0] } },
+    ],
+  } };
+  check("une tempete posee", sandstormVolumes(gpSable).length, 1);
+  const cyl = childTriggers(gpSable, "SandFunnel_Body");
+  check("deux cylindres", cyl.length, 2);
+  check("et chacun a son identite", cyl[0].id !== cyl[1].id, true);
+  const orage = new Sandstorm(sandstormVolumes(gpSable), cyl);
+  check("dehors, rien", orage.update([1000, 0, 0]), null);
+  check("et l'ecran est calme", orage.active, false);
+  check("entrer dans le premier cylindre l'annonce",
+        orage.update([0, 0, 0]), "enter");
+  check("l'ecran se charge", orage.active, true);
+  // LE POINT DU VOLUME COMPOSE : passer d'un cylindre a l'autre n'emet RIEN.
+  check("passer au second n'annonce rien", orage.update([40, 0, 0]), null);
+  check("et l'ecran ne clignote pas", orage.active, true);
+  check("ressortir l'annonce une fois", orage.update([1000, 0, 0]), "exit");
+  check("et l'ecran se calme", orage.active, false);
+  check("ressortir deux fois n'annonce rien", orage.update([1000, 0, 0]), null);
+  // Sans cylindre, la tempete n'a pas de forme et ne declenche jamais.
+  check("sans cylindre, rien",
+        new Sandstorm(sandstormVolumes(gpSable), []).update([0, 0, 0]), null);
+  // Le compte du volume compose, seul.
+  const comp = new CompoundTrigger();
+  comp.enterChild("a"); comp.enterChild("a");
+  check("deux entrees du meme corps, un seul suivi", comp.inside, 1);
+  check("une sortie ne suffit pas", comp.exitChild("a"), false);
+  check("la seconde, oui", comp.exitChild("a"), true);
+  check("et plus personne dedans", comp.inside, 0);
 }
 
 report();

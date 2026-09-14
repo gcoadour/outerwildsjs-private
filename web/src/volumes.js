@@ -496,3 +496,67 @@ export function sandstormVolumes(gameplay) {
     name: c.name, body: c.body || null, position: c.position, volume: c.volume || null,
   }));
 }
+
+/**
+ * Les cylindres du volume compose, corps par corps.
+ *
+ * `SandstormVolume` n'a PAS de collider a lui : `ctx.volumeOf` rend vide, et le
+ * portage aurait pu en conclure que la tempete n'a pas de forme. Sa forme est
+ * celle de ses ENFANTS — quatre capsules qui se chevauchent, de 31,6 a 21,4 de
+ * rayon et de 440 a 298 de haut, le long de l'entonnoir de sable entre les
+ * jumelles.
+ *
+ * C'est exactement ce pour quoi `CompoundTriggerVolume` existe : quatre formes,
+ * une entree, une sortie.
+ */
+export function childTriggers(gameplay, body = null) {
+  return ((gameplay.placed || {}).ChildTriggerVolume || [])
+    .filter((c) => !body || c.body === body)
+    .map((c, i) => ({
+      id: `${c.body || "?"}#${i}`,
+      name: c.name, body: c.body || null,
+      position: c.position, rotation: c.rotation || null,
+      volume: c.volume || null,
+    }));
+}
+
+/**
+ * La tempete de sable : quatre cylindres, un compte, deux evenements.
+ *
+ * `ScreenEffectController` tient `_sandstormCount` et joue ses particules tant
+ * qu'il est positif — un compte, pas un booleen, parce que rien n'interdit
+ * plusieurs tempetes. Le portage n'avait ni l'un ni l'autre.
+ */
+export class Sandstorm {
+  constructor(volumes = [], cylindres = []) {
+    this.volumes = volumes;
+    this.cylindres = cylindres;
+    this.trigger = new CompoundTrigger();
+    this.count = 0;
+  }
+
+  get active() { return this.count > 0; }
+  get inside() { return this.trigger.inside > 0; }
+
+  /**
+   * @param worldPoint position du joueur, en coordonnees monde
+   * @param shiftOf    decalage du corps porteur depuis la scene au repos
+   * @returns {"enter"|"exit"|null}
+   */
+  update(worldPoint, shiftOf = null) {
+    if (!this.volumes.length || !this.cylindres.length) return null;
+    let dedans = false;
+    for (const c of this.cylindres) {
+      if (!c.volume) continue;
+      const d = shiftOf ? (shiftOf(c) || [0, 0, 0]) : [0, 0, 0];
+      const p = [worldPoint[0] - d[0], worldPoint[1] - d[1], worldPoint[2] - d[2]];
+      if (insideVolume(c, p)) { dedans = true; break; }
+    }
+    // Un seul corps suit — le joueur. `OnEntry` ne teste que le tag
+    // `PlayerDetector` : un vaisseau qui traverse ne declenche rien.
+    const avant = this.trigger.contains("joueur");
+    if (dedans && !avant) { this.trigger.enterChild("joueur"); this.count++; return "enter"; }
+    if (!dedans && avant) { this.trigger.exitChild("joueur"); this.count--; return "exit"; }
+    return null;
+  }
+}

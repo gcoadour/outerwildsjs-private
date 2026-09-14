@@ -56,7 +56,7 @@ import { Autopilot } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
-         webSpeeds } from "./gaze.js";
+         webSpeeds, webAlpha, webAnimators } from "./gaze.js";
 import { elevators, Elevator, LaunchTerminal, landingPadSensors,
          museumEntryways } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
@@ -120,7 +120,8 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor, lookRotation } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
-         gameSectorAt, signalVolumes, signalZoneAt } from "./volumes.js";
+         gameSectorAt, signalVolumes, signalZoneAt, sandstormVolumes,
+         childTriggers, Sandstorm } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
          LOCK_ON } from "./gear.js";
@@ -441,8 +442,88 @@ async function boot() {
   // On allume en REGARDANT (docs/50-regard.md) : trois secondes de regard fixe,
   // a moins de quatre unites et dix degres, et la porte d'energie s'efface.
   const regards = gazeSwitches(gameplay).map((d) => new GazeSwitch(d));
+  // §M LA TOILE. `GazeWebAnimator` fait tourner deux anneaux en sens INVERSE,
+  // au cube des fractions : la toile s'anime a mesure qu'on la fixe, et
+  // s'efface en deux secondes une fois la charge pleine. Le portage avait la
+  // loi, ecrite et eprouvee (docs/50) — et il ne faisait tourner personne.
+  const toiles = webAnimators(gameplay);
+
+  // §M LA TEMPETE DE SABLE. `SandstormVolume` n'a pas de collider a lui : sa
+  // forme est celle de ses ENFANTS — quatre capsules qui se chevauchent le long
+  // de l'entonnoir de sable entre les jumelles. C'est exactement ce pour quoi
+  // `CompoundTriggerVolume` existe : quatre formes, UNE entree, UNE sortie.
+  //
+  // `ScreenEffectController` joue ses particules tant que le compte est
+  // positif ; le portage n'avait ni le compte ni les particules.
+  const tempetes = sandstormVolumes(gameplay);
+  const tempete = new Sandstorm(tempetes,
+    tempetes.length ? childTriggers(gameplay, tempetes[0].body) : []);
+  window.__tempete = tempete;
+  let psSable = null;
+  function systemeSable() {
+    if (psSable !== null) return psSable;
+    try {
+      const ps = new BABYLON.ParticleSystem("sandstorm", 600, scene);
+      const t = new BABYLON.DynamicTexture("sandTex", 8, scene, false);
+      const c2 = t.getContext();
+      c2.fillStyle = "#d9b477";
+      c2.beginPath(); c2.arc(4, 4, 3, 0, 6.284); c2.fill();
+      t.update();
+      ps.particleTexture = t;
+      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+      ps.emitter = camera;
+      ps.minEmitBox = new BABYLON.Vector3(-8, -8, -8);
+      ps.maxEmitBox = new BABYLON.Vector3(8, 8, 8);
+      ps.minLifeTime = 0.4; ps.maxLifeTime = 1.2;
+      ps.minSize = 0.05; ps.maxSize = 0.25;
+      ps.minEmitPower = 4; ps.maxEmitPower = 14;
+      ps.color1 = new BABYLON.Color4(0.85, 0.72, 0.47, 0.5);
+      ps.color2 = new BABYLON.Color4(0.72, 0.6, 0.4, 0.35);
+      ps.colorDead = new BABYLON.Color4(0.7, 0.6, 0.4, 0);
+      ps.emitRate = 0;
+      ps.start();
+      psSable = ps;
+    } catch (e) { psSable = false; }
+    return psSable;
+  }
+
+  // §M LA POUSSIERE DE VITESSE, et son rendu.
+  //
+  // `MotionDust` est un systeme de particules pose SUR la camera : il ne seme
+  // rien sous trente unites par seconde, et au-dela le debit monte pendant que
+  // la duree de vie diminue. Les traits sont alignes sur le deplacement — le
+  // build fait un `LookAt` sur la direction du mouvement.
+  //
+  // La texture est fabriquee ici plutot que lue dans `data/` : ce lot ne
+  // dispose pas de celle du build, et un point blanc etire suffit a porter la
+  // loi, qui est une loi de DEBIT et de DUREE, pas de dessin.
+  let poussiere = { emitting: false };
+  let psPoussiere = null;
+  function systemePoussiere() {
+    if (psPoussiere !== null) return psPoussiere;
+    try {
+      const ps = new BABYLON.ParticleSystem("motionDust", 400, scene);
+      const dt2 = new BABYLON.DynamicTexture("dustTex", 8, scene, false);
+      const ctx = dt2.getContext();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(3, 0, 2, 8);
+      dt2.update();
+      ps.particleTexture = dt2;
+      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+      ps.emitter = camera;
+      // Une boite autour du joueur : le build seme dans un volume qui suit la
+      // camera, et non depuis un point.
+      ps.minEmitBox = new BABYLON.Vector3(-20, -20, -20);
+      ps.maxEmitBox = new BABYLON.Vector3(20, 20, 20);
+      ps.start();
+      psPoussiere = ps;
+    } catch (e) {
+      psPoussiere = false;   // pas de particules : on n'y revient pas
+    }
+    return psPoussiere;
+  }
   const portes = energyGates(gameplay).map((d) => new EnergyGate(d));
-  window.__regard = { regards, portes };
+  window.__regard = { regards, portes, toiles };
   // La tour de lancement : le terminal refuse tant qu'on ne sait pas les
   // codes, puis l'ascenseur monte de 31,5 unites en cinq secondes
   // (docs/51-tour.md).
@@ -459,6 +540,8 @@ async function boot() {
   const voyants = new DamageDisplay();
   const notifications = new Notifications();
   const invitesGuimauve = roastPrompts(gameplay);
+  // Une seule annonce par eloignement, pas une par image.
+  let grillageRompu = false;
   // Les six buses du vaisseau miniature : homonymes, donc pilotees par POSITION.
   const busesModele = modelShipNozzles(gameplay);
   window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
@@ -3228,6 +3311,29 @@ async function boot() {
       marshmallow.held = h > 0 || marshmallow.toast > 0;
       marshmallow.update(dt, h);
     }
+    // §M ON NE GRILLE PAS DE LOIN. `RoastPromptEvent` coupe le grillage des
+    // qu'on s'eloigne de plus de quatre unites du feu — c'est ce qui empeche de
+    // partir la guimauve a la main et de la voir cuire en marchant. Les huit
+    // invites du build portent la distance, et toutes la meme.
+    if (invitesGuimauve.length && marshmallow.toast > 0) {
+      const pw = [playerWorld.x, playerWorld.y, playerWorld.z];
+      let proche = null, best = Infinity;
+      for (const inv of invitesGuimauve) {
+        const dec = decalageDuCorps(inv.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(inv.position[0] + dec[0] - pw[0],
+                             inv.position[1] + dec[1] - pw[1],
+                             inv.position[2] + dec[2] - pw[2]);
+        if (d < best) { best = d; proche = inv; }
+      }
+      if (roastBroken(best, proche)) {
+        marshmallow.held = false;
+        chaleurBaton = 0;
+        if (!grillageRompu) {
+          grillageRompu = true;
+          console.log("grillage interrompu : trop loin du feu");
+        }
+      } else grillageRompu = false;
+    }
     // Le baton a guimauve, tel que le build le joue : deux clips a la queue au
     // reveil, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
     // chaleur — vitesse zero, pose choisie a la main (docs/64-mains.md).
@@ -3622,6 +3728,78 @@ async function boot() {
         }
       }
     }
+    // §M LA TOILE QUI TOURNE. Deux anneaux en sens inverse, au CUBE des
+    // fractions — donc presque immobiles au debut du regard, et emportes a la
+    // fin. C'est cette acceleration qui fait qu'on sent la charge monter.
+    for (const t of toiles) {
+      if (t.noeuds === undefined) {
+        t.noeuds = { inner: null, outer: null };
+        for (const e of geo) {
+          if (!t.noeuds.inner && t.inner) t.noeuds.inner = e.nodes.get(t.inner) || null;
+          if (!t.noeuds.outer && t.outer) t.noeuds.outer = e.nodes.get(t.outer) || null;
+        }
+        t.pleinDepuis = null;
+      }
+      const g = regards.find((r) => r.data.name === t.gazeSwitch) || regards[0];
+      if (!g || (!t.noeuds.inner && !t.noeuds.outer)) continue;
+      const v = webSpeeds(g.gazeFraction || 0, g.charge || 0);
+      // Les vitesses sont en degres par seconde, et l'axe est celui de la
+      // toile : son avant local, donc l'axe Z du noeud.
+      for (const [k, n] of [["inner", t.noeuds.inner], ["outer", t.noeuds.outer]]) {
+        if (!n) continue;
+        n.rotate(BABYLON.Axis.Z, v[k] * dt * Math.PI / 180, BABYLON.Space.LOCAL);
+      }
+      // `webAlpha` : une fois la charge pleine, la toile s'efface en deux
+      // secondes et le composant s'eteint. Le build ne la remontre jamais.
+      if ((g.charge || 0) >= 1 && t.pleinDepuis === null) t.pleinDepuis = now;
+      if (t.pleinDepuis !== null) {
+        const a = webAlpha(now - t.pleinDepuis);
+        for (const n of [t.noeuds.inner, t.noeuds.outer]) {
+          if (!n) continue;
+          for (const m of (n.getChildMeshes ? n.getChildMeshes() : [])) {
+            if (m.material) { m.material.alpha = a; m.visibility = a; }
+          }
+          if (a <= 0) n.setEnabled(false);
+        }
+      }
+    }
+    // §M LE RENDU DE LA POUSSIERE. La loi a decide au bloc du suivi ; ici on ne
+    // fait que la poser sur le systeme.
+    {
+      const ps = systemePoussiere();
+      if (ps) {
+        const d = poussiere;
+        if (!d.emitting || d.alpha <= 0) ps.emitRate = 0;
+        else {
+          ps.emitRate = d.rate;
+          ps.minLifeTime = ps.maxLifeTime = d.lifetime;
+          ps.minSize = ps.maxSize = Math.max(0.05, d.size * 0.02);
+          ps.minEmitPower = ps.maxEmitPower = d.startSpeed;
+          const a = d.alpha;
+          ps.color1 = new BABYLON.Color4(0.8, 0.9, 1, a);
+          ps.color2 = new BABYLON.Color4(0.8, 0.9, 1, a * 0.6);
+          ps.colorDead = new BABYLON.Color4(0.8, 0.9, 1, 0);
+          // Les traits regardent le deplacement : la direction d'emission est
+          // l'oppose de la vitesse, vue depuis la camera qui avance.
+          const v = [player.vel.x, player.vel.y, player.vel.z];
+          const l = Math.hypot(v[0], v[1], v[2]) || 1;
+          ps.direction1 = new BABYLON.Vector3(-v[0] / l, -v[1] / l, -v[2] / l);
+          ps.direction2 = ps.direction1;
+        }
+      }
+    }
+    // §M LA TEMPETE. Une entree, une sortie, quel que soit le nombre de
+    // cylindres traverses — c'est tout l'interet du volume compose : sans le
+    // compte, passer d'un cylindre au suivant emettrait une sortie puis une
+    // entree, et l'ecran clignoterait.
+    {
+      const ev = tempete.update([playerWorld.x, playerWorld.y, playerWorld.z],
+                                (c) => decalageDuCorps(c.body, anchorPos));
+      if (ev === "enter") console.log("annonce : EnterSandstorm");
+      if (ev === "exit") console.log("annonce : ExitSandstorm");
+      const ps = systemeSable();
+      if (ps) ps.emitRate = tempete.active ? 400 : 0;
+    }
     for (const p of portes) p.update(now);
     // Le casque suit le regard avec un vingtieme de retard, et seulement quand
     // on le porte. `pitch` est le tangage en angles d'Euler d'Unity : la bande
@@ -3654,8 +3832,17 @@ async function boot() {
         const vRel = [player.vel.x, player.vel.y, player.vel.z];
         const m = relativeMotion(vRel, moi, cible.position);
         resHUD.setTracker(trackerReadout(m.distance, m.zSpeed));
+        // §M LA POUSSIERE DE VITESSE. `MotionDust` ne seme RIEN sous trente
+        // unites par seconde : en dessous, l'espace reste vide, et c'est ce qui
+        // donne son prix a la vitesse. Au-dessus, le debit monte pendant que la
+        // duree de vie DIMINUE — plus on va vite, plus il y a de traits, et
+        // plus ils sont courts (docs/58).
+        //
+        // La loi etait ecrite, eprouvee, et seulement IMPORTEE (docs/71).
+        poussiere = motionDust(Math.hypot(vRel[0], vRel[1], vRel[2]),
+                               { targeting: true, mapView: solarMap.open });
         window.__suivi = m;
-      } else resHUD.setTracker(null);
+      } else { resHUD.setTracker(null); poussiere = motionDust(0, { targeting: false }); }
     }
 
     // --- viser un referentiel, et s'y accorder (docs/62-visee.md) ---

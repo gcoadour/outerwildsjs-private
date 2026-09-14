@@ -120,7 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **201/201** ([`71`](71-quantique.md)) |
+| vérification avec le build | **212/212** ([`72`](72-poussiere.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -138,6 +138,10 @@ portage.
 | objets quantiques | 5 sur la lune (3 pins, une cabane, un panneau) et la statue du musée : ils bougent **à l'instant** où l'on détourne les yeux ([`71`](71-quantique.md)) |
 | la sonde **épingle** | photographier un objet quantique à portée et dans le cadre le fige ([`71`](71-quantique.md)) |
 | marqueur de sonde | où elle est, à quelle distance, dans quel état ([`71`](71-quantique.md)) |
+| poussière de vitesse | **rien** sous 30 u/s, puis des traits de plus en plus courts ([`72`](72-poussiere.md)) |
+| grillage rompu | on ne grille pas à plus de 4 unités du feu ([`72`](72-poussiere.md)) |
+| toile du regard | deux anneaux en sens inverse, au **cube** des fractions ([`72`](72-poussiere.md)) |
+| tempête de sable | 4 cylindres, **une** entrée, **une** sortie ([`72`](72-poussiere.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
