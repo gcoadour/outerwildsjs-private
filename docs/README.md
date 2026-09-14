@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`77-sons.md`](77-sons.md) — **les huit sons que l'interface ne faisait pas, et une réparation qui ne s'entend pas pareil dans le vide**
 - [`76-proximite.md`](76-proximite.md) — **le tableau de bord ne parle que de près, le tutoriel ne se rejoue pas, et un garde-fou qui n'avait jamais parlé**
 - [`75-chaleur.md`](75-chaleur.md) — **la chaleur qui n'existait pas : un motif qui ne trouvait rien, une guimauve qui ne cuisait jamais, et la liste des lois fermée**
 - [`74-etalons.md`](74-etalons.md) — **les étalons, les lois vides, et une question trop simple : un compte qui ne distingue pas « pas fait » de « rien à faire »**

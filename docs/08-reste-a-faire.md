@@ -120,7 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **237/237** ([`76`](76-proximite.md)) |
+| vérification avec le build | **243/243** ([`77`](77-sons.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -152,6 +152,8 @@ portage.
 | sonde ancienne | 50 d'accélération locale, pour toujours ([`75`](75-chaleur.md)) |
 | voyants d'avarie | ils ne parlent que **dans les 13 unités** du vaisseau ([`76`](76-proximite.md)) |
 | tutoriel de la sonde | lancer depuis une invite les détruit **toutes les quatre** ([`76`](76-proximite.md)) |
+| **sons d'interface** | les 8 de `UIAudioController`, à demi-volume ([`77`](77-sons.md)) |
+| son de réparation | l'air ou le vide, et le vide est le **passe-bas** de l'air ([`77`](77-sons.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

@@ -67,7 +67,8 @@ import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angl
          DecorField } from "../web/src/decor.js";
 import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
-         EndOfTimeMusic, END_OF_TIME, eventAudio } from "../web/src/reactaudio.js";
+         EndOfTimeMusic, END_OF_TIME, eventAudio, UISounds, UI_SOUNDS,
+         UI_VOLUME, REPAIR_FADE } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
@@ -5072,6 +5073,67 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     v.update(1.9, true, [true], false);
     check("mais le battement continue", v.blinkOn !== avant, true);
   }
+}
+
+{
+  // --- LES HUIT SONS D'INTERFACE (docs/77-sons.md) ---
+
+  check("le demi-volume de toute l'interface", UI_VOLUME, 0.5);
+  check("neuf evenements, huit clips", Object.keys(UI_SOUNDS).length, 9);
+  // La lampe partage `_switch01` dans les deux sens : un interrupteur fait le
+  // meme bruit a l'aller et au retour.
+  check("allumer et eteindre, le meme clip",
+        UI_SOUNDS.TurnOnFlashlight, UI_SOUNDS.TurnOffFlashlight);
+  // Viser et lacher, eux, sont DEUX clips differents.
+  check("viser et lacher ne s'entendent pas pareil",
+        UI_SOUNDS.TargetReferenceFrame !== UI_SOUNDS.UntargetReferenceFrame, true);
+  check("avancer le texte et le finir non plus",
+        UI_SOUNDS.AdvanceText !== UI_SOUNDS.ExitDialogueMode, true);
+
+  const faux = {
+    of(script) {
+      if (script === "UIAudioController") {
+        return { clips: { _advanceTextClip: "a.ogg", _finishTextClip: "f.ogg",
+                          _affirmative01: "oui.ogg", _negative01: "non.ogg",
+                          _jetpackWarning: "sac.ogg", _switch01: "clic.ogg",
+                          _targetReferenceFrame: "vise.ogg",
+                          _untargetReferenceFrame: "lache.ogg" } };
+      }
+      if (script === "RepairAudioController") {
+        return { clips: { _repairLoop: "rep.ogg", _spaceRepairLoop: "repvide.ogg",
+                          _repairFinish: "fin.ogg", _spaceRepairFinish: "finvide.ogg" } };
+      }
+      if (script === "SpacesuitAudioController") {
+        return { clips: { _refillOxygenClip: "o2.ogg" } };
+      }
+      return null;
+    },
+  };
+  const ui = new UISounds(faux);
+  check("avancer le texte clique", ui.fire("AdvanceText").file, "a.ogg");
+  check("a demi-volume", ui.fire("AdvanceText").volume, 0.5);
+  check("finir a son propre son", ui.fire("ExitDialogueMode").file, "f.ogg");
+  check("allumer la lampe", ui.fire("TurnOnFlashlight").file, "clic.ogg");
+  check("l'eteindre aussi", ui.fire("TurnOffFlashlight").file, "clic.ogg");
+  check("viser", ui.fire("TargetReferenceFrame").file, "vise.ogg");
+  check("lacher", ui.fire("UntargetReferenceFrame").file, "lache.ogg");
+  check("un evenement inconnu ne joue rien", ui.fire("N'importe quoi"), null);
+  check("et sans clips, rien non plus", new UISounds(null).fire("AdvanceText"), null);
+
+  // ON NE REPARE PAS PAREIL DANS LE VIDE.
+  check("a l'air, la boucle de l'atelier", ui.startRepair(true).file, "rep.ogg");
+  check("et elle MONTE en deux dixiemes", ui.startRepair(true).fade, REPAIR_FADE);
+  check("dans le vide, l'autre boucle", ui.startRepair(false).file, "repvide.ogg");
+  // Arreter rend la boucle EN COURS, pas une boucle choisie a nouveau.
+  check("arreter rend celle qui jouait", ui.stopRepair().file, "repvide.ogg");
+  check("et il n'y en a plus", ui.stopRepair(), null);
+  check("finir a l'air", ui.finishRepair(true).file, "fin.ogg");
+  check("finir dans le vide", ui.finishRepair(false).file, "finvide.ogg");
+  ui.startRepair(true);
+  ui.finishRepair(true);
+  check("et la fin arrete la boucle", ui.stopRepair(), null);
+  check("le plein d'oxygene s'entend", ui.refillOxygen().file, "o2.ogg");
+  check("a plein volume", ui.refillOxygen().volume, 1);
 }
 
 report();

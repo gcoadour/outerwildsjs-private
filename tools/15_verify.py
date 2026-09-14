@@ -1042,6 +1042,38 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- les huit sons d'interface (docs/77-sons.md) -------------------------
+        #
+        # Le portage n'en jouait AUCUN : avancer un dialogue, le finir, viser
+        # un referentiel, allumer sa lampe — tout en silence.
+        son = page.evaluate("""() => {
+          const u = window.__sonsUI;
+          if (!u) return null;
+          const f = (n) => { const s = u.fire(n); return s ? s.file : null; };
+          return { avance: f("AdvanceText"), fin: f("ExitDialogueMode"),
+                   lampeOn: f("TurnOnFlashlight"), lampeOff: f("TurnOffFlashlight"),
+                   vise: f("TargetReferenceFrame"),
+                   lache: f("UntargetReferenceFrame"),
+                   volume: u.fire("AdvanceText") ? u.fire("AdvanceText").volume : null,
+                   repAir: (u.startRepair(true) || {}).file,
+                   repVide: (u.startRepair(false) || {}).file };
+        }""")
+        if son:
+            rep.check("le son d'avance de texte existe", son["avance"] is not None,
+                      son["avance"], "!= None")
+            rep.check("et celui de fin est DIFFERENT",
+                      son["fin"] is not None and son["fin"] != son["avance"],
+                      son["fin"], f"!= {son['avance']}")
+            rep.eq("la lampe fait le meme bruit dans les deux sens",
+                   son["lampeOn"], son["lampeOff"])
+            rep.check("viser et lacher ne s'entendent pas pareil",
+                      son["vise"] != son["lache"], [son["vise"], son["lache"]],
+                      "differents")
+            rep.eq("a demi-volume", son["volume"], 0.5)
+            rep.check("on ne repare pas pareil dans le vide",
+                      son["repAir"] != son["repVide"],
+                      [son["repAir"], son["repVide"]], "differents")
+
         # --- la proximite du vaisseau (docs/76-proximite.md) ---------------------
         prox = page.evaluate("""() => {
           const p = window.__proximite;

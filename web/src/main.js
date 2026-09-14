@@ -136,7 +136,8 @@ import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
 import { AttachPoints, snapDuration, snapDegrees,
          turnFraction } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
-         TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO } from "./reactaudio.js";
+         TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO,
+         UISounds } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
@@ -644,6 +645,17 @@ async function boot() {
   const training = new ZeroGTraining(repairs);
   // §5 le son d'evenement : marcher, pousser, voyager, finir.
   const events = eventAudio(await loadEventAudio());
+  // §R LES HUIT SONS D'INTERFACE. Le portage n'en jouait aucun : avancer un
+  // dialogue, le finir, viser un referentiel, le relacher, allumer sa lampe —
+  // tout cela se faisait en silence (docs/77-sons.md).
+  const sonsUI = new UISounds(events);
+  window.__sonsUI = sonsUI;
+  /** Joue un son d'interface s'il existe. */
+  function bipUI(nom) {
+    const s = sonsUI.fire(nom);
+    if (s) audio.playOneShot(s.file, { volume: s.volume });
+    return !!s;
+  }
   const footsteps = new Footsteps();
   const turbulence = new Turbulence();
   const thrusterSound = new ThrusterSound();
@@ -1547,6 +1559,10 @@ async function boot() {
   let departAFaire = true;
   // Le joueur est-il dans la zone brouillee de l'epave ? La carte s'y efface.
   let dansEpave = false;
+  // Le plein d'oxygene ne s'annonce qu'une fois par remplissage.
+  let refaitLePlein = false;
+  // L'avertissement du sac dorsal, une fois au passage a sec.
+  let sacASec = false;
 
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
@@ -2007,7 +2023,12 @@ async function boot() {
     if (est("Recenter Map") && solarMap.open) solarMap.recenter();
     // La lampe : `Flashlight`, la touche F du build — et la croix
     // directionnelle a la manette (axe 6).
-    if (est("Flashlight")) flashlight.toggle();
+    if (est("Flashlight")) {
+      // `UIAudioController` ecoute `TurnOnFlashlight` ET `TurnOffFlashlight`,
+      // et joue `_switch01` dans les deux cas : un interrupteur fait le meme
+      // bruit a l'aller et au retour.
+      bipUI(flashlight.toggle() ? "TurnOnFlashlight" : "TurnOffFlashlight");
+    }
     // L'ordinateur de bord ne se consulte qu'a l'interieur du vaisseau ; ce
     // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
     // Le build n'a pas de canal pour lui : c'est un ajout, et `AJOUTS` le dit.
@@ -2477,6 +2498,18 @@ async function boot() {
     }
 
     // --- vaisseau, ressources, interaction ---
+    //
+    // §R L'AIR, CALCULE ICI ET NON PLUS BAS. `RepairAudioController` interroge
+    // le detecteur d'oxygene pour choisir son clip, et la reparation a lieu
+    // AVANT le bloc qui calculait la zone : le lire de la aurait leve une
+    // erreur de zone morte temporelle, la quatrieme de ce depot
+    // (docs/77-sons.md). On calcule donc la zone une fois, ici, et le bloc
+    // d'en dessous la reutilise.
+    const zoneOxygene = oxygen.length
+      ? inOxygenZone(oxygen, [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                              player.pos.z + anchorPos[2]],
+                     oxyDet ? oxyDet.reach : 0)
+      : null;
     let focus = null;
     if (ship) {
       if (autopilot && autopilot.engaged) autopilot.update(dt);
@@ -2549,10 +2582,27 @@ async function boot() {
         const abimee = avarie.deadParts.length || avarie.integrity < avarie.total;
         const en_cours = shipRepairs.find((r) => !r.done) || null;
         if (abimee && en_cours) {
+          const tenaitAvant = en_cours.holding;
           if (cmds.held("Interact", etatCmd)) en_cours.press(); else en_cours.release();
+          // §R ON NE REPARE PAS PAREIL DANS LE VIDE. `RepairAudioController`
+          // choisit entre `_repairLoop` et `_spaceRepairLoop` selon que le
+          // detecteur d'oxygene trouve quelque chose : reparer sa coque en
+          // apesanteur ne fait pas le meme bruit que la reparer au village, et
+          // le build a enregistre les deux (docs/77-sons.md).
+          if (en_cours.holding !== tenaitAvant) {
+            const air = !!(zoneOxygene || (ship && ship.boarded));
+            const s = en_cours.holding ? sonsUI.startRepair(air) : sonsUI.stopRepair();
+            if (s) audio.playOneShot(s.file, { volume: en_cours.holding ? 0.6 : 0 });
+            console.log(`annonce : ${en_cours.holding ? "StartRepairing" : "StopRepairing"}`);
+          }
           if (en_cours.update(dt)) {
             const piece = avarie.repair();
             if (piece) console.log(`reparation : ${piece} remise en etat`);
+            // `OnFinishRepairing` : la boucle s'ARRETE net, et un coup la
+            // remplace — l'un ou l'autre selon l'air, la aussi.
+            const fin = sonsUI.finishRepair(!!(zoneOxygene || ship.boarded));
+            if (fin) audio.playOneShot(fin.file, { volume: fin.volume });
+            console.log("annonce : FinishRepairing");
             en_cours.reset();
           }
           repairFraction = en_cours.fraction;
@@ -2610,7 +2660,13 @@ async function boot() {
     const convo = (!ship || !ship.boarded)
       ? dialogue.nearest(player.pos, anchorPos) : null;
     if (interactPressed) {
-      if (dialogue.active) dialogue.advance();
+      if (dialogue.active) {
+        const avant = dialogue.active;
+        dialogue.advance();
+        // Deux clips differents : avancer CLIQUE, finir a son propre son.
+        bipUI(dialogue.active ? "AdvanceText" : "ExitDialogueMode");
+        if (!dialogue.active && avant) { /* la conversation s'est fermee */ }
+      }
       else if (convo) {
         // L'arbre se choisit a l'ouverture, comme le fait
         // `OnStartConversation` — et il depend de l'etat de la BOUCLE autant
@@ -2711,15 +2767,25 @@ async function boot() {
       } else verrouFOV = null;
     }
 
-    const zone = oxygen.length
-      ? inOxygenZone(oxygen, playerW, oxyDet ? oxyDet.reach : 0) : null;
+    const zone = zoneOxygene;
     // Le carburant etait consomme EN MARCHANT : `thrusting` valait vrai des
     // qu'une touche de deplacement etait tenue. Seul le sac dorsal brule
     // (docs/36-audit.md §1.1) — et il ne brule pas quand on pilote.
-    resources.update(dt, {
-      inSupply: !!(ship && ship.boarded) || !!zone,
-      thrusting: !!player.jetpack && !(ship && ship.boarded),
-    });
+    {
+      // §R `RefillOxygen` : le plein s'entend, et UNE SEULE FOIS — sur la
+      // transition, pas a chaque image passee dans la zone.
+      const avant = resources.oxygen;
+      resources.update(dt, {
+        inSupply: !!(ship && ship.boarded) || !!zone,
+        thrusting: !!player.jetpack && !(ship && ship.boarded),
+      });
+      if (resources.oxygen > avant && !refaitLePlein) {
+        refaitLePlein = true;
+        const s = sonsUI.refillOxygen();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        console.log("annonce : RefillOxygen");
+      } else if (resources.oxygen <= avant) refaitLePlein = false;
+    }
 
     // --- les lots de docs/44, image par image ---------------------------
     //
@@ -4087,6 +4153,12 @@ async function boot() {
       const frac = ship.damage.total > 0 ? ship.damage.integrity / ship.damage.total : 1;
       const crie = alarme.update(frac);
       if (resHUD) resHUD.setAlarm(crie);
+      // `PlaySuitWarningSound` vient de `PlayerResourceGUI.Update` : c'est
+      // l'avertissement du SAC DORSAL, pas celui de la coque. Il ne se joue
+      // qu'au passage sous le seuil.
+      const sec = resources.fuel <= 0;
+      if (sec && !sacASec) bipUI("PlaySuitWarningSound");
+      sacASec = sec;
       // La zone suit le vaisseau : elle est posee SUR lui, et il vole.
       presDuVaisseau = zonesVaisseau.length === 0 || !!ship.boarded
         || zonesVaisseau.some((z) => z.volume && Math.hypot(
@@ -4149,6 +4221,9 @@ async function boot() {
         // La carte et la visee tiennent la MEME cible : viser du regard et
         // choisir sur la carte sont deux gestes pour une seule chose.
         solarMap.selected = lockOn.current ? lockOn.current.body : null;
+        // `_targetReferenceFrame` et `_untargetReferenceFrame` sont DEUX clips :
+        // verrouiller et lacher ne s'entendent pas pareil.
+        bipUI(lockOn.current ? "TargetReferenceFrame" : "UntargetReferenceFrame");
         console.log(lockOn.current
           ? `referentiel vise : ${lockOn.current.name}`
           : "referentiel abandonne");
