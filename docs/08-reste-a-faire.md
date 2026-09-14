@@ -20,7 +20,7 @@ lisait**.
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
-> | `lois.mjs` — ce que le portage **appelle** | **0** loi sans appelant ([`75`](75-chaleur.md)) |
+> | `lois.mjs` — ce que le portage **appelle** | **35** methodes sans appelant ([`90`](90-methodes.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -389,15 +389,17 @@ des trois : **du travail fait qui ne s'exécutait pas**. Un module entier import
 par personne ([`68`](68-lois.md)), des lois présentes dans une ligne d'`import`
 et nulle part ailleurs ([`71`](71-quantique.md)), un motif qui posait une
 question au build sans lire la réponse ([`75`](75-chaleur.md)), un garde-fou qui
-n'avait jamais parlé ([`76`](76-proximite.md)). Elle est comblée — `lois.mjs`
-compte **zéro** — et les outils qui l'ont trouvée sont désormais plus sévères
-que le dépôt ne l'était.
+n'avait jamais parlé ([`76`](76-proximite.md)). On l'a crue comblée — `lois.mjs`
+comptait **zéro** — et elle ne l'était pas : le compte ne regardait que les
+fonctions exportées.
 
-`scripts/lois.mjs` a montré sa limite avec [`89`](89-pose.md) : il compte les
+`scripts/lois.mjs` a montré sa limite avec [`89`](89-pose.md) : il comptait les
 **fonctions exportées**, et `Ship.padLanding` était une **méthode** — écrite,
-commentée, éprouvée par un test, et appelée par personne pendant tout ce
-temps. Le dénominateur des lois ne voit pas les méthodes ; celui des annonces,
-lui, l'a trouvée.
+commentée, éprouvée par un test, et appelée par personne pendant tout ce temps.
+Il voit les méthodes depuis [`90`](90-methodes.md), et il en trouve
+**trente-cinq** que rien n'appelle, dont vingt-deux qu'un test fait pourtant
+tourner. Le compte est passé de 0 à 35 sans qu'une ligne ait régressé : l'outil
+a cessé de regarder ailleurs. C'est le front ouvert.
 
 Une **quatrième** nature est apparue avec [`82`](82-secteur-majeur.md), et elle
 est la plus discrète : **la constante inventée**. Le portage décidait du secteur

@@ -60,6 +60,13 @@ function sansImports(t) {
           .replace(/^\s*import\s+["'][^"']+["'];?/gm, " ");
 }
 
+// Ce qui, indente de deux espaces et suivi d'une parenthese, n'est pas une
+// methode : les mots-cles du langage.
+const MOTS_CLES = new Set(["constructor", "if", "for", "while", "switch", "catch",
+                           "return", "typeof", "new", "delete", "throw", "else",
+                           "do", "try", "yield", "await", "in", "of", "case",
+                           "void", "function", "with"]);
+
 const compte = (t, nom) => (t.match(new RegExp(`\\b${nom}\\b`, "g")) || []).length;
 
 /**
@@ -129,6 +136,43 @@ export function lois() {
     const noms = new Set();
     for (const m of brut.matchAll(/^export (?:async )?function (\w+)/gm)) noms.add(m[1]);
     for (const m of brut.matchAll(/^export class (\w+)/gm)) noms.add(m[1]);
+    // LES METHODES AUSSI. Ce compte ne voyait que les exports, et
+    // `Ship.padLanding` a donc dormi un lot entier : ecrite, commentee,
+    // eprouvee par un test, appelee par personne — et invisible ici parce
+    // qu'elle etait une methode ([`docs/89`](../docs/89-pose.md)).
+    //
+    // On ne les cherche que DANS le corps d'une classe exportee, delimite par
+    // l'accolade fermante en colonne zero : un `return (` indente de deux
+    // espaces au milieu d'une fonction libre ressemble sinon a une methode, et
+    // le premier essai a rendu treize `.return`. Un compte qui se trompe sur ce
+    // qu'il compte est pire que pas de compte.
+    //
+    // On les appelle par un POINT, ce qui les distingue de leur definition. Les
+    // accesseurs comptent pareil : `get x()` se lit `.x`.
+    const methodes = new Set();
+    const propre = sansCommentaires(brut);
+    for (const tete of propre.matchAll(/^export class \w+[^\n]*\{$/gm)) {
+      const debut = tete.index + tete[0].length;
+      const fin = propre.indexOf("\n}", debut);
+      const corps = propre.slice(debut, fin < 0 ? undefined : fin);
+      for (const m of corps.matchAll(
+        /^  (?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?(\w+)\s*\(/gm)) {
+        if (MOTS_CLES.has(m[1])) continue;
+        methodes.add(m[1]);
+      }
+    }
+    for (const nom of methodes) {
+      if (mesures.has(nom) || sansEntree.has(nom)) continue;
+      // Un appel de methode porte un point : `x.nom(`. La definition, non.
+      const appelee = [...src, ...pages].some(
+        (g) => (txt.get(g).match(new RegExp(`\\.${nom}\\b`, "g")) || []).length > 0);
+      if (appelee) continue;
+      out.push({
+        fichier: relative(ROOT, f),
+        nom: `.${nom}`,
+        eprouvee: tests.some((g) => compte(txt.get(g), nom) > 0),
+      });
+    }
     for (const nom of noms) {
       // Un etalon n'a pas a etre appele : c'est sa raison d'etre.
       if (mesures.has(nom)) continue;
