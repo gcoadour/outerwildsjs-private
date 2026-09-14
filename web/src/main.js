@@ -62,7 +62,8 @@ import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
-import { elevators, Elevator, LaunchTerminal, landingPadSensors,
+import { elevators, Elevator, LaunchTerminal, launchTerminals,
+         elevatorControllers, RETURN_ABOVE, landingPadSensors,
          museumEntryways } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          roastPrompts, roastBroken, shipProximity,
@@ -598,11 +599,24 @@ async function boot() {
   // La tour de lancement : le terminal refuse tant qu'on ne sait pas les
   // codes, puis l'ascenseur monte de 31,5 unites en cinq secondes
   // (docs/51-tour.md).
-  const ascenseurs = elevators(gameplay).map((d) => new Elevator(d));
+  // `LaunchElevatorController.Start` ferme les commandes de la cabine — une
+  // ligne, et c'est elle qui fait que la tour n'est pas ouverte d'emblee. Le
+  // constructeur du portage naissait deja verrouille ; on le dit quand meme,
+  // parce que c'est le build qui le decide et non le portage.
+  const ascenseurs = elevators(gameplay).map((d) => {
+    const a = new Elevator(d);
+    a.deactivateControls();
+    return a;
+  });
   const terminal = new LaunchTerminal();
+  // La borne de lancement et le declencheur d'en haut : sans eux, les commandes
+  // de la cabine ne s'ouvrent jamais (docs/92-tour.md).
+  const bornesTour = launchTerminals(gameplay);
+  const declencheursTour = elevatorControllers(gameplay);
   const capteursPad = landingPadSensors(gameplay);
   const museeEntrees = museumEntryways(gameplay);
-  window.__tour = { ascenseurs, terminal, capteursPad, museeEntrees };
+  window.__tour = { ascenseurs, terminal, bornesTour, declencheursTour,
+                    capteursPad, museeEntrees };
   // Le casque qui traine derriere le regard, l'alarme a trente pour cent, les
   // voyants qui clignotent, les notifications qui s'effacent, et les huit
   // invites de la guimauve (docs/52-casque.md).
@@ -3026,6 +3040,18 @@ async function boot() {
                                                demande.rate) };
           }
           console.log(`accroche : ${focus.prompt || point.name}`);
+          // `Elevator.OnPressInteract` fait DEUX choses : il accroche le
+          // joueur, et il lance la cabine. Le portage n'en faisait que la
+          // premiere, et l'ascenseur restait a quai avec quelqu'un dedans.
+          for (const a of ascenseurs) {
+            const dec2 = decalageDuCorps(a.data.body, anchorPos) || [0, 0, 0];
+            const dd = Math.hypot(a.data.position[0] + dec2[0] - playerW[0],
+                                  a.data.position[1] + dec2[1] - playerW[1],
+                                  a.data.position[2] + dec2[2] - playerW[2]);
+            if (dd < 12 && a.pressInteract(now)) {
+              console.log(a.goingToTheEnd ? "ascenseur : en haut" : "ascenseur : en bas");
+            }
+          }
         }
       }
     }
@@ -4650,6 +4676,42 @@ async function boot() {
       window.__visee = lockOn;
     }
 
+    // --- LA TOUR DE LANCEMENT, de bout en bout (docs/92-tour.md) ---
+    //
+    // `LaunchTerminal.OnPressInteract` : avec les codes, un son affirmatif et
+    // `ActivateLaunchTower` ; sans, un son negatif et la borne se remet a
+    // disposition. Elle ne sert qu'UNE fois — le build desactive son volume
+    // d'interaction.
+    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
+      for (const b of bornesTour) {
+        const q = restingPoint(playerW, decalageDuCorps(b.body, anchorPos));
+        const d = Math.hypot(q[0] - b.position[0], q[1] - b.position[1],
+                             q[2] - b.position[2]);
+        if (d > GEAR_REACH) continue;
+        const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
+        if (r === "activate") {
+          // `LaunchElevatorController.OnActivateLaunchTower`.
+          for (const a of ascenseurs) a.activateControls();
+          bipUI("PlayAffirmativeUISound");
+          console.log("tour de lancement actionnee");
+        } else if (r === "refuse") {
+          bipUI("PlayNegativeUISound");
+          console.log("tour de lancement : codes inconnus");
+        }
+        break;
+      }
+    }
+    // `LaunchElevatorController.OnTriggerEnter` : entrer dans la sphere de dix
+    // unites alors que la cabine est en haut la renvoie en bas. Le seuil de 0,9
+    // est ce qui empeche qu'elle reparte des qu'on approche du pied de la tour.
+    for (const dcl of declencheursTour) {
+      if (!dcl.volume) continue;
+      const dec = decalageDuCorps(dcl.body, anchorPos);
+      if (!insideVolume(dcl, restingPoint(playerW, dec))) continue;
+      for (const a of ascenseurs) {
+        if (a.fraction > RETURN_ABOVE && !a.moving) a.returnToStart(now);
+      }
+    }
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
     for (const a of ascenseurs) a.update(now);
 

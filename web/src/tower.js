@@ -165,6 +165,49 @@ export class LaunchTerminal {
   reset() { this.announced = false; this.used = false; }
 }
 
+/**
+ * La tour de lancement, telle que la scene la pose.
+ *
+ * @lit LaunchTerminal
+ * @lit LaunchElevatorController
+ *
+ * Trois objets dans `LaunchZone`, et il fallait les trois pour que l'ascenseur
+ * bouge (docs/92-tour.md) :
+ *
+ *   LaunchTerminal      une sphere de 0,42 — la borne qu'on presse
+ *   ElevatorController  une sphere de DIX — le declencheur d'en haut
+ *   Elevator            la cabine, avec son point d'accrochage
+ *
+ * Le portage avait la cabine, ses deux clips, sa course de 31,5 en cinq
+ * secondes, et son point d'accrochage. Il n'avait ni la borne ni le
+ * declencheur : `activateControls`, `pressInteract` et `returnToStart` etaient
+ * ecrites et appelees par personne.
+ */
+export function launchTerminals(gameplay) {
+  return ((gameplay.placed || {}).LaunchTerminal || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position,
+    rotation: c.rotation || null, volume: c.volume || null,
+  }));
+}
+
+/** Le declencheur d'en haut : y entrer renvoie la cabine en bas. */
+export function elevatorControllers(gameplay) {
+  return ((gameplay.placed || {}).LaunchElevatorController || []).map((c) => ({
+    name: c.name, body: c.body || null, position: c.position,
+    rotation: c.rotation || null, volume: c.volume || null,
+  }));
+}
+
+/**
+ * `LaunchElevatorController.OnTriggerEnter` : au-dessus de 0,9, on redescend.
+ *
+ * Le seuil n'est pas decoratif — la sphere fait dix unites et la course
+ * trente et une : en bas, on est DEDANS, et sans le seuil la cabine repartirait
+ * vers le bas des qu'on s'en approche. C'est le meme genre de garde que le
+ * « on ne tire que quand on sait » de la sphere de l'observatoire.
+ */
+export const RETURN_ABOVE = 0.9;
+
 /** Les capteurs de pad poses dans la scene. */
 export function landingPadSensors(gameplay) {
   return ((gameplay.placed || {}).LandingPadSensor || []).map((c) => ({

@@ -181,7 +181,8 @@ const WANT_VOLUME = new RegExp([
   "|PlayerAttachPoint|LODCameraSnapshot|SunlessZone|EntrywayTrigger",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
-  "|GazeSwitch|MuseumEntryway|Surface|AudioShell|ResetSimulationTrigger)$",
+  "|GazeSwitch|MuseumEntryway|Surface|AudioShell|ResetSimulationTrigger",
+  "|LaunchTerminal|LaunchElevatorController)$",
 ].join(""), "i");
 
 /**

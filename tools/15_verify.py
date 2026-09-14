@@ -2095,6 +2095,40 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("armee si et seulement si premier tour sans les codes",
                    raz["armee"], raz["tour"] + 1 == 1 and not raz["codes"])
 
+        # --- la tour de lancement, de bout en bout (docs/92-tour.md) ----------
+        tour = page.evaluate("""() => {
+          const t = window.__tour;
+          if (!t) return null;
+          return { bornes: t.bornesTour.length,
+                   declencheurs: t.declencheursTour.length,
+                   cabines: t.ascenseurs.length,
+                   ouverte: t.ascenseurs.some(a => a.unlocked),
+                   servie: t.terminal.used };
+        }""")
+        if tour:
+            rep.eq("une borne de lancement montee", tour["bornes"], 1)
+            rep.eq("un declencheur d'en haut", tour["declencheurs"], 1)
+            rep.eq("une cabine", tour["cabines"], 1)
+            # `LaunchElevatorController.Start` ferme les commandes : tant que la
+            # borne n'a pas ete pressee, la cabine ne repond pas.
+            rep.eq("la cabine nait verrouillee", tour["ouverte"], False)
+            rep.eq("et la borne n'a pas servi", tour["servie"], False)
+            # La presser sans les codes refuse ; avec, elle ouvre la cabine.
+            ouvert = page.evaluate("""() => {
+              const t = window.__tour, d = window.__pdata;
+              const avant = d.knowsLaunchCodes;
+              d.knowsLaunchCodes = false;
+              const refus = t.terminal.pressInteract(false);
+              d.knowsLaunchCodes = true;
+              const ok = t.terminal.pressInteract(true);
+              if (ok === "activate") t.ascenseurs.forEach(a => a.activateControls());
+              d.knowsLaunchCodes = avant;
+              return { refus, ok, ouverte: t.ascenseurs.some(a => a.unlocked) };
+            }""")
+            rep.eq("sans les codes, la borne refuse", ouvert["refus"], "refuse")
+            rep.eq("avec, elle actionne la tour", ouvert["ok"], "activate")
+            rep.eq("et la cabine repond", ouvert["ouverte"], True)
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

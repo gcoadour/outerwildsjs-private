@@ -1150,6 +1150,14 @@ const raz = (gp.placed.ResetSimulationTrigger || []);
 check("une sphere de remise a zero", raz.length, 1);
 check("et elle mesure 5,196", raz[0].volume.radius, 5.196);
 check("elle est posee sur Timber Hearth", raz[0].body, "TimberHearth_Body");
+// La tour de lancement : trois objets dans `LaunchZone` (docs/92-tour.md).
+check("une borne de lancement", (gp.placed.LaunchTerminal || []).length, 1);
+check("et elle a sa forme",
+      (gp.placed.LaunchTerminal || [])[0].volume.radius, 0.42);
+check("un declencheur d'en haut",
+      (gp.placed.LaunchElevatorController || []).length, 1);
+check("de dix unites",
+      (gp.placed.LaunchElevatorController || [])[0].volume.radius, 10);
 check("deux phares exterieurs", (gp.placed.ExternalLightController || []).length, 2);
 check("une lumiere a fondu", (gp.placed.FadeLight || []).length, 1);
 check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length, 1);

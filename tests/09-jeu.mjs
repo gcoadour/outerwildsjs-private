@@ -26,6 +26,7 @@ import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
          ROAST_DISTANCE } from "../web/src/helmet.js";
 import { elevators, Elevator as Cabine, LaunchTerminal, landedOn, LandingPads,
          LANDED_SPEED, landingPadSensors, museumEntryways, smoothStep,
+         launchTerminals, elevatorControllers, RETURN_ABOVE,
          ELEVATOR } from "../web/src/tower.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
@@ -3692,6 +3693,40 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("puis lance, on decolle",
         glisse.update(trois, LANDED_SPEED + 1), "ShipTakeoff");
   check("et le corps touche est oublie", glisse.body, null);
+
+  // --- LA TOUR, DE BOUT EN BOUT (docs/92-tour.md) ---
+  //
+  // La borne, le declencheur d'en haut, et la cabine : le portage n'avait que
+  // la cabine, et ses trois commandes etaient appelees par personne.
+  const bornes = launchTerminals({ placed: { LaunchTerminal: [
+    { name: "LaunchTerminal", body: "TH_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 0.42, center: [0, 0, 0] } }] } });
+  check("une borne de lancement", bornes.length, 1);
+  check("et elle a sa forme", bornes[0].volume.radius, 0.42);
+  const dcls = elevatorControllers({ placed: { LaunchElevatorController: [
+    { name: "ElevatorController", body: "TH_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 10, center: [0, 0, 0] } }] } });
+  check("un declencheur d'en haut", dcls.length, 1);
+  check("de dix unites", dcls[0].volume.radius, 10);
+
+  // La cabine nait verrouillee : `LaunchElevatorController.Start` la ferme.
+  const cabTour = new Cabine({ trackHeight: 31.5, liftDuration: 5 });
+  cabTour.deactivateControls();
+  check("verrouillee, la commande ne repond pas", cabTour.pressInteract(0), false);
+  check("et la cabine n'a pas bouge", cabTour.fraction, 0);
+  cabTour.activateControls();
+  check("la tour actionnee, elle repond", cabTour.pressInteract(0), true);
+  cabTour.update(5);
+  check("cinq secondes plus tard, elle est en haut", round(cabTour.fraction, 3), 1);
+  // `OnTriggerEnter` : au-dessus de 0,9, entrer dans la sphere la renvoie.
+  check("elle est bien au-dessus du seuil", cabTour.fraction > RETURN_ABOVE, true);
+  cabTour.returnToStart(5);
+  cabTour.update(10);
+  check("le declencheur d'en haut la renvoie en bas", round(cabTour.fraction, 3), 0);
+  // ... et `returnToStart` ne bascule PAS le sens : une nouvelle pression
+  // remonte, elle ne redescend pas.
+  cabTour.pressInteract(10);
+  check("la pression suivante remonte", cabTour.goingToTheEnd, true);
 
   const pads = landingPadSensors({ placed: { LandingPadSensor: [
     { name: "SurfaceSensor", position: [0, 0, 0], body: "Ship_Body",
