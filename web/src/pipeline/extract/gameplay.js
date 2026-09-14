@@ -110,7 +110,13 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "ThrusterParticleController",
                 // Le volume compose et ses declencheurs enfants : une entree,
                 // une sortie, quel que soit le nombre d'enfants traverses.
-                "CompoundTriggerVolume", "ChildTriggerVolume", "SandstormVolume"];
+                "CompoundTriggerVolume", "ChildTriggerVolume", "SandstormVolume",
+                // Ce qui bouge quand on ne le regarde PAS (docs/71-quantique.md).
+                // La statue et le parent des objets planaires etaient dans la
+                // scene depuis toujours ; aucun des deux n'etait extrait, donc
+                // le recensement ne les comptait ni lus ni non lus — ils
+                // n'etaient simplement pas la.
+                "QuantumStatue", "MakeChildrenPlanarQuantum"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -284,6 +290,12 @@ export function extractGameplay(ctx) {
                               ["_upThruster", "up"], ["_downThruster", "down"]]) {
         entry.nozzles[dir] = positionDuComposant(ctx, brut[k]);
       }
+    }
+    // Ce qui bouge quand on ne le regarde pas : ces deux classes agissent sur
+    // leur DESCENDANCE, pas sur leurs champs — et `MakeChildrenPlanarQuantum`
+    // n'a aucun champ du tout (docs/71-quantique.md).
+    if (cls === "MakeChildrenPlanarQuantum" || cls === "QuantumStatue") {
+      entry.children = ctx.childrenOf(gid);
     }
     (placed[cls] ||= []).push(entry);
   }

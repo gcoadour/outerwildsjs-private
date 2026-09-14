@@ -21,6 +21,7 @@ import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
 import { gearPickups, suitVolumes, interactZones, attachPoints, lockOnTargets,
          ZeroGTraining } from "../web/src/gear.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
+import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
@@ -82,6 +83,30 @@ const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
 check("objets lisibles", n("ReadableObject"), 34);
 check("points d'apparition", n("SpawnPoint"), 16);
+
+// Ce qui bouge quand on ne le regarde pas (docs/71-quantique.md). Ni la statue
+// ni le parent des objets planaires n'etaient extraits : ils etaient dans la
+// scene depuis toujours, et le recensement ne les comptait meme pas.
+{
+  const planaires = planarQuantumObjects(gp);
+  check("cinq objets planaires quantiques", planaires.length, 5);
+  check("tous sur la lune quantique",
+        planaires.every((o) => o.body === "QuantumMoon_Body"), true);
+  check("trois pins", planaires.filter((o) => o.name === "Pine_Thick").length, 3);
+  check("une cabane", planaires.filter((o) => o.name === "QuantumCabin").length, 1);
+  check("un panneau", planaires.filter((o) => o.name === "Sign01").length, 1);
+  // Ils sont POSES sur la lune : leur hauteur locale est celle de sa surface.
+  check("et tous a la surface, entre 18 et 22 unites du centre",
+        planaires.every((o) => o.local[1] > 18 && o.local[1] < 22), true);
+  const statues = quantumStatues(gp);
+  check("une statue quantique", statues.length, 1);
+  check("avec un morceau", statues[0].parts.length, 1);
+  check("qui est la tete ancienne", statues[0].parts[0], "AncientHeadStatue");
+  check("cent unites de verrou", statues[0].maxLockRange, 100);
+  // AUCUNE des deux n'est sensible a la lumiere : la loi de la lampe est
+  // portee, et son entree est vide. Le build le dit, pas le portage.
+  check("et elle n'est pas sensible a la lumiere", statues[0].lightSensitive, false);
+}
 
 // Le point d'apparition ne dit pas seulement OU l'on nait, mais dans quelle
 // direction on regarde : son axe Z. Seule la position etait extraite, et le

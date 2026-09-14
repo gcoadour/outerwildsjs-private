@@ -75,6 +75,9 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
 import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT } from "../web/src/modes.js";
+import { QUANTIQUE, QuantumObject as ObjetQuantique, planarQuantumObjects,
+         quantumStatues, locksOnSnapshot, collapsesOnFlashlightOff,
+         statueParts, planarCandidate, slopeOK } from "../web/src/quantumobj.js";
 import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          launchSpeed, launchPitch, orbitalSpeed, launchWindowLength,
          tracksHorizon, horizonAim, impendingCollision, lanternRange,
@@ -4562,6 +4565,135 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   fm.entre("menu");
   check("dans un menu, plus un axe", cm.axis("Move X", { keys: { KeyD: true } }), 0);
   check("et les modes qui sauvegardent sont sept", SAUVEGARDENT.size, 7);
+}
+
+{
+  // --- CE QUI BOUGE QUAND ON NE LE REGARDE PAS (docs/71-quantique.md) ---
+
+  check("cent unites de verrou", QUANTIQUE.maxQuantumLockRange, 100);
+  check("cent de rayon de fonction d'onde", QUANTIQUE.wavefunctionRadius, 100);
+  check("quarante-cinq degres de pente", QUANTIQUE.maxSlope, 45);
+  check("une chance sur cinq par morceau", QUANTIQUE.rendererChance, 0.2);
+
+  // Les cinq enfants de `MakeChildrenPlanarQuantum` : trois pins, une cabane,
+  // un panneau — sur la lune quantique.
+  const gpq = { placed: { MakeChildrenPlanarQuantum: [
+    { name: "QuantumObjects", body: "QuantumMoon_Body", position: [0, 0, 0],
+      fields: {}, children: [
+        { name: "Pine_Thick", local: [-13.8, 18.3, -15.1], position: [-13.8, 18.3, -15.1] },
+        { name: "Pine_Thick", local: [6.3, 19, 15.4], position: [6.3, 19, 15.4] },
+        { name: "Pine_Thick", local: [-25.3, 21.1, 17.6], position: [-25.3, 21.1, 17.6] },
+        { name: "QuantumCabin", local: [0, 18.9, 0], position: [0, 18.9, 0] },
+        { name: "Sign01", local: [-5.6, 19.6, 13.7], position: [-5.6, 19.6, 13.7] },
+      ] },
+  ] } };
+  const cinq = planarQuantumObjects(gpq);
+  check("cinq objets planaires", cinq.length, 5);
+  check("et tous sur la lune quantique",
+        cinq.every((o) => o.body === "QuantumMoon_Body"), true);
+  check("trois pins", cinq.filter((o) => o.name === "Pine_Thick").length, 3);
+  check("une cabane et un panneau",
+        cinq.filter((o) => /Cabin|Sign/.test(o.name)).length, 2);
+  check("sans composant pose, rien", planarQuantumObjects({}).length, 0);
+
+  // La statue du musee, avec ses morceaux.
+  const st = quantumStatues({ placed: { QuantumStatue: [
+    { name: "QuantumStatue", body: null, position: [1, 2, 3],
+      fields: { _maxQuantumLockRange: 100, _minQuantumLockRange: 0,
+                _isLightSensitive: false },
+      children: [{ name: "AncientHeadStatue", local: [0, 1.1, 0] }] },
+  ] } });
+  check("une statue", st.length, 1);
+  check("un morceau", st[0].parts.length, 1);
+  check("et elle n'est pas sensible a la lumiere", st[0].lightSensitive, false);
+
+  // L'EFFONDREMENT SE DECLENCHE SUR LA TRANSITION, et sur elle seule.
+  const q = new ObjetQuantique(cinq[0]);
+  check("regarde, il ne bouge pas", q.update(true), false);
+  check("toujours regarde, toujours pas", q.update(true), false);
+  check("a l'instant ou il sort du champ, il bouge", q.update(false), true);
+  check("et ne rebouge pas tant qu'il reste dehors", q.update(false), false);
+  q.update(true);
+  check("le revoir puis detourner les yeux le refait bouger",
+        q.update(false), true);
+  check("deux effondrements en tout", q.collapses, 2);
+
+  // LE VERROU DE LA SONDE. Distance dans la fourchette ET dans le cadre.
+  const v = new ObjetQuantique(cinq[1]);
+  check("hors portee, rien ne change", v.snapshot(500, true), false);
+  check("a bonne distance mais hors cadre, non", v.snapshot(50, false), false);
+  check("a bonne distance et dans le cadre, verrouille", v.snapshot(50, true), true);
+  v.update(true);
+  check("un objet verrouille ne s'effondre plus", v.update(false), false);
+  v.retrieveProbe();
+  check("rappeler la sonde le libere", v.locked, false);
+  v.update(true);
+  check("et il s'effondre a nouveau", v.update(false), true);
+  // La loi seule, hors de l'objet.
+  check("hors portee : inchange", locksOnSnapshot(500, true), null);
+  check("sous la portee minimale : inchange aussi",
+        locksOnSnapshot(-1, true, { minLockRange: 0, maxLockRange: 100 }), null);
+  check("dans la fourchette, le cadre decide", locksOnSnapshot(50, false), false);
+
+  // LA LAMPE. Une sonde posee a moins de cent unites protege l'objet.
+  check("invisible, eteindre ne fait rien",
+        collapsesOnFlashlightOff(false, null), false);
+  check("visible et sans sonde, il s'effondre",
+        collapsesOnFlashlightOff(true, null), true);
+  check("visible avec la sonde a cinquante, il tient",
+        collapsesOnFlashlightOff(true, 50), false);
+  check("la sonde a cent tient encore", collapsesOnFlashlightOff(true, 100), false);
+  check("a cent-un, elle ne protege plus",
+        collapsesOnFlashlightOff(true, 101), true);
+
+  // LA STATUE : chaque morceau a sa chance, tiree independamment.
+  const parts = ["a", "b", "c", "d", "e"];
+  check("tout visible si le tirage est toujours bas",
+        statueParts(parts, () => 0).filter((p) => p.visible).length, 5);
+  check("rien si le tirage est toujours haut",
+        statueParts(parts, () => 0.9).filter((p) => p.visible).length, 0);
+  check("et le seuil est bien un cinquieme",
+        statueParts(parts, () => 0.2).filter((p) => p.visible).length, 0);
+  check("juste en dessous, tout",
+        statueParts(parts, () => 0.19).filter((p) => p.visible).length, 5);
+
+  // Le tirage planaire : dans le disque, a la hauteur du terrain.
+  {
+    let n = 0;
+    const suite = [0.9, 0.9, 0.5, 0.5];     // premier couple hors du disque
+    const p = planarCandidate(() => suite[n++ % suite.length]);
+    check("le point tombe dans le disque",
+          Math.hypot(p[0], p[2]) <= QUANTIQUE.wavefunctionRadius, true);
+    check("et part d'au-dessus du terrain", p[1], QUANTIQUE.maxTerrainHeight);
+    check("le tirage hors du disque est REJETE, pas ramene", n > 2, true);
+  }
+
+  // La pente : quarante-cinq degres, strictement.
+  check("a plat, la pente convient", slopeOK([0, 1, 0], [0, 1, 0]), true);
+  check("a trente degres, encore",
+        slopeOK([Math.sin(Math.PI / 6), Math.cos(Math.PI / 6), 0], [0, 1, 0]), true);
+  check("a soixante, non",
+        slopeOK([Math.sin(Math.PI / 3), Math.cos(Math.PI / 3), 0], [0, 1, 0]), false);
+
+  // Le tirage refuse un candidat visible : un objet quantique ne se
+  // materialise jamais sous vos yeux.
+  {
+    const o = new ObjetQuantique(cinq[3]);
+    let essais = 0;
+    o.update(true);
+    const bouge = o.update(false, () => { essais++; return essais >= 4 ? [1, 2, 3] : null; });
+    check("il insiste jusqu'a trouver une place qu'on ne voit pas", bouge, true);
+    check("en quatre essais", essais, 4);
+    check("et il y est", o.position.join(","), "1,2,3");
+  }
+  {
+    // Mille essais, aucune place : l'objet reste ou il est.
+    const o = new ObjetQuantique(cinq[4]);
+    const avant = o.position.join(",");
+    o.update(true);
+    check("sans place libre, il ne bouge pas", o.update(false, () => null), false);
+    check("et reste ou il etait", o.position.join(","), avant);
+  }
 }
 
 report();

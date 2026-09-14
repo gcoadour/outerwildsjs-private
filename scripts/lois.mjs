@@ -46,6 +46,20 @@ function sansCommentaires(t) {
   return t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
 }
 
+/**
+ * Le texte sans ses lignes d'`import`.
+ *
+ * UN IMPORT N'EST PAS UN APPEL. Importer un nom et ne jamais s'en servir est
+ * exactement la forme de dette que ce compte cherche, et sans ce retrait il
+ * suffisait d'ajouter le nom a une liste d'import pour le declarer vivant.
+ * C'est la meme erreur que le commentaire-qui-lit de docs/47, d'une syntaxe de
+ * plus ([`docs/71`](../docs/71-quantique.md)).
+ */
+function sansImports(t) {
+  return t.replace(/^\s*import[\s\S]*?from\s+["'][^"']+["'];?/gm, " ")
+          .replace(/^\s*import\s+["'][^"']+["'];?/gm, " ");
+}
+
 const compte = (t, nom) => (t.match(new RegExp(`\\b${nom}\\b`, "g")) || []).length;
 
 export function lois() {
@@ -60,7 +74,7 @@ export function lois() {
   // ce qu'il mesure ([`docs/69`](../docs/69-assise.md)).
   const pages = lister(join(ROOT, "web"), [], [".html"]);
   const txt = new Map([...src, ...tests, ...outils, ...pages]
-    .map((f) => [f, sansCommentaires(readFileSync(f, "utf8"))]));
+    .map((f) => [f, sansImports(sansCommentaires(readFileSync(f, "utf8")))]));
 
   const out = [];
   for (const f of moteur) {

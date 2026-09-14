@@ -46,6 +46,9 @@ import { MeshLOD, Evictor, lodThresholds, colliderLODs, ColliderLODs } from "./l
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
 import { QuantumMoon, quantumHosts, bodyOccluder,
          alignToObserver } from "./quantum.js";
+import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
+         statueParts, planarCandidate, slopeOK,
+         QUANTIQUE } from "./quantumobj.js";
 import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity } from "./sectors.js";
@@ -66,7 +69,7 @@ import { Telescope, ProbeCamera, SoundWave, WAVE,
          telescopeScale } from "./tools.js";
 // La sonde entiere vient du prefabrique `sharedassets1.assets:2295`, que le
 // recensement ne voyait pas : il ne lisait que `level0` (docs/60-sonde.md).
-import { ProbeLauncher, SONDE, snapshotSize, probeIcon,
+import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
          probeReadout } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
@@ -823,6 +826,161 @@ async function boot() {
   const qOccluder = bodyOccluder(bodies, qBody);
   window.__quantum = quantum;
 
+  // §L CE QUI BOUGE QUAND ON NE LE REGARDE PAS (docs/71-quantique.md).
+  //
+  // La lune quantique n'est pas seule : `QuantumObject` est une classe de base,
+  // et le build en pose deux descendances que le portage n'EXTRAYAIT meme pas.
+  // Cinq objets sur la lune — trois pins, une cabane, un panneau — et une tete
+  // ancienne en vitrine au musee.
+  //
+  // Les cinq ne sont poses par aucun composant : `MakeChildrenPlanarQuantum`
+  // prend ses ENFANTS au reveil et se detruit. Ce que ce composant fait n'est
+  // pas dans ses champs, il n'en a aucun.
+  const objetsQ = planarQuantumObjects(gameplay).map((d) => new ObjetQuantique(d));
+  const statuesQ = quantumStatues(gameplay);
+  window.__quantiques = { objets: objetsQ, statues: statuesQ };
+
+  /**
+   * Le noeud d'un nom donne le plus proche d'une position.
+   *
+   * Trois `Pine_Thick` portent le MEME nom sur la lune : `nodes.get(nom)` en
+   * rend un, et toujours le meme. C'est la position qui les distingue, comme
+   * pour les dix visages de nuage (docs/48) et les six buses du modele reduit.
+   *
+   * Le repere ANCRE se passe en parametre : il est recalcule a chaque image et
+   * n'existe pas ici. Le lire de cette portee-la leve, et une exception dans la
+   * boucle de rendu ne se voit pas (docs/71-quantique.md).
+   */
+  function noeudLePlusProche(entry, nom, monde, anchorPos) {
+    if (!entry || !entry.nodes) return null;
+    let best = null, bestD = Infinity;
+    for (const [n, node] of entry.nodes) {
+      if (n !== nom) continue;
+      const p = node.getAbsolutePosition
+        ? node.getAbsolutePosition() : node.position;
+      const d = (p.x + anchorPos[0] - monde[0]) ** 2
+              + (p.y + anchorPos[1] - monde[1]) ** 2
+              + (p.z + anchorPos[2] - monde[2]) ** 2;
+      if (d < bestD) { best = node; bestD = d; }
+    }
+    return best;
+  }
+
+  /**
+   * Une place tiree pour un objet quantique de la lune, ou null.
+   *
+   * Le build tire un point dans un disque de cent unites, le fait TOMBER sur le
+   * terrain par un rayon de deux cents, et refuse une pente de plus de
+   * quarante-cinq degres. Ce portage n'a pas toujours le terrain de la lune
+   * sous la main — elle n'est chargee qu'a portee — et retombe alors sur la
+   * SPHERE de rayon egal a la hauteur d'origine de l'objet : sur un corps de
+   * vingt unites de rayon, les deux se confondent a un cheveu pres, et la loi
+   * de la pente n'a rien a mordre.
+   *
+   * La condition qui compte, elle, est portee dans les deux cas : une place
+   * VISIBLE est refusee.
+   */
+  /**
+   * L'objet est-il dans le tronc de la camera active ?
+   *
+   * LE PIEGE. `QuantumObject.CheckVisibility` demande a Unity de tester des
+   * `Bounds` contre les plans du tronc ; Babylon, lui, ne sait tester que ce
+   * qui est CULLABLE — un maillage. Un `TransformNode` n'a pas d'`isInFrustum`,
+   * et `camera.isInFrustum(noeud)` leve donc a chaque image. Une exception dans
+   * la boucle de rendu ne se voit pas : tout ce qui suit dans l'image ne tourne
+   * simplement plus, et le symptome apparait trente controles plus loin, sur un
+   * `window.__visee` qui n'a jamais ete pose.
+   *
+   * `--repli` ne pouvait pas l'attraper : ce code ne tourne qu'avec le build.
+   */
+  function dansLeChamp(noeud) {
+    if (!noeud || !camera.isInFrustum) return false;
+    if (typeof noeud.isInFrustum === "function") {
+      try { return !!camera.isInFrustum(noeud); } catch (e) { /* pas cullable */ }
+    }
+    const mailles = noeud.getChildMeshes ? noeud.getChildMeshes(false) : [];
+    for (const m of mailles) {
+      if (typeof m.isInFrustum !== "function") continue;
+      try { if (camera.isInFrustum(m)) return true; } catch (e) { /* idem */ }
+    }
+    if (mailles.length) return false;
+    // Sans rien de cullable, on juge sur le POINT : c'est ce que fait le tronc,
+    // en moins fin, et cela suffit pour un objet de quelques unites.
+    const p = noeud.getAbsolutePosition ? noeud.getAbsolutePosition() : null;
+    if (!p) return false;
+    const v = p.subtract(camera.position);
+    const l = v.length();
+    if (!l) return true;
+    const cos = BABYLON.Vector3.Dot(v.scale(1 / l), camera.getForwardRay().direction);
+    return cos > Math.cos(camera.fov);
+  }
+
+  function tirerPlaceQuantique(o, anchorPos) {
+    const lune = bodies.find((b) => /quantum/i.test(b.name));
+    if (!lune || !o.node) return null;
+    const r = Math.hypot(o.local[0], o.local[1], o.local[2]) || 20;
+    let p = null;
+    // Le chemin du build : un point dans le disque de cent unites, un rayon
+    // vers le bas, et la pente qui refuse.
+    const eng = scene.getPhysicsEngine();
+    if (eng && eng.raycast) {
+      const loc = planarCandidate();
+      // Le disque du build est pose dans le plan du parent ; ici le parent est
+      // la lune, et son « haut » local est la verticale du point de depart.
+      const base = [o.local[0], o.local[1], o.local[2]];
+      const lh = Math.hypot(base[0], base[1], base[2]) || 1;
+      const haut = [base[0] / lh, base[1] / lh, base[2] / lh];
+      const e1 = Math.abs(haut[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+      const cr = [e1[1] * haut[2] - e1[2] * haut[1],
+                  e1[2] * haut[0] - e1[0] * haut[2],
+                  e1[0] * haut[1] - e1[1] * haut[0]];
+      const lc = Math.hypot(cr[0], cr[1], cr[2]) || 1;
+      const ax = [cr[0] / lc, cr[1] / lc, cr[2] / lc];
+      const az = [haut[1] * ax[2] - haut[2] * ax[1],
+                  haut[2] * ax[0] - haut[0] * ax[2],
+                  haut[0] * ax[1] - haut[1] * ax[0]];
+      const depart = [0, 1, 2].map((i) =>
+        lune.position[i] + haut[i] * (r + loc[1]) + ax[i] * loc[0] + az[i] * loc[2]);
+      try {
+        const a0 = new BABYLON.Vector3(depart[0] - anchorPos[0],
+                                       depart[1] - anchorPos[1],
+                                       depart[2] - anchorPos[2]);
+        const b0 = new BABYLON.Vector3(
+          a0.x - haut[0] * QUANTIQUE.raycastDist,
+          a0.y - haut[1] * QUANTIQUE.raycastDist,
+          a0.z - haut[2] * QUANTIQUE.raycastDist);
+        const hit = eng.raycast(a0, b0);
+        if (hit && hit.hasHit) {
+          const n = hit.hitNormalWorld || hit.hitNormal;
+          // La pente decide : au-dela de quarante-cinq degres, on retire.
+          if (!n || slopeOK([n.x, n.y, n.z], haut)) {
+            const q = hit.hitPointWorld || hit.hitPoint;
+            p = [q.x + anchorPos[0], q.y + anchorPos[1], q.z + anchorPos[2]];
+          } else return null;
+        }
+      } catch (e) { p = null; }
+    }
+    if (!p) {
+      // Sans collider sous la main — la lune n'est chargee qu'a portee — on
+      // retombe sur la SPHERE de rayon egal a la hauteur d'origine. Sur un
+      // corps de vingt unites, les deux se confondent a un cheveu pres, et la
+      // loi de la pente n'a rien a mordre.
+      const u = Math.random() * 2 - 1, a = Math.random() * 2 * Math.PI;
+      const sn = Math.sqrt(Math.max(0, 1 - u * u));
+      const dir = [sn * Math.cos(a), u, sn * Math.sin(a)];
+      p = [lune.position[0] + dir[0] * r, lune.position[1] + dir[1] * r,
+           lune.position[2] + dir[2] * r];
+    }
+    // La place est-elle visible ? On deplace le noeud pour le demander a
+    // Babylon, et on le remet si la reponse est oui.
+    const avant = o.node.getAbsolutePosition().clone();
+    o.node.setAbsolutePosition(new BABYLON.Vector3(
+      p[0] - anchorPos[0], p[1] - anchorPos[1], p[2] - anchorPos[2]));
+    const vue = dansLeChamp(o.node);
+    if (vue) { o.node.setAbsolutePosition(avant); return null; }
+    return p;
+  }
+
   // --- interface de jeu : jauges et invites ---
   const iface = await loadInterface();
   const uiRoot = document.getElementById("ui");
@@ -1333,8 +1491,13 @@ async function boot() {
    * `ship.quat` part de l'identite sur la scene AU REPOS : la pose du siege
    * s'obtient donc en tournant son ecart au centre du vaisseau par ce
    * quaternion, et en composant les deux orientations.
+   *
+   * Le repere ancre se passe en PARAMETRE : il est recalcule a chaque image, et
+   * cette fonction vit hors de la boucle. Elle le lisait de la portee de
+   * `boot()`, ou il n'existe pas — une faute qui ne se declenchait qu'en
+   * MONTANT dans le vaisseau, ce qu'aucun controle ne fait (docs/71).
    */
-  function siegeVivant() {
+  function siegeVivant(anchorPos) {
     if (!ship || !shipRest || !siegePilotage) return null;
     const d = [siegePilotage.position[0] - shipRest[0],
                siegePilotage.position[1] - shipRest[1],
@@ -1365,6 +1528,25 @@ async function boot() {
     uiRoot.appendChild(ondeEl);
   }
   const ondeCtx = ondeEl ? ondeEl.getContext("2d") : null;
+
+  // §L LE MARQUEUR DE SONDE (docs/71-quantique.md).
+  //
+  // `probeIcon`, `probeReadout` et `probeLabelPos` etaient ecrites, eprouvees,
+  // documentees (docs/60) — et IMPORTEES par `main.js`, ce qui leur donnait
+  // l'air branchees. `lois.mjs` les declarait vivantes pour cette seule raison,
+  // jusqu'a ce qu'il cesse de compter un import pour un appel.
+  //
+  // Le marqueur dit trois choses : ou est la sonde a l'ecran, a quelle
+  // distance, et dans quel etat — danger, ancree, ou simple reperage.
+  const marqueurEl = uiRoot ? document.createElement("div") : null;
+  if (marqueurEl) {
+    marqueurEl.className = "ow-probe-marker";
+    marqueurEl.hidden = true;
+    uiRoot.appendChild(marqueurEl);
+  }
+  // La taille du marqueur suit celle de la vignette : c'est la meme loi de
+  // distance, et le build les dimensionne ensemble.
+  const MARQUEUR = { width: 40, height: 40 };
   /**
    * Un point de plus, et le trace.
    *
@@ -2075,7 +2257,7 @@ async function boot() {
         // Le siege prend le repere VIVANT de la coque : sa pose au repos ne dit
         // rien de l'assiette du moment, et un siege qui ne tourne pas avec son
         // vaisseau est un siege dont on tombe des le premier tonneau.
-        const cible = siegeVivant();
+        const cible = siegeVivant(anchorPos);
         if (cible && siegePilotage) {
           siegePilotage.follow(cible);
           const etat = pointsAttache.update(dt, now);
@@ -2160,7 +2342,7 @@ async function boot() {
           // l'avant du joueur et celui du siege, divise par cent degres par
           // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
           // et arriver de face n'en demande aucune.
-          const cible = siegeVivant();
+          const cible = siegeVivant(anchorPos);
           if (cible && siegePilotage) {
             siegePilotage.follow(cible);
             lacetSiege = yaw;
@@ -2836,6 +3018,40 @@ async function boot() {
       }
     }
     if (ondeEl) ondeEl.hidden = !telescope.active || guiMode.hidden;
+
+    // §L LE MARQUEUR DE SONDE. `WorldToScreenPoint` a son origine en BAS a
+    // gauche, `GUI` en haut : d'ou la soustraction a la hauteur, et les trente
+    // pixels qui remontent l'etiquette au-dessus du point (docs/60).
+    if (marqueurEl) {
+      const s = probes.last;
+      let pose = null;
+      if (s && !guiMode.hidden) {
+        const v = BABYLON.Vector3.Project(
+          new BABYLON.Vector3(s.pos[0], s.pos[1], s.pos[2]),
+          BABYLON.Matrix.Identity(),
+          scene.getTransformMatrix(),
+          camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()));
+        // `Project` rend deja l'origine en haut a gauche et `z` la profondeur
+        // normalisee : on repasse en convention `WorldToScreenPoint` pour que
+        // la loi du build s'applique telle qu'elle est ecrite.
+        const h = engine.getRenderHeight();
+        const devant = v.z > 0 && v.z < 1;
+        pose = devant
+          ? probeLabelPos({ x: v.x, y: h - v.y, z: 1 }, h, MARQUEUR) : null;
+      }
+      if (!pose) marqueurEl.hidden = true;
+      else {
+        const d = Math.hypot(s.pos[0] - player.pos.x, s.pos[1] - player.pos.y,
+                             s.pos[2] - player.pos.z);
+        const icone = probeIcon(s.damagePerSecond || 0,
+                                s.lastContact ?? null, s.anchored);
+        marqueurEl.hidden = false;
+        marqueurEl.dataset.icon = icone;
+        marqueurEl.style.left = `${Math.round(pose.x)}px`;
+        marqueurEl.style.top = `${Math.round(pose.y)}px`;
+        marqueurEl.textContent = probeReadout(d, null, s.probeInfos || []);
+      }
+    }
     if (telescope.active && pdata.learn("knowsHowTelescopeWorks")) {
       console.log("usage du telescope appris");
     }
@@ -3093,6 +3309,67 @@ async function boot() {
           qnode.rotationQuaternion = new BABYLON.Quaternion(q[0], q[1], q[2], q[3]);
         } else {
           qnode.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+        }
+      }
+    }
+
+    // --- §L ce qui bouge quand on ne le regarde pas ---
+    //
+    // La regle est la meme pour les cinq objets de la lune et pour la statue du
+    // musee, et elle tient en une ligne : l'objet s'effondre a l'INSTANT ou il
+    // sort du champ de la camera active. Pas pendant qu'on le regarde, pas
+    // pendant qu'on ne le regarde pas — sur la transition.
+    //
+    // Et chaque place tiree est refusee si elle est VISIBLE : un objet
+    // quantique ne se materialise jamais sous vos yeux. C'est ce refus qui
+    // rend la mecanique credible, et c'est lui qu'un portage presse oublierait.
+    if (objetsQ.length && geo.length) {
+      for (const o of objetsQ) {
+        if (o.node === undefined) {
+          o.node = null;
+          // Trois `Pine_Thick` homonymes : on rattache par POSITION, comme les
+          // dix visages de nuage et les six buses du modele reduit.
+          for (const e of geo) {
+            const n = noeudLePlusProche(e, o.name, o.position, anchorPos);
+            if (n) { o.node = n; break; }
+          }
+        }
+        if (!o.node) continue;
+        // `Start` appelle `Collapse()` UNE FOIS : les cinq ne sont jamais la ou
+        // la scene les pose. Ce n'est pas un hasard de partie, c'est la
+        // premiere image qu'on a d'eux.
+        if (!o.brouille) {
+          o.brouille = true;
+          o.collapse(() => tirerPlaceQuantique(o, anchorPos));
+        }
+        const visible = dansLeChamp(o.node);
+        o.update(visible, () => tirerPlaceQuantique(o, anchorPos));
+        const p = o.position;
+        o.node.setAbsolutePosition(
+          new BABYLON.Vector3(p[0] - anchorPos[0], p[1] - anchorPos[1],
+                              p[2] - anchorPos[2]));
+      }
+    }
+    // La statue ne se DEPLACE pas : chacun de ses morceaux a une chance sur
+    // cinq d'etre encore la. Detourner les yeux d'une tete ancienne en
+    // vitrine, et n'en retrouver qu'un cinquieme.
+    for (const st of statuesQ) {
+      if (st.noeuds === undefined) {
+        st.noeuds = [];
+        for (const nom of st.parts) {
+          for (const e of geo) {
+            const n = e.nodes.get(nom);
+            if (n) { st.noeuds.push(n); break; }
+          }
+        }
+        st.etat = new ObjetQuantique({ name: st.name, position: st.position });
+      }
+      if (!st.noeuds.length) continue;
+      const visible = st.noeuds.some((n) => dansLeChamp(n));
+      if (st.etat.update(visible)) {
+        const tirage = statueParts(st.parts);
+        for (let i = 0; i < st.noeuds.length; i++) {
+          st.noeuds[i].setEnabled(tirage[i] ? tirage[i].visible : true);
         }
       }
     }

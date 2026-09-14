@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`71-quantique.md`](71-quantique.md) — **ce qui bouge quand on ne le regarde pas : cinq objets sur la lune, une statue au musée, et un import qui comptait pour un appel**
 - [`70-modes.md`](70-modes.md) — **ce qui se commande, et quand : dix ensembles de canaux, une case qui n'est pas une pile, et un mort qui ne commande rien**
 - [`69-assise.md`](69-assise.md) — **s'asseoir : les quatre points d'accrochage, une caméra dont la loi était une paraphrase, et un compteur tombé dans le piège qu'il était né pour éviter**
 - [`68-lois.md`](68-lois.md) — **les lois écrites que rien n'appelait : un module entier, éprouvé, documenté et vert, qu'aucun module du moteur n'importait**

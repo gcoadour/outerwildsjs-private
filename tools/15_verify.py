@@ -131,7 +131,8 @@ def run_repli(url):
         exe = CHROMIUM if os.path.exists(CHROMIUM) else None
         browser = p.chromium.launch(executable_path=exe, args=args)
         page = browser.new_page(viewport={"width": 1280, "height": 720})
-        errors = []
+        errors = _ERREURS_PAGE
+        del errors[:]
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(url, wait_until="load", timeout=90000)
         # On saute le portique : il attend un fichier qu'on n'a pas, et ce n'est
@@ -240,7 +241,83 @@ def pixel_png(data, x, y):
     return (ligne[o], ligne[o + 1], ligne[o + 2])
 
 
+def extraction_perimee(profil):
+    """
+    L'extraction du profil est-elle plus vieille que le pipeline qui l'a faite ?
+
+    LE PIEGE, paye en docs/71. `--profil` sans `--zip` reutilise l'extraction
+    deja presente dans le stockage prive de l'origine. Un lot qui touche a un
+    EXTRACTEUR ne change alors rien a ce que la page lit : les controles neufs
+    mesurent les donnees d'avant, et ils echouent — ou pire, ils passent.
+
+    C'est le meme genre de silence que le cache HTTP de docs/62, une couche plus
+    loin : la page etait a jour, ses DONNEES ne l'etaient pas.
+
+    Le test est grossier a dessein — des dates de fichiers, pas un hachage du
+    contenu — et il suffit : ce qu'on veut attraper est « j'ai edite un
+    extracteur et j'ai oublie de refaire l'extraction ».
+
+    @returns une phrase a afficher, ou None si tout va bien
+    """
+    racine = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pipeline = os.path.join(racine, "web", "src", "pipeline")
+    plus_recent, quoi = 0, None
+    for base, _, fichiers in os.walk(pipeline):
+        for f in fichiers:
+            if not f.endswith((".js", ".json")):
+                continue
+            t = os.path.getmtime(os.path.join(base, f))
+            if t > plus_recent:
+                plus_recent, quoi = t, os.path.relpath(os.path.join(base, f), racine)
+    # L'OPFS de Chromium vit sous le profil ; on prend la date la plus recente
+    # qu'on y trouve, sans supposer le detail de son arborescence.
+    stockage = os.path.join(profil, "Default")
+    ecrit = 0
+    for base, _, fichiers in os.walk(stockage):
+        if "File System" not in base and "WebStorage" not in base:
+            continue
+        for f in fichiers:
+            try:
+                ecrit = max(ecrit, os.path.getmtime(os.path.join(base, f)))
+            except OSError:
+                pass
+    if not ecrit or not plus_recent or ecrit >= plus_recent:
+        return None
+    from datetime import datetime
+    d = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
+    return (f"extraction du {d(ecrit)}, "
+            f"{quoi} modifie le {d(plus_recent)}")
+
+
 def run(url, heavy, profil=None, zip_path=None):
+    """
+    Les controles navigateur, et ce qu'on montre quand ils s'arretent net.
+
+    UNE EXCEPTION DE PLAYWRIGHT CACHAIT LA VRAIE CAUSE. Une erreur dans la
+    boucle de rendu arrete l'image en cours : tout ce qui suit ne tourne plus,
+    et le premier controle qui s'en apercoit est trente lignes plus loin, sur un
+    objet sans rapport. Le message etait « impossible de lire `current` » — et la
+    faute etait vingt ecrans plus haut, dans un tout autre systeme.
+
+    Les erreurs de page etaient pourtant collectees depuis toujours, et n'etaient
+    lues qu'au DERNIER controle, celui qu'on n'atteint jamais dans ce cas
+    (docs/71-quantique.md).
+    """
+    try:
+        return _run(url, heavy, profil, zip_path)
+    except Exception:
+        for e in _ERREURS_PAGE[:6]:
+            print(f"  !!   erreur de page : {e}")
+        if _ERREURS_PAGE:
+            print("       ^ la cause est probablement la, pas dans le controle"
+                  " qui a leve.\n")
+        raise
+
+
+_ERREURS_PAGE = []
+
+
+def _run(url, heavy, profil=None, zip_path=None):
     from playwright.sync_api import sync_playwright
 
     rep = Report()
@@ -265,6 +342,12 @@ def run(url, heavy, profil=None, zip_path=None):
             # stockage prive de l'origine, qui est ailleurs et qu'on garde.
             for sous in ("Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage"):
                 shutil.rmtree(os.path.join(profil, "Default", sous), ignore_errors=True)
+            perime = extraction_perimee(profil)
+            if perime and not zip_path:
+                print(f"  !!   L'EXTRACTION DU PROFIL EST PLUS VIEILLE QUE LE PIPELINE.\n"
+                      f"       {perime}\n"
+                      f"       Les controles vont mesurer d'ANCIENNES donnees, et passer.\n"
+                      f"       Relancer avec --zip pour refaire l'extraction.\n")
             browser = p.chromium.launch_persistent_context(
                 profil, executable_path=exe, args=args,
                 viewport={"width": 1280, "height": 720})
@@ -272,7 +355,8 @@ def run(url, heavy, profil=None, zip_path=None):
         else:
             browser = p.chromium.launch(executable_path=exe, args=args)
             page = browser.new_page(viewport={"width": 1280, "height": 720})
-        errors = []
+        errors = _ERREURS_PAGE
+        del errors[:]
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         weight = {"total": 0}
@@ -933,6 +1017,66 @@ def run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- ce qui bouge quand on ne le regarde pas (docs/71-quantique.md) -----
+        #
+        # Cinq objets sur la lune quantique — trois pins, une cabane, un
+        # panneau — et une tete ancienne au musee. Ni la statue ni le parent
+        # des cinq n'etaient EXTRAITS : ils etaient dans la scene depuis
+        # toujours, et le recensement ne les comptait meme pas.
+        qo = page.evaluate("""() => {
+          const q = window.__quantiques;
+          return { objets: q.objets.length, statues: q.statues.length,
+                   noms: q.objets.map(o => o.name).sort(),
+                   corps: q.objets.every(o => o.body === "QuantumMoon_Body"),
+                   morceaux: q.statues[0] ? q.statues[0].parts : [] };
+        }""")
+        rep.eq("cinq objets quantiques planaires", qo["objets"], 5)
+        rep.eq("trois pins, une cabane, un panneau", qo["noms"],
+               ["Pine_Thick", "Pine_Thick", "Pine_Thick", "QuantumCabin", "Sign01"])
+        rep.eq("tous sur la lune quantique", qo["corps"], True)
+        rep.eq("une statue au musee", qo["statues"], 1)
+        rep.eq("avec la tete ancienne", qo["morceaux"], ["AncientHeadStatue"])
+        # L'effondrement se declenche sur la TRANSITION visible -> non visible,
+        # et une place VISIBLE est refusee.
+        col = page.evaluate("""() => {
+          const o = window.__quantiques.objets[0];
+          const avant = o.collapses;
+          o.wasVisible = false;
+          const regarde = o.update(true);          // on le regarde : rien
+          const detourne = o.update(false, () => [1, 2, 3]);
+          const encore = o.update(false, () => [9, 9, 9]);
+          // Toutes les places proposees sont refusees : il reste ou il est.
+          o.update(true);
+          const place = o.position.join(",");
+          const bloque = o.update(false, () => null);
+          const apres = o.position.join(",");
+          return { regarde, detourne, encore, bloque, bouge: place !== apres,
+                   n: o.collapses - avant };
+        }""")
+        rep.eq("regarde, il ne bouge pas", col["regarde"], False)
+        rep.eq("a l'instant ou il sort du champ, il bouge", col["detourne"], True)
+        rep.eq("et pas une seconde fois hors du champ", col["encore"], False)
+        rep.eq("sans place invisible, il ne bouge pas", col["bloque"], False)
+        rep.eq("et il est reste ou il etait", col["bouge"], False)
+        # La sonde VERROUILLE : photographier a bonne distance et dans le cadre.
+        ver = page.evaluate("""() => {
+          const o = window.__quantiques.objets[1];
+          const loin = o.snapshot(500, true);
+          const horsCadre = o.snapshot(50, false);
+          const dedans = o.snapshot(50, true);
+          o.wasVisible = true;
+          const fige = o.update(false, () => [0, 0, 0]);
+          o.retrieveProbe();
+          o.wasVisible = true;
+          const libre = o.update(false, () => [0, 0, 0]);
+          return { loin, horsCadre, dedans, fige, libre };
+        }""")
+        rep.eq("photographier de loin ne verrouille pas", ver["loin"], False)
+        rep.eq("hors du cadre non plus", ver["horsCadre"], False)
+        rep.eq("dans le cadre et a portee, oui", ver["dedans"], True)
+        rep.eq("et un objet verrouille ne s'effondre plus", ver["fige"], False)
+        rep.eq("rappeler la sonde le libere", ver["libre"], True)
+
         # --- ce qui se commande, et quand (docs/70-modes.md) --------------------
         #
         # `OWInput` echange un ensemble de canaux actifs a chaque changement de
@@ -1005,6 +1149,30 @@ def run(url, heavy, profil=None, zip_path=None):
           a.drain();
           return { dos: Math.round(dos * 100) / 100, face, emporte: leve.velocity[2] };
         }""")
+        # ET ON S'ASSIED POUR DE VRAI, dans la boucle de rendu.
+        #
+        # Les controles ci-dessus appellent la loi a la main ; ils ne touchent
+        # jamais au chemin que la boucle emprunte. Une faute de PORTEE y a
+        # dormi un lot entier — `siegeVivant()` lisait le repere ancre depuis
+        # `boot()`, ou il n'existe pas — parce qu'aucun controle ne MONTAIT
+        # dans le vaisseau (docs/71-quantique.md).
+        assis = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return { saute: true };
+          const avant = { boarded: s.boarded };
+          s.boarded = true;
+          return { avant, saute: false };
+        }""")
+        if not assis["saute"]:
+            page.wait_for_timeout(800)
+            rep.eq("monter dans le vaisseau ne leve pas", _ERREURS_PAGE[:2], [])
+            rep.eq("et le moteur tourne toujours",
+                   page.evaluate("() => typeof window.__visee"), "object")
+            page.evaluate("() => { window.__shipRef.boarded = false;"
+                          "  window.__assise.points.detach([0,0,0]);"
+                          "  window.__assise.points.drain(); }")
+            page.wait_for_timeout(300)
+
         rep.eq("dos tourne, le demi-tour dure 1,8 s", duree["dos"], 1.8)
         rep.eq("de face, aucune duree", duree["face"], 0)
         rep.eq("et on se leve avec la vitesse du siege", duree["emporte"], 200)
