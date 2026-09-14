@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`95-lots-partages.md`](95-lots-partages.md) — **un lot pour plusieurs corps : la planète de départ s'effaçait une demi-minute sur deux, au rythme de sa lune**
 - [`94-manette.md`](94-manette.md) — **deux tables pour une manette, et un champ qui était un commentaire déguisé en donnée**
 - [`93-commandes.md`](93-commandes.md) — **quatre lois de commande qui ne commandaient rien, dont une sensibilité qu'on pouvait régler sans rien sentir**
 - [`92-tour.md`](92-tour.md) — **la tour de lancement : la cabine était portée, la borne et le déclencheur manquaient, et rien ne bougeait**
