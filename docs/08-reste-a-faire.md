@@ -20,7 +20,7 @@ lisait**.
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
-> | `lois.mjs` — ce que le portage **appelle** | **20** methodes sans appelant ([`90`](90-methodes.md)) |
+> | `lois.mjs` — ce que le portage **appelle** | **14** methodes sans appelant ([`95`](95-verdicts.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -403,8 +403,11 @@ navigateur est un appelant, et c'est la deuxième fois que l'extension du fichie
 appelant le cachait à ce compte. Deux autres attendaient la sphère de
 l'observatoire ([`91`](91-remise-a-zero.md)), quatre la borne de la tour de
 lancement ([`92`](92-tour.md)), quatre étaient des règles de commande jamais
-branchées ([`93`](93-commandes.md)), et deux confrontent désormais les deux
-tables de la manette ([`94`](94-manette.md)). **Il en reste vingt**, et c'est le front
+branchées ([`93`](93-commandes.md)), deux confrontent désormais les deux
+tables de la manette ([`94`](94-manette.md)), une est marquée `@vide` parce que
+la scène ne pose aucune de ses entrées, et trois étaient des **doublons** d'une
+règle écrite ailleurs — supprimés ([`95`](95-verdicts.md)). **Il en reste
+quatorze**, et c'est le front
 ouvert : ce ne sont pas des lois à écrire, ce sont des lois écrites à brancher —
 et chaque fois qu'on cherche ce qui devrait les appeler, on trouve une mécanique
 entière.

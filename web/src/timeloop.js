@@ -19,7 +19,10 @@
 //     mi-chemin, la vraie onde est a 3 750 unites quand la lineaire est a
 //     15 000. On a quelques secondes de calme trompeur, puis tout arrive d'un
 //     coup — et c'est la toute la sensation de la fin des temps ;
-//   - la musique de fin a 90 secondes restantes, elle, etait juste.
+//   - la musique de fin a 90 secondes restantes, elle, etait juste — et son
+//     seuil vit dans `reactaudio.js`, avec la loi qui s'en sert. Ce module en
+//     gardait un second exemplaire, et un getter `endMusic` que personne
+//     n'appelait : deux sources pour un seuil (docs/95-verdicts.md).
 //
 // Et le chronometre de l'onde part de `SunExploded`, PAS de `TriggerSupernova`.
 // Entre les deux, l'etoile s'effondre : `SupernovaVolume` joue son
@@ -29,7 +32,6 @@
 export const LOOP_MINUTES = 18;
 export const SHOCKWAVE_SECONDS = 15;         // duree de la course de l'onde
 export const SHOCKWAVE_RADIUS = 30000;       // rayon atteint au bout des 15 s
-export const END_MUSIC_AT = 90;              // secondes restantes
 
 /**
  * `SupernovaVolume.Update` : le rayon de l'onde, t secondes apres l'explosion.
@@ -155,7 +157,6 @@ export class TimeLoop {
   get secondsRemaining() { return Math.max(0, this.duration - this.elapsed); }
   get fraction() { return Math.min(1, this.elapsed / this.duration); }
   get supernova() { return this.supernovaAt !== null; }
-  get endMusic() { return this.secondsRemaining < END_MUSIC_AT; }
 
   /** Rayon atteint par l'onde de choc depuis le centre de l'etoile. */
   get shockwaveRadius() {

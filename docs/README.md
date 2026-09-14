@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`95-verdicts.md`](95-verdicts.md) — **brancher, marquer ou supprimer : comment on tranche une loi que rien n'appelle, et une lecture qui a fini par parler**
 - [`94-manette.md`](94-manette.md) — **deux tables pour une manette, et un champ qui était un commentaire déguisé en donnée**
 - [`93-commandes.md`](93-commandes.md) — **quatre lois de commande qui ne commandaient rien, dont une sensibilité qu'on pouvait régler sans rien sentir**
 - [`92-tour.md`](92-tour.md) — **la tour de lancement : la cabine était portée, la borne et le déclencheur manquaient, et rien ne bougeait**

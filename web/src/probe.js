@@ -438,6 +438,7 @@ export class Probe {
   }
 
   /** `ProbeScanner` : ce qui entre dans la sphere de trente, et le plus proche. */
+  // @vide la scene ne pose ni ProbeScanner ni PointOfInterest : zero instance
   scan(points) {
     this.poi = points.filter((p) => len(sub(p.pos, this.pos)) <= this.cfg.scanRadius);
     let best = null, d = Infinity;

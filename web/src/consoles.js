@@ -137,10 +137,10 @@ export class Flashlight {
     this.light.direction.copyFrom(forward);
   }
 
-  /** L'invite ne s'affiche que dans le noir, lampe eteinte. */
-  promptVisible(inDark, inShip, inMap, inDialogue) {
-    return !this.on && !inShip && !inMap && !inDialogue && inDark;
-  }
+  // `promptVisible` vivait ici, avec QUATRE conditions. Le build en pose SEPT
+  // (`Flashlight.CheckPromptStatus`), et `flashlightPromptVisible` les porte
+  // toutes depuis docs/67. Garder les deux, c'etait garder une regle fausse a
+  // cote de la vraie (docs/95-verdicts.md).
 }
 
 /**
@@ -272,7 +272,11 @@ export class Marshmallow {
   }
 
   get edible() { return this.held && this.toast >= MIN_TOAST; }
-  get burnt() { return this.toast >= 1; }
+  // Un `burnt` (toast >= 1) avait ete ecrit ici. Le build n'en fait RIEN :
+  // `Marshmallow.Update` se contente d'arreter d'assombrir — la couleur est
+  // `initColor - toastLevel`, bornee a zero, et rien d'autre ne lit ce seuil.
+  // Le portage le bornait deja dans `update` ; le getter etait un doublon du
+  // plafond, pas une regle (docs/95-verdicts.md).
 
   /** @param heat chaleur totale recue, 0 a 100 */
   update(dt, heat) {

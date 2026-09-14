@@ -2150,6 +2150,29 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("les deux tables de manette s'accordent dans la page",
                page.evaluate("() => window.__padAccord"), [])
 
+        # --- les nuages : ce que le build decrit, ce qu'on a rattache ---------
+        #
+        # `cloudCount` et `cloudsAttached` sont deux lectures ecrites pour etre
+        # comparees de l'exterieur, et personne ne les comparait. C'est ici
+        # qu'elles ont leur place : dans un vrai navigateur, avec la voute
+        # montee (docs/95-verdicts.md).
+        nuages = page.evaluate("""() => {
+          const c = window.__sky;
+          if (!c) return null;
+          return { decrits: c.cloudCount, rattaches: c.cloudsAttached };
+        }""")
+        if nuages:
+            rep.eq("le build decrit vingt-quatre nuages", nuages["decrits"], 24)
+            # Le rattachement se fait PAR POSITION, a une unite pres, sur le lot
+            # de geometrie qui porte la voute. Ce parcours reste au village et ne
+            # le charge pas : zero est donc la bonne reponse ici. Ce que ce
+            # controle garde, c'est qu'il n'y ait jamais de rattachement
+            # PARTIEL — vingt-trois nuages sur vingt-quatre voudrait dire que la
+            # tolerance derive, et c'est cela qu'on veut voir tout de suite.
+            rep.check("les nuages se rattachent en bloc ou pas du tout",
+                      nuages["rattaches"] in (0, nuages["decrits"]),
+                      nuages["rattaches"], f"0 ou {nuages['decrits']}")
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

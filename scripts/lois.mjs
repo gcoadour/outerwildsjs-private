@@ -89,6 +89,13 @@ function etalons(brut) {
   for (const m of brut.matchAll(/\/\/\s*@mesure[^\n]*\n\s*export\s+(?:async\s+)?(?:function|class|const)\s+(\w+)/g)) {
     out.add(m[1]);
   }
+  // Les marqueurs valent pour les METHODES aussi, depuis que ce compte les voit
+  // (docs/95-verdicts.md) : une ligne `// @mesure` au-dessus d'une methode dit
+  // la meme chose qu'au-dessus d'un export, et l'exiger sous forme d'export
+  // aurait pousse a exporter pour faire taire un chiffre.
+  for (const m of brut.matchAll(/\/\/\s*@mesure[^\n]*\n\s{2,4}(?:get\s+|set\s+|async\s+)?(\w+)\s*\(/g)) {
+    out.add(m[1]);
+  }
   return out;
 }
 
@@ -109,6 +116,9 @@ function etalons(brut) {
 function vides(brut) {
   const out = new Map();
   for (const m of brut.matchAll(/\/\/\s*@vide\s+([^\n]+)\n\s*export\s+(?:async\s+)?(?:function|class|const)\s+(\w+)/g)) {
+    if (m[1].trim().length >= 10) out.set(m[2], m[1].trim());
+  }
+  for (const m of brut.matchAll(/\/\/\s*@vide\s+([^\n]+)\n\s{2,4}(?:get\s+|set\s+|async\s+)?(\w+)\s*\(/g)) {
     if (m[1].trim().length >= 10) out.set(m[2], m[1].trim());
   }
   return out;
