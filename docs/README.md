@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`85-chambre.md`](85-chambre.md) — **les deux dernières mécaniques que le portage écartait en le disant : la chambre en apesanteur et le champ de la station météo**
 - [`84-ambiance.md`](84-ambiance.md) — **les zones sonores n'ont pas de forme non plus : une grotte à quatre portes réduite à une seule, et un test qui l'a bénie**
 - [`83-seuils.md`](83-seuils.md) — **les seuils : une grotte n'a pas de forme, elle a des portes — et l'ambiance ne s'éteignait dans aucune**
 - [`82-secteur-majeur.md`](82-secteur-majeur.md) — **le secteur majeur actif : une question, cinq réponses inventées — et la minicarte qui s'éteint aux trois endroits où l'on est perdu**

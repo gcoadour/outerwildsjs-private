@@ -25,8 +25,8 @@ import { Resources, oxygenZones, inOxygenZone,
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
-import { sunlessZones, darkZones, entrywayTriggers,
-         EffectZones } from "./entryways.js";
+import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
+         ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatSources, heatAt, remoteConsoles, RemoteConsoles,
@@ -133,7 +133,7 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor, lookRotation } from "./decor.js";
-import { hazardVolumes, Hazards, zeroGFields, zeroGAt,
+import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
          sandstormVolumes,
          childTriggers, Sandstorm, radiationEmitters, probePrompts,
          promptFaced } from "./volumes.js";
@@ -671,6 +671,8 @@ async function boot() {
   // §4 les volumes de jeu : ce qui blesse, ce qui fait flotter, ce qui limite.
   const hazards = new Hazards(hazardVolumes(gameplay));
   const zeroGVolumes = zeroGFields(gameplay);
+  // La chambre en apesanteur du village n'a pas de forme : elle a une porte.
+  const presencesZeroG = zeroGVolumes.map((z) => new ZonePresence(z));
   // Les secteurs MAJEURS, avec leur declencheur : c'est eux que la minicarte
   // interroge, et eux seuls qui repondent a `GetUseMinimap`.
   const majSecteurs = majorSectors(gameplay);
@@ -729,7 +731,12 @@ async function boot() {
   window.__meteores = meteores;
 
   window.__lots = { declared, decor, passages, hazards, zeroGVolumes,
-                    majSecteurs, zonesSansSoleil, zonesSombres, pickups, suits, equipment, training, events,
+                    majSecteurs, zonesSansSoleil, zonesSombres,
+                    presencesZeroG, pickups, suits, equipment, training, events,
+                    // `champsParSeuils` est declare plus BAS : un getter evite
+                    // la zone morte temporelle, le piege recurrent de ce
+                    // fichier (docs/85-chambre.md).
+                    get champsParSeuils() { return champsParSeuils; },
                     get etat() {
                       return { referentiel: declared.current && declared.current.body,
                                secteurMajeur: secteurMajeur && secteurMajeur.name,
@@ -752,6 +759,17 @@ async function boot() {
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
   // dans leur volume, comme SingleFieldDetector le veut.
   const dirFields = directionalFields(gameplay);
+  // Le seul champ directionnel commande par des SEUILS : la station meteo de
+  // Brittle Hollow. Il n'a pas de collider, et le portage l'ecartait donc.
+  //
+  // On lui greffe ses portes SUR PLACE : `attachEntryways` rend des copies, et
+  // c'est l'objet de `dirFields` que `strongestDirectional` lira.
+  const champsParSeuils = [];
+  for (const f of dirFields) {
+    if (!f.byEntryways) continue;
+    f.entryways = attachEntryways([f], entrywayTriggers(gameplay))[0].entryways;
+    champsParSeuils.push(new ZonePresence(f));
+  }
   // `PolarForceField` : un seul volume, d'acceleration -10, radiale a un axe.
   // Il etait extrait et jamais lu (docs/36-audit.md §2.9).
   const polFields = polarFields(gameplay);
@@ -2461,12 +2479,18 @@ async function boot() {
     // §4 L'APESANTEUR DECLAREE. Quatre volumes la posent ; dans le leur, le
     // champ radial ne s'applique plus. Le point est ramene au repos du corps
     // porteur, comme tous les volumes extraits.
-    const zeroG = zeroGVolumes.length
-      ? zeroGAt(zeroGVolumes,
-                [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
-                 player.pos.z + anchorPos[2]],
-                (v) => decalageDuCorps(v.body, anchorPos))
+    const monde3 = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                    player.pos.z + anchorPos[2]];
+    const decale = (v) => decalageDuCorps(v.body, anchorPos);
+    const zeroG = presencesZeroG.length
+      ? strongestZeroG(zonesAround(presencesZeroG, monde3, decale))
       : null;
+    // Les champs par seuils : on les marque presents pour l'image, et
+    // `strongestDirectional` les compte alors sans test de forme.
+    if (champsParSeuils.length) {
+      const dedans = new Set(zonesAround(champsParSeuils, monde3, decale));
+      for (const p of champsParSeuils) p.zone.present = dedans.has(p.zone);
+    }
     const world = { directional: dirFields, polar: polFields,
                     framePos: anchorPos, fluids, zeroG,
                     // Coriolis et centrifuge du repere ancre, qui TOURNE avec

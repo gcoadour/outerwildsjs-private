@@ -49,9 +49,9 @@ import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAccelerati
          BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
-import { ambienceZones, zonesAround, winnersByLayer, clipOf,
-         ZonePresence, AmbienceMixer } from "../web/src/ambience.js";
-import { hazardVolumes, Hazards, zeroGFields, zeroGAt,
+import { ambienceZones, winnersByLayer, clipOf,
+         AmbienceMixer } from "../web/src/ambience.js";
+import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
          probePrompts, radiationEmitters,
          radiationAt, CompoundTrigger, sandstormVolumes,
          childTriggers, Sandstorm, promptFaced } from "../web/src/volumes.js";
@@ -124,7 +124,7 @@ import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
          ambientColor, ambientTint, hsvToRgb } from "../web/src/sectors.js";
 import { entrywayTriggers, sunlessZones, isOutsideEntryway, Entryway,
-         EffectZones } from "../web/src/entryways.js";
+         EffectZones, ZonePresence, zonesAround } from "../web/src/entryways.js";
 import { Minimap, localMapPosition, MARKER_RADIUS, TRAIL_ANGLE,
          MINIMAP_EVENTS } from "../web/src/minimap.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
@@ -2992,8 +2992,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("quatre champs, dont un sans forme : ici deux et un", champs.length, 2);
   check("celui qui vit de ses declencheurs n'a pas de volume",
         champs[1].volume, null);
-  check("dans le volume, on flotte", zeroGAt(champs, [10, 0, 0]).name, "ZeroGVolume");
-  check("dehors, non", zeroGAt(champs, [1000, 0, 0]), null);
+  const presencesZ = champs.map((z) => new ZonePresence(z));
+  // La chambre du build n'a pas de forme : elle a une porte. Sans seuil joint,
+  // elle ne peut rien dire — et c'est ce que le portage faisait d'elle.
+  const chambre = { name: "ZeroGChamber", body: "TH_Body", overridePriority: 2,
+                    position: [0, 0, 0], entryways: [
+    { name: "Entryway", body: "TH_Body", parents: ["ZeroGChamber"],
+      position: [0, 0, 0], rotation: null,
+      volume: { shape: "box", size: [4, 4, 4], center: [0, 0, 0] },
+      exit: [0, 0, -1], initial: 0 }] };
+  const pc = new ZonePresence(chambre);
+  check("dehors de la chambre au depart", pc.update([0, 0, -10]), false);
+  pc.update([0, 0, -1]);
+  check("franchie, on y flotte", pc.update([0, 0, 10]), true);
+  // Et sa priorite l'emporte sur celle du volume ordinaire.
+  check("la chambre couvre un volume de priorite plus basse",
+        strongestZeroG([champs[0], chambre]).name, "ZeroGChamber");
+  check("dans le volume, on flotte",
+        strongestZeroG(zonesAround(presencesZ, [10, 0, 0])).name, "ZeroGVolume");
+  check("dehors, non",
+        strongestZeroG(zonesAround(presencesZ, [1000, 0, 0])), null);
 
   // --- LE SECTEUR MAJEUR ACTIF (docs/82-secteur-majeur.md) ---
   //

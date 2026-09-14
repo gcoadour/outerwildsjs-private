@@ -40,6 +40,7 @@
 
 import { insideVolume } from "./gravity.js";
 import { restingPoint } from "./frames.js";
+import { entrywayTriggers, attachEntryways } from "./entryways.js";
 
 /** Les cinq valeurs de `DeathType`, lues dans l'assembly. */
 export const DEATH_TYPES = ["Default", "Impact", "Asphyxiation", "Energy", "Supernova"];
@@ -252,10 +253,14 @@ export class Hazards {
  *
  * Un des quatre (`ZeroGZone/ZeroGChamber`) prend sa forme de ses declencheurs
  * d'entree (`_useEntrywayTriggers`) et non d'un collider : il n'a donc pas de
- * volume, et c'est vrai du build, pas un defaut d'extraction.
+ * volume, et c'est vrai du build, pas un defaut d'extraction. Le portage
+ * l'ECARTAIT pour autant — `zeroGAt` saute les champs sans forme — et la chambre
+ * en apesanteur du village ne donnait aucune apesanteur. Ses seuils lui sont
+ * maintenant joints (docs/85-chambre.md).
  */
 export function zeroGFields(gameplay) {
-  return ((gameplay.placed || {}).ZeroGField || []).map((c) => {
+  const seuils = entrywayTriggers(gameplay);
+  return attachEntryways(((gameplay.placed || {}).ZeroGField || []).map((c) => {
     const f = c.fields || {};
     return {
       name: c.name, body: c.body || null, position: c.position,
@@ -265,16 +270,19 @@ export function zeroGFields(gameplay) {
       alignmentPriority: f._alignmentPriority ?? 0,
       overridePriority: f._overridePriority ?? 0,
     };
-  });
+  }), seuils);
 }
 
-/** Est-on en apesanteur declaree ? Rend le champ, ou null. */
-export function zeroGAt(fields, worldPoint, shiftOf = null) {
+/**
+ * Est-on en apesanteur declaree ? Rend le champ, ou null.
+ *
+ * @param actives champs ou l'on se trouve deja — `zonesAround` les etablit,
+ *   contenance et seuils confondus. La contenance seule ne suffisait pas : la
+ *   chambre du village n'a pas de forme.
+ */
+export function strongestZeroG(actives) {
   let best = null;
-  for (const f of fields) {
-    if (!f.volume) continue;
-    const p = shiftOf ? restingPoint(worldPoint, shiftOf(f)) : worldPoint;
-    if (!insideVolume(f, p)) continue;
+  for (const f of actives) {
     if (!best || f.overridePriority > best.overridePriority) best = f;
   }
   return best;

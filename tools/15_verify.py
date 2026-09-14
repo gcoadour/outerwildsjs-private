@@ -1939,6 +1939,37 @@ def _run(url, heavy, profil=None, zip_path=None):
                       amb["couches"], "aucune Cave*")
             rep.at_least("et au moins une couche sonne", len(amb["couches"]), 1)
 
+        # --- ce que les seuils commandent encore (docs/85-chambre.md) ----------
+        #
+        # Les deux derniers seuils orphelins : la chambre en apesanteur du
+        # village, et le champ de la station meteo. Ni l'une ni l'autre n'a de
+        # collider — le portage les ecartait toutes les deux.
+        chambre = page.evaluate("""() => {
+          const L = window.__lots;
+          if (!L || !L.presencesZeroG) return null;
+          const sans = L.presencesZeroG.filter(p => !p.zone.volume);
+          return {
+            champs: L.presencesZeroG.length,
+            sansForme: sans.length,
+            portesChambre: sans.length ? sans[0].portes.length : -1,
+            champsParSeuils: L.champsParSeuils.length,
+            portesMeteo: L.champsParSeuils.length
+              ? L.champsParSeuils[0].portes.length : -1,
+            meteoPresente: L.champsParSeuils.length
+              ? !!L.champsParSeuils[0].zone.present : null,
+          };
+        }""")
+        if chambre:
+            rep.eq("champs d'apesanteur montes", chambre["champs"], 4)
+            rep.eq("dont un sans forme", chambre["sansForme"], 1)
+            rep.eq("et il a sa porte", chambre["portesChambre"], 1)
+            rep.eq("un champ directionnel par seuils",
+                   chambre["champsParSeuils"], 1)
+            rep.eq("avec ses deux portes", chambre["portesMeteo"], 2)
+            # Au village de Timber Hearth, on n'est pas dans la station meteo
+            # de Brittle Hollow.
+            rep.eq("et on n'y est pas", chambre["meteoPresente"], False)
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

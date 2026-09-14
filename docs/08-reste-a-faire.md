@@ -406,10 +406,9 @@ test qui aurait pu le dire, parce qu'on ne teste pas ce qu'on a inventé.
 La teinte de l'ambiance par secteur, que ce lot avait laissée ouverte, est
 portée depuis [`83`](83-seuils.md) : `_ambientLight` est une énumération, pas un
 nombre. Les seuils, eux, servent maintenant les cinq zones sans soleil, la zone
-sombre et les six zones sonores sans forme ([`84`](84-ambiance.md)) — quatorze
-des dix-huit. Restent la chambre en apesanteur et les deux seuils de la station
-météo, qui commandent des `DirectionalForceField` : même forme, même loi,
-mécaniques non branchées.
+sombre, les six zones sonores sans forme, la chambre en apesanteur et le champ
+de la station météo : **dix-huit sur dix-huit** ([`83`](83-seuils.md),
+[`84`](84-ambiance.md), [`85`](85-chambre.md)).
 
 Et une cinquième nature de manque, découverte par [`84`](84-ambiance.md) :
 **le commentaire exact posé sur un code approximatif**. L'extracteur audio

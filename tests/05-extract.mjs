@@ -15,6 +15,7 @@ import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
          radiationEmitters } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.js";
 import { majorSectors, activeMajorSector } from "../web/src/sectors.js";
+import { directionalFields } from "../web/src/gravity.js";
 import { sunlessZones, entrywayTriggers } from "../web/src/entryways.js";
 import { ambienceZones } from "../web/src/ambience.js";
 import { billboards, talkingFaces, thrusterNozzles, particleBursts,
@@ -616,7 +617,18 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   const zg = zeroGFields(gp);
   check("champs d'apesanteur", zg.length, 4);
   check("dont un sans forme, qui vit de ses declencheurs",
-        zg.filter((f) => !f.volume && f.entryways).length, 1);
+        zg.filter((f) => !f.volume && f.entryways.length).length, 1);
+  // La chambre du village : une seule porte, et le portage l'ecartait
+  // (docs/85-chambre.md).
+  const chambre = zg.find((f) => !f.volume);
+  check("la chambre en apesanteur a une porte", chambre.entryways.length, 1);
+  check("et elle est sur Timber Hearth", chambre.body, "TimberHearth_Body");
+  // Le seul champ directionnel commande par des seuils : la station meteo.
+  const dirs = directionalFields(gp);
+  const parSeuils = dirs.filter((f) => f.byEntryways);
+  check("un seul champ directionnel par seuils",
+        parSeuils.map((f) => f.name).join(","), "Field_WeatherStation");
+  check("et il n'a pas de forme a lui", parSeuils[0].volume, undefined);
   // Les secteurs MAJEURS : sept PlanetoidSector, deux ZeroGSector, un
   // MajorSector nu (docs/82-secteur-majeur.md).
   const secteurs = majorSectors(gp);

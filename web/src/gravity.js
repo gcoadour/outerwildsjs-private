@@ -120,6 +120,12 @@ function localField(opts, world) {
  * que l'extracteur mesure desormais (`entry.volume`). Sans volume lisible, sans
  * intensite lisible, le champ est ECARTE plutot que devine — le champ radial
  * reprend alors la main, ce qui est le comportement d'avant.
+ *
+ * UN champ fait exception, et il a ete ecarte a tort : `Field_WeatherStation`
+ * sur Brittle Hollow porte `_useEntrywayTriggers`. Il n'a pas de collider parce
+ * qu'il n'en a pas besoin — on y entre par une porte, et on en sort par
+ * l'autre. Le moteur le marque `present` quand ses seuils le disent
+ * (docs/85-chambre.md).
  */
 /** Un Vector3 serialise : le build l'ecrit {x, y, z}, les fixtures en tableau. */
 function vec3(v) {
@@ -168,7 +174,11 @@ export function directionalFields(gameplay) {
     const scale = typeof f._forceScaleFactor === "number" ? f._forceScaleFactor : 1;
     if (magnitude !== null) magnitude *= scale;
 
-    if (!magnitude || !e.volume) continue;
+    // Un champ commande par des SEUILS n'a pas de collider, et c'est normal :
+    // `Field_WeatherStation` est le seul du build dans ce cas. Il est garde,
+    // et c'est le moteur qui dira s'il est present (docs/85-chambre.md).
+    const parSeuils = !!f._useEntrywayTriggers;
+    if (!magnitude || (!e.volume && !parSeuils)) continue;
     // Axe nomme par un enum : Unity range les six directions dans cet ordre.
     const AXES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
     let d = direction || AXES[axisIndex] || [0, -1, 0];
@@ -192,6 +202,9 @@ export function directionalFields(gameplay) {
       // 34 le font). Lu ici, il reste a en tenir compte a l'alignement.
       affectsAlignment: f._affectsAlignment !== false,
       volume: e.volume,
+      body: e.body || null,
+      // Sa forme est celle de ses portes, jointes par le moteur.
+      byEntryways: parSeuils,
     });
   }
   return out;
@@ -268,7 +281,10 @@ export function localPoint(field, worldPoint) {
 export function strongestDirectional(fields, worldPoint) {
   let best = null;
   for (const f of fields) {
-    if (!insideVolume(f, worldPoint)) continue;
+    // `present` est pose par l'appelant pour un champ commande par des SEUILS :
+    // sa forme n'est pas une contenance, et aucun test de point ne pourrait la
+    // rendre. Les autres se testent comme avant.
+    if (!f.present && !insideVolume(f, worldPoint)) continue;
     if (!best) { best = f; continue; }
     const p = f.priority ?? 0, bp = best.priority ?? 0;
     if (p > bp || (p === bp && f.magnitude > best.magnitude)) best = f;

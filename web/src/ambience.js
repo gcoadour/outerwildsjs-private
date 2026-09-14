@@ -43,9 +43,7 @@
 // @lit AudioVolume, DayNightAudioVolume
 // Les dix-sept volumes d'ambiance, arbitres par priorite.
 
-import { insideVolume } from "./gravity.js";
-import { Entryway } from "./entryways.js";
-import { restingPoint } from "./frames.js";
+import { ZonePresence, zonesAround, attachEntryways } from "./entryways.js";
 
 /**
  * Charge les zones depuis le meme fichier que les sources.
@@ -77,12 +75,7 @@ export async function loadAmbience() {
  * portes (docs/84-ambiance.md).
  */
 export function ambienceZones(audio, seuils = []) {
-  return ((audio && audio.volumes) || [])
-    .map((z) => ({
-      ...z,
-      entryways: seuils.filter((t) => t.name === z.name ||
-        (t.parents.includes(z.name) && (!z.body || !t.body || t.body === z.body))),
-    }))
+  return attachEntryways((audio && audio.volumes) || [], seuils)
     .filter((z) => z.file && (z.volume || z.entryways.length));
 }
 
@@ -127,51 +120,10 @@ function rayon(z) {
   return min;
 }
 
-/**
- * Ou l'on est, zone par zone : contenance ET seuils franchis.
- *
- * L'etat est necessaire — un seuil ne dit rien tant qu'on ne l'a pas
- * RETRAVERSE, et c'est justement ce qui lui permet de decrire une grotte que
- * nulle sphere ne decrirait.
- */
-export class ZonePresence {
-  constructor(zone) {
-    this.zone = zone;
-    this.portes = (zone.entryways || []).map((t) => new Entryway(t));
-    this.count = 0;
-    this.dedans = false;
-  }
-
-  get inside() { return this.dedans || this.count > 0; }
-
-  update(worldPoint, shiftOf = null) {
-    const ou = (x) => (shiftOf ? restingPoint(worldPoint, shiftOf(x)) : worldPoint);
-    for (const p of this.portes) {
-      const e = p.update(ou(p.trigger));
-      if (e === "entry") this.count += 1;
-      else if (e === "exit") this.count = Math.max(0, this.count - 1);
-    }
-    if (this.zone.volume) this.dedans = insideVolume(this.zone, ou(this.zone));
-    return this.inside;
-  }
-}
-
 /** Le clip d'une zone a cet instant : celui de la nuit s'il en a un. */
 export function clipOf(zone, night = false) {
   if (night && zone.nightFile) return zone.nightFile;
   return zone.file;
-}
-
-/**
- * Les zones ou l'auditeur se trouve : contenance et seuils confondus.
- *
- * Remplace l'ancien `activeZones`, qui ne savait que la contenance — et qui, de
- * ce fait, ne pouvait rien dire des six zones sans collider.
- */
-export function zonesAround(presences, worldPoint, shiftOf = null) {
-  const out = [];
-  for (const p of presences) if (p.update(worldPoint, shiftOf)) out.push(p.zone);
-  return out;
 }
 
 /**
