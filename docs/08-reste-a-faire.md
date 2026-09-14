@@ -120,7 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **174/174** ([`69`](69-assise.md)) |
+| vérification avec le build | **184/184** ([`70`](70-modes.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -134,6 +134,7 @@ portage.
 | météores de Brittle Hollow | quatre lanceurs, délai **retiré à chaque tir**, 50 de dégâts au contact ([`68`](68-lois.md)) |
 | **s'asseoir** | les 4 points d'accrochage : une durée tirée de l'angle, et on se lève avec la vitesse du siège ([`69`](69-assise.md)) |
 | verrouillage de caméra | le corps tourne en lacet, le champ suit `500/d` borné à 20° ([`69`](69-assise.md)) |
+| **modes d'entrée** | 10 ensembles de canaux : la lunette **enracine**, le poste n'a pas de lampe, un mort ne commande rien ([`70`](70-modes.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

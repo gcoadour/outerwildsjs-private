@@ -933,6 +933,44 @@ def run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- ce qui se commande, et quand (docs/70-modes.md) --------------------
+        #
+        # `OWInput` echange un ensemble de canaux actifs a chaque changement de
+        # mode. Le portage lisait les vingt-deux en permanence.
+        mo = page.evaluate("""() => {
+          const m = window.__modes;
+          return { mode: m.mode, actifs: m.actif.size,
+                   lampe: m.permet("Flashlight"), pilote: m.permet("Autopilot") };
+        }""")
+        rep.eq("a pied, dix-huit canaux sur vingt-deux", mo["actifs"], 18)
+        rep.eq("la lampe repond", mo["lampe"], True)
+        rep.eq("et l'autopilote, non", mo["pilote"], False)
+        # La lunette ROOTE le joueur : ni marche, ni saut. C'est le controle qui
+        # se sent le plus, et le portage laissait marcher.
+        page.mouse.move(640, 360)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(300)
+        lun = page.evaluate("""() => {
+          const m = window.__modes;
+          return { mode: m.mode, n: m.actif.size, marche: m.permet("Move Z"),
+                   saut: m.permet("Jump"), zoom: m.permet("Zoom In") };
+        }""")
+        rep.eq("a la lunette, six canaux", lun["n"], 6)
+        rep.eq("on ne marche plus", lun["marche"], False)
+        rep.eq("on ne saute plus", lun["saut"], False)
+        rep.eq("et le zoom repond", lun["zoom"], True)
+        # Et la MEME touche ne fait plus rien : le filtre vit dans `Commandes`.
+        rep.eq("la touche de marche ne rend plus rien", page.evaluate(
+            "() => window.__cmds.axis('Move Z', { keys: { KeyW: true } })"), 0)
+        page.mouse.down(button="middle")
+        page.mouse.up(button="middle")
+        page.wait_for_timeout(300)
+        rep.eq("lunette refermee, on remarche", page.evaluate(
+            "() => window.__cmds.axis('Move Z', { keys: { KeyW: true } })"), 1)
+        rep.eq("et on est rendu a dix-huit canaux",
+               page.evaluate("() => window.__modes.actif.size"), 18)
+
         # --- s'asseoir (docs/69-assise.md) --------------------------------------
         #
         # Les quatre `PlayerAttachPoint` : le portage ne s'asseyait nulle part,

@@ -74,6 +74,7 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
+import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT } from "../web/src/modes.js";
 import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          launchSpeed, launchPitch, orbitalSpeed, launchWindowLength,
          tracksHorizon, horizonAim, impendingCollision, lanternRange,
@@ -4435,6 +4436,132 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const annonces = tous.drain();
   check("les quatre annonces sont passees", annonces.length, 4);
   check("et le drainage vide", tous.drain().length, 0);
+}
+
+{
+  // --- CE QUI SE COMMANDE, ET QUAND (docs/70-modes.md) ---
+  //
+  // `OWInput` echange un ENSEMBLE de canaux actifs a chaque changement de
+  // mode, et `GetAxis` rend zero pour tout canal absent. Le portage lisait les
+  // vingt-deux canaux en permanence, ce qui n'est vrai dans aucun mode.
+
+  check("dix ensembles", Object.keys(ENSEMBLES).length, 10);
+  // Les alias de mode retombent tous sur un canal du build : c'est tout ce que
+  // sont les classes `*Input` — des tables d'alias.
+  check("chaque alias designe un canal connu",
+        Object.values(ALIAS).every((c) => COMMANDES[c] !== undefined), true);
+  check("roulis et lacet sont le MEME canal", ALIAS.roll, ALIAS.yaw);
+  check("avancer le texte, c'est interagir", ALIAS.advanceText, ALIAS.interact);
+
+  // Les tailles mesurees, ensemble par ensemble.
+  check("a pied, dix-huit canaux sur vingt-deux", canaux("personnage").size, 18);
+  check("au poste de pilotage, dix-sept", canaux("vaisseau").size, 17);
+  check("a la camera d'atterrissage, douze", canaux("atterrissage").size, 12);
+  check("au vaisseau miniature, huit", canaux("modele").size, 8);
+  check("a la carte, huit", canaux("carte").size, 8);
+  check("a la lunette, six", canaux("lunette").size, 6);
+  check("a l'ordinateur de bord, quatre", canaux("ordinateur").size, 4);
+  check("a la camera du satellite, trois", canaux("satellite").size, 3);
+  check("en dialogue, deux", canaux("dialogue").size, 2);
+  check("dans un menu, UN", canaux("menu").size, 1);
+
+  // Et ce que ces tailles veulent dire, ligne par ligne.
+  check("a pied, pas d'autopilote", canaux("personnage").has("Autopilot"), false);
+  check("ni de camera d'atterrissage",
+        canaux("personnage").has("Landing Camera"), false);
+  check("ni de zoom", canaux("personnage").has("Zoom In"), false);
+  check("au poste, pas de saut", canaux("vaisseau").has("Jump"), false);
+  check("et PAS DE LAMPE", canaux("vaisseau").has("Flashlight"), false);
+  check("a la lunette, on ne marche plus", canaux("lunette").has("Move Z"), false);
+  check("ni ne saute", canaux("lunette").has("Jump"), false);
+  check("mais on vise toujours un referentiel",
+        canaux("lunette").has("Lock On"), true);
+  check("a la carte, on n'interagit pas", canaux("carte").has("Interact"), false);
+  check("mais on vise", canaux("carte").has("Lock On"), true);
+  check("dans un menu, seule la touche qui le referme",
+        [...canaux("menu")][0], "Pause");
+  check("en dialogue, avancer et choisir",
+        [...canaux("dialogue")].sort().join(","), "Interact,Move Z");
+  check("a la camera d'atterrissage, pas de menu",
+        canaux("atterrissage").has("Pause"), false);
+
+  // Chaque mode se quitte : un ensemble sans sortie enfermerait le joueur.
+  for (const [nom, sortie] of [["carte", "Map"], ["lunette", "Telescope"],
+                               ["menu", "Pause"], ["dialogue", "Interact"],
+                               ["ordinateur", "Cancel"], ["satellite", "Cancel"],
+                               ["modele", "Cancel"],
+                               ["atterrissage", "Landing Camera"]]) {
+    check(`on sort du mode ${nom}`, canaux(nom).has(sortie), true);
+  }
+
+  const m = new Modes();
+  check("on commence a pied", m.mode, "personnage");
+  check("et la lampe s'allume", m.permet("Flashlight"), true);
+  m.entre("vaisseau");
+  check("au poste, la lampe ne repond plus", m.permet("Flashlight"), false);
+  check("mais l'autopilote, oui", m.permet("Autopilot"), true);
+  m.sort("vaisseau");
+  check("en sortant, la lampe revient", m.permet("Flashlight"), true);
+
+  // LA CASE DE SAUVEGARDE N'EST PAS UNE PILE. C'est le build, et le reproduire
+  // est le but : un portage qui « corrige » cela ne se commande plus pareil.
+  const pile = new Modes();
+  pile.entre("lunette");
+  check("a la lunette", pile.permet("Zoom In"), true);
+  pile.entre("carte");
+  check("la carte ecrase la sauvegarde de la lunette",
+        pile.dernier.has("Zoom In"), true);
+  pile.entre("menu");
+  check("et le menu ecrase celle de la carte", pile.dernier.has("Map"), true);
+  pile.sort("menu");
+  check("refermer le menu rend la CARTE", pile.permet("Map"), true);
+  pile.sort("carte");
+  check("et refermer la carte rend la carte encore", pile.permet("Map"), true);
+  // Et c'est bien l'ensemble de la CARTE que l'on garde, pas celui de la
+  // lunette : « Move Z » y est, et la lunette ne l'a pas.
+  check("la lunette, elle, est perdue", pile.permet("Move Z"), true);
+
+  // Sortir du poste alors que la lunette est ouverte ne touche a RIEN.
+  const lu = new Modes();
+  lu.entre("vaisseau");
+  lu.entre("lunette");
+  check("la lunette depuis le poste", lu.permet("Zoom In"), true);
+  check("sortir du poste ne fait rien", lu.sort("vaisseau"), false);
+  check("et la lunette tient toujours", lu.permet("Zoom In"), true);
+  lu.sort("lunette");
+  check("c'est en la refermant qu'on retrouve le poste",
+        lu.permet("Autopilot"), true);
+
+  // Un mort ne commande RIEN — pas meme d'ouvrir le menu.
+  const mo = new Modes();
+  mo.meurt();
+  check("un mort n'a aucun canal", mo.actif.size, 0);
+  check("pas meme la pause", mo.permet("Pause"), false);
+  mo.init();
+  check("et rouvrir les yeux les rend tous", mo.actif.size, 18);
+
+  // Les cinq ajouts du portage ne sont dans aucun ensemble du build, et
+  // passent toujours : ils sont hors du systeme de modes, pas dedans.
+  const aj = new Modes();
+  aj.entre("menu");
+  for (const nom of Object.keys(AJOUTS)) {
+    check(`l'ajout « ${nom} » passe meme dans un menu`, aj.permet(nom), true);
+  }
+
+  // Le filtre vit dans `Commandes`, comme `GetAxis` dans le build.
+  const cm = new Commandes(null);
+  const etat = { keys: { KeyF: true, KeyE: true } };
+  check("sans modes poses, tout se lit", cm.held("Flashlight", etat), true);
+  const fm = new Modes();
+  cm.setModes(fm);
+  check("a pied, la lampe repond", cm.held("Flashlight", etat), true);
+  fm.entre("vaisseau");
+  check("au poste, la MEME touche ne rend plus rien",
+        cm.held("Flashlight", etat), false);
+  check("et l'axe rend zero", cm.axis("Move X", { keys: { KeyD: true } }), 1);
+  fm.entre("menu");
+  check("dans un menu, plus un axe", cm.axis("Move X", { keys: { KeyD: true } }), 0);
+  check("et les modes qui sauvegardent sont sept", SAUVEGARDENT.size, 7);
 }
 
 report();

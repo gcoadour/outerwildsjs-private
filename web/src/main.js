@@ -75,6 +75,7 @@ import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes } from "./input.js";
+import { Modes } from "./modes.js";
 import { SpinField, sunElevation } from "./spin.js";
 import { directionalFields, polarFields } from "./gravity.js";
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
@@ -170,6 +171,13 @@ async function boot() {
   // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
   // prend le relais — et elle se sait repli, comme `config.js`.
   const cmds = await loadCommandes();
+  // §K Le jeu de commandes actif. `OWInput` en echange l'ensemble a chaque
+  // changement de mode, et tout ce qui lit une touche passe par lui
+  // (docs/70-modes.md).
+  const modes = new Modes();
+  cmds.setModes(modes);
+  window.__modes = modes;
+  window.__cmds = cmds;
   window.__commandes = cmds;
   const reglagesCam = reglagesDuJoueur(camerasDuBuild);
   camera.fov = (reglagesCam.fov || 70) * Math.PI / 180;
@@ -1795,6 +1803,52 @@ async function boot() {
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = north.scale(cy * cp).add(east.scale(sy * cp)).add(up.scale(-sp));
     const right = north.scale(-sy).add(east.scale(cy));
+
+    // §K CE QUI SE COMMANDE, ET QUAND (docs/70-modes.md).
+    //
+    // `OWInput` echange un ENSEMBLE de canaux actifs a chaque changement de
+    // mode, et `GetAxis` rend zero pour tout canal absent. Le portage lisait
+    // les vingt-deux canaux en permanence — ce qui n'est vrai dans aucun mode
+    // du jeu, pas meme a pied.
+    //
+    // Les transitions se lisent sur l'ETAT plutot que sur les appels : chaque
+    // bascule de mode a deja son booleen ici, et les guetter est exact la ou
+    // brancher soixante appels aurait laisse des trous. Les sorties passent
+    // d'abord, dans l'ordre inverse des entrees, pour que la case de
+    // sauvegarde d'`OWInput` se vide dans le bon ordre.
+    {
+      const etats = [
+        ["menu", !!(settings && settings.open)],
+        ["dialogue", !!dialogue.active],
+        ["carte", !!solarMap.open],
+        ["lunette", !!(telescope && telescope.active)],
+        // Les deux consoles deportees du build ne donnent PAS le meme jeu de
+        // commandes : `RemoteFlightConsole` pose celui du vaisseau miniature
+        // (huit canaux, pas de sonde ni de carte), la console du satellite en
+        // pose trois — annuler, photographier, photographier en arriere.
+        //
+        // `EnterLandingView`, la caméra d'atterrissage du vaisseau, n'a pas
+        // d'equivalent ici : ce portage n'a pas de vue d'atterrissage separee,
+        // et son canal « Landing Camera » bascule les consoles deportees. Son
+        // ensemble est donc lu, garde, et sans appelant — dit plutot qu'omis.
+        ["satellite", !!(consoles.active && !consoles.active.flight)],
+        ["modele", !!(consoles.active && consoles.active.flight)],
+        ["ordinateur", !!computer.open],
+        ["vaisseau", !!(ship && ship.boarded)],
+      ];
+      for (let i = etats.length - 1; i >= 0; i--) {
+        const [nom, on] = etats[i];
+        if (!on && modes.dedans.has(nom)) { modes.dedans.delete(nom); modes.sort(nom); }
+      }
+      for (const [nom, on] of etats) {
+        if (on && !modes.dedans.has(nom)) { modes.dedans.add(nom); modes.entre(nom); }
+      }
+      // `OnPlayerDeath` pose un ensemble VIDE : un mort ne commande rien du
+      // tout, pas meme d'ouvrir le menu. Le portage coupait deja le
+      // deplacement ; il laissait la lampe, la carte et la sonde.
+      if (death.dead && !modes.mort) modes.meurt();
+      else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
+    }
 
     // Un mort ne pilote plus : PlayerDeathHandler coupe les commandes le temps
     // de la sequence. Sans cela on continuait a marcher pendant son propre

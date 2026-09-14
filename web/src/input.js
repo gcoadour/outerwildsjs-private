@@ -168,12 +168,30 @@ export class Commandes {
       this.canaux.set(nom, { nom, neg: ranger([]), pos: ranger(def.pos),
                              pad: null, mouseLook: null, ajout: true });
     }
+    // Sans jeu de commandes pose, tout se lit : c'est l'etat du portage avant
+    // docs/70, et le repli de tout ce qui construit un `Commandes` pour une
+    // mesure isolee.
+    this.modes = null;
     this.fixedTimestep = (data && data.fixedTimestep) || 0.016;
     this.tags = (data && data.tags) || [];
     this.layers = (data && data.layers) || {};
   }
 
   get(nom) { return this.canaux.get(nom) || null; }
+
+  /**
+   * Le jeu de commandes actif, ou null pour tout lire.
+   *
+   * `OWInput.GetAxis` ne fait qu'une chose de plus que lire la touche :
+   * `_activeInputs.Contains(canal)`. Le filtre vit donc ICI, au meme endroit
+   * que dans le build, plutot qu'a chacun des soixante appels de `main.js` —
+   * un filtre qu'on peut oublier a un endroit n'est pas un filtre
+   * (docs/70-modes.md).
+   */
+  setModes(modes) { this.modes = modes || null; return this; }
+
+  /** Le canal est-il lisible dans le mode courant ? */
+  permis(nom) { return !this.modes || this.modes.permet(nom); }
 
   /**
    * Le canal est-il tenu ?
@@ -183,7 +201,7 @@ export class Commandes {
    */
   held(nom, etat = {}) {
     const c = this.get(nom);
-    if (!c) return false;
+    if (!c || !this.permis(nom)) return false;
     const k = etat.keys || {}, s = etat.mouse || {}, p = etat.pad || null;
     for (const code of c.pos.codes) if (k[code]) return true;
     for (const b of c.pos.mouse) if (s[b]) return true;
@@ -202,7 +220,7 @@ export class Commandes {
    */
   axis(nom, etat = {}) {
     const c = this.get(nom);
-    if (!c) return 0;
+    if (!c || !this.permis(nom)) return 0;
     const k = etat.keys || {}, s = etat.mouse || {};
     let v = 0;
     for (const code of c.pos.codes) if (k[code]) v += 1;
