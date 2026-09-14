@@ -187,7 +187,9 @@ const WANT_VOLUME = new RegExp([
  * quelle direction on regarde au premier instant. La position seule etait
  * extraite, et le portage tournait donc la tete au hasard (docs/38-depart.md).
  */
-const WANT_ROTATION = /spawnpoint/i;
+// `ShipBody` s'y ajoute : les capteurs de pad sont ses enfants, et ramener
+// leur position dans SON repere demande sa pose de repos (docs/89-pose.md).
+const WANT_ROTATION = /^(spawnpoint|shipbody)$/i;
 
 /** Composants dont le PARENT designe ce qu'ils commandent. */
 const WANT_PARENTS = /^EntrywayTrigger$/i;
@@ -242,6 +244,17 @@ export function extractGameplay(ctx) {
     // plutot que « le corps, c'est moi ».
     if (body) entry.body = body;
 
+    // L'ORIENTATION se pose AVANT le tri : un singleton en a besoin aussi, et
+    // le `continue` qui suit la lui refusait. `ShipBody` en est le cas : ses
+    // capteurs de pad sont ses enfants, et ramener leurs positions dans son
+    // repere demande sa pose de repos. Le champ manquait sans que rien ne le
+    // dise — l'offset sortait en coordonnees MONDE, et les jambes du vaisseau
+    // se retrouvaient devant lui (docs/89-pose.md).
+    if (WANT_ROTATION.test(cls)) {
+      const [, rot] = ctx.world(gid);
+      entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+    }
+
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;
     if (!PLACED.includes(cls) && !PLACED_PATTERNS.some((p) => p.test(cls))) continue;
     if (!PLACED.includes(cls)) discovered[cls] = (discovered[cls] || 0) + 1;
@@ -251,10 +264,10 @@ export function extractGameplay(ctx) {
     if (WANT_VOLUME.test(cls)) {
       const vol = ctx.volumeOf(gid);
       if (vol) entry.volume = vol;
-    }
-    if (WANT_VOLUME.test(cls) || WANT_ROTATION.test(cls)) {
-      const [, rot] = ctx.world(gid);
-      entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+      if (!entry.rotation) {
+        const [, rot] = ctx.world(gid);
+        entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+      }
     }
 
     // A QUI ce seuil appartient. `OWEffectVolume.Awake` prend ses

@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`89-pose.md`](89-pose.md) — **une loi écrite, commentée, testée et jamais appelée : trois bugs en série sous ce que « posé » veut dire**
 - [`88-boucle.md`](88-boucle.md) — **trois nombres écrits de mémoire, deux faux : dix-huit minutes, une onde cubique, et une fin des temps qui attend**
 - [`87-atterrissage.md`](87-atterrissage.md) — **la caméra qui regarde le sol, le manche qui change de main, et la poussée qui refuse de vous mettre en orbite**
 - [`86-annonces-de-mode.md`](86-annonces-de-mode.md) — **dix-neuf chaînes pour une mécanique déjà portée : faire la bonne chose sans jamais dire celle du jeu**

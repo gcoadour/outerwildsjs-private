@@ -24,8 +24,8 @@ import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
          HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
          ROAST_DISTANCE } from "../web/src/helmet.js";
-import { elevators, Elevator as Cabine, LaunchTerminal, landedOn,
-         landingPadSensors, museumEntryways, smoothStep,
+import { elevators, Elevator as Cabine, LaunchTerminal, landedOn, LandingPads,
+         LANDED_SPEED, landingPadSensors, museumEntryways, smoothStep,
          ELEVATOR } from "../web/src/tower.js";
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
@@ -1776,12 +1776,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // (docs/87-atterrissage.md).
   const auSol = new Ship(consts, null, [0, 0, 0]);
   auSol.boarded = true;
-  auSol.landed = true;
+  auSol.onPad = true;
   for (let i = 0; i < 60; i++) auSol.rotate(1 / 60, { roll: 1 }, droit);
-  check("pose, le roulis ne fait rien", auSol.quat.join(","), "0,0,0,1");
-  auSol.landed = false;
+  check("gare sur la piste, le roulis ne fait rien", auSol.quat.join(","), "0,0,0,1");
+  auSol.onPad = false;
   auSol.rotate(1 / 60, { roll: 1 }, droit);
-  check("decolle, il repond de nouveau", auSol.quat.join(",") !== "0,0,0,1", true);
+  check("une fois parti, il repond de nouveau", auSol.quat.join(",") !== "0,0,0,1", true);
 
   // Un pas d'integration d'orientation ne change pas la norme.
   const q = spinStep([0, 0, 0, 1], [0, 3, 0], 0.1);
@@ -3649,6 +3649,29 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a cheval sur deux corps, pas pose non plus",
         landedOn(["TimberHearth_Body", "Moon_Body", "TimberHearth_Body"]), null);
   check("et aucun capteur du tout n'est pas un atterrissage", landedOn([]), null);
+  // LA TROISIEME CONDITION, qui manquait : au-dela de cinq unites de vitesse
+  // relative, on ne se pose pas — on GLISSE (docs/89-pose.md). Elle compte
+  // depuis que « pose » coupe toute rotation.
+  const trois = ["TimberHearth_Body", "TimberHearth_Body", "TimberHearth_Body"];
+  check("a l'arret, on est pose", landedOn(trois, 0), "TimberHearth_Body");
+  check("a la limite exacte, encore",
+        landedOn(trois, LANDED_SPEED), "TimberHearth_Body");
+  check("au-dela, on glisse", landedOn(trois, LANDED_SPEED + 0.01), null);
+
+  // Les deux annonces du build, sur les transitions et pas sur l'etat.
+  const quai = new LandingPads();
+  check("en vol, rien", quai.update([null, null, null]), null);
+  check("le toucher s'annonce", quai.update(trois, 0), "ShipTouchdown");
+  check("et ne se repete pas", quai.update(trois, 0), null);
+  check("le decollage aussi", quai.update([null, null, null]), "ShipTakeoff");
+  // Reprendre de la vitesse sans quitter le sol compte comme un decollage :
+  // c'est la meme ligne du build, et c'est ce qui rend les commandes.
+  const glisse = new LandingPads();
+  glisse.update(trois, 0);
+  check("pose a l'arret", glisse.landed, true);
+  check("puis lance, on decolle",
+        glisse.update(trois, LANDED_SPEED + 1), "ShipTakeoff");
+  check("et le corps touche est oublie", glisse.body, null);
 
   const pads = landingPadSensors({ placed: { LandingPadSensor: [
     { name: "SurfaceSensor", position: [0, 0, 0], body: "Ship_Body",

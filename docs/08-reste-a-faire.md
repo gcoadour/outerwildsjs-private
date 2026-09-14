@@ -19,7 +19,7 @@ lisait**.
 > | | |
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
-> | `evenements.mjs` — ce que le build **annonce** | **77** des 124 nommés |
+> | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** loi sans appelant ([`75`](75-chaleur.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
@@ -393,6 +393,12 @@ n'avait jamais parlé ([`76`](76-proximite.md)). Elle est comblée — `lois.mjs
 compte **zéro** — et les outils qui l'ont trouvée sont désormais plus sévères
 que le dépôt ne l'était.
 
+`scripts/lois.mjs` a montré sa limite avec [`89`](89-pose.md) : il compte les
+**fonctions exportées**, et `Ship.padLanding` était une **méthode** — écrite,
+commentée, éprouvée par un test, et appelée par personne pendant tout ce
+temps. Le dénominateur des lois ne voit pas les méthodes ; celui des annonces,
+lui, l'a trouvée.
+
 Une **quatrième** nature est apparue avec [`82`](82-secteur-majeur.md), et elle
 est la plus discrète : **la constante inventée**. Le portage décidait du secteur
 courant par un `horizon × 1,5` — un nombre plausible, écrit de bonne foi, et
@@ -418,7 +424,7 @@ première boîte d'enfant et la servait comme contenance. Aucun test ne
 l'interrogeait, parce que le commentaire tenait lieu de preuve. C'est plus
 difficile à voir qu'un commentaire faux.
 
-Reste le dénominateur des **annonces** : 47 des 124 chaînes de `GlobalMessenger`
+Reste le dénominateur des **annonces** : 45 des 124 chaînes de `GlobalMessenger`
 ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
 un événement non nommé peut correspondre à un comportement porté sous un autre
 nom — mais c'est **la carte de ce qu'il reste à lire**, et chaque piste s'y

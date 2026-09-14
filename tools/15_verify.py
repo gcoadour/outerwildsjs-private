@@ -2046,6 +2046,36 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("la fin des temps est suspendue si et seulement si les codes"
                    " sont inconnus", boucle["prevenue"], not boucle["codes"])
 
+        # --- ce que « pose » veut dire (docs/89-pose.md) ----------------------
+        #
+        # `padLanding` etait ecrite, eprouvee, et appelee par personne : le
+        # portage declarait « pose » au contact au sol, sans exiger que les
+        # trois capteurs touchent le meme corps ni qu'on soit assez lent.
+        pose = page.evaluate("""() => {
+          const s = window.__shipRef;
+          if (!s) return null;
+          return { pose: s.onPad, corps: s.padBody,
+                   vitesse: Math.round(s.speed * 100) / 100,
+                   annonces: s.pads.events.slice(0, 2) };
+        }""")
+        if pose:
+            # Le vaisseau commence pose sur la piste de Timber Hearth.
+            rep.eq("au demarrage, le vaisseau est pose", pose["pose"], True)
+            rep.at_most("et il ne bouge pas", pose["vitesse"], 5)
+            rep.eq("le toucher s'est annonce", pose["annonces"][:1],
+                   ["ShipTouchdown"])
+            # Le lancer a plus de cinq unites : on ne se pose plus, on glisse.
+            lance = page.evaluate("""() => {
+              const s = window.__shipRef;
+              s.vel.x += 40;
+              return true;
+            }""")
+            page.wait_for_timeout(700)
+            apres = page.evaluate("() => ({ pose: window.__shipRef.onPad,"
+                                 " annonces: window.__shipRef.pads.events.slice(-1) })")
+            rep.eq("lance a quarante unites, il ne l'est plus", apres["pose"], False)
+            rep.eq("et le decollage s'annonce", apres["annonces"], ["ShipTakeoff"])
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

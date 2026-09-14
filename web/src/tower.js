@@ -186,7 +186,9 @@ export function landingPadSensors(gameplay) {
  * rebord n'est pas pose — c'est la difference entre « quelque chose est sous
  * moi » et « je suis pose ».
  */
-export function landedOn(contacts) {
+export const LANDED_SPEED = 5;   // vitesse relative au-dela de laquelle on glisse
+
+export function landedOn(contacts, relSpeed = 0) {
   if (!contacts || !contacts.length) return null;
   let corps = null;
   for (const c of contacts) {
@@ -194,7 +196,40 @@ export function landedOn(contacts) {
     if (corps === null) corps = c;
     else if (corps !== c) return null;
   }
+  // La TROISIEME condition, qui manquait : le build compare la vitesse du
+  // vaisseau a celle du point de contact, et au-dela de cinq unites on n'est
+  // pas pose — on GLISSE. La nuance compte depuis que « pose » coupe toute
+  // rotation (docs/89-pose.md) : sans elle, un vaisseau qui derape sur une
+  // piste perdait ses commandes.
+  if (relSpeed > LANDED_SPEED) return null;
   return corps;
+}
+
+/**
+ * `LandingPadManager.Update` : les deux annonces du toucher et du decollage.
+ *
+ * Elles ne sont ecoutees par personne dans l'assembly — et c'est justement ce
+ * qui les rend interessantes a poser : le build les emet quand meme, et un
+ * portage qui les emet aussi pourra les brancher sans rien rouvrir.
+ */
+export class LandingPads {
+  constructor() {
+    this.landed = false;
+    this.body = null;
+    this.events = [];
+  }
+
+  /** @returns {"ShipTouchdown"|"ShipTakeoff"|null} */
+  update(contacts, relSpeed = 0) {
+    const corps = landedOn(contacts, relSpeed);
+    const pose = corps !== null;
+    this.body = corps;
+    if (pose === this.landed) return null;
+    this.landed = pose;
+    const e = pose ? "ShipTouchdown" : "ShipTakeoff";
+    this.events.push(e);
+    return e;
+  }
 }
 
 /**

@@ -317,6 +317,7 @@ async function boot() {
 
   // Position du vaisseau dans la scene AU REPOS, pour ramener ce qu'il porte.
   const shipRest = ((gameplay.singletons || {}).ShipBody || {}).position || null;
+  const shipRestRot = ((gameplay.singletons || {}).ShipBody || {}).rotation || null;
 
   // Depart : au point d'apparition du joueur, celui que le build pose.
   //
@@ -1032,9 +1033,10 @@ async function boot() {
                       // la piece touchee — la plus proche du point d'impact, et
                       // non celle que designe une normale.
                       engineComponents(gameplay));
-      // Les trois capteurs de pad, en offsets du repere du vaisseau : c'est
-      // par eux que le build decide si l'on est POSE, et non par un contact.
-      if (ship.setPadSensors(capteursPad, spawnWorld)) {
+      // Les trois capteurs de pad, en offsets du repere du vaisseau. L'origine
+      // est la position de REPOS de `Ship_Body`, pas le point d'apparition :
+      // s'en tromper mettait les jambes a 171 unites de la coque.
+      if (ship.setPadSensors(capteursPad, shipRest, shipRestRot)) {
         console.log(`vaisseau : ${capteursPad.length} capteurs de pad`);
       }
       // Le vaisseau porte desormais son orientation : sans la poser une
@@ -2499,7 +2501,7 @@ async function boot() {
                              (cibleAtt.gravity && cibleAtt.gravity.upperSurfaceRadius) || 0)
         : null;
       const modeAtt = atterrissage.updateMode(
-        { frame: cadreAtt, landed: !!(ship && ship.landed), distance: dAtt });
+        { frame: cadreAtt, landed: !!(ship && ship.onPad), distance: dAtt });
       if (modeAtt) {
         // `ShipThrusterController.OnEnterLandingMode` retient le referentiel ;
         // c'est lui qui sert d'axe radial a l'ecretage.
