@@ -10,7 +10,22 @@ lisait**.
 > l'autre bout — **ce que l'alpha pose et que le portage ne nomme pas** — et en
 > fait des lots ordonnés, prêts à écrire. Ses chiffres viennent du recensement
 > refait sur le build ([`45-recensement-mesure.md`](45-recensement-mesure.md)) :
-> **109 classes et 413 instances n'ont toujours aucun lecteur**.
+> **109 classes et 413 instances n'avaient alors aucun lecteur**.
+>
+> **Où en sont les trois dénominateurs**, aujourd'hui. Le dépôt en tient trois,
+> et chacun a été ouvert quand le précédent a cessé de dire quelque chose
+> ([`66`](66-allumage.md), [`68`](68-lois.md)) :
+>
+> | | |
+> |---|---|
+> | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, sur 295 / 1 451 |
+> | `evenements.mjs` — ce que le build **annonce** | **34** des 124 nommés |
+> | `lois.mjs` — ce que le portage **appelle** | **0** loi sans appelant ([`75`](75-chaleur.md)) |
+>
+> Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
+> flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
+> [`69`](69-assise.md), [`71`](71-quantique.md), [`74`](74-etalons.md),
+> [`75`](75-chaleur.md), [`76`](76-proximite.md).
 
 Inventaire fondé sur les composants et assets réellement présents dans le
 build, pas sur une impression. Ce document dit honnêtement où en est le
@@ -207,6 +222,8 @@ dans l'alpha.
 > `RocketKidConvoController` **est** dans le build, lisible, et porte trois
 > arbres (`_introduction`, `_successfulLanding`, `_tooManyCrashes`). Il sort
 > donc de cette liste : c'est un manque du portage, pas de l'alpha.
+> **Et il est comblé depuis [`78`](78-modele.md)** : le modèle réduit vole, ses
+> trois pistes comptent, et l'enfant choisit son arbre.
 >
 > **Et une deuxième fois** ([`45-recensement-mesure.md`](45-recensement-mesure.md)).
 > Le ciblage et l'entraînement y sont aussi. Deux lignes de ce tableau sur dix
@@ -266,21 +283,20 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   que le portage ne faisait pas : les mille étoiles **s'éteignent une à une**
   pendant la boucle, les trois quarts dans le dernier tiers. Le compte à rebours
   est écrit dans le ciel.
-- **13 des 275 classes posées dans `level0` n'ont aucun lecteur**, motifs
-  compris — et 32 de plus sont **extraites sans être lues**. Le compte est monté
-  de 59 à 77 en devenant juste : `scripts/recensement.mjs` retire désormais les
-  **commentaires** avant de compter, et c'est un commentaire qui avait caché
-  toute la pile d'effets d'image ([`47`](47-effets-image.md)).
-  La série du compte : 170 en [`42`](42-lumieres.md), 109 avant les six lots de
-  [`46`](46-migration-lots.md), 59 après, 77 une fois les commentaires retirés.
-  Puis **62** après la queue de [`49`](49-queue.md), et **13** après la série
-  [`50`](50-regard.md)–[`58`](58-suivi.md). Sur les **1 390 instances** posées
-  dans `level0`, **1 356 sont lues — 97,6 %**. Les 34 qui restent sont nommées
-  une par une en fin de [`58`](58-suivi.md) : quatorze calibrateurs de tenseur
-  d'inertie, sept outils de studio, sept mises en page, trois singletons de
-  câblage, une bibliothèque d'explosion tierce et un tracé d'onde.
-  `node scripts/recensement.mjs` en redonne la liste à jour, et c'est la carte
-  de ce qui reste.
+- **12 classes sur 295 n'ont aucun lecteur** — 15 instances sur 1 451 — et 5 de
+  plus sont **extraites sans être lues**. Les douze sont des outils de studio et
+  des mises en page ; `node scripts/recensement.mjs` en redonne la liste à jour.
+  Ce dénominateur est **fermé** depuis [`65`](65-onde.md) : il ne dit plus rien
+  d'utile, et c'est pour cela que [`66`](66-allumage.md) en a ouvert un autre.
+  L'historique du compte vaut d'être gardé, parce qu'il **monte** une fois :
+  170 en [`42`](42-lumieres.md), 109 avant les six lots de
+  [`46`](46-migration-lots.md), 59 après — puis **77**, quand
+  `scripts/recensement.mjs` s'est mis à retirer les **commentaires** avant de
+  compter. C'est un commentaire qui avait caché toute la pile d'effets d'image
+  ([`47`](47-effets-image.md)). Puis **62** après la queue de
+  [`49`](49-queue.md), **13** après la série [`50`](50-regard.md)–[`58`](58-suivi.md),
+  et **12** depuis, le recensement portant désormais sur les **cinq** fichiers
+  sérialisés et non sur `level0` seul ([`60`](60-sonde.md)).
 - ~~**Les impostures de planète**~~ **Fermé** ([`56`](56-impostures.md)), et la
   mesure a démenti la page : sur les cinq caméras, **deux n'ont aucun plan** et
   une troisième vise un `HomePlanet_graybox`. Le système est un chantier de
@@ -361,6 +377,19 @@ extrait et que rien ne lisait**. Elle est comblée
 
 Ce qui reste tient en une phrase : **le contenu que l'alpha n'a pas, et le
 jugement qu'une machine ne rend pas**. Le premier ne se comble pas ; le second
-demande quelqu'un qui joue, regarde et écoute. S'y ajoute, pour un temps, une
-troisième chose : **des comptes à relever sur un vrai build**, que les
-extracteurs neufs sortiront à la première extraction.
+demande quelqu'un qui joue, regarde et écoute.
+
+Une troisième nature de manque est apparue depuis, et c'est la plus instructive
+des trois : **du travail fait qui ne s'exécutait pas**. Un module entier importé
+par personne ([`68`](68-lois.md)), des lois présentes dans une ligne d'`import`
+et nulle part ailleurs ([`71`](71-quantique.md)), un motif qui posait une
+question au build sans lire la réponse ([`75`](75-chaleur.md)), un garde-fou qui
+n'avait jamais parlé ([`76`](76-proximite.md)). Elle est comblée — `lois.mjs`
+compte **zéro** — et les outils qui l'ont trouvée sont désormais plus sévères
+que le dépôt ne l'était.
+
+Reste le dénominateur des **annonces** : 90 des 124 chaînes de `GlobalMessenger`
+ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
+un événement non nommé peut correspondre à un comportement porté sous un autre
+nom — mais c'est **la carte de ce qu'il reste à lire**, et chaque piste s'y
+vérifie en une lecture d'IL. C'est par là que passe la suite.
