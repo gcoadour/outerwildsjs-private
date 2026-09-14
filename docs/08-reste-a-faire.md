@@ -19,7 +19,7 @@ lisait**.
 > | | |
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
-> | `evenements.mjs` — ce que le build **annonce** | **68** des 124 nommés |
+> | `evenements.mjs` — ce que le build **annonce** | **71** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** loi sans appelant ([`75`](75-chaleur.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
@@ -418,7 +418,7 @@ première boîte d'enfant et la servait comme contenance. Aucun test ne
 l'interrogeait, parce que le commentaire tenait lieu de preuve. C'est plus
 difficile à voir qu'un commentaire faux.
 
-Reste le dénominateur des **annonces** : 56 des 124 chaînes de `GlobalMessenger`
+Reste le dénominateur des **annonces** : 53 des 124 chaînes de `GlobalMessenger`
 ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
 un événement non nommé peut correspondre à un comportement porté sous un autre
 nom — mais c'est **la carte de ce qu'il reste à lire**, et chaque piste s'y

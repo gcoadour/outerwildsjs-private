@@ -82,6 +82,8 @@ import { eatMarshmallowHeals, flashlightPromptVisible,
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
+import { ATTERRISSAGE, rollMode, orbitSpeed, project,
+         limitOrbitThrust, allowLandingMode, LandingView } from "../web/src/landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
          modelLandingSpots, modelShipBody,
          rocketKids } from "../web/src/modelship.js";
@@ -1711,6 +1713,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le roulis tourne le vaisseau autour de son nez",
         round(roul.axes.fwd[2], 2), 1);
   check("... et incline son haut", Math.abs(roul.axes.up[0]) > 0.1, true);
+
+  // `ReadRotationalInput` rend Vector3.zero des que `IsLanded()` : pose, on ne
+  // tourne plus DU TOUT. Pas moins, pas lentement — zero
+  // (docs/87-atterrissage.md).
+  const auSol = new Ship(consts, null, [0, 0, 0]);
+  auSol.boarded = true;
+  auSol.landed = true;
+  for (let i = 0; i < 60; i++) auSol.rotate(1 / 60, { roll: 1 }, droit);
+  check("pose, le roulis ne fait rien", auSol.quat.join(","), "0,0,0,1");
+  auSol.landed = false;
+  auSol.rotate(1 / 60, { roll: 1 }, droit);
+  check("decolle, il repond de nouveau", auSol.quat.join(",") !== "0,0,0,1", true);
 
   // Un pas d'integration d'orientation ne change pas la norme.
   const q = spinStep([0, 0, 0, 1], [0, 3, 0], 0.1);
@@ -4820,6 +4834,85 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // `PlayerDeath` est dans la meme table, et pose l'ensemble vide.
   an.annonce("PlayerDeath");
   check("l'annonce de mort vide l'ensemble", an.actif.size, 0);
+
+  // --- le mode atterrissage (docs/87-atterrissage.md) --------------------
+  //
+  // Deux mecaniques que le build nomme presque pareil : la VUE (une camera, un
+  // regard, des commandes) et le MODE (une poussee ecretee).
+  check("le manche lace par defaut", rollMode(false, false), false);
+  check("la touche alt donne le roulis", rollMode(true, false), true);
+  // ... et en vue d'atterrissage, tout s'inverse.
+  check("en vue d'atterrissage, le manche roule", rollMode(false, true), true);
+  check("et la touche alt rend le lacet", rollMode(true, true), false);
+
+  // `ReferenceFrame.GetOrbitSpeed` = sqrt(g(d) * d), sur le champ analytique.
+  const corps = { gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 200,
+                             lowerSurfaceRadius: 200, cutoffRadius: 0,
+                             falloffType: 0 } };
+  check("a la surface, la vitesse orbitale",
+        round(orbitSpeed(corps, 200), 3), round(Math.sqrt(12 * 200), 3));
+  check("sans distance, rien", orbitSpeed(corps, 0), 0);
+
+  check("la projection suit l'axe", project([3, 4, 0], [1, 0, 0]).join(","), "3,0,0");
+  check("un axe nul ne projette rien", project([3, 4, 0], [0, 0, 0]).join(","), "0,0,0");
+
+  // L'ECRETAGE. Radial le long de x, tangentiel le long de y.
+  const radial = [10, 0, 0];
+  // Deja a la vitesse orbitale : la poussee tangentielle est annulee...
+  const vOrb = 5;
+  const borne = limitOrbitThrust([0, 4, 0], [0, 5, 0], radial, vOrb, 1);
+  check("a la vitesse orbitale, la poussee tangentielle est annulee",
+        borne.map((x) => round(x, 6)).join(","), "0,0,0");
+  // ... mais la RADIALE passe entiere : on monte et on descend a pleine
+  // puissance, c'est tout l'interet.
+  const mixte = limitOrbitThrust([3, 4, 0], [0, 5, 0], radial, vOrb, 1);
+  check("la part radiale n'est jamais touchee", round(mixte[0], 6), 3);
+  check("seule la tangentielle est ecretee", round(mixte[1], 6), 0);
+  // Sous la vitesse orbitale, rien ne change.
+  const libre = limitOrbitThrust([0, 1, 0], [0, 1, 0], radial, vOrb, 1);
+  check("sous la vitesse orbitale, la poussee passe",
+        libre.map((x) => round(x, 6)).join(","), "0,1,0");
+
+  check("sans referentiel, pas de mode atterrissage",
+        allowLandingMode({ frame: null, distance: 10 }), false);
+  check("pose, pas davantage",
+        allowLandingMode({ frame: { alignment: 500 }, landed: true, distance: 10 }),
+        false);
+  check("trop loin non plus",
+        allowLandingMode({ frame: { alignment: 500 }, distance: 900 }), false);
+  check("assez pres, oui",
+        allowLandingMode({ frame: { alignment: 500 }, distance: 10 }), true);
+
+  // LA BASCULE. Le regard part a l'appui, la camera 0,45 s plus tard.
+  const vue = new LandingView();
+  const t0 = vue.toggle(0, 5);
+  check("le regard bascule des l'appui", t0.snap.join(","),
+        `${ATTERRISSAGE.snapYaw},${ATTERRISSAGE.snapPitch}`);
+  check("a cinq unites, pas d'egalisation", t0.match, false);
+  check("le manche roule deja", vue.rollByDefault, true);
+  check("et le roulis est inverse", vue.flipRollFactor, -1);
+  check("la camera n'a pas encore bascule", vue.update(0.4), false);
+  // Tant que la transition dure, la touche ne repond plus.
+  check("et la touche ne repond pas", vue.toggle(0.4), null);
+  check("passe le delai, elle bascule", vue.update(0.5), true);
+  check("avec les deux annonces du build",
+        vue.events.join(","), "SwitchActiveCamera,EnterLandingView");
+  // Le MODE demande en plus d'etre assez pres.
+  check("loin, la vue sans le mode",
+        vue.updateMode({ frame: { alignment: 500 }, distance: 900 }), null);
+  check("pres, le mode s'ouvre",
+        vue.updateMode({ frame: { alignment: 500 }, distance: 10 }), "enter");
+  check("et il s'annonce", vue.events.at(-1), "EnterLandingMode");
+  check("s'eloigner le referme",
+        vue.updateMode({ frame: { alignment: 500 }, distance: 900 }), "exit");
+  const t1 = vue.toggle(1);
+  check("ressortir recentre le regard", t1.centre, true);
+  check("le manche relace", vue.rollByDefault, false);
+  check("et le roulis reprend son sens", vue.flipRollFactor, 1);
+  // Au-dela de vingt unites de vitesse relative, ouvrir la vue egalise.
+  const vite = new LandingView();
+  check("a vingt-cinq unites, l'egalisation part",
+        vite.toggle(0, ATTERRISSAGE.matchSpeed + 5).match, true);
 
   // Un mort ne commande RIEN — pas meme d'ouvrir le menu.
   const mo = new Modes();

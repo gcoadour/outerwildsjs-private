@@ -1978,6 +1978,55 @@ def _run(url, heavy, profil=None, zip_path=None):
             # de Brittle Hollow.
             rep.eq("et on n'y est pas", chambre["meteoPresente"], False)
 
+        # --- la vue d'atterrissage (docs/87-atterrissage.md) -------------------
+        #
+        # Le canal `Landing Camera` au poste de pilotage : le regard bascule a
+        # l'appui, la camera 0,45 s plus tard, et le manche change de main.
+        page.evaluate("() => { window.__shipRef.boarded = true; }")
+        page.wait_for_timeout(400)
+        att0 = page.evaluate("""() => {
+          const a = window.__atterrissage;
+          return a ? { on: a.on, roule: a.rollByDefault, flip: a.flipRollFactor,
+                       mode: a.mode } : null;
+        }""")
+        if att0:
+            rep.eq("au poste, la vue d'atterrissage est fermee", att0["on"], False)
+            rep.eq("le manche lace", att0["roule"], False)
+            rep.eq("et le roulis n'est pas inverse", att0["flip"], 1)
+            page.keyboard.press("KeyR")
+            page.wait_for_timeout(200)
+            att1 = page.evaluate("() => ({ on: window.__atterrissage.on,"
+                                 " transition: window.__atterrissage.transition,"
+                                 " roule: window.__atterrissage.rollByDefault,"
+                                 " flip: window.__atterrissage.flipRollFactor })")
+            # Les 0,45 s de transition ne sont PAS observables ici : sous
+            # swiftshader une image peut durer une seconde, et la premiere
+            # image apres l'appui tombe deja au-dela du delai. Ce que ce
+            # controle mesure est donc ce qui est synchrone de l'appui — les
+            # commandes — et le delai lui-meme est garde par tests/09-jeu.mjs.
+            rep.eq("le manche roule des l'appui", att1["roule"], True)
+            rep.eq("et le roulis est inverse", att1["flip"], -1)
+            page.wait_for_timeout(900)
+            att2 = page.evaluate("""() => {
+              const a = window.__atterrissage;
+              return { on: a.on, annonces: a.events.slice(-2),
+                       mode: window.__modes.mode };
+            }""")
+            rep.eq("passe le delai, la vue s'ouvre", att2["on"], True)
+            rep.eq("avec les deux annonces du build", att2["annonces"],
+                   ["SwitchActiveCamera", "EnterLandingView"])
+            rep.eq("et le jeu de commandes change", att2["mode"], "atterrissage")
+            page.keyboard.press("KeyR")
+            page.wait_for_timeout(300)
+            att3 = page.evaluate("() => ({ on: window.__atterrissage.on,"
+                                 " roule: window.__atterrissage.rollByDefault,"
+                                 " flip: window.__atterrissage.flipRollFactor })")
+            rep.eq("ressortir la referme", att3["on"], False)
+            rep.eq("le manche relace", att3["roule"], False)
+            rep.eq("et le roulis reprend son sens", att3["flip"], 1)
+        page.evaluate("() => { window.__shipRef.boarded = false; }")
+        page.wait_for_timeout(300)
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

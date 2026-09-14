@@ -25,6 +25,7 @@
 // et le nez devient visible, et c'est exactement la lourdeur que decrit
 // docs/07-gameplay.md.
 
+import { limitOrbitThrust, orbitSpeed } from "./landing.js";
 import { dominantField } from "./gravity.js";
 import { ShipDamage } from "./shipdamage.js";
 import { landedOn } from "./tower.js";
@@ -219,13 +220,16 @@ export class Ship {
     // ne recoit plus de couple, mais sa trainee angulaire continue de l'arreter.
     // Tangage et lacet : on vise la direction du regard. Le produit vectoriel
     // du nez vers la cible donne l'axe et, a petit angle, l'amplitude.
-    if (this.boarded && basis && basis.fwd) {
+    // `ShipThrusterController.ReadRotationalInput` rend Vector3.zero des que
+    // `LandingPadManager.IsLanded()` : pose, on ne tourne plus DU TOUT. Pas
+    // moins, pas lentement — zero. La trainee angulaire, elle, continue.
+    if (this.boarded && !this.landed && basis && basis.fwd) {
       const t = [basis.fwd.x, basis.fwd.y, basis.fwd.z];
       torque[0] += a.fwd[1] * t[2] - a.fwd[2] * t[1];
       torque[1] += a.fwd[2] * t[0] - a.fwd[0] * t[2];
       torque[2] += a.fwd[0] * t[1] - a.fwd[1] * t[0];
     }
-    const roll = (this.boarded && input && input.roll)
+    const roll = (this.boarded && !this.landed && input && input.roll)
       ? Math.max(-1, Math.min(1, input.roll)) : 0;
     if (roll) {
       torque[0] -= a.fwd[0] * roll;
@@ -311,15 +315,31 @@ export class Ship {
             up: [basis.up.x, basis.up.y, basis.up.z] };
       const fw = input.forward * this.damage.thrustFactor(input.forward > 0 ? "arriere" : "avant");
       const rt = input.right * this.damage.thrustFactor(input.right > 0 ? "gauche" : "droite");
-      this.vel.x += (a.fwd[0] * fw + a.right[0] * rt) * t;
-      this.vel.y += (a.fwd[1] * fw + a.right[1] * rt) * t;
-      this.vel.z += (a.fwd[2] * fw + a.right[2] * rt) * t;
       const vertical = this.ignition(dt, input.up ? 1 : 0);
-      if (vertical > 0 && this.damage.thrustFactor("bas")) {
-        this.vel.x += a.up[0] * t * vertical;
-        this.vel.y += a.up[1] * t * vertical;
-        this.vel.z += a.up[2] * t * vertical;
+      const vz = (vertical > 0 && this.damage.thrustFactor("bas")) ? vertical : 0;
+      // La poussee est rassemblee en UNE acceleration avant d'etre appliquee :
+      // c'est la seule facon d'en ecreter la part tangentielle en mode
+      // atterrissage, ou le build refuse de vous laisser gagner de la vitesse
+      // orbitale en essayant de vous poser (docs/87-atterrissage.md).
+      let acc = [a.fwd[0] * fw + a.right[0] * rt + a.up[0] * vz,
+                 a.fwd[1] * fw + a.right[1] * rt + a.up[1] * vz,
+                 a.fwd[2] * fw + a.right[2] * rt + a.up[2] * vz];
+      const L = world && world.landing;
+      if (L && L.body) {
+        const radial = [L.body.position[0] - this.pos.x,
+                        L.body.position[1] - this.pos.y,
+                        L.body.position[2] - this.pos.z];
+        const d = Math.hypot(radial[0], radial[1], radial[2]);
+        const vRel = [this.vel.x - (L.velocity ? L.velocity[0] : 0),
+                      this.vel.y - (L.velocity ? L.velocity[1] : 0),
+                      this.vel.z - (L.velocity ? L.velocity[2] : 0)];
+        acc = limitOrbitThrust(acc.map((x) => x * this.effectiveThrust), vRel,
+                               radial, orbitSpeed(L.body, d), dt)
+          .map((x) => x / (this.effectiveThrust || 1));
       }
+      this.vel.x += acc[0] * t;
+      this.vel.y += acc[1] * t;
+      this.vel.z += acc[2] * t;
     }
 
     this.pos.x += this.vel.x * dt;

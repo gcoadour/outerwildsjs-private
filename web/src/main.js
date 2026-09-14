@@ -85,6 +85,7 @@ import { GamepadControls, padAvailable } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
+import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
          modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod } from "./spin.js";
@@ -2070,6 +2071,24 @@ async function boot() {
   // Pour ne pas repeter l'annonce du mur a chaque image ou l'on s'y appuie.
   let murAnnonce = false;
   const lockOn = new LockOn();
+  // La vue d'atterrissage : une camera, un regard, et des commandes qui
+  // changent de main (docs/87-atterrissage.md).
+  const atterrissage = new LandingView();
+  window.__atterrissage = atterrissage;
+  // Le regard vise par la bascule, en radians, ou null. Le build appelle
+  // `SnapToDegrees(0, -70, 140)` : lacet ZERO, tangage -70, a 140 degres par
+  // seconde. Ici le lacet du portage est absolu et non relatif au vaisseau — le
+  // remettre a zero ferait pivoter la vue au hasard — donc seul le TANGAGE est
+  // vise, et c'est lui qui porte le sens du geste : on regarde le sol.
+  let snapRegard = null;
+  // `ShipThrusterController._landingRF` : le referentiel du mode atterrissage.
+  let atterrissageCorps = null;
+  /** Vitesse du vaisseau relative au referentiel vise, ou null. */
+  function viseeVitesseRelative() {
+    if (!ship || !lockOn.current) return null;
+    const v = lockOn.current.body.velocity || [0, 0, 0];
+    return Math.hypot(ship.vel.x - v[0], ship.vel.y - v[1], ship.vel.z - v[2]);
+  }
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
 
@@ -2130,7 +2149,29 @@ async function boot() {
     // Consoles a camera deportee : `Landing Camera`, la meme touche que la
     // photo arriere de la sonde — le build les separe par jeu de commandes,
     // pas par touche.
-    if (est("Landing Camera") && consoles.count) {
+    // `FlightConsole.Update` : au poste de pilotage, `toggleLandingCam` ouvre
+    // la VUE d'atterrissage. Ailleurs le portage garde ce canal pour les
+    // consoles deportees, qui n'ont pas d'autre touche ici.
+    if (est("Landing Camera") && ship && ship.boarded) {
+      const t = atterrissage.toggle(performance.now() / 1000,
+                                    viseeVitesseRelative());
+      if (t && t.snap) {
+        // Le regard bascule des l'APPUI, la camera 0,45 s plus tard : on voit
+        // le sol arriver avant d'y etre.
+        snapRegard = t.snap[1] * Math.PI / 180;
+      }
+      // `CenterCamera(140)` : en ressortir recentre, au meme rythme.
+      if (t && t.centre) snapRegard = 0;
+      // `Autopilot.InitMatchVelocity` : au-dela de vingt unites de vitesse
+      // RELATIVE, le jeu ne vous laisse pas basculer en vue d'atterrissage sans
+      // rien faire. Le portage pose la vitesse la ou le build y va par la
+      // poussee, comme il le fait deja pour le sac dorsal.
+      if (t && t.match && lockOn.current) {
+        const vm = matchedVelocity(lockOn.current.body.velocity || [0, 0, 0]);
+        ship.vel.x = vm[0]; ship.vel.y = vm[1]; ship.vel.z = vm[2];
+        console.log("vue d'atterrissage : egalisation automatique");
+      }
+    } else if (est("Landing Camera") && consoles.count) {
       const c = consoles.toggle([player.pos.x + framePos[0],
                                  player.pos.y + framePos[1],
                                  player.pos.z + framePos[2]]);
@@ -2204,6 +2245,9 @@ async function boot() {
     // commandes du regard. C'est le seul moment ou elles ne repondent plus, et
     // c'est ce qui donne son poids a la perte du sol.
     if (alignement.locked) return;
+    // La bascule de la vue d'atterrissage prend le tangage le temps du
+    // mouvement : `SnapToDegrees` ne se laisse pas interrompre.
+    if (snapRegard !== null) return;
     const f = settings.lookFactor();
     const w = Math.max(320, (window.innerWidth || 1280));
     const k = (TURN / w) * (telescope && telescope.active
@@ -2212,8 +2256,14 @@ async function boot() {
     // `JetpackInput.yaw` sont construits sur le MEME canal (`yaw`), et la touche
     // alt choisit lequel des deux recoit le mouvement. Le portage avait invente
     // une paire Q/Z — or Q est le canal `Cancel` du build.
-    if (cmds && cmds.held("Swap Roll/Yaw", { keys })) {
-      rollInput += dx * k * gain * Math.abs(f);
+    // `ShipThrusterController.Update` :
+    //   isRollMode = GetButton(swap) ? !rollByDefault : rollByDefault
+    // En vue d'atterrissage le defaut s'inverse — le manche ROULE, et c'est la
+    // touche alt qui rend le lacet (docs/87-atterrissage.md).
+    const roulisDefaut = !!(ship && ship.boarded && atterrissage.rollByDefault);
+    if (rollMode(!!(cmds && cmds.held("Swap Roll/Yaw", { keys })), roulisDefaut)) {
+      // `_flipRollFactor` vaut -1 en vue d'atterrissage : le roulis s'inverse.
+      rollInput += dx * k * gain * Math.abs(f) * atterrissage.flipRollFactor;
       return;
     }
     yaw += dx * k * gain * Math.abs(f);
@@ -2413,6 +2463,37 @@ async function boot() {
       // `OnPlayerDeath` pose un ensemble VIDE : un mort ne commande rien du
       // tout, pas meme d'ouvrir le menu. Le portage coupait deja le
       // deplacement ; il laissait la lampe, la carte et la sonde.
+      // --- la vue d'atterrissage : son delai, son regard, son mode ---
+      //
+      // `UpdateLandingMode` : la camera ne bascule que 0,45 s apres l'appui, et
+      // c'est alors que `EnterLandingView` part. Le MODE, lui, demande en plus
+      // un referentiel vise, assez proche, et un vaisseau pas pose.
+      if (atterrissage.update(now)) modes.annonce("EnterLandingView");
+      if (snapRegard !== null) {
+        const pas = (ATTERRISSAGE.snapDegrees * Math.PI / 180) * dt;
+        const ecart = snapRegard - pitch;
+        if (Math.abs(ecart) <= pas) { pitch = snapRegard; snapRegard = null; }
+        else pitch += Math.sign(ecart) * pas;
+      }
+      const cibleAtt = lockOn.current ? lockOn.current.body : null;
+      const dAtt = cibleAtt
+        ? Math.hypot(cibleAtt.position[0] - ship.pos.x,
+                     cibleAtt.position[1] - ship.pos.y,
+                     cibleAtt.position[2] - ship.pos.z)
+        : Infinity;
+      const cadreAtt = cibleAtt
+        ? autopilotDistances(declared.frames, cibleAtt.name,
+                             (cibleAtt.gravity && cibleAtt.gravity.upperSurfaceRadius) || 0)
+        : null;
+      const modeAtt = atterrissage.updateMode(
+        { frame: cadreAtt, landed: !!(ship && ship.landed), distance: dAtt });
+      if (modeAtt) {
+        // `ShipThrusterController.OnEnterLandingMode` retient le referentiel ;
+        // c'est lui qui sert d'axe radial a l'ecretage.
+        atterrissageCorps = modeAtt === "enter" ? cibleAtt : null;
+        console.log(modeAtt === "enter"
+          ? `mode atterrissage : ${cibleAtt.name}` : "mode atterrissage quitte");
+      }
       if (death.dead && !modes.mort) modes.annonce("PlayerDeath");
       else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
     }
@@ -2502,6 +2583,12 @@ async function boot() {
     }
     const world = { directional: dirFields, polar: polFields,
                     framePos: anchorPos, fluids, zeroG,
+                    // Le referentiel du mode atterrissage, s'il y en a un :
+                    // c'est lui qui donne l'axe radial de l'ecretage.
+                    landing: atterrissageCorps
+                      ? { body: atterrissageCorps,
+                          velocity: atterrissageCorps.velocity || [0, 0, 0] }
+                      : null,
                     // Coriolis et centrifuge du repere ancre, qui TOURNE avec
                     // son corps : sans eux le sol ne defile pas sous un
                     // stationnaire (docs/36-audit.md §1.2).
