@@ -25,6 +25,7 @@ import { Resources, oxygenZones, inOxygenZone,
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
+import { sunlessZones, darkZones, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatSources, heatAt, remoteConsoles, RemoteConsoles,
@@ -53,7 +54,7 @@ import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
          QUANTIQUE } from "./quantumobj.js";
 import { BlackHole, DebrisField } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
-import { Sectors, sectorMap, ambientIntensity, majorSectors,
+import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
@@ -132,7 +133,7 @@ import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
          qrot as qrotDecor, lookRotation } from "./decor.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt,
-         signalVolumes, signalZoneAt, sandstormVolumes,
+         sandstormVolumes,
          childTriggers, Sandstorm, radiationEmitters, probePrompts,
          promptFaced } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
@@ -460,9 +461,6 @@ async function boot() {
   // (docs/45-recensement-mesure.md).
   // Le seul `Surface` du build qui declare ecraser est le collider de
   // `RisingSand` : c'est lui qui porte la mort par compression (docs/53).
-  // Les zones sombres et les brouilleurs : extraits depuis longtemps, lus par
-  // personne. Les premieres coupent l'ambiance globale (docs/54-lumiere.md).
-  const zonesSignal = signalVolumes(gameplay);
   const sand = new SandLevels(markCrushing(sandColumns(gameplay), gameplay),
                               sandFunnels(gameplay));
   window.__sand = sand;
@@ -674,6 +672,12 @@ async function boot() {
   // Les secteurs MAJEURS, avec leur declencheur : c'est eux que la minicarte
   // interroge, et eux seuls qui repondent a `GetUseMinimap`.
   const majSecteurs = majorSectors(gameplay);
+  // Les zones sans soleil et leurs portes : `DarkZone` n'etait pas elles.
+  const zonesSansSoleil = new EffectZones(sunlessZones(gameplay));
+  // Et la zone sombre, qui est un SEUIL elle aussi : le portage la testait par
+  // contenance, et l'invite de lampe clignotait le temps de l'embrasure.
+  const zonesSombres = new EffectZones(darkZones(gameplay),
+                                       ["EnterDarkZone", "ExitDarkZone"]);
   // Le secteur majeur actif de l'image courante, pour les controles navigateur.
   let secteurMajeur = null;
   // §7 l'equipement se RAMASSE : le portage le donnait d'emblee.
@@ -723,10 +727,12 @@ async function boot() {
   window.__meteores = meteores;
 
   window.__lots = { declared, decor, passages, hazards, zeroGVolumes,
-                    majSecteurs, pickups, suits, equipment, training, events,
+                    majSecteurs, zonesSansSoleil, zonesSombres, pickups, suits, equipment, training, events,
                     get etat() {
                       return { referentiel: declared.current && declared.current.body,
                                secteurMajeur: secteurMajeur && secteurMajeur.name,
+                               secteurAmbiant: secteurMajeur ? secteurMajeur.ambient : null,
+                               sansSoleil: zonesSansSoleil.count,
                                minicarteDuSecteur: !!(secteurMajeur &&
                                                       secteurMajeur.useMinimap),
                                equipement: { combinaison: equipment.suit,
@@ -2810,15 +2816,15 @@ async function boot() {
       : null);
     const secMaj = secteurDe(playerW);
     secteurMajeur = secMaj;
-    // La zone sans soleil se lit ici parce que l'invite de lampe, plus haut
-    // dans l'image, la demande : la declarer plus bas la laissait dans sa zone
-    // morte temporelle, et le portage avait donc mis a la place
+    // LES SEUILS : on n'y est pas « dedans », on les a franchis dans un sens.
+    //
+    // Les deux comptes se tiennent ici parce que l'invite de lampe, plus haut
+    // dans l'image, demande la zone sombre : la calculer plus bas la laissait
+    // dans sa zone morte temporelle, et le portage avait mis a la place
     // `sectorState.secteur.sunless` — un champ qu'aucune extraction ne pose.
     // La condition ne s'est jamais verifiee une seule fois.
-    const zoneSombre = zonesSignal.length
-      ? signalZoneAt(zonesSignal, "dark", playerW,
-                     (z) => decalageDuCorps(z.body, anchorPos))
-      : null;
+    zonesSansSoleil.update(playerW, (x) => decalageDuCorps(x.body, anchorPos));
+    zonesSombres.update(playerW, (x) => decalageDuCorps(x.body, anchorPos));
 
     // §J LES DEUX POINTS D'ACCROCHAGE DE TIMBER HEARTH.
     //
@@ -3153,7 +3159,7 @@ async function boot() {
           on: flashlight.on, suit: equipment.suit,
           inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
           attached: !!consoles.active, satelliteCam: false,
-          inDarkZone: !!zoneSombre,
+          inDarkZone: zonesSombres.sunless,
           onDaySide: !night,
         })) {
           // Le texte, lui, n'est pas extractible : `_flashlightPrompt` est un
@@ -3307,13 +3313,19 @@ async function boot() {
         const p = restingPoint(playerW, dec);
         const d = Math.hypot(p[0] - secMaj.position[0], p[1] - secMaj.position[1],
                              p[2] - secMaj.position[2]);
-        vise = ambientIntensity(d, secMaj.lightRange);
+        vise = ambientIntensity(d, secMaj.lightRange, secMaj.ambient);
       } else {
-        vise = ambientIntensity(0, 0);
+        vise = ambientIntensity(0, 0, 0);
       }
       ambient.intensity = ambientStep(ambient.intensity,
-        ambientTarget(vise, { sunless: !!zoneSombre, inMajorSector: !!secMaj,
+        ambientTarget(vise, { sunless: zonesSansSoleil.sunless,
+                              inMajorSector: !!secMaj,
                               onMapCamera: !!solarMap.open }), dt);
+      // La TEINTE du secteur, que le portage ne lisait pas : `_ambientLight`
+      // est un choix de couleur, pas un nombre. Bleu de nuit sur les mondes
+      // rocheux, vert sur Giant's Deep et Dark Bramble.
+      const teinte = ambientTint(secMaj ? secMaj.ambient : 0);
+      ambient.diffuse.set(teinte[0], teinte[1], teinte[2]);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
       meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));

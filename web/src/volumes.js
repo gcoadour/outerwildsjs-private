@@ -331,37 +331,24 @@ export function promptFaced(prompt, avantCamera, regardMonde) {
   return angle < (prompt.minAngle ?? 45);
 }
 
-/** Les zones sans lumiere (`DarkZone`) et les brouilleurs (`InterferenceVolume`). */
-export function signalVolumes(gameplay) {
-  const placed = gameplay.placed || {};
-  const map = (list, kind) => (list || []).map((c) => ({
-    kind, name: c.name, body: c.body || null, position: c.position,
-    rotation: c.rotation || null, volume: c.volume || null,
-    strength: (c.fields || {})._interferenceStrength ?? 1,
-  }));
-  return [...map(placed.DarkZone, "dark"), ...map(placed.InterferenceVolume, "interference")];
-}
-
 /**
- * La zone de signal qui contient un point, par genre.
+ * LES ZONES DE SIGNAL, RETIREES.
  *
- * `signalVolumes` etait extrait depuis longtemps et LU PAR PERSONNE — la
- * troisieme fois que ce depot rencontre ce cas (docs/35, docs/47). Les zones
- * sombres commandent l'ambiance globale (`AmbientLightManager` coupe tout dans
- * une zone sans soleil), les brouilleurs coupent le signal du telescope.
+ * `signalVolumes` rendait deux familles : les `DarkZone` et les
+ * `InterferenceVolume`. Les deux moities sont tombees pour deux raisons
+ * differentes, et c'est la mesure qui a tranche chacune (docs/83-seuils.md) :
  *
- * @param point  position MONDE
- * @param offset fonction qui rend le decalage du corps porteur
+ * - la zone sombre n'est pas une contenance mais un SEUIL — `DarkZone.Awake`
+ *   s'abonne a son `EntrywayTrigger` et ne teste jamais si l'on est dedans.
+ *   Elle vit maintenant dans `entryways.js`, avec ses evenements.
+ * - le brouillage est INERTE dans cette alpha : la scene pose un
+ *   `InterferenceVolume` (force 1, sur le volume musical de la cite enterree),
+ *   mais `InterferenceDetector` n'a AUCUNE instance, et son `GetInterference`
+ *   n'est appele par personne dans l'assembly. Il n'y a rien a brancher.
+ *
+ * Le volume reste extrait : `recensement.mjs` le comptera desormais parmi les
+ * classes extraites que rien ne lit, ce qui est la verite.
  */
-export function signalZoneAt(zones, kind, point, offset = () => [0, 0, 0]) {
-  for (const z of zones) {
-    if (z.kind !== kind || !z.volume) continue;
-    const d = offset(z);
-    if (insideVolume(z.volume, [point[0] - d[0], point[1] - d[1], point[2] - d[2]],
-                     z.position, z.rotation)) return z;
-  }
-  return null;
-}
 
 /**
  * Les neuf emetteurs de rayonnement : huit feux de camp et l'etoile.

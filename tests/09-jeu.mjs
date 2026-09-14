@@ -121,8 +121,10 @@ import { QuantumMoon, orbitTilt, bodyOccluder,
 import { Anglerfish, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
-import { ambientIntensity, majorSectors, activeMajorSector,
-         sectorThrustLimit } from "../web/src/sectors.js";
+import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
+         ambientColor, ambientTint, hsvToRgb } from "../web/src/sectors.js";
+import { entrywayTriggers, sunlessZones, isOutsideEntryway, Entryway,
+         EffectZones } from "../web/src/entryways.js";
 import { Minimap, localMapPosition, MARKER_RADIUS, TRAIL_ANGLE,
          MINIMAP_EVENTS } from "../web/src/minimap.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
@@ -523,6 +525,99 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a la portee exacte, la marche tombe",
         round(ambientIntensity(750, 750), 3), 0.1);
   check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0.1);
+  // `_ambientLight = 0` rend Color.black : la portee ne rattrape rien. Dark
+  // Bramble a 1 200 de portee et la valeur 0.
+  check("un secteur noir n'eclaire pas, meme a portee",
+        round(ambientIntensity(0, 1200, 0), 3), 0.1);
+
+  // La TEINTE : une enumeration a trois valeurs, pas un nombre.
+  check("le noir est noir", ambientColor(0).join(","), "0,0,0");
+  check("le bleu de nuit est le plus fort en bleu",
+        ambientColor(1).map((x) => round(x, 4)).join(","), "0.045,0.045,0.0588");
+  check("le vert est le plus fort en vert",
+        ambientColor(2).map((x) => round(x, 4)).join(","), "0.045,0.0588,0.0484");
+  check("les deux teintes ont la meme valeur",
+        Math.max(...ambientColor(1)) === Math.max(...ambientColor(2)), true);
+  check("la teinte normalisee vaut un sur sa composante forte",
+        Math.max(...ambientTint(1)), 1);
+  check("et sans couleur, elle est blanche", ambientTint(0).join(","), "1,1,1");
+  // `ColorHSV.ToColorRGB` : saturation nulle, du gris.
+  check("saturation nulle : du gris", hsvToRgb(200, 0, 0.5).join(","), "0.5,0.5,0.5");
+  check("rouge pur", hsvToRgb(0, 1, 1).join(","), "1,0,0");
+  check("vert pur", hsvToRgb(120, 1, 1).join(","), "0,1,0");
+  check("bleu pur", hsvToRgb(240, 1, 1).join(","), "0,0,1");
+  check("la teinte boucle a 360", hsvToRgb(360, 1, 1).join(","), "1,0,0");
+}
+
+// --- les seuils et les zones sans soleil (docs/83-seuils.md) --------------
+//
+// `EntrywayTrigger` ne demande pas « suis-je dedans » mais « dans quel sens
+// ai-je traverse » : une grotte n'a pas de forme, elle a des portes.
+{
+  const gameplay = { placed: {
+    SunlessZone: [
+      { name: "CaveVolume", position: [0, 0, 0], body: "TH_Body" },
+      { name: "CorrosiveMembrane", position: [100, 0, 0], body: "GD_Body",
+        volume: { shape: "sphere", radius: 20, center: [0, 0, 0] } },
+    ],
+    EntrywayTrigger: [
+      { name: "CaveEntry", position: [0, 0, 0], body: "TH_Body",
+        parents: ["TH_Body", "CaveEntrance", "CaveVolume"],
+        volume: { shape: "box", size: [4, 4, 4], center: [0, 0, 0] },
+        fields: { _localExitDirection: { x: 0, y: 1, z: 0 }, _initialOccupants: [] } },
+      { name: "Ailleurs", position: [500, 0, 0], body: "TH_Body",
+        parents: ["TH_Body", "MusicVolume"],
+        volume: { shape: "box", size: [4, 4, 4], center: [0, 0, 0] },
+        fields: { _localExitDirection: { x: 1, y: 0, z: 0 } } },
+    ],
+  } };
+
+  const seuils = entrywayTriggers(gameplay);
+  check("deux seuils lus", seuils.length, 2);
+  check("et leur direction de sortie", seuils[0].exit.join(","), "0,1,0");
+  // La sortie pointe vers +Y : au-dessus de la porte, on est DEHORS.
+  check("au-dessus du seuil, on est dehors",
+        isOutsideEntryway(seuils[0], [0, 10, 0]), true);
+  check("en dessous, on est dedans",
+        isOutsideEntryway(seuils[0], [0, -10, 0]), false);
+
+  const zones = sunlessZones(gameplay);
+  check("deux zones sans soleil", zones.length, 2);
+  // Le lien est dans la HIERARCHIE : le seuil du volume musical n'est pas a
+  // elle, meme s'il est sur le meme corps.
+  check("la grotte n'a qu'une porte, celle qui la nomme",
+        zones[0].entryways.map((t) => t.name).join(","), "CaveEntry");
+  check("la membrane n'en a aucune, elle a une sphere",
+        zones[1].entryways.length, 0);
+
+  // La TRAVERSEE. Dehors -> boite -> dedans : une entree.
+  const porte = new Entryway(seuils[0]);
+  check("loin, rien", porte.update([0, 10, 0]), null);
+  check("dans l'embrasure non plus, on attend d'en sortir",
+        porte.update([0, 1, 0]), null);
+  check("ressorti de l'autre cote : entree", porte.update([0, -10, 0]), "entry");
+  check("repasse dans l'embrasure : on attend", porte.update([0, -1, 0]), null);
+  check("ressorti par le haut : sortie", porte.update([0, 10, 0]), "exit");
+  // LE demi-tour : entrer dans la boite et en ressortir du meme cote ne compte
+  // pas. C'est toute la difference avec un test de contenance.
+  check("entre dans l'embrasure", porte.update([0, 1, 0]), null);
+  check("et fait demi-tour : rien", porte.update([0, 10, 0]), null);
+
+  // Le COMPTE : `_sunlessZoneCount` n'est pas un booleen.
+  const sz = new EffectZones(sunlessZones(gameplay));
+  check("au depart, il fait jour", sz.sunless, false);
+  sz.update([0, 10, 0]);
+  sz.update([0, 1, 0]);
+  sz.update([0, -10, 0]);
+  check("la grotte franchie, il fait noir", sz.count, 1);
+  // La membrane est une contenance : on l'ajoute sans quitter la grotte.
+  sz.update([100, 0, 0]);
+  check("deux zones a la fois : le compte monte", sz.count, 2);
+  check("et il fait toujours noir", sz.sunless, true);
+  sz.update([100, 100, 0]);
+  check("sortir de la membrane ne rallume pas la grotte", sz.count, 1);
+  check("les evenements du build sont partis",
+        sz.events.filter((e) => e === "EnterSunlessZone").length, 2);
 }
 
 // --- coupure passe-bas des emetteurs ------------------------------------

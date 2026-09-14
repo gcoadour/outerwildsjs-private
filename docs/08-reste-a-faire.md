@@ -18,8 +18,8 @@ lisait**.
 >
 > | | |
 > |---|---|
-> | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, sur 295 / 1 451 |
-> | `evenements.mjs` — ce que le build **annonce** | **46** des 124 nommés |
+> | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
+> | `evenements.mjs` — ce que le build **annonce** | **50** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** loi sans appelant ([`75`](75-chaleur.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
@@ -104,7 +104,7 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
-| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit |
+| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |
 | référentiels déclarés | 14 volumes : le build dit l'ancre, la gravité complète |
 | distances du pilote auto | 1 000 / 2 500 et l'alignement, lus dans le build |
 | décor vivant | 15 panneaux, 8 visages, 10 buses, 6 passages anciens |
@@ -403,12 +403,14 @@ qu'il faut chercher avant d'écrire une formule. Cinq lois en dépendaient — l
 minicarte, la poussée, l'ambiance, la lampe, les phares — et aucune n'avait de
 test qui aurait pu le dire, parce qu'on ne teste pas ce qu'on a inventé.
 
-Une seule chose du lot reste ouverte : `_ambientLight` est une énumération que
-`MajorSector.Awake` convertit en **couleur** (noir, un bleu de nuit, un vert),
-et le portage n'a qu'une intensité. La teinte de l'ambiance par secteur est à
-porter.
+La teinte de l'ambiance par secteur, que ce lot avait laissée ouverte, est
+portée depuis [`83`](83-seuils.md) : `_ambientLight` est une énumération, pas un
+nombre. Ce qui reste ouvert du même côté, ce sont les **dix seuils sur dix-huit**
+qui ne gardent pas une zone sans soleil — un volume musical, la chambre en
+apesanteur, la station météo, la trappe : même forme, même loi, mécaniques non
+branchées.
 
-Reste le dénominateur des **annonces** : 78 des 124 chaînes de `GlobalMessenger`
+Reste le dénominateur des **annonces** : 74 des 124 chaînes de `GlobalMessenger`
 ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
 un événement non nommé peut correspondre à un comportement porté sous un autre
 nom — mais c'est **la carte de ce qu'il reste à lire**, et chaque piste s'y

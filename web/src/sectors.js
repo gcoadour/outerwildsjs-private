@@ -79,6 +79,7 @@ export function majorSectors(gameplay = {}) {
         horizon: f._horizonRadius || 0,
         thrustLimit: f._thrustLimit ?? null,
         lightRange: f._ambientLightRange || 0,
+        ambient: f._ambientLight || 0,
         flashlightLimit: f._flashlightRangeLimit ?? null,
         shiplightLimit: f._shiplightRangeLimit ?? null,
       });
@@ -240,6 +241,71 @@ export class Sectors {
  * une page entierement noire n'est pas jouable sans les phares du jeu final.
  * C'est un repli assume, pas une mesure.
  */
-export function ambientIntensity(distance, range, base = 0.1, full = 0.35) {
+export function ambientIntensity(distance, range, kind = 1, base = 0.1, full = 0.35) {
+  // `_ambientLight = 0` rend `Color.black` : le secteur n'eclaire rien, quelle
+  // que soit sa portee. Dark Bramble a 1 200 de portee ET la valeur 0 — une
+  // grande portee pour une couleur noire, ce qu'aucune lecture du seul
+  // `_ambientLightRange` ne pouvait dire.
+  if (!kind) return base;
   return distance < range ? full : base;
+}
+
+/**
+ * La TEINTE de l'ambiance d'un secteur.
+ *
+ * `_ambientLight` n'est pas une intensite mais une enumeration a trois valeurs,
+ * que `MajorSector.Awake` convertit en couleur — et le portage n'en lisait rien,
+ * faute de savoir que le champ etait un choix et non un nombre :
+ *
+ *   0  ->  Color.black               le noir : la comete, les jumelles, la lune
+ *   1  ->  ColorHSV(240, .2353, .0588)   un bleu de nuit : Timber Hearth,
+ *                                        Brittle Hollow, la jumelle ensablee
+ *   2  ->  ColorHSV(135, .2353, .0588)   un vert : Giant's Deep, et lui seul
+ *
+ * Les deux teintes ont exactement la meme saturation et la meme valeur : ce
+ * n'est pas une intensite deguisee, c'est un choix de couleur, et il dit
+ * quelque chose : quatre secteurs rocheux en bleu de nuit, l'ocean en vert, et
+ * le NOIR pour les cinq autres — la comete, la lune, Dark Bramble, l'epave et
+ * la lune quantique. Dark Bramble porte pourtant 1 200 de portee d'ambiance :
+ * une grande portee pour une couleur noire, ce qui ne se voit qu'en lisant les
+ * deux champs ensemble.
+ *
+ * La valeur (0,0588) est tres sombre parce qu'elle s'ajoute a l'eclairage du
+ * soleil ; le portage porte la teinte et garde son amplitude a lui, comme pour
+ * `ambientIntensity`.
+ */
+export function ambientColor(kind) {
+  if (kind === 1) return hsvToRgb(240, 0.23529412, 0.05882353);
+  if (kind === 2) return hsvToRgb(135, 0.23529412, 0.05882353);
+  return [0, 0, 0];
+}
+
+/** `ColorHSV.ToColorRGB`, a la lettre : h en degres, s et v dans [0,1]. */
+export function hsvToRgb(h, s, v) {
+  if (s === 0) return [v, v, v];
+  const x = ((h % 360) + 360) % 360 / 60;
+  const i = Math.floor(x), f = x - i;
+  const p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+  switch (i) {
+    case 0: return [v, t, p];
+    case 1: return [q, v, p];
+    case 2: return [p, v, t];
+    case 3: return [p, q, v];
+    case 4: return [t, p, v];
+    default: return [v, p, q];
+  }
+}
+
+/**
+ * La teinte normalisee : la couleur du secteur, ramenee a sa composante la plus
+ * forte.
+ *
+ * Le moteur porte une INTENSITE (`ambientIntensity`) et une lumiere
+ * hemispherique ; multiplier l'une par l'autre demande une teinte de norme 1,
+ * sans quoi le secteur bleu serait seize fois plus sombre que la valeur choisie.
+ */
+export function ambientTint(kind) {
+  const c = ambientColor(kind);
+  const m = Math.max(...c);
+  return m > 0 ? c.map((x) => x / m) : [1, 1, 1];
 }

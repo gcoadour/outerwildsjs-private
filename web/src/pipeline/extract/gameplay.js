@@ -40,6 +40,11 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // §4 les volumes et zones de jeu.
                 "InteractZone", "SuitBarrier", "SuitRemovalVolume", "HazardVolume",
                 "DarkZone", "InterferenceVolume", "ZeroGField", "ZeroGSector",
+                // `SunlessZone` eteint l'ambiance globale, et le portage
+                // prenait `DarkZone` pour elle : deux classes, deux evenements,
+                // deux usages. `EntrywayTrigger` est leur forme reelle — un
+                // SEUIL qu'on franchit dans un sens (docs/83-seuils.md).
+                "SunlessZone", "EntrywayTrigger",
                 "MajorSector", "ProbePromptTrigger", "TelescopePromptTrigger",
                 "RadiationEmitter",
                 // §5 le son reactif : le jeu repond a ce qu'on FAIT.
@@ -167,7 +172,7 @@ const WANT_VOLUME = new RegExp([
   "|ProbePromptTrigger",
   "|TelescopePromptTrigger|AncientTeleporter|AncientTeleportReceiver",
   "|RadiationEmitter|DerelictWarp|GearPickup|LandingPadSensor",
-  "|PlayerAttachPoint|LODCameraSnapshot",
+  "|PlayerAttachPoint|LODCameraSnapshot|SunlessZone|EntrywayTrigger",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
   "|GazeSwitch|MuseumEntryway|Surface|AudioShell)$",
@@ -181,6 +186,9 @@ const WANT_VOLUME = new RegExp([
  * extraite, et le portage tournait donc la tete au hasard (docs/38-depart.md).
  */
 const WANT_ROTATION = /spawnpoint/i;
+
+/** Composants dont le PARENT designe ce qu'ils commandent. */
+const WANT_PARENTS = /^EntrywayTrigger$/i;
 
 /**
  * La position MONDE du GameObject qu'un PPtr de composant designe.
@@ -245,6 +253,15 @@ export function extractGameplay(ctx) {
     if (WANT_VOLUME.test(cls) || WANT_ROTATION.test(cls)) {
       const [, rot] = ctx.world(gid);
       entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+    }
+
+    // A QUI ce seuil appartient. `OWEffectVolume.Awake` prend ses
+    // `EntrywayTrigger` par `GetComponentsInChildren` : le lien est dans la
+    // HIERARCHIE, pas dans un champ, et le nom du corps porteur ne suffit pas
+    // — Timber Hearth porte les deux grottes, le musee et six autres seuils.
+    if (WANT_PARENTS.test(cls)) {
+      const chain = ctx.ancestors(gid).filter(Boolean);
+      if (chain.length) entry.parents = chain;
     }
 
     // Reference vers un corps : on remplace le pointeur par son nom.

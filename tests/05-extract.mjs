@@ -10,12 +10,12 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
-import { signalVolumes } from "../web/src/volumes.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
          zeroGFields, probePrompts,
          radiationEmitters } from "../web/src/volumes.js";
 import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.js";
 import { majorSectors, activeMajorSector } from "../web/src/sectors.js";
+import { sunlessZones, entrywayTriggers } from "../web/src/entryways.js";
 import { billboards, talkingFaces, thrusterNozzles, particleBursts,
          meteorLaunchers, teleporters, warps } from "../web/src/decor.js";
 import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
@@ -641,6 +641,50 @@ console.log("     sources avec courbe echantillonnee:", courbes,
         activeMajorSector(secteurs, lq.position).useMinimap, false);
   check("loin de tout, aucun secteur majeur",
         activeMajorSector(secteurs, [0, 100000, 0]), null);
+  // La TEINTE, lue pour la premiere fois : `_ambientLight` est une
+  // enumeration. Quatre secteurs en bleu de nuit, l'ocean en vert, cinq noirs.
+  check("secteurs en bleu de nuit",
+        secteurs.filter((x) => x.ambient === 1).length, 4);
+  check("un seul secteur vert",
+        secteurs.filter((x) => x.ambient === 2).map((x) => x.name).join(","),
+        "Sector_GD");
+  check("et cinq qui n'eclairent rien",
+        secteurs.filter((x) => !x.ambient).length, 5);
+  // Dark Bramble a la plus grande portee d'ambiance du systeme ET la couleur
+  // noire : lire `_ambientLightRange` seul ne pouvait pas le dire.
+  check("Dark Bramble : 1200 de portee pour du noir",
+        [secteurs.find((x) => x.name === "Sector_DB").lightRange,
+         secteurs.find((x) => x.name === "Sector_DB").ambient].join(","), "1200,0");
+
+  // --- les seuils et les zones sans soleil (docs/83-seuils.md) ------------
+  const seuils = entrywayTriggers(gp);
+  check("seuils poses dans la scene", seuils.length, 18);
+  check("tous ont une boite", seuils.every((t) => t.volume &&
+        t.volume.shape === "box"), true);
+  check("et une direction de sortie unitaire",
+        seuils.every((t) => Math.abs(Math.hypot(...t.exit) - 1) < 1e-6), true);
+  const sz = sunlessZones(gp);
+  check("zones sans soleil", sz.length, 5);
+  // Le portage prenait `DarkZone` pour elles : il y en a UNE, sur un
+  // declencheur d'invite de lampe.
+  check("zones sombres, qui sont autre chose",
+        (gp.placed.DarkZone || []).length, 1);
+  check("les grottes n'ont pas de forme, elles ont des portes",
+        sz.filter((z) => !z.volume).length, 4);
+  check("la membrane corrosive, elle, est une sphere",
+        sz.find((z) => z.name === "CorrosiveMembrane").volume.radius, 205);
+  check("portes des zones sans soleil",
+        sz.reduce((a, z) => a + z.entryways.length, 0), 8);
+  check("la grande grotte de la jumelle en a quatre",
+        sz.find((z) => z.name === "CaveVolume01").entryways.map((t) => t.name)
+          .sort().join(","), "CityEntryway,PodEntryway,QuantumEntryway,TowerEntryway");
+  // Les six portes des deux grottes de la jumelle sortent vers +Y : elles sont
+  // au plafond, et sortir c'est monter. Les deux autres zones n'ont pas cette
+  // forme — le toit du musee sort en +X, la grotte de Timber Hearth en -Z.
+  check("directions de sortie des huit portes",
+        sz.flatMap((z) => z.entryways).map((t) => t.exit.join(",")).sort()
+          .join(" | "),
+        "0,0,-1 | 0,1,0 | 0,1,0 | 0,1,0 | 0,1,0 | 0,1,0 | 0,1,0 | 1,0,0");
 
   check("zones d'interaction", interactZones(gp).length, 7);
   check("trois fenetres de vue distinctes",
@@ -1062,9 +1106,12 @@ check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length
 const coques = (gp.placed.AudioShell || []);
 check("deux coquilles sonores", coques.length, 2);
 check("et toutes deux ont une forme", coques.every((c) => !!c.volume), true);
-const signaux = signalVolumes(gp);
-check("des zones de signal sont posees", signaux.length > 0, true);
-check("dont des zones sombres", signaux.some((z) => z.kind === "dark"), true);
+// Le brouillage est INERTE dans cette alpha : un volume pose, un detecteur
+// sans aucune instance, et un `GetInterference` que personne n'appelle. On
+// garde la mesure — c'est elle qui dit qu'il n'y a rien a brancher.
+check("un seul volume brouilleur", (gp.placed.InterferenceVolume || []).length, 1);
+check("et aucun detecteur pour le lire",
+      (gp.placed.InterferenceDetector || []).length, 0);
 
 // La fin de la queue (docs/55-attaches.md).
 check("quatorze objets s'alignent sur un corps designe",

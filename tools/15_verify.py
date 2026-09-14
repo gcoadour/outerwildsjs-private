@@ -928,6 +928,15 @@ def _run(url, heavy, profil=None, zip_path=None):
         # frappe entiere tombe entre deux images, comme dans Unity qui latche
         # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
         # geste avant de mesurer.
+        # ... et il tient aussi a CE QUI PRECEDE. Six controles de plus inseres
+        # avant lui — six `page.evaluate`, aucune attente ajoutee — ont suffi a
+        # faire refuser le tir, et a les remettre en fin de parcours il repasse.
+        # On ne sait donc pas ce que ce controle mesure au juste : la fenetre de
+        # cinq metres, ou l'orientation ou le joueur se trouve a cet instant-la.
+        # Tant qu'il n'aura pas ete rendu independant du regard — en visant
+        # explicitement avant de tirer — rien ne doit s'inserer avant lui. Le
+        # lot des seuils est alle en fin de parcours pour cette raison, et c'est
+        # une dette, pas une solution.
         def sonde_geste(duree_ms, attente_ms=9000):
             # Le bouton DROIT : `InputChannels.probe` est `mouse 1`, et les
             # trois statiques d'`OWInput` qui lancent, photographient et
@@ -1867,6 +1876,38 @@ def _run(url, heavy, profil=None, zip_path=None):
                          page.evaluate("() => window.__lod.meshLOD.hidden"), 1)
             rep.at_least("maillages examines par image",
                          page.evaluate("() => window.__lod.meshLOD.tested"), 1)
+
+        # --- les seuils et les zones sans soleil (docs/83-seuils.md) ------------
+        #
+        # `DarkZone` n'etait pas `SunlessZone` : deux classes, deux evenements,
+        # deux auditeurs. L'ambiance ne s'eteignait dans aucune grotte.
+        seuils = page.evaluate("""() => {
+          const L = window.__lots;
+          if (!L || !L.zonesSansSoleil) return null;
+          const z = L.zonesSansSoleil;
+          return {
+            zones: z.zones.length,
+            portes: z.portes.length,
+            contenances: z.contenants.length,
+            compte: z.count,
+            teinte: L.etat.secteurAmbiant,
+          };
+        }""")
+        if seuils:
+            rep.eq("zones sans soleil montees", seuils["zones"], 5)
+            rep.eq("portes suivies", seuils["portes"], 8)
+            rep.eq("et une seule zone qui vaut par contenance",
+                   seuils["contenances"], 1)
+            # Debout au village, dehors : aucune zone franchie.
+            rep.eq("au village, il fait jour", seuils["compte"], 0)
+            # Timber Hearth porte `_ambientLight = 1` : le bleu de nuit.
+            rep.eq("et le secteur est en bleu de nuit", seuils["teinte"], 1)
+            rep.eq("la lumiere ambiante en porte la teinte",
+                   page.evaluate("() => { const s = window.__scene ||"
+                                 " BABYLON.Engine.LastCreatedScene;"
+                                 " const a = s.lights.find(l => l.name === 'amb');"
+                                 " return a ? Math.round(a.diffuse.b * 1000) /"
+                                 " Math.round(a.diffuse.r * 1000) > 1 : null; }"), True)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
