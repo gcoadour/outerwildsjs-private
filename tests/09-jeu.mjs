@@ -74,6 +74,7 @@ import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          suitBarrierPush } from "../web/src/gear.js";
 import { Interactables } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
+         FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
          slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
@@ -5226,6 +5227,61 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("avec ses trois arbres",
         [k[0].trees.introduction, k[0].trees.successfulLanding,
          k[0].trees.tooManyCrashes].join(","), "a,b,c");
+}
+
+{
+  // --- PERDRE LA GRAVITE (docs/79-alignement.md) ---
+
+  check("cinquante degres par seconde", FIELD_ALIGN.rate, 50);
+  // Moitie moins vite que le demi-tour d'un siege : se relever est vif,
+  // perdre le sol est lent.
+  check("moitie moins vite que le siege", FIELD_ALIGN.rate * 2, ATTACHE.rotationRate);
+
+  // La duree est encore un ANGLE divise par un TAUX, la troisieme fois.
+  check("deux poses identiques, aucune duree",
+        discreteRotationDuration([0, 0, 0, 1], [0, 0, 0, 1]), 0);
+  {
+    // Un demi-tour complet : 180 degres a 50 degres par seconde.
+    const d = discreteRotationDuration([0, 0, 0, 1], [0, 1, 0, 0]);
+    check("un demi-tour dure 3,6 s", Math.round(d * 100) / 100, 3.6);
+  }
+  {
+    // Un quart de tour.
+    const q = Math.sqrt(0.5);
+    const d = discreteRotationDuration([0, 0, 0, 1], [0, q, 0, q]);
+    check("un quart de tour, 1,8 s", Math.round(d * 100) / 100, 1.8);
+  }
+
+  const al = new FieldAlignment();
+  // `CheckAlignmentRequirements` rend VRAI a la toute premiere image, quoi
+  // qu'il arrive : sans cela, le premier instant d'une partie est une chute.
+  check("la premiere image est alignee, meme sans champ",
+        al.update(false, 0, 90), null);
+  check("et les commandes repondent", al.locked, false);
+  // Puis perdre le champ verrouille le regard.
+  check("perdre le champ", al.update(false, 1, 90), "break");
+  check("et prend les commandes", al.locked, true);
+  check("pendant 90/50 secondes", al.duration, 1.8);
+  check("a mi-chemin, toujours verrouille",
+        al.update(false, 1.9, 0) === null && al.locked, true);
+  al.update(false, 3, 0);
+  check("passe la duree, elles reviennent", al.locked, false);
+
+  // Et l'ecart se passe aussi sous la FORME DU BUILD : deux poses.
+  const al3 = new FieldAlignment();
+  al3.update(true, 0, 0);
+  al3.update(false, 1, [[0, 0, 0, 1], [0, 1, 0, 0]]);   // un demi-tour
+  check("deux poses valent un angle", Math.round(al3.duration * 100) / 100, 3.6);
+
+  // Retrouver le sol rend les commandes TOUT DE SUITE.
+  const al2 = new FieldAlignment();
+  al2.update(true, 0, 0);
+  al2.update(false, 1, 3600);        // une duree enorme
+  check("verrouille pour longtemps", al2.duration, 72);
+  check("retrouver un champ", al2.update(true, 1.1, 0), "init");
+  check("rend les commandes sans attendre", al2.locked, false);
+  // Et la transition ne se rejoue pas tant que l'etat ne change pas.
+  check("rester dans le champ n'annonce rien", al2.update(true, 2, 0), null);
 }
 
 report();

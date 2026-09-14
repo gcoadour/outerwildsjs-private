@@ -1042,6 +1042,30 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- perdre la gravite (docs/79-alignement.md) ---------------------------
+        #
+        # Quitter un champ verrouille le regard le temps qu'on soit retourne :
+        # le seul moment du jeu ou les commandes ne repondent plus.
+        alg = page.evaluate("""() => {
+          const a = window.__alignement;
+          if (!a) return null;
+          const avant = { aligned: a.aligned, locked: a.locked,
+                          first: a.firstFrame, since: a.since, dur: a.duration };
+          a.firstFrame = false; a.aligned = true; a.locked = false;
+          const perdu = a.update(false, 1000, 90);
+          const verrouille = a.locked, duree = a.duration;
+          const repris = a.update(true, 1000.1, 0);
+          const rendu = !a.locked;
+          Object.assign(a, avant);
+          return { perdu, verrouille, duree, repris, rendu, taux: 50 };
+        }""")
+        if alg:
+            rep.eq("perdre le champ s'annonce", alg["perdu"], "break")
+            rep.eq("et prend les commandes du regard", alg["verrouille"], True)
+            rep.eq("pendant l'angle divise par cinquante", alg["duree"], 1.8)
+            rep.eq("le retrouver s'annonce aussi", alg["repris"], "init")
+            rep.eq("et rend les commandes sans attendre", alg["rendu"], True)
+
         # --- le vaisseau miniature et l'enfant (docs/78-modele.md) ---------------
         mod = page.evaluate("""() => {
           const m = window.__modele;

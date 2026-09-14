@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`79-alignement.md`](79-alignement.md) — **perdre la gravité vous prend les commandes : 50°/s, et la toute première image est alignée quoi qu'il arrive**
 - [`78-modele.md`](78-modele.md) — **le vaisseau miniature vole, et l'enfant compte : cinq crashs valent un reproche, et il passe avant la réussite**
 - [`77-sons.md`](77-sons.md) — **les huit sons que l'interface ne faisait pas, et une réparation qui ne s'entend pas pareil dans le vide**
 - [`76-proximite.md`](76-proximite.md) — **le tableau de bord ne parle que de près, le tutoriel ne se rejoue pas, et un garde-fou qui n'avait jamais parlé**

@@ -349,3 +349,109 @@ export class AttachPoints {
     return this.current ? this.current.update(dt, now, shift) : null;
   }
 }
+
+// --- perdre la gravite (docs/79-alignement.md) ------------------------------
+//
+// @lit AlignPlayerWithField
+//
+// Quitter un champ de gravite n'est pas seulement cesser de tomber : le jeu
+// vous RETOURNE, et vous prend les commandes du regard pendant qu'il le fait.
+//
+//   BreakAlignment:
+//       CenterCamera(50)                          la camera revient au centre
+//       InitDiscreteRotation(corps, camera, 50)   le CORPS va ou le regard etait
+//       FireEvent("BreakPlayerFieldAlignment")    -> _isInputLocked = true
+//
+//   InitAlignment:
+//       FireEvent("InitPlayerFieldAlignment")     -> _isInputLocked = false
+//                                                    StopSnapping()
+//
+// CINQUANTE DEGRES PAR SECONDE, et non les cent du point d'accrochage
+// (docs/69). Se relever d'un siege est vif ; perdre le sol sous ses pieds est
+// lent, et cette lenteur est le seul moment du jeu ou l'on ne commande plus
+// rien. Un demi-tour complet dure 3,6 s.
+//
+// LA DUREE EST ENCORE UN ANGLE DIVISE PAR UN TAUX — la troisieme fois dans ce
+// build, apres le demi-tour du siege et le recentrage de la camera. C'est une
+// habitude de ce studio, et elle se reconnait maintenant a vue.
+//
+// CE QUE CE PORTAGE N'A PAS. Le build tourne le CORPS vers l'orientation de la
+// CAMERA ; ici les deux n'en font qu'un — le regard EST l'orientation du
+// joueur, tenu en lacet et tangage. La rotation discrete n'a donc rien a
+// tourner, et ce qui reste est ce qui se sent : les commandes verrouillees et
+// la camera qui revient au centre. C'est dit ici plutot que passe sous silence.
+
+/** `BreakAlignment` passe 50 a `CenterCamera` et a `InitDiscreteRotation`. */
+export const FIELD_ALIGN = { rate: 50 };
+
+/**
+ * `InitDiscreteRotation` : la duree est `Quaternion.Angle(from, to) / rate`.
+ *
+ * `Quaternion.Angle` rend l'angle du plus court chemin, en degres — d'ou le
+ * facteur deux et la valeur absolue du produit scalaire.
+ */
+export function discreteRotationDuration(from, to, rate = FIELD_ALIGN.rate) {
+  if (!(rate > 0)) return 0;
+  const d = Math.abs(from[0] * to[0] + from[1] * to[1] + from[2] * to[2]
+                   + from[3] * to[3]);
+  const angle = 2 * Math.acos(Math.max(0, Math.min(1, d))) * 180 / Math.PI;
+  return angle / rate;
+}
+
+/**
+ * L'alignement du joueur sur son champ, et ce qu'il fait aux commandes.
+ *
+ * `CheckAlignmentRequirements` rend VRAI a la toute premiere image, quoi qu'il
+ * arrive : le joueur est aligne des le reveil, avant meme qu'un champ ait pu
+ * etre trouve. Sans cela, la premiere image d'une partie est une chute libre.
+ */
+export class FieldAlignment {
+  constructor(cfg = FIELD_ALIGN) {
+    this.cfg = cfg;
+    this.aligned = true;      // `_isFirstFrame` rend vrai la premiere fois
+    this.firstFrame = true;
+    this.locked = false;
+    this.since = 0;
+    this.duration = 0;
+  }
+
+  /**
+   * @param ecart soit un angle en degres, soit DEUX quaternions `[de, vers]` —
+   *   la forme du build, qui divise `Quaternion.Angle(de, vers)` par le taux.
+   *
+   * Dans ce portage, « de » est la pose alignee sur l'horizon et « vers » la
+   * meme plus le tangage : le regard EST l'orientation, et leur ecart est donc
+   * exactement le tangage (docs/79-alignement.md).
+   *
+   * @returns {"init"|"break"|null} la transition, s'il y en a une.
+   */
+  update(dansUnChamp, now = 0, ecart = 0) {
+    const angleDegres = Array.isArray(ecart)
+      ? discreteRotationDuration(ecart[0], ecart[1], 1) : ecart;
+    if (this.firstFrame) { this.firstFrame = false; dansUnChamp = true; }
+    const veut = !!dansUnChamp;
+    if (veut === this.aligned) {
+      // La rotation discrete se termine toute seule, et rend les commandes.
+      if (this.locked && now - this.since >= this.duration) this.locked = false;
+      return null;
+    }
+    this.aligned = veut;
+    if (veut) {
+      // `OnInitPlayerFieldAlignment` : `_isInputLocked = false`, et le
+      // recentrage en cours s'ARRETE (`StopSnapping`) — retrouver le sol rend
+      // les commandes tout de suite, sans attendre la fin du mouvement.
+      this.locked = false;
+      this.duration = 0;
+      return "init";
+    }
+    this.locked = true;
+    this.since = now;
+    this.duration = angleDegres / this.cfg.rate;
+    return "break";
+  }
+
+  reset() {
+    this.aligned = true; this.firstFrame = true; this.locked = false;
+    this.since = 0; this.duration = 0;
+  }
+}

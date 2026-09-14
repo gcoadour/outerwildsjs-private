@@ -135,8 +135,8 @@ import { hazardVolumes, Hazards, zeroGFields, zeroGAt, gameSectors,
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
          LOCK_ON } from "./gear.js";
-import { AttachPoints, snapDuration, snapDegrees,
-         turnFraction } from "./attach.js";
+import { AttachPoints, snapDuration, snapDegrees, turnFraction,
+         FieldAlignment, FIELD_ALIGN } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO,
          UISounds } from "./reactaudio.js";
@@ -1580,6 +1580,12 @@ async function boot() {
   let departAFaire = true;
   // Le joueur est-il dans la zone brouillee de l'epave ? La carte s'y efface.
   let dansEpave = false;
+  // §T PERDRE LA GRAVITE. Quitter un champ n'est pas seulement cesser de
+  // tomber : le jeu vous retourne, et vous prend les commandes du regard
+  // pendant qu'il le fait — a cinquante degres par seconde, moitie moins vite
+  // que le demi-tour d'un siege (docs/79-alignement.md).
+  const alignement = new FieldAlignment();
+  window.__alignement = alignement;
   // Le plein d'oxygene ne s'annonce qu'une fois par remplissage.
   let refaitLePlein = false;
   // L'avertissement du sac dorsal, une fois au passage a sec.
@@ -2136,6 +2142,10 @@ async function boot() {
    */
   const TURN = (player.c.turnRate ?? 160) * Math.PI / 180;
   function look(dx, dy, gain = 1) {
+    // §T `_isInputLocked` : pendant que le jeu vous retourne, il vous prend les
+    // commandes du regard. C'est le seul moment ou elles ne repondent plus, et
+    // c'est ce qui donne son poids a la perte du sol.
+    if (alignement.locked) return;
     const f = settings.lookFactor();
     const w = Math.max(320, (window.innerWidth || 1280));
     const k = (TURN / w) * (telescope && telescope.active
@@ -2226,6 +2236,30 @@ async function boot() {
     const dt = (settings && settings.open) ? 0
       : Math.min(engine.getDeltaTime() / 1000, 0.05);
     const now = performance.now() / 1000;
+
+    // §T L'alignement sur le champ : on le perd, on le retrouve.
+    {
+      // L'ecart entre « le corps » et « le regard » se passe sous la forme du
+      // build — deux poses — et c'est le TANGAGE qui les separe ici : la pose
+      // alignee sur l'horizon, et la meme plus le tangage. Le lacet, lui, ne
+      // compte pas : le corps le suit deja.
+      const demiP = pitch / 2;
+      const t = alignement.update(!!player.field, now,
+                                  [[0, 0, 0, 1],
+                                   [Math.sin(demiP), 0, 0, Math.cos(demiP)]]);
+      if (t === "break") {
+        console.log("annonce : BreakPlayerFieldAlignment");
+        // `CenterCamera(50)` — et non les cent du siege.
+        recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
+                       duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                           FIELD_ALIGN.rate) };
+      } else if (t === "init") {
+        console.log("annonce : InitPlayerFieldAlignment");
+        // `StopSnapping()` : retrouver le sol rend les commandes TOUT DE
+        // SUITE, et interrompt le recentrage en cours.
+        recentrage = null;
+      }
+    }
 
     // §N La vitesse de depart, une seule fois, quand le repere existe.
     if (departAFaire) {
