@@ -2076,6 +2076,25 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("lance a quarante unites, il ne l'est plus", apres["pose"], False)
             rep.eq("et le decollage s'annonce", apres["annonces"], ["ShipTakeoff"])
 
+        # --- la sphere de l'observatoire (docs/91-remise-a-zero.md) -----------
+        raz = page.evaluate("""() => {
+          const r = window.__remiseAZero;
+          if (!r) return null;
+          return { forme: !!r.volume, rayon: r.volume && r.volume.volume
+                     ? r.volume.volume.radius : null,
+                   armee: r.armed, tiree: r.fired,
+                   codes: !!window.__pdata.knows("knowsLaunchCodes"),
+                   tour: window.__loop.loopCount };
+        }""")
+        if raz:
+            rep.eq("la sphere de remise a zero est montee", raz["forme"], True)
+            rep.eq("et elle mesure 5,196", raz["rayon"], 5.196)
+            # `OnStartOfTimeLoop` : armee au PREMIER tour seulement, et
+            # seulement tant qu'on ignore les codes. Le profil des controles
+            # les connait, donc elle doit etre desarmee.
+            rep.eq("armee si et seulement si premier tour sans les codes",
+                   raz["armee"], raz["tour"] + 1 == 1 and not raz["codes"])
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

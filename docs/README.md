@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`91-remise-a-zero.md`](91-remise-a-zero.md) — **armée quand on ne sait pas, elle ne tire que quand on sait : le geste qui fait commencer la partie**
 - [`90-methodes.md`](90-methodes.md) — **le dénominateur qui ne voyait pas les méthodes : de zéro à trente-cinq lois mortes, sans qu'une ligne ait régressé**
 - [`89-pose.md`](89-pose.md) — **une loi écrite, commentée, testée et jamais appelée : trois bugs en série sous ce que « posé » veut dire**
 - [`88-boucle.md`](88-boucle.md) — **trois nombres écrits de mémoire, deux faux : dix-huit minutes, une onde cubique, et une fin des temps qui attend**

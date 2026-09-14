@@ -42,7 +42,7 @@ import { loadAudioMap, AudioField, AudioMixer, signalStrength,
          audioShells, AudioShells } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
-import { TimeLoop } from "./timeloop.js";
+import { TimeLoop, ResetTrigger } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
 import { PlayerDeathHandler, FlashbackOverlay, deathCamera,
          DEATH_SOUNDS } from "./death.js";
@@ -1621,6 +1621,12 @@ async function boot() {
   // n'a pas appris les codes de lancement — le compte a rebours tourne, la fin
   // des temps attend (docs/88-boucle.md).
   loop.start(pdata.knows("knowsLaunchCodes"));
+  // La sphere de l'observatoire : armee au premier tour d'une partie neuve,
+  // elle attend qu'on ait appris les codes (docs/91-remise-a-zero.md).
+  const remiseAZero = new ResetTrigger(
+    ((gameplay.placed || {}).ResetSimulationTrigger || [])[0] || null);
+  remiseAZero.startOfTimeLoop(loop.loopCount + 1, pdata.knows("knowsLaunchCodes"));
+  window.__remiseAZero = remiseAZero;
   if (loop.preventSupernova) console.log("fin des temps suspendue : codes inconnus");
   // le compteur persiste doit etre RESTAURE au demarrage : sans cela, la
   // premiere synchronisation ecrasait la valeur sauvegardee par un zero
@@ -2963,6 +2969,21 @@ async function boot() {
     // La condition ne s'est jamais verifiee une seule fois.
     zonesSansSoleil.update(playerW, (x) => decalageDuCorps(x.body, anchorPos));
     zonesSombres.update(playerW, (x) => decalageDuCorps(x.body, anchorPos));
+    // `ResetSimulationTrigger.OnTriggerEnter` : entrer dans la sphere de
+    // l'observatoire une fois les codes appris remet la simulation a zero.
+    if (remiseAZero.armed && remiseAZero.volume) {
+      const dec = decalageDuCorps(remiseAZero.volume.body, anchorPos);
+      if (remiseAZero.enter(insideVolume(remiseAZero.volume,
+                                         restingPoint(playerW, dec)),
+                            pdata.knows("knowsLaunchCodes"))) {
+        loop.resetSimulation();
+        // Le build recharge la scene, et `TimeLoop.Start` annonce alors
+        // `ResumeSimulation` parce que `_startTimeLoopOnReload` vient d'etre
+        // remis a faux. Ce portage ne recharge rien : il enchaine.
+        loop.resume();
+        console.log("simulation remise a zero : la partie commence");
+      }
+    }
 
     // §J LES DEUX POINTS D'ACCROCHAGE DE TIMBER HEARTH.
     //

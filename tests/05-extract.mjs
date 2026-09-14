@@ -1144,6 +1144,12 @@ check("un gestionnaire d'ambiance", (gp.placed.AmbientLightManager || []).length
 // (docs/88-boucle.md). Le portage avait ecrit vingt.
 check("la duree de boucle vient du build",
       gp.singletons.TimeLoop.fields._loopDurationInMinutes, 18);
+// La sphere de l'observatoire qui remet la simulation a zero : une seule, et
+// elle a une forme (docs/91-remise-a-zero.md).
+const raz = (gp.placed.ResetSimulationTrigger || []);
+check("une sphere de remise a zero", raz.length, 1);
+check("et elle mesure 5,196", raz[0].volume.radius, 5.196);
+check("elle est posee sur Timber Hearth", raz[0].body, "TimberHearth_Body");
 check("deux phares exterieurs", (gp.placed.ExternalLightController || []).length, 2);
 check("une lumiere a fondu", (gp.placed.FadeLight || []).length, 1);
 check("un suivi du jour et de la nuit", (gp.placed.DayNightTracker || []).length, 1);

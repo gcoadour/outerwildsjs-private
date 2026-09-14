@@ -125,7 +125,15 @@ export function lois() {
   // appelant quand meme, et c'est la quatrieme fois que ce depot se ment sur
   // ce qu'il mesure ([`docs/69`](../docs/69-assise.md)).
   const pages = lister(join(ROOT, "web"), [], [".html"]);
-  const txt = new Map([...src, ...tests, ...outils, ...pages]
+  // LES CONTROLES NAVIGATEUR APPELLENT AUSSI. `tools/15_verify.py` interroge la
+  // page par `page.evaluate`, en JavaScript, dans des chaines Python : c'est un
+  // appelant, exactement comme `index.html` l'etait (docs/69). Trois methodes
+  // n'etaient lues que de la, et le compte les disait mortes.
+  //
+  // C'est la cinquieme fois que ce compte regardait ailleurs — et la deuxieme
+  // fois que c'est l'EXTENSION du fichier appelant qui le lui cachait.
+  const controles = lister(join(ROOT, "tools"), [], [".py"]);
+  const txt = new Map([...src, ...tests, ...outils, ...pages, ...controles]
     .map((f) => [f, sansImports(sansCommentaires(readFileSync(f, "utf8")))]));
 
   const out = [];
@@ -164,7 +172,7 @@ export function lois() {
     for (const nom of methodes) {
       if (mesures.has(nom) || sansEntree.has(nom)) continue;
       // Un appel de methode porte un point : `x.nom(`. La definition, non.
-      const appelee = [...src, ...pages].some(
+      const appelee = [...src, ...pages, ...controles].some(
         (g) => (txt.get(g).match(new RegExp(`\\.${nom}\\b`, "g")) || []).length > 0);
       if (appelee) continue;
       out.push({
@@ -179,7 +187,8 @@ export function lois() {
       // Une loi sans entree n'a personne a qui s'appliquer, et le dit.
       if (sansEntree.has(nom)) continue;
       // Appelee ailleurs dans le moteur, le pipeline, ou une page ?
-      if ([...src, ...pages].some((g) => g !== f && compte(txt.get(g), nom) > 0)) continue;
+      if ([...src, ...pages, ...controles].some(
+        (g) => g !== f && compte(txt.get(g), nom) > 0)) continue;
       // Appelee dans son PROPRE fichier, au-dela de sa definition ? Une
       // fonction interne exportee pour les tests est legitime.
       if (compte(txt.get(f), nom) > 1) continue;

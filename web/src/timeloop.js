@@ -42,6 +42,55 @@ export function shockwaveRadius(elapsed) {
   return SHOCKWAVE_RADIUS * t * t * t;
 }
 
+/**
+ * La sphere de l'observatoire qui remet la simulation a zero.
+ *
+ * @lit ResetSimulationTrigger
+ *
+ * Une sphere de 5,2 posee a l'observatoire de Timber Hearth, et deux lignes
+ * d'IL qui disent une chose etrange tant qu'on ne les lit pas ensemble :
+ *
+ *   Awake                      : collider DESACTIVE
+ *   OnStartOfTimeLoop(n)       : si n == 1 ET qu'on ignore les codes ->
+ *                                collider active
+ *   OnTriggerEnter(joueur)     : si on CONNAIT les codes -> ResetSimulation()
+ *
+ * Armee quand on ne sait pas, elle ne tire que quand on sait. Autrement dit :
+ * elle attend, au premier tour d'une partie neuve, qu'on soit alle apprendre
+ * les codes de lancement — et le pas qui vous ramene a l'observatoire remet la
+ * simulation a zero. C'est le geste qui fait COMMENCER la partie, et il tient
+ * avec l'invulnerabilite du premier tour (docs/81) et la fin des temps
+ * suspendue (docs/88) : trois mecaniques pour une seule idee.
+ *
+ * Le build recharge la scene ; ce portage n'a pas de rechargement, et enchaine
+ * donc `ResetSimulation` et le `ResumeSimulation` qui aurait suivi.
+ */
+export class ResetTrigger {
+  constructor(volume = null) {
+    this.volume = volume;
+    // `Awake` : le collider nait desactive.
+    this.armed = false;
+    this.fired = false;
+  }
+
+  /** `OnStartOfTimeLoop` : l'arme, et seulement au premier tour sans codes. */
+  startOfTimeLoop(loopCount, knowsLaunchCodes) {
+    if (loopCount === 1 && !knowsLaunchCodes) this.armed = true;
+    return this.armed;
+  }
+
+  /**
+   * `OnTriggerEnter` : dedans, avec les codes.
+   * @returns vrai si la simulation doit etre remise a zero
+   */
+  enter(inside, knowsLaunchCodes) {
+    if (!this.armed || !inside || !knowsLaunchCodes) return false;
+    this.armed = false;
+    this.fired = true;
+    return true;
+  }
+}
+
 export class TimeLoop {
   constructor(minutes = LOOP_MINUTES) {
     this.duration = minutes * 60;

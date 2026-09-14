@@ -20,7 +20,7 @@ lisait**.
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
-> | `lois.mjs` — ce que le portage **appelle** | **35** methodes sans appelant ([`90`](90-methodes.md)) |
+> | `lois.mjs` — ce que le portage **appelle** | **30** methodes sans appelant ([`90`](90-methodes.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -396,10 +396,14 @@ fonctions exportées.
 `scripts/lois.mjs` a montré sa limite avec [`89`](89-pose.md) : il comptait les
 **fonctions exportées**, et `Ship.padLanding` était une **méthode** — écrite,
 commentée, éprouvée par un test, et appelée par personne pendant tout ce temps.
-Il voit les méthodes depuis [`90`](90-methodes.md), et il en trouve
-**trente-cinq** que rien n'appelle, dont vingt-deux qu'un test fait pourtant
-tourner. Le compte est passé de 0 à 35 sans qu'une ligne ait régressé : l'outil
-a cessé de regarder ailleurs. C'est le front ouvert.
+Il voit les méthodes depuis [`90`](90-methodes.md), et il en a trouvé
+**trente-cinq** que rien n'appelait, dont vingt-deux qu'un test faisait pourtant
+tourner. Trois n'étaient lues que par `tools/15_verify.py` — un contrôle
+navigateur est un appelant, et c'est la deuxième fois que l'extension du fichier
+appelant le cachait à ce compte. Deux autres attendaient la sphère de
+l'observatoire ([`91`](91-remise-a-zero.md)). **Il en reste trente**, et c'est
+le front ouvert : ce ne sont pas des lois à écrire, ce sont des lois écrites à
+brancher.
 
 Une **quatrième** nature est apparue avec [`82`](82-secteur-majeur.md), et elle
 est la plus discrète : **la constante inventée**. Le portage décidait du secteur

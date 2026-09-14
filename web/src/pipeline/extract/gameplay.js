@@ -47,6 +47,10 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // deux usages. `EntrywayTrigger` est leur forme reelle — un
                 // SEUIL qu'on franchit dans un sens (docs/83-seuils.md).
                 "SunlessZone", "EntrywayTrigger",
+                // La sphere de l'observatoire qui remet la simulation a zero :
+                // armee au premier tour, elle n'attend que les codes de
+                // lancement (docs/91-remise-a-zero.md).
+                "ResetSimulationTrigger",
                 "MajorSector", "ProbePromptTrigger", "TelescopePromptTrigger",
                 "RadiationEmitter",
                 // §5 le son reactif : le jeu repond a ce qu'on FAIT.
@@ -177,7 +181,7 @@ const WANT_VOLUME = new RegExp([
   "|PlayerAttachPoint|LODCameraSnapshot|SunlessZone|EntrywayTrigger",
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
-  "|GazeSwitch|MuseumEntryway|Surface|AudioShell)$",
+  "|GazeSwitch|MuseumEntryway|Surface|AudioShell|ResetSimulationTrigger)$",
 ].join(""), "i");
 
 /**

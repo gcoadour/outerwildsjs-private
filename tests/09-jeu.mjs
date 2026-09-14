@@ -97,8 +97,8 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          selfDestructed, angleEntre } from "../web/src/probe.js";
 
 import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
-import { TimeLoop, LOOP_MINUTES, SHOCKWAVE_SECONDS, SHOCKWAVE_RADIUS,
-         shockwaveRadius } from "../web/src/timeloop.js";
+import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
+         SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
          engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
@@ -277,6 +277,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et elle s'annonce", neuve.events.at(-1), "ResetSimulation");
   neuve.resume();
   check("reprendre ne recommence rien", neuve.events.at(-1), "ResumeSimulation");
+
+  // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------
+  //
+  // Armee quand on ne sait pas, elle ne tire que quand on sait : elle attend,
+  // au premier tour d'une partie neuve, qu'on soit alle apprendre les codes.
+  const sphere = new ResetTrigger({ volume: { shape: "sphere", radius: 5.196,
+                                              center: [0, 0, 0] },
+                                    position: [0, 0, 0], body: "TH_Body" });
+  check("elle nait desarmee", sphere.armed, false);
+  check("un deuxieme tour ne l'arme pas",
+        sphere.startOfTimeLoop(2, false), false);
+  check("le premier tour AVEC les codes non plus",
+        sphere.startOfTimeLoop(1, true), false);
+  check("le premier tour sans les codes, oui",
+        sphere.startOfTimeLoop(1, false), true);
+  check("dedans sans les codes, elle ne tire pas", sphere.enter(true, false), false);
+  check("dehors avec les codes non plus", sphere.enter(false, true), false);
+  check("dedans avec les codes, elle tire", sphere.enter(true, true), true);
+  check("et elle ne tire qu'une fois", sphere.enter(true, true), false);
+  check("elle s'est desarmee", sphere.armed, false);
 }
 
 // --- mise en scene de la supernova --------------------------------------
