@@ -1042,6 +1042,45 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- le vaisseau miniature et l'enfant (docs/78-modele.md) ---------------
+        mod = page.evaluate("""() => {
+          const m = window.__modele;
+          if (!m || !m.vaisseau) return null;
+          return { pistes: m.pistes.length, nom: m.vaisseau.name,
+                   son: m.vaisseau.crashSound,
+                   arbres: m.arbres ? Object.values(m.arbres.trees)
+                                        .filter(Boolean).length : 0 };
+        }""")
+        if mod:
+            rep.eq("trois pistes pour le modele reduit", mod["pistes"], 3)
+            rep.eq("le vaisseau miniature est la", mod["nom"], "ModelShip_Body")
+            rep.eq("avec son son de crash", mod["son"], "ModelShipCrash_Explosion")
+            rep.eq("et l'enfant a ses trois arbres", mod["arbres"], 3)
+        # Il VOLE : la console deportee le pousse, et la gravite le fait tomber.
+        vol = page.evaluate("""() => {
+          const m = window.__modele;
+          if (!m || !m.vaisseau) return null;
+          const v = m.vaisseau;
+          const avant = v.pos.slice();
+          return { bouge: v.vel.some(x => x !== 0) || avant.some(x => x !== 0) };
+        }""")
+        if vol:
+            rep.eq("il a une position et une vitesse", vol["bouge"], True)
+        # L'enfant compte, et les crashs passent avant les reussites.
+        kid = page.evaluate("""() => {
+          const k = window.__modele.enfant;
+          const avant = { c: k.crashes, l: k.landings };
+          k.crashes = 5; k.landings = 1;
+          const a = k.tree();
+          const b = k.tree();
+          k.crashes = avant.c; k.landings = avant.l;
+          return { a, b };
+        }""")
+        if kid:
+            rep.eq("cinq crashs et une reussite : le reproche d'abord",
+                   kid["a"], "tooManyCrashes")
+            rep.eq("et la reussite attend son tour", kid["b"], "successfulLanding")
+
         # --- les huit sons d'interface (docs/77-sons.md) -------------------------
         #
         # Le portage n'en jouait AUCUN : avancer un dialogue, le finir, viser

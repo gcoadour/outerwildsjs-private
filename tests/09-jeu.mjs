@@ -79,6 +79,9 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
 import { eatMarshmallowHeals, flashlightPromptVisible } from "../web/src/consoles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT } from "../web/src/modes.js";
+import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
+         modelLandingSpots, modelShipBody,
+         rocketKids } from "../web/src/modelship.js";
 import { QUANTIQUE, QuantumObject as ObjetQuantique, planarQuantumObjects,
          quantumStatues, locksOnSnapshot, collapsesOnFlashlightOff,
          statueParts, planarCandidate, slopeOK } from "../web/src/quantumobj.js";
@@ -5134,6 +5137,95 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et la fin arrete la boucle", ui.stopRepair(), null);
   check("le plein d'oxygene s'entend", ui.refillOxygen().file, "o2.ogg");
   check("a plein volume", ui.refillOxygen().volume, 1);
+}
+
+{
+  // --- LE VAISSEAU MINIATURE ET L'ENFANT (docs/78-modele.md) ---
+
+  check("dix unites par seconde, le seuil de crash", MODELE.crashSpeed, 10);
+  check("un contact doux n'est pas un crash", crashes(9.9), false);
+  check("au-dela, si", crashes(10.1), true);
+  check("et pile au seuil, non plus", crashes(10), false);
+
+  // ETRE POSE NE SUFFIT PAS : il faut etre IMMOBILE, et la rotation compte
+  // cent fois plus serre que la translation.
+  check("un dixieme d'unite par seconde", MODELE.landSpeed, 0.1);
+  check("un centieme de radian par seconde", MODELE.landSpin, 0.01);
+  check("assez lent, assez droit", stillEnough(0.05, 0.005), true);
+  check("trop vite, non", stillEnough(0.2, 0), false);
+  check("et un modele qui TOURNE lentement ne compte pas",
+        stillEnough(0, 0.05), false);
+
+  const piste = new ModelLandingSpot();
+  check("hors de la piste, rien", piste.update(0, 0, 0), false);
+  piste.setInside(true);
+  check("dedans mais trop vite, rien", piste.update(0, 5, 0), false);
+  check("dedans et immobile : on note l'instant", piste.update(1, 0, 0), false);
+  check("mais l'annonce attend deux dixiemes", piste.update(1.1, 0, 0), false);
+  check("puis elle vient", piste.update(1.3, 0, 0), true);
+  check("et une seule fois", piste.update(2, 0, 0), false);
+  // UNE FOIS POSE, ON NE PEUT PLUS RATER : le build ne re-teste pas les
+  // seuils. Seule la SORTIE de la zone annule.
+  const p2 = new ModelLandingSpot();
+  p2.setInside(true);
+  p2.update(0, 0, 0);
+  check("repartir tout de suite compte quand meme",
+        p2.update(0.3, 999, 999), true);
+  p2.setInside(false);
+  p2.setInside(true);
+  check("mais quitter la piste efface tout", p2.update(0.4, 999, 999), false);
+
+  // L'ENFANT COMPTE, et l'ordre n'est pas celui qu'on choisirait.
+  const gamin = new RocketKid();
+  check("la premiere fois, il se presente", gamin.tree(), "introduction");
+  check("et il se represente tant qu'on n'a rien fait", gamin.tree(), "introduction");
+  gamin.landed();
+  check("un atterrissage lui vaut un compliment",
+        gamin.tree(), "successfulLanding");
+  // ET IL SE REPRESENTE. Les deux compteurs sont a zero apres le compliment,
+  // donc la PREMIERE branche s'applique a nouveau : l'enfant se represente
+  // apres chaque reussite reconnue. C'est le build, ce n'est pas un oubli du
+  // portage, et l'invariant garde la mesure et non ce qu'on en penserait.
+  check("et il se represente ensuite", gamin.tree(), "introduction");
+  for (let i = 0; i < 4; i++) gamin.crashed();
+  check("quatre crashs ne suffisent pas", gamin.tree(), null);
+  gamin.crashed();
+  check("le cinquieme, si", gamin.tree(), "tooManyCrashes");
+  check("et le compteur repart de zero", gamin.crashes, 0);
+  // LES CRASHS PASSENT AVANT : se planter cinq fois puis reussir une fois vaut
+  // le reproche, pas le compliment.
+  const g2 = new RocketKid();
+  for (let i = 0; i < 5; i++) g2.crashed();
+  g2.landed();
+  check("cinq crashs et une reussite : le reproche d'abord",
+        g2.tree(), "tooManyCrashes");
+  check("et la reussite attend son tour", g2.tree(), "successfulLanding");
+
+  // Les lectures de la scene.
+  const gpM = { placed: {
+    ModelShipLandingSpot: [
+      { name: "ModelLandingSpot", body: "TimberHearth_Body", position: [0, 0, 0], fields: {} },
+      { name: "ModelLandingSpot", body: "TimberHearth_Body", position: [5, 0, 0], fields: {} },
+    ],
+    ModelShipCrashBehavior: [
+      { name: "ModelShip_Body", body: "ModelShip_Body", position: [1, 2, 3],
+        fields: { _crashSound: { name: "boum" } } },
+    ],
+    RocketKidConvoController: [
+      { name: "ConversationZone", body: "TimberHearth_Body", position: [0, 0, 0],
+        fields: {}, trees: { _introduction: "a", _successfulLanding: "b",
+                             _tooManyCrashes: "c" } },
+    ],
+  } };
+  check("deux pistes", modelLandingSpots(gpM).length, 2);
+  check("un vaisseau miniature", modelShipBody(gpM).name, "ModelShip_Body");
+  check("avec son son de crash", modelShipBody(gpM).crashSound, "boum");
+  check("sans rien de pose, rien", modelShipBody({}), null);
+  const k = rocketKids(gpM);
+  check("un enfant", k.length, 1);
+  check("avec ses trois arbres",
+        [k[0].trees.introduction, k[0].trees.successfulLanding,
+         k[0].trees.tooManyCrashes].join(","), "a,b,c");
 }
 
 report();

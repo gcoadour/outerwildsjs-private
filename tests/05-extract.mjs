@@ -24,6 +24,8 @@ import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
 import { heatSources } from "../web/src/consoles.js";
 import { shipProximity } from "../web/src/helmet.js";
+import { modelLandingSpots, modelShipBody,
+         rocketKids } from "../web/src/modelship.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
@@ -147,6 +149,19 @@ check("points d'apparition", n("SpawnPoint"), 16);
   check("une zone de proximite du vaisseau", zp.length, 1);
   check("de treize unites", zp[0].volume.radius, 13);
   check("posee sur le vaisseau", zp[0].body, "Ship_Body");
+  // Le vaisseau miniature et l'enfant qui compte (docs/78-modele.md).
+  check("trois pistes pour le modele reduit", modelLandingSpots(gp).length, 3);
+  check("toutes deux a Timber Hearth",
+        modelLandingSpots(gp).every((p) => p.body === "TimberHearth_Body"), true);
+  const mod = modelShipBody(gp);
+  check("un vaisseau miniature", mod !== null, true);
+  check("avec son son de crash", mod.crashSound, "ModelShipCrash_Explosion");
+  const kid = rocketKids(gp);
+  check("un enfant aux fusees", kid.length, 1);
+  // Les TROIS arbres sont resolus : c'est ce qui rend la selection possible.
+  check("et ses trois arbres, tous resolus",
+        Object.values(kid[0].trees).every((t) => t !== null), true);
+  check("et tous differents", new Set(Object.values(kid[0].trees)).size, 3);
 }
 
 // Le point d'apparition ne dit pas seulement OU l'on nait, mais dans quelle

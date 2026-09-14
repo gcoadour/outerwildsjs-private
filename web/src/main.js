@@ -80,6 +80,8 @@ import { GamepadControls, padAvailable } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes } from "./input.js";
 import { Modes } from "./modes.js";
+import { MODELE, ModelLandingSpot, RocketKid, crashes,
+         modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
          dominantField } from "./gravity.js";
@@ -605,6 +607,25 @@ async function boot() {
   let grillageRompu = false;
   // Les six buses du vaisseau miniature : homonymes, donc pilotees par POSITION.
   const busesModele = modelShipNozzles(gameplay);
+
+  // §S LE VAISSEAU MINIATURE VOLE. Ce n'est pas un decor : c'est un petit jeu
+  // complet, avec sa console, ses trois pistes, son seuil de crash et quelqu'un
+  // qui commente. Le portage le laissait pose (docs/78-modele.md).
+  const modele = modelShipBody(gameplay);
+  const pistesModele = modelLandingSpots(gameplay).map((d) => ({
+    data: d, etat: new ModelLandingSpot(),
+  }));
+  const enfant = rocketKids(gameplay)[0] || null;
+  const compteurEnfant = new RocketKid();
+  if (modele) {
+    modele.pos = modele.position.slice();
+    modele.vel = [0, 0, 0];
+    modele.quat = [0, 0, 0, 1];
+    modele.repos = modele.position.slice();
+    modele.node = undefined;
+  }
+  window.__modele = { vaisseau: modele, pistes: pistesModele,
+                      enfant: compteurEnfant, arbres: enfant };
   window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
   // Ce que le joueur porte en plus de son corps (docs/53-joueur.md) : l'etat,
   // le bruit qu'il fait, et le capteur qui le tue s'il reste coince.
@@ -2671,9 +2692,23 @@ async function boot() {
         // L'arbre se choisit a l'ouverture, comme le fait
         // `OnStartConversation` — et il depend de l'etat de la BOUCLE autant
         // que des connaissances, d'ou `dialogue.stateOf`.
+        //
+        // §S L'ENFANT AUX FUSEES choisit le sien autrement : il COMPTE. Cinq
+        // crashs lui valent un reproche, un atterrissage un compliment — et
+        // les crashs passent avant, donc se planter cinq fois puis reussir une
+        // fois vous vaut le reproche (docs/78-modele.md).
+        let arbre = null;
+        if (enfant && convo.name === enfant.name) {
+          const choix = compteurEnfant.tree();
+          if (choix && enfant.trees[choix]) {
+            arbre = enfant.trees[choix];
+            console.log(`enfant aux fusees : ${choix}`);
+          }
+        }
         dialogue.open({ ...convo,
-                        tree: selectTree(pdata, convo, dialogue.trees, controllers,
-                                         dialogue.stateOf(convo)) });
+                        tree: arbre || selectTree(pdata, convo, dialogue.trees,
+                                                  controllers,
+                                                  dialogue.stateOf(convo)) });
       }
     }
     if (dialogue.active && optionPressed > 0) dialogue.choose(optionPressed - 1);
@@ -4264,17 +4299,106 @@ async function boot() {
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
     for (const a of ascenseurs) a.update(now);
 
-    // Les six buses du vaisseau MINIATURE — celui de l'observatoire, pas celui
-    // du joueur : le champ `body` dit `ModelShip_Body`.
+    // §S LE VAISSEAU MINIATURE VOLE.
     //
-    // Le vaisseau miniature n'est PAS porte (playerdata.js le dit deja a propos
-    // de ses compteurs d'essais) : il n'y a donc aucune commande a lire, et les
-    // six buses restent eteintes. La loi est ecrite et eprouvee — la buse
-    // allumee est celle qui POUSSE, donc l'opposee au mouvement — et c'est le
-    // meme choix que pour les dix-huit bouffees de docs/46 : la mecanique
-    // existe, sa liste d'entrees est vide, et on le dit.
+    // Il se pilote depuis la console deportee de l'observatoire, avec les huit
+    // canaux que `_modelShipInputs` autorise (docs/70) : les deux axes de
+    // poussee, la montee, la descente, le tangage, le lacet — et rien d'autre,
+    // ni sonde ni carte.
+    //
+    // La poussee est celle du VRAI vaisseau, faute d'un modele a lui : le
+    // build n'en pose aucun sur `ModelShip_Body`, et c'est dit ici plutot que
+    // presente comme mesure.
+    let pousseeModele = [0, 0, 0];
+    if (modele) {
+      const auxCommandes = !!(consoles.active && consoles.active.flight);
+      if (auxCommandes) {
+        const a = {
+          fwd: quatRotate(modele.quat, [0, 0, 1]),
+          right: quatRotate(modele.quat, [1, 0, 0]),
+          up: quatRotate(modele.quat, [0, 1, 0]),
+        };
+        const ax = cmds.axis("Move X", etatCmd);
+        const az = cmds.axis("Move Z", etatCmd);
+        const mu = (cmds.held("Move Up", etatCmd) ? 1 : 0)
+                 - (cmds.held("Move Down", etatCmd) ? 1 : 0);
+        const p = (ship ? ship.thrust : 50) * 0.4;
+        pousseeModele = [
+          (a.right[0] * ax + a.fwd[0] * az + a.up[0] * mu) * p,
+          (a.right[1] * ax + a.fwd[1] * az + a.up[1] * mu) * p,
+          (a.right[2] * ax + a.fwd[2] * az + a.up[2] * mu) * p,
+        ];
+      }
+      const g = dominantField(bodies, {
+        x: modele.pos[0] - anchorPos[0], y: modele.pos[1] - anchorPos[1],
+        z: modele.pos[2] - anchorPos[2] });
+      const avant = modele.vel.slice();
+      for (let i = 0; i < 3; i++) {
+        const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;
+        modele.vel[i] += (pousseeModele[i] + gi) * dt;
+        modele.pos[i] += modele.vel[i] * dt;
+      }
+      // LE SOL. Le modele reduit n'a pas de collider a lui : on le pose sur la
+      // surface du corps dominant, et c'est l'ARRIVEE a cette surface qui donne
+      // la vitesse d'impact — la seule chose dont le seuil de crash a besoin.
+      if (g && g.body && g.body.gravity) {
+        const r = (g.body.gravity.upperSurfaceRadius || 0) + 0.6;
+        const d = [modele.pos[0] - anchorPos[0] - g.body.position[0],
+                   modele.pos[1] - anchorPos[1] - g.body.position[1],
+                   modele.pos[2] - anchorPos[2] - g.body.position[2]];
+        const l = Math.hypot(d[0], d[1], d[2]) || 1;
+        if (l < r) {
+          const impact = Math.hypot(avant[0], avant[1], avant[2]);
+          for (let i = 0; i < 3; i++) {
+            modele.pos[i] = anchorPos[i] + g.body.position[i] + d[i] / l * r;
+            modele.vel[i] = 0;
+          }
+          // `OnImpact` ne fait rien sous DIX : un contact doux n'est pas un
+          // crash, et c'est ce qui rend l'atterrissage possible.
+          if (crashes(impact)) {
+            compteurEnfant.crashed();
+            console.log(`annonce : CrashedModelShip (${impact.toFixed(1)} u/s)`);
+            if (modele.crashSound) audio.playOneShot(modele.crashSound);
+            // Il repart de sa place : le build l'y remet par son support.
+            modele.pos = modele.repos.slice();
+            modele.vel = [0, 0, 0];
+          }
+        }
+      }
+      // LES TROIS PISTES. Pose ne suffit pas : il faut etre IMMOBILE — 0,1 u/s
+      // et 0,01 rad/s — pendant deux dixiemes de seconde.
+      for (const p of pistesModele) {
+        const dec = decalageDuCorps(p.data.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(modele.pos[0] - p.data.position[0] - dec[0],
+                             modele.pos[1] - p.data.position[1] - dec[1],
+                             modele.pos[2] - p.data.position[2] - dec[2]);
+        p.etat.setInside(d < 3);
+        // La vitesse est relative a la PLANETE : sur un sol qui tourne, un
+        // modele immobile dans le monde ne l'est pas pour la piste.
+        if (p.etat.update(now, Math.hypot(...modele.vel), 0)) {
+          compteurEnfant.landed();
+          console.log("annonce : LandedModelShip");
+        }
+      }
+      if (modele.node === undefined) {
+        modele.node = null;
+        for (const e of geo) {
+          const n = e.nodes.get(modele.name);
+          if (n) { modele.node = n; break; }
+        }
+      }
+      if (modele.node) {
+        modele.node.setAbsolutePosition(new BABYLON.Vector3(
+          modele.pos[0] - anchorPos[0], modele.pos[1] - anchorPos[1],
+          modele.pos[2] - anchorPos[2]));
+      }
+    }
+    // Les six buses du vaisseau MINIATURE — celui de l'observatoire, pas celui
+    // du joueur : le champ `body` dit `ModelShip_Body`. La buse allumee est
+    // celle qui POUSSE, donc l'opposee au mouvement demande — et elle a enfin
+    // une entree a lire.
     if (busesModele.length && particles.live && particles.live.size) {
-      const etats = shipNozzles([0, 0, 0]);
+      const etats = shipNozzles(pousseeModele);
       const parPosition = new Map();
       for (const b of busesModele) parPosition.set(b.position.join(","), etats[b.direction]);
       particles.gateAt(parPosition);

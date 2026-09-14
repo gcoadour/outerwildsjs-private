@@ -123,7 +123,11 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "AncientProbeController",
                 // La zone de proximite du vaisseau : l'affichage des avaries
                 // ne s'allume QUE dedans (docs/76-proximite.md).
-                "ShipProximityVolume"];
+                "ShipProximityVolume",
+                // Le vaisseau miniature de l'observatoire : sa piste, son
+                // crash, et l'enfant qui compte les deux (docs/78-modele.md).
+                "ModelShipLandingSpot", "ModelShipCrashBehavior",
+                "RocketKidConvoController"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
