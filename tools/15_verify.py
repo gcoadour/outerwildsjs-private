@@ -1909,6 +1909,36 @@ def _run(url, heavy, profil=None, zip_path=None):
                                  " return a ? Math.round(a.diffuse.b * 1000) /"
                                  " Math.round(a.diffuse.r * 1000) > 1 : null; }"), True)
 
+        # --- les zones d'ambiance et leurs seuils (docs/84-ambiance.md) --------
+        #
+        # Six des dix-sept zones n'ont pas de collider. L'extraction leur en
+        # fabriquait un avec la premiere boite d'enfant trouvee : la grotte aux
+        # quatre portes se reduisait a UNE porte de onze metres.
+        amb = page.evaluate("""() => {
+          const a = window.__audio && window.__audio.ambience;
+          if (!a) return null;
+          const z = a.zones;
+          return {
+            zones: z.length,
+            sansForme: z.filter(x => !x.volume).length,
+            portes: z.reduce((n, x) => n + (x.entryways || []).length, 0),
+            grotte: (z.find(x => x.name === "CaveVolume01") || {}).entryways
+                      ? z.find(x => x.name === "CaveVolume01").entryways.length : -1,
+            couches: a.playing.map(l => l.name).sort(),
+          };
+        }""")
+        if amb:
+            rep.eq("zones d'ambiance montees", amb["zones"], 17)
+            rep.eq("dont six sans forme propre", amb["sansForme"], 6)
+            rep.eq("quatorze seuils leur sont joints", amb["portes"], 14)
+            rep.eq("et la grotte aux quatre portes les a toutes", amb["grotte"], 4)
+            # Debout au village : l'atmosphere et la musique du village, pas la
+            # grotte d'en face.
+            rep.check("au village, aucune ambiance de grotte ne joue",
+                      all("Cave" not in (n or "") for n in amb["couches"]),
+                      amb["couches"], "aucune Cave*")
+            rep.at_least("et au moins une couche sonne", len(amb["couches"]), 1)
+
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
     return rep

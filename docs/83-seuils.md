@@ -56,9 +56,9 @@ que `TowerEntryway` garde `CaveVolume01` et non le volume musical de la cité
 enterrée, qui est sur le même corps.
 
 Sur les dix-huit seuils de la scène, huit servent les zones sans soleil. Les dix
-autres gardent un volume musical (×6), la chambre en apesanteur, la station
-météo (×2) et la trappe du vaisseau : autant de mécaniques qui ont la même forme
-et qui restent à brancher.
+autres gardent la musique de la cité enterrée (×5), la zone sombre elle-même, la
+chambre en apesanteur, la station météo (×2) et la trappe du vaisseau : autant
+de mécaniques qui ont la même forme.
 
 ## Un compte, pas un booléen
 

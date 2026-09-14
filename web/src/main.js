@@ -25,7 +25,8 @@ import { Resources, oxygenZones, inOxygenZone,
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
          AutopilotReadout } from "./hud.js";
 import { Minimap } from "./minimap.js";
-import { sunlessZones, darkZones, EffectZones } from "./entryways.js";
+import { sunlessZones, darkZones, entrywayTriggers,
+         EffectZones } from "./entryways.js";
 import { Settings, SettingsUI } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatSources, heatAt, remoteConsoles, RemoteConsoles,
@@ -408,7 +409,8 @@ async function boot() {
   if (audioMap.length) await audio.init();
   // Dix-sept zones d'ambiance : ce ne sont pas des sources de plus, ce sont des
   // couches qui s'arbitrent par priorite (web/src/ambience.js).
-  const ambience = new AmbienceMixer(ambienceZones({ volumes: await loadAmbience() }));
+  const ambience = new AmbienceMixer(
+    ambienceZones({ volumes: await loadAmbience() }, entrywayTriggers(gameplay)));
   window.__ambience = ambience;
 
   const particleMap = await loadParticleMap();
@@ -1959,7 +1961,8 @@ async function boot() {
   window.__particles = { field: particles, total: particleMap.length, live: () => particles.count,
                         active: () => particles.particles, failed: () => particles.failed };
   window.__audio = { total: audioMap.length, live: () => audio.count,
-                     playing: () => audio.playing, failed: () => audio.failed };
+                     playing: () => audio.playing, failed: () => audio.failed,
+                     ambience };
   // point d'entree de verification : oriente la camera sans passer par le
   // verrouillage de souris, pour les captures automatisees
   window.__look = (y, p) => { yaw = y; pitch = p; };
@@ -4771,7 +4774,8 @@ async function boot() {
     if (ambience.count) {
       audio.setLayers(ambience.update(dt,
         [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
-         player.pos.z + anchorPos[2]], { night }), mixer);
+         player.pos.z + anchorPos[2]],
+        { night, shiftOf: (x) => decalageDuCorps(x.body, anchorPos) }), mixer);
     }
     // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas

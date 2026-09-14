@@ -16,6 +16,7 @@ import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
 import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.js";
 import { majorSectors, activeMajorSector } from "../web/src/sectors.js";
 import { sunlessZones, entrywayTriggers } from "../web/src/entryways.js";
+import { ambienceZones } from "../web/src/ambience.js";
 import { billboards, talkingFaces, thrusterNozzles, particleBursts,
          meteorLaunchers, teleporters, warps } from "../web/src/decor.js";
 import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
@@ -445,6 +446,34 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   // C'est cette ligne qui rend le reencodage Opus du worker possible : sans un
   // seul `.wav`, il ne s'executait jamais.
   check("le worker a de quoi reencoder", (parExt.wav ?? 0) > 0, true);
+
+  // --- les zones d'ambiance et leurs seuils (docs/84-ambiance.md) --------
+  //
+  // Six des dix-sept n'ont AUCUN collider. L'extraction leur en fabriquait un
+  // en prenant la premiere boite d'enfant trouvee : la grotte aux quatre
+  // portes se reduisait a une porte de onze metres.
+  check("volumes d'ambiance", audio.volumes.length, 17);
+  check("dont six sans forme propre",
+        audio.volumes.filter((v) => !v.volume).map((v) => v.name).sort().join(","),
+        "CaveVolume,CaveVolume01,CaveVolume02,Hatch,MuseumVolume,MusicVolume");
+  check("tous portent leur corps",
+        audio.volumes.every((v) => !!v.body), true);
+  // Deux `MusicVolume`, sur deux corps : l'un a une sphere, l'autre des portes.
+  const musiques = audio.volumes.filter((v) => v.name === "MusicVolume");
+  check("deux zones nommees MusicVolume", musiques.length, 2);
+  check("et elles ne sont pas sur le meme corps",
+        new Set(musiques.map((v) => v.body)).size, 2);
+  const jointes = ambienceZones(audio, entrywayTriggers(gp));
+  check("zones d'ambiance retenues", jointes.length, 17);
+  check("et les six sans forme ont toutes des portes",
+        jointes.filter((z) => !z.volume).every((z) => z.entryways.length > 0), true);
+  check("quatorze seuils servent une zone sonore",
+        jointes.reduce((a, z) => a + z.entryways.length, 0), 14);
+  check("la grotte aux quatre portes les a toutes les quatre",
+        jointes.find((z) => z.name === "CaveVolume01").entryways.length, 4);
+  check("et la musique de la cite enterree en a cinq",
+        jointes.find((z) => z.name === "MusicVolume" && !z.volume)
+          .entryways.length, 5);
 
   // Les sons d'evenement : qui les porte, et avec quelle loi.
   const ev = eventAudio(audio);

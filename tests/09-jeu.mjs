@@ -49,8 +49,8 @@ import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAccelerati
          BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
-import { ambienceZones, activeZones, winnersByLayer, clipOf,
-         AmbienceMixer } from "../web/src/ambience.js";
+import { ambienceZones, zonesAround, winnersByLayer, clipOf,
+         ZonePresence, AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, zeroGAt,
          probePrompts, radiationEmitters,
          radiationAt, CompoundTrigger, sandstormVolumes,
@@ -2455,29 +2455,70 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     zone("Hatch", 0, 100, 0.5, "sas.ogg"),
   ];
 
+  const ou = (l, pt) => zonesAround(l.map((z) => new ZonePresence(z)), pt);
+
   check("une zone sans forme ni clip est ecartee",
         ambienceZones({ volumes: [...zones, { name: "vide", layer: 0 }] }).length, 4);
+  // ... mais une zone SANS FORME qui a des portes, elle, est gardee : c'est le
+  // cas des six zones du build qui n'ont pas de collider (docs/84-ambiance.md).
+  const porte = (name, parent, body, pos = [0, 0, 0], taille = 4) => ({
+    name, body, parents: ["Racine", parent], position: pos, rotation: null,
+    volume: { shape: "box", size: [taille, taille, taille], center: [0, 0, 0] },
+    exit: [0, 1, 0], initial: 0,
+  });
+  const grotte = { name: "CaveVolume01", body: "Twin01_Body", layer: 1,
+                   priority: 1, file: "grotte.ogg", fade: 2, position: [0, 0, 0] };
+  const jointes = ambienceZones({ volumes: [grotte] },
+    [porte("TowerEntryway", "CaveVolume01", "Twin01_Body"),
+     porte("CityEntryway", "CaveVolume01", "Twin01_Body", [50, 0, 0]),
+     porte("Ailleurs", "MusicVolume", "Twin01_Body")]);
+  check("une zone sans forme mais avec des portes est gardee", jointes.length, 1);
+  check("et elle prend les siennes, pas celles du voisin",
+        jointes[0].entryways.map((t) => t.name).sort().join(","),
+        "CityEntryway,TowerEntryway");
+  // Il y a DEUX `MusicVolume` dans le build, sur deux corps : la jointure se
+  // fait par nom ET par corps.
+  const deuxMemesNoms = ambienceZones(
+    { volumes: [{ name: "MusicVolume", body: "QuantumMoon_Body", layer: 2,
+                  priority: 0, file: "q.ogg", position: [0, 0, 0],
+                  volume: { shape: "sphere", radius: 100, center: [0, 0, 0] } }] },
+    [porte("Entryway", "MusicVolume", "Twin01_Body")]);
+  check("le seuil de la cite ne suit pas la musique de la lune quantique",
+        deuxMemesNoms[0].entryways.length, 0);
+
+  // LA PRESENCE : on n'est pas « dedans » une grotte, on y est ENTRE.
+  const presence = new ZonePresence(jointes[0]);
+  check("dehors au depart", presence.update([0, 10, 0]), false);
+  presence.update([0, 1, 0]);              // dans l'embrasure de la tour
+  check("ressorti par l'autre cote : on y est", presence.update([0, -10, 0]), true);
+  // On ressort par une AUTRE porte, cinquante metres plus loin : le compte
+  // retombe. Une contenance posee sur une seule boite d'enfant — ce que faisait
+  // l'extraction — ne pouvait pas decrire ca.
+  presence.update([50, -1, 0]);
+  check("toujours dedans en gagnant l'autre porte", presence.inside, true);
+  presence.update([50, 10, 0]);
+  check("ressorti par elle, on n'y est plus", presence.inside, false);
   check("au centre, les quatre zones contiennent l'auditeur",
-        activeZones(zones, [0, 0, 0]).length, 4);
+        ou(zones, [0, 0, 0]).length, 4);
   // A 100 unites on est encore SUR le bord de MusicVolume : la borne est
   // inclusive, et c'est ce que le test garde.
   check("a 100 unites, l'atmosphere et le bord de la musique",
-        activeZones(zones, [100, 0, 0]).map((z) => z.name).sort().join(","),
+        ou(zones, [100, 0, 0]).map((z) => z.name).sort().join(","),
         "Atmosphere,MusicVolume");
-  check("a 101, la musique est sortie", activeZones(zones, [101, 0, 0]).length, 1);
+  check("a 101, la musique est sortie", ou(zones, [101, 0, 0]).length, 1);
 
-  const g = winnersByLayer(zones, [0, 0, 0]);
+  const g = winnersByLayer(ou(zones, [0, 0, 0]));
   check("trois couches gagnees", g.size, 3);
   check("dans la couche 1, la grotte couvre l'atmosphere", g.get(1).name, "CaveVolume");
   check("la couche 0 revient au sas", g.get(0).name, "Hatch");
   check("hors de la grotte, l'atmosphere reprend la couche 1",
-        winnersByLayer(zones, [50, 0, 0]).get(1).name, "Atmosphere");
+        winnersByLayer(ou(zones, [50, 0, 0])).get(1).name, "Atmosphere");
 
   // A priorite egale, la plus petite zone gagne : une piece est plus precise
   // qu'une atmosphere, et c'est la seule regle qui donne un resultat stable.
   const exaequo = [zone("grande", 1, 0, 250, "a.ogg"), zone("petite", 1, 0, 20, "b.ogg")];
   check("a egalite, la plus petite l'emporte",
-        winnersByLayer(exaequo, [0, 0, 0]).get(1).name, "petite");
+        winnersByLayer(ou(exaequo, [0, 0, 0])).get(1).name, "petite");
 
   const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg", { nightFile: "nuit.ogg" });
   check("de jour, le clip du jour", clipOf(nuit, false), "jour.ogg");

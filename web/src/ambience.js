@@ -22,9 +22,11 @@
 //   - le clip d'une zone est vise par `_clip`, et l'`AudioSource` posee sur le
 //     meme objet est serialisee SANS clip. Les apparier par objet rendait les
 //     dix-sept zones muettes ;
-//   - la forme n'est pas sur l'objet de la zone mais sur ses ENFANTS, qui
-//     portent les `EntrywayTrigger`. Six zones sur dix-sept n'avaient donc
-//     aucune portee ;
+//   - six zones sur dix-sept n'ont PAS de collider. Leur forme est celle des
+//     `EntrywayTrigger` poses sous elles — et un seuil n'est pas une
+//     contenance : il dit dans quel SENS on l'a traverse. Avoir servi la
+//     premiere boite d'enfant comme portee reduisait la grotte aux quatre
+//     portes a UNE porte de onze metres (docs/84-ambiance.md) ;
 //   - les priorites vont de 0 a 100 et NE sont PAS uniques dans une couche :
 //     cinq zones de la couche 1 sont a 0. A egalite, c'est la plus petite qui
 //     gagne — une piece est plus precise qu'une atmosphere, et c'est la seule
@@ -42,6 +44,8 @@
 // Les dix-sept volumes d'ambiance, arbitres par priorite.
 
 import { insideVolume } from "./gravity.js";
+import { Entryway } from "./entryways.js";
+import { restingPoint } from "./frames.js";
 
 /**
  * Charge les zones depuis le meme fichier que les sources.
@@ -61,25 +65,36 @@ export async function loadAmbience() {
   }
 }
 
-/** Zones d'ambiance extraites, telles quelles. */
-export function ambienceZones(audio) {
-  return ((audio && audio.volumes) || []).filter((z) => z.volume && z.file);
-}
-
-/** Les zones qui contiennent ce point. */
-export function activeZones(zones, worldPoint) {
-  return zones.filter((z) => insideVolume(z, worldPoint));
+/**
+ * Zones d'ambiance extraites, jointes a leurs SEUILS.
+ *
+ * Six des dix-sept n'ont pas de collider : la grotte aux quatre portes, sa
+ * voisine a deux, la grotte et le musee de Timber Hearth, la musique de la cite
+ * enterree et la trappe du vaisseau. Leur forme est celle de leurs
+ * `EntrywayTrigger`, et le lien vit dans la HIERARCHIE — d'ou la jointure par
+ * nom ET par corps : il y a deux `MusicVolume` dans la scene, l'un sur la lune
+ * quantique avec sa sphere de cent, l'autre sous la cite enterree avec ses six
+ * portes (docs/84-ambiance.md).
+ */
+export function ambienceZones(audio, seuils = []) {
+  return ((audio && audio.volumes) || [])
+    .map((z) => ({
+      ...z,
+      entryways: seuils.filter((t) => t.name === z.name ||
+        (t.parents.includes(z.name) && (!z.body || !t.body || t.body === z.body))),
+    }))
+    .filter((z) => z.file && (z.volume || z.entryways.length));
 }
 
 /**
- * La zone qui gagne chaque couche.
+ * La zone qui gagne chaque couche, parmi celles ou l'on EST.
  *
- * @returns {Map<number, object>} couche -> zone, ou la couche est absente si
- *   aucune zone ne contient le point.
+ * @param actives zones ou l'auditeur se trouve — par contenance ou par seuil
+ * @returns {Map<number, object>} couche -> zone
  */
-export function winnersByLayer(zones, worldPoint) {
+export function winnersByLayer(actives) {
   const out = new Map();
-  for (const z of activeZones(zones, worldPoint)) {
+  for (const z of actives) {
     const en_place = out.get(z.layer);
     if (!en_place || z.priority > en_place.priority ||
         (z.priority === en_place.priority && rayon(z) < rayon(en_place))) {
@@ -89,18 +104,74 @@ export function winnersByLayer(zones, worldPoint) {
   return out;
 }
 
-/** Taille d'une zone, pour departager deux priorites egales. */
+/**
+ * Taille d'une zone, pour departager deux priorites egales.
+ *
+ * Une zone sans collider n'a pas de taille propre : on prend la plus petite de
+ * ses portes. C'est un choix du portage — le build ne departage pas les egalites
+ * de priorite, il garde simplement la premiere arrivee — mais « la plus petite
+ * gagne » donne au moins un resultat stable, et une piece est plus precise
+ * qu'une atmosphere.
+ */
 function rayon(z) {
   const v = z.volume || {};
   if (v.radius > 0) return v.radius;
   if (v.size) return Math.hypot(v.size[0], v.size[1], v.size[2]) / 2;
-  return Infinity;
+  let min = Infinity;
+  for (const t of z.entryways || []) {
+    const b = t.volume || {};
+    const r = b.radius > 0 ? b.radius
+      : (b.size ? Math.hypot(b.size[0], b.size[1], b.size[2]) / 2 : Infinity);
+    if (r < min) min = r;
+  }
+  return min;
+}
+
+/**
+ * Ou l'on est, zone par zone : contenance ET seuils franchis.
+ *
+ * L'etat est necessaire — un seuil ne dit rien tant qu'on ne l'a pas
+ * RETRAVERSE, et c'est justement ce qui lui permet de decrire une grotte que
+ * nulle sphere ne decrirait.
+ */
+export class ZonePresence {
+  constructor(zone) {
+    this.zone = zone;
+    this.portes = (zone.entryways || []).map((t) => new Entryway(t));
+    this.count = 0;
+    this.dedans = false;
+  }
+
+  get inside() { return this.dedans || this.count > 0; }
+
+  update(worldPoint, shiftOf = null) {
+    const ou = (x) => (shiftOf ? restingPoint(worldPoint, shiftOf(x)) : worldPoint);
+    for (const p of this.portes) {
+      const e = p.update(ou(p.trigger));
+      if (e === "entry") this.count += 1;
+      else if (e === "exit") this.count = Math.max(0, this.count - 1);
+    }
+    if (this.zone.volume) this.dedans = insideVolume(this.zone, ou(this.zone));
+    return this.inside;
+  }
 }
 
 /** Le clip d'une zone a cet instant : celui de la nuit s'il en a un. */
 export function clipOf(zone, night = false) {
   if (night && zone.nightFile) return zone.nightFile;
   return zone.file;
+}
+
+/**
+ * Les zones ou l'auditeur se trouve : contenance et seuils confondus.
+ *
+ * Remplace l'ancien `activeZones`, qui ne savait que la contenance — et qui, de
+ * ce fait, ne pouvait rien dire des six zones sans collider.
+ */
+export function zonesAround(presences, worldPoint, shiftOf = null) {
+  const out = [];
+  for (const p of presences) if (p.update(worldPoint, shiftOf)) out.push(p.zone);
+  return out;
 }
 
 /**
@@ -112,6 +183,7 @@ export function clipOf(zone, night = false) {
 export class AmbienceMixer {
   constructor(zones = []) {
     this.zones = zones;
+    this.presences = zones.map((z) => new ZonePresence(z));
     this.layers = new Map();   // couche -> { zone, file, gain }
   }
 
@@ -132,8 +204,8 @@ export class AmbienceMixer {
    * au rythme de la zone SORTANTE, puis remonte au rythme de l'entrante. C'est
    * ce qui evite qu'un seuil de porte fasse claquer le son.
    */
-  update(dt, worldPoint, { night = false } = {}) {
-    const gagnantes = winnersByLayer(this.zones, worldPoint);
+  update(dt, worldPoint, { night = false, shiftOf = null } = {}) {
+    const gagnantes = winnersByLayer(zonesAround(this.presences, worldPoint, shiftOf));
     const couches = new Set([...this.layers.keys(), ...gagnantes.keys()]);
     for (const c of couches) {
       const veut = gagnantes.get(c) || null;

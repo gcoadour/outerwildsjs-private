@@ -405,10 +405,19 @@ test qui aurait pu le dire, parce qu'on ne teste pas ce qu'on a inventé.
 
 La teinte de l'ambiance par secteur, que ce lot avait laissée ouverte, est
 portée depuis [`83`](83-seuils.md) : `_ambientLight` est une énumération, pas un
-nombre. Ce qui reste ouvert du même côté, ce sont les **dix seuils sur dix-huit**
-qui ne gardent pas une zone sans soleil — un volume musical, la chambre en
-apesanteur, la station météo, la trappe : même forme, même loi, mécaniques non
-branchées.
+nombre. Les seuils, eux, servent maintenant les cinq zones sans soleil, la zone
+sombre et les six zones sonores sans forme ([`84`](84-ambiance.md)) — quatorze
+des dix-huit. Restent la chambre en apesanteur et les deux seuils de la station
+météo, qui commandent des `DirectionalForceField` : même forme, même loi,
+mécaniques non branchées.
+
+Et une cinquième nature de manque, découverte par [`84`](84-ambiance.md) :
+**le commentaire exact posé sur un code approximatif**. L'extracteur audio
+décrivait correctement ce qu'il aurait fallu faire — « la forme est celle des
+`EntrywayTrigger` posés sous l'objet » — au-dessus d'un code qui prenait la
+première boîte d'enfant et la servait comme contenance. Aucun test ne
+l'interrogeait, parce que le commentaire tenait lieu de preuve. C'est plus
+difficile à voir qu'un commentaire faux.
 
 Reste le dénominateur des **annonces** : 74 des 124 chaînes de `GlobalMessenger`
 ne sont nommées nulle part dans `web/src/`. Ce n'est pas une liste de manques —
