@@ -1017,6 +1017,57 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- les passages, les coquilles, le sol qui tourne (docs/73) ------------
+        ep = page.evaluate("""() => {
+          const e = window.__epaves;
+          return { n: e.count,
+                   noms: e.warps.map(w => w.data.name),
+                   surSortie: e.warps.filter(w => w.data.onExit).length,
+                   jumeaux: e.warps.filter(w => w.jumeau).length };
+        }""")
+        rep.eq("trois passages de Dark Bramble", ep["n"], 3)
+        rep.eq("dont le raccourci depuis Timber Hearth",
+               "DarkBrambleShortcut" in ep["noms"], True)
+        rep.eq("un seul part sur la SORTIE", ep["surSortie"], 1)
+        rep.eq("et les trois connaissent leur jumeau", ep["jumeaux"], 3)
+        # Trois secondes, pas a l'instant : la moitie de `_warpDuration`.
+        saut = page.evaluate("""() => {
+          const e = window.__epaves;
+          const w = e.warps.find(x => x.data.name === "DarkBrambleShortcut");
+          const p = w.data.position;
+          const a = e.update(0.1, 1000, p);
+          const b = e.update(0.1, 1002, p);
+          const c = e.update(0.1, 1003, p);
+          e.drain();
+          return { a: a !== null, b: b !== null, c: c !== null,
+                   vers: c ? c.receiver.body : null,
+                   vitesse: c ? Math.round(Math.hypot(...c.velocity)) : 0 };
+        }""")
+        rep.eq("entrer ne suffit pas", saut["a"], False)
+        rep.eq("ni deux secondes", saut["b"], False)
+        rep.eq("a trois secondes, on part", saut["c"], True)
+        rep.eq("vers Dark Bramble", saut["vers"], "DarkBramble_Body")
+        rep.eq("et en mouvement", saut["vitesse"], 10)
+        # Les coquilles sonores, appariees a leur source par position.
+        coq = page.evaluate("""() => {
+          const c = window.__coquilles;
+          if (!c) return null;
+          return { n: c.count, appariees: c.paired,
+                   rayons: c.shells.map(s => Math.round(s.data.volume.radius)) };
+        }""")
+        if coq:
+            rep.eq("deux coquilles sonores", coq["n"], 2)
+            rep.eq("concentriques sur Giant's Deep", sorted(coq["rayons"]), [205, 498])
+            rep.at_least("appariees a leur source", coq["appariees"], 1)
+        # On part avec le sol : la vitesse initiale n'est pas zero.
+        sol = page.evaluate("""() => {
+          const p = window.__player;
+          return p ? Math.hypot(p.vel.x, p.vel.y, p.vel.z) : null;
+        }""")
+        if sol is not None:
+            rep.check("le joueur ne part pas immobile sur un sol qui tourne",
+                      sol > 0, round(sol, 3), "> 0")
+
         # --- les lois qui n'etaient qu'importees (docs/72-poussiere.md) ---------
         #
         # Quatre lois ecrites, eprouvees, documentees — et presentes dans une

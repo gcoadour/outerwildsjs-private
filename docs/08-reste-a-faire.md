@@ -120,7 +120,7 @@ portage.
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
-| vérification avec le build | **212/212** ([`72`](72-poussiere.md)) |
+| vérification avec le build | **225/225** ([`73`](73-passages.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
@@ -142,6 +142,9 @@ portage.
 | grillage rompu | on ne grille pas à plus de 4 unités du feu ([`72`](72-poussiere.md)) |
 | toile du regard | deux anneaux en sens inverse, au **cube** des fractions ([`72`](72-poussiere.md)) |
 | tempête de sable | 4 cylindres, **une** entrée, **une** sortie ([`72`](72-poussiere.md)) |
+| passages de Dark Bramble | 3 volumes, départ **3 s après l'entrée**, et l'épave se quitte par son **bord** ([`73`](73-passages.md)) |
+| coquilles sonores | entrer la **tête** dans l'océan coupe le bruit de l'océan ([`73`](73-passages.md)) |
+| **on part avec le sol** | le joueur se réveille à la vitesse du sol qui tourne, pas à zéro ([`73`](73-passages.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

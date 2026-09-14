@@ -32,7 +32,7 @@ import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
          COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, DayNightTracker } from "../web/src/lights.js";
-import { shellGain, audioShells, SHELL_FADE } from "../web/src/audio.js";
+import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
 import { MarshmallowStick as Baton, thermTime, THERM_HEAT_SPAN,
@@ -58,7 +58,8 @@ import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          attachTarget, DeclaredFrames, restingPoint,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
 import { tornadoPivots, TornadoPivots, matchTransforms,
-         disposableContainers, MeteorLaunchers, METEOR } from "../web/src/decor.js";
+         disposableContainers, MeteorLaunchers, METEOR, warps, WARP,
+         DerelictWarps } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
@@ -4791,6 +4792,114 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("une sortie ne suffit pas", comp.exitChild("a"), false);
   check("la seconde, oui", comp.exitChild("a"), true);
   check("et plus personne dedans", comp.inside, 0);
+}
+
+{
+  // --- LES PASSAGES, LES COQUILLES, ET LE SOL QUI TOURNE (docs/73) ---
+
+  // LES TROIS PASSAGES DE DARK BRAMBLE.
+  check("six secondes de traversee", WARP.duration, 6);
+  check("une seconde de garde apres l'arrivee", WARP.arrivalGuard, 1);
+  check("et dix unites par seconde en arrivant", WARP.exitSpeed, 10);
+
+  const gpW = { placed: { DerelictWarp: [
+    { name: "DarkBrambleShortcut", body: "TimberHearth_Body", position: [0, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 50, center: [0, 0, 0] },
+      fields: { _warpOnExit: false, _localArrivalPos: { x: 0, y: 0, z: 32.5 } },
+      targets: { _sisterWarp: { name: "WarpVolume", body: "DarkBramble_Body" } } },
+    { name: "WarpVolume", body: "DarkBramble_Body", position: [1000, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 60, center: [0, 0, 0] },
+      fields: { _warpOnExit: false, _localArrivalPos: { x: 0, y: 0, z: 107.59 } },
+      targets: { _sisterWarp: { name: "DarkBrambleShortcut", body: "TimberHearth_Body" } } },
+  ] } };
+  const res = new DerelictWarps(warps(gpW));
+  check("deux passages", res.count, 2);
+  check("et chacun connait son jumeau",
+        res.warps.every((w) => w.jumeau !== null), true);
+  // Entrer ne suffit pas : il faut TENIR trois secondes.
+  check("a l'entree, rien", res.update(0.1, 0, [0, 0, 0]), null);
+  check("a deux secondes, toujours rien", res.update(0.1, 2, [0, 0, 0]), null);
+  const saut = res.update(0.1, 3, [0, 0, 0]);
+  check("a trois secondes, on part", saut !== null, true);
+  check("vers le jumeau", saut.receiver.name, "WarpVolume");
+  // Le point d'arrivee : le local du JUMEAU, dans son repere.
+  check("au point d'arrivee du jumeau", Math.round(saut.arrival[2]), 108);
+  check("et pres de son centre", Math.round(saut.arrival[0]), 1000);
+  // On arrive EN MOUVEMENT, vers le centre ou en s'en eloignant.
+  check("et en mouvement", Math.round(Math.hypot(...saut.velocity)), 10);
+  // La seconde de garde : arriver DANS le jumeau ne renvoie pas aussitot.
+  check("la garde empeche le renvoi immediat",
+        res.update(0.1, 3.5, [1000, 0, 0]), null);
+
+  // Sortir d'un volume `_warpOnExit` part TOUT DE SUITE.
+  const gpX = { placed: { DerelictWarp: [
+    { name: "WarpVolume", body: "DerelictDimension_Body", position: [0, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 550, center: [0, 0, 0] },
+      fields: { _warpOnExit: true, _localArrivalPos: { x: 525, y: 0, z: 0 } },
+      targets: { _sisterWarp: { name: "Autre", body: "DarkBramble_Body" } } },
+    { name: "Autre", body: "DarkBramble_Body", position: [5000, 0, 0],
+      rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 60, center: [0, 0, 0] },
+      fields: { _warpOnExit: false, _localArrivalPos: { x: 0, y: 0, z: 10 } },
+      targets: { _sisterWarp: { name: "WarpVolume", body: "DerelictDimension_Body" } } },
+  ] } };
+  const bord = new DerelictWarps(warps(gpX));
+  bord.update(0.1, 0, [0, 0, 0]);                 // dedans
+  check("rester dedans ne fait rien", bord.update(0.1, 1, [0, 0, 0]), null);
+  const sortie = bord.update(0.1, 2, [10000, 0, 0]);
+  check("en sortir part tout de suite", sortie !== null, true);
+  check("et cela s'annonce", bord.drain().includes("ExitDerelictZone"), true);
+  check("le drainage vide", bord.drain().length, 0);
+
+  // LES COQUILLES SONORES.
+  check("une seconde de fondu", SHELL_FADE, 1);
+  const gpS = { placed: { AudioShell: [
+    { name: "OceanAudio", body: "GiantsDeep_Body", position: [0, 0, 0],
+      volume: { shape: "sphere", radius: 498, center: [0, 0, 0] }, fields: {} },
+  ] } };
+  const sources = [{ position: [0, 0, 0], name: "ocean" },
+                   { position: [9999, 0, 0], name: "ailleurs" }];
+  const coq = new AudioShells(audioShells(gpS), sources);
+  check("une coquille", coq.count, 1);
+  check("appariee a la source de son centre", coq.paired, 1);
+  check("et c'est la bonne", coq.shells[0].index, 0);
+  // Dehors : la source joue a plein.
+  check("dehors, la source joue", coq.update(1, [1000, 0, 0]).get(0), 1);
+  // Entrer la tete : le fondu part de 1 et descend en une seconde.
+  const g0 = coq.update(0, [0, 0, 0]).get(0);
+  check("a l'instant ou la tete entre, rien n'a encore change", g0, 1);
+  check("a mi-seconde, la moitie", coq.update(0.5, [0, 0, 0]).get(0), 0.5);
+  check("a une seconde, etouffee", coq.update(0.5, [0, 0, 0]).get(0), 0);
+  check("et cela tient", coq.update(2, [0, 0, 0]).get(0), 0);
+  // Ressortir la remonte, du meme fondu.
+  coq.update(0, [1000, 0, 0]);
+  check("ressortir la remonte", coq.update(0.5, [1000, 0, 0]).get(0), 0.5);
+  // Une source qu'aucune coquille ne commande n'est jamais touchee.
+  check("l'autre source n'est jamais commandee",
+        coq.update(1, [0, 0, 0]).has(1), false);
+
+  // ON PART AVEC LE SOL : `MatchInitialMotion`.
+  {
+    // Un porteur qui tourne autour de Y a un radian par seconde ; un point a
+    // dix unites de son axe va donc a dix unites par seconde.
+    const porteur = { velocity: [0, 0, 0], position: [0, 0, 0],
+                      angularVelocity: [0, 1, 0] };
+    const v = matchInitialVelocity(porteur, [10, 0, 0]);
+    check("le sol emporte le point a dix unites par seconde",
+          Math.round(Math.hypot(v[0], v[1], v[2])), 10);
+    check("et perpendiculairement au rayon", Math.round(v[0]), 0);
+    // Sur l'axe, rien ne bouge : un pole ne va nulle part.
+    const pole = matchInitialVelocity(porteur, [0, 10, 0]);
+    check("au pole, le sol ne va nulle part",
+          Math.round(Math.hypot(pole[0], pole[1], pole[2])), 0);
+    // Le drapeau des cinq instances : on jette le terme tangentiel.
+    const sans = matchInitialVelocity(porteur, [10, 0, 0], { ignoreAngular: true });
+    check("cinq instances ignorent la rotation", Math.hypot(...sans), 0);
+    // Et la vitesse du porteur s'ajoute toujours.
+    const mobile = { velocity: [100, 0, 0], position: [0, 0, 0],
+                     angularVelocity: [0, 1, 0] };
+    check("la vitesse du porteur s'ajoute",
+          Math.round(matchInitialVelocity(mobile, [10, 0, 0])[0]), 100);
+  }
 }
 
 report();

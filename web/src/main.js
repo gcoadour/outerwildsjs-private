@@ -35,7 +35,8 @@ import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
 import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
 import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT } from "./start.js";
-import { loadAudioMap, AudioField, AudioMixer, signalStrength } from "./audio.js";
+import { loadAudioMap, AudioField, AudioMixer, signalStrength,
+         audioShells, AudioShells } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
 import { TimeLoop } from "./timeloop.js";
@@ -79,7 +80,7 @@ import { GamepadControls, padAvailable } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes } from "./input.js";
 import { Modes } from "./modes.js";
-import { SpinField, sunElevation } from "./spin.js";
+import { SpinField, sunElevation, spinPeriod } from "./spin.js";
 import { directionalFields, polarFields } from "./gravity.js";
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
 // Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
@@ -113,8 +114,10 @@ import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
 import { referenceFrames, DeclaredFrames, restingPoint,
-         autopilotDistances } from "./frames.js";
+         autopilotDistances, attachTarget,
+         matchInitialVelocity } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
+         warps, DerelictWarps,
          meteorLaunchers, MeteorLaunchers, METEOR,
          tornadoPivots, TornadoPivots, matchTransforms, disposableContainers,
          nozzleFires, thrusterNozzles, particleBursts, RandomTimer,
@@ -215,6 +218,37 @@ async function boot() {
   // C'est de la que vient le cycle jour/nuit, absent jusqu'ici.
   const spins = new SpinField(bodies);
   window.__spin = spins;
+
+  /**
+   * La vitesse avec laquelle un corps se reveille : `MatchInitialMotion`.
+   *
+   * `AttachOnAwake` decide du porteur en posant une petite sphere et en
+   * regardant ce qu'elle touche ; `attachTarget` pose la meme question au
+   * systeme charge. Le rayon de controle vaut 1 sur trente des trente-quatre
+   * instances du build, mais le point de depart du joueur est a hauteur d'oeil
+   * au-dessus du sol : on elargit a la hauteur d'oeil, faute de collider.
+   *
+   * @param point position, dans le repere ANCRE
+   */
+  function vitesseDeDepart(point, ignoreAngular = false) {
+    const monde = [point[0] + framePos[0], point[1] + framePos[1],
+                   point[2] + framePos[2]];
+    const porteur = attachTarget(monde, EYE_HEIGHT + 2, bodies);
+    if (!porteur) return [0, 0, 0];
+    const s = spins.spin(porteur);
+    // Dans le repere ancre, la vitesse du porteur est nulle quand c'est lui
+    // l'ancre. Le terme tangentiel, lui, ne l'est jamais : l'ancre ne tourne
+    // pas avec la planete (docs/73-passages.md).
+    const v = porteur === anchorBody ? [0, 0, 0]
+      : [porteur.velocity ? porteur.velocity[0] : 0,
+         porteur.velocity ? porteur.velocity[1] : 0,
+         porteur.velocity ? porteur.velocity[2] : 0];
+    return matchInitialVelocity(
+      { velocity: v, position: porteur.position,
+        angularVelocity: s ? [s.axis[0] * s.rate, s.axis[1] * s.rate,
+                              s.axis[2] * s.rate] : null },
+      monde, { ignoreAngular });
+  }
 
   /** Exprime toutes les positions dans le repere du corps ancre. */
   function reframe(anchor) {
@@ -448,6 +482,18 @@ async function boot() {
   // loi, ecrite et eprouvee (docs/50) — et il ne faisait tourner personne.
   const toiles = webAnimators(gameplay);
 
+  // §N LES COQUILLES SONORES. Deux dans le build, concentriques sur Giant's
+  // Deep : l'ocean a 498 unites, la membrane corrosive a 205. Chacune etouffe
+  // la source posee sur le MEME objet — `GetComponent`, pas une recherche — et
+  // c'est la position qui les apparie ici, faute d'un autre lien.
+  const coquilles = audioMap.length
+    ? new AudioShells(audioShells(gameplay), audioMap) : null;
+  if (coquilles) {
+    console.log(`${coquilles.count} coquilles sonores, `
+      + `${coquilles.paired} appariees a leur source`);
+  }
+  window.__coquilles = coquilles;
+
   // §M LA TEMPETE DE SABLE. `SandstormVolume` n'a pas de collider a lui : sa
   // forme est celle de ses ENFANTS — quatre capsules qui se chevauchent le long
   // de l'entonnoir de sable entre les jumelles. C'est exactement ce pour quoi
@@ -568,6 +614,11 @@ async function boot() {
   const bursts = particleBursts(gameplay).filter((b) => !b.looping)
     .map((b) => ({ b, t: new RandomTimer(b.min, b.max) }));
   const passages = new Teleporters(teleporters(gameplay));
+  // §N LES TROIS PASSAGES DE DARK BRAMBLE. Un raccourci depuis Timber Hearth,
+  // une porte vers l'epave, et un BORD pour en sortir : la dimension de l'epave
+  // n'a pas de porte de sortie, on la quitte en sortant de sa sphere.
+  const epaves = new DerelictWarps(warps(gameplay));
+  window.__epaves = epaves;
   // §4 les volumes de jeu : ce qui blesse, ce qui fait flotter, ce qui limite.
   const hazards = new Hazards(hazardVolumes(gameplay));
   const zeroGVolumes = zeroGFields(gameplay);
@@ -1434,6 +1485,18 @@ async function boot() {
   // premiere synchronisation ecrasait la valeur sauvegardee par un zero
   loop.loopCount = pdata.loopCount || 0;
   const spawn0 = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
+  // §N La PREMIERE image aussi : le joueur se reveille sur un sol qui tourne,
+  // et `MatchInitialMotion` lui en donne la vitesse. Sans cela le tout premier
+  // instant de la partie est un glissement.
+  //
+  // POSE A LA PREMIERE IMAGE, ET NON ICI. `vitesseDeDepart` lit `framePos`, qui
+  // est declare avec la boucle — l'appeler depuis `boot()` leve une erreur de
+  // zone morte temporelle, et une erreur dans `boot()` ne laisse pas de page.
+  // C'est la troisieme fois que ce depot y tombe (docs/62, docs/56, ici) : un
+  // `const` est declare avec ce qu'il decrit, pas avec ce qui le lit — et une
+  // fonction qui le lit a le droit d'etre ecrite avant, pas d'etre APPELEE
+  // avant.
+  let departAFaire = true;
 
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
@@ -1480,7 +1543,18 @@ async function boot() {
     resources.suit = resources.maxSuit;
     resources.dead = false;
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
-    player.vel.x = player.vel.y = player.vel.z = 0;
+    // §N ON PART AVEC LE SOL. `MatchInitialMotion` est pose sur vingt-sept
+    // corps, `Player_Body` et `Ship_Body` compris : un corps qui se reveille
+    // prend la vitesse de son PORTEUR, terme tangentiel inclus.
+    //
+    //     v = v_porteur + omega x (p - centre_du_porteur)
+    //
+    // Le portage remettait zero. Dans le repere ancre, la vitesse du porteur
+    // est deja nulle — c'est lui l'ancre — mais le terme tangentiel ne l'est
+    // pas : l'ancre ne tourne pas avec la planete. Debarquer immobile sur un
+    // sol qui defile est precisement ce que cette classe evite.
+    const vDepart = vitesseDeDepart([spawn0.x, spawn0.y, spawn0.z]);
+    player.vel.x = vDepart[0]; player.vel.y = vDepart[1]; player.vel.z = vDepart[2];
     // Une boucle qui recommence remet TOUT a l'etat de depart, le regard
     // compris : sinon on rouvre les yeux dans la direction ou l'on est mort.
     yaw = yaw0; pitch = 0;
@@ -2037,6 +2111,18 @@ async function boot() {
     const dt = (settings && settings.open) ? 0
       : Math.min(engine.getDeltaTime() / 1000, 0.05);
     const now = performance.now() / 1000;
+
+    // §N La vitesse de depart, une seule fois, quand le repere existe.
+    if (departAFaire) {
+      departAFaire = false;
+      const v0 = vitesseDeDepart([player.pos.x, player.pos.y, player.pos.z]);
+      player.vel.x = v0[0]; player.vel.y = v0[1]; player.vel.z = v0[2];
+      const jour = anchorBody ? spinPeriod(anchorBody) : null;
+      if (jour) {
+        console.log(`${anchorBody.name} : un tour en ${Math.round(jour)} s, `
+          + `sol a ${Math.hypot(v0[0], v0[1], v0[2]).toFixed(2)} u/s au depart`);
+      }
+    }
 
     // repere camera aligne sur la verticale locale du champ dominant
     const f = player.field;
@@ -3975,6 +4061,30 @@ async function boot() {
         }
       }
     }
+    // §N LES PASSAGES DE DARK BRAMBLE. Trois secondes apres etre entre, pas a
+    // l'instant : `_warpDuration` vaut 6 et `Update` deplace le corps a la
+    // MOITIE, au milieu de l'eclair de brouillard. On s'enfonce, le brouillard
+    // monte, et on est ailleurs.
+    if (epaves.count) {
+      const saut = epaves.update(dt, now,
+        [playerWorld.x, playerWorld.y, playerWorld.z],
+        (w) => decalageDuCorps(w.body, anchorPos));
+      if (saut) {
+        player.pos.x = saut.arrival[0] - anchorPos[0];
+        player.pos.y = saut.arrival[1] - anchorPos[1];
+        player.pos.z = saut.arrival[2] - anchorPos[2];
+        // ET ON ARRIVE EN MOUVEMENT : dix unites par seconde le long de l'axe
+        // du point d'arrivee vers le centre du passage. On ne se materialise
+        // pas immobile.
+        player.vel.x = saut.velocity[0];
+        player.vel.y = saut.velocity[1];
+        player.vel.z = saut.velocity[2];
+        if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
+        fx.teleport(now);
+        console.log(`epave : ${saut.warp.name} -> ${saut.receiver.name}`);
+      }
+      for (const e of epaves.drain()) console.log(`annonce : ${e}`);
+    }
     // §5 LE SON D'EVENEMENT. Marcher, souffler, pousser, voyager, finir.
     if (events.count) {
       // Les pas se comptent sur la vitesse AU SOL : dans un vaisseau qui file,
@@ -4052,7 +4162,19 @@ async function boot() {
       if (cFin) audio.loopAt(cFin, vFin * mixer.volume("Music"));
     }
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
-    if (audioMap.length) audio.update(player.pos, anchorPos, mixer);
+    if (audioMap.length) {
+      // §N LES COQUILLES SONORES. Le build teste le tag `PlayerCameraDetector` :
+      // c'est l'OREILLE qu'on guette, pas le corps. Entrer la tete dans l'ocean
+      // de Giant's Deep COUPE le bruit de l'ocean — on l'entend du dessus, et
+      // plus une fois dedans, ou le son d'immersion prend le relais.
+      const gains = coquilles
+        ? coquilles.update(dt, [camera.position.x + anchorPos[0],
+                                camera.position.y + anchorPos[1],
+                                camera.position.z + anchorPos[2]],
+                           (sh) => decalageDuCorps(sh.body, anchorPos))
+        : null;
+      audio.update(player.pos, anchorPos, mixer, gains);
+    }
     // Les ambiances suivent la position MONDE de l'auditeur, dans la meme
     // convention que les sources placees : position dans le repere ancre, plus
     // la position monde de l'ancre.

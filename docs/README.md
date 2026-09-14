@@ -57,6 +57,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`73-passages.md`](73-passages.md) — **trois passages de Dark Bramble, deux coquilles sonores, et un sol qui tourne sous les pieds au premier instant**
 - [`72-poussiere.md`](72-poussiere.md) — **quatre lois qui n'étaient qu'importées : la poussière de vitesse, le grillage qui se rompt, la toile qui tourne, la tempête de sable**
 - [`71-quantique.md`](71-quantique.md) — **ce qui bouge quand on ne le regarde pas : cinq objets sur la lune, une statue au musée, et un import qui comptait pour un appel**
 - [`70-modes.md`](70-modes.md) — **ce qui se commande, et quand : dix ensembles de canaux, une case qui n'est pas une pile, et un mort qui ne commande rien**

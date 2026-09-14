@@ -359,6 +359,124 @@ export function warps(gameplay) {
   });
 }
 
+/**
+ * Les trois passages, et ce qu'ils font au corps qui les traverse.
+ *
+ * @lit DerelictWarp
+ *
+ * LE RESEAU. Trois volumes, et un seul aller-retour :
+ *
+ *   DarkBrambleShortcut   sur Timber Hearth, sphere de 50  -> Dark Bramble
+ *   WarpVolume            sur Dark Bramble, sphere de 60   -> l'epave
+ *   WarpVolume            sur l'epave, sphere de 550, SUR LA SORTIE -> Dark Bramble
+ *
+ * Le troisieme porte `_warpOnExit` : on ne quitte pas la dimension de l'epave
+ * en entrant quelque part, mais en SORTANT de sa sphere. C'est ce qui la rend
+ * close — elle n'a pas de porte, elle a un bord.
+ *
+ * LE DELAI. `_warpDuration` vaut 6 dans le constructeur, et `Update` deplace le
+ * corps a la MOITIE : trois secondes apres etre entre, au milieu de l'eclair de
+ * brouillard que `StartFogFlash` allume. On ne disparait pas a l'instant ou l'on
+ * touche le volume — on s'enfonce, le brouillard monte, et on est ailleurs.
+ *
+ * Une sortie, elle, est immediate : `OnTriggerExit` deplace sans attendre.
+ *
+ * LA SECONDE D'APRES-ARRIVEE. Les deux declencheurs refusent d'agir tant que
+ * `Time.time <= _arrivalTime + 1`. Sans cela, arriver DANS le volume jumeau
+ * renverrait aussitot d'ou l'on vient, sans fin.
+ *
+ * ET ON ARRIVE EN MOUVEMENT : dix unites par seconde le long de l'axe qui va du
+ * point d'arrivee au centre du passage — vers le centre quand on entre dans
+ * l'epave, en s'en eloignant sinon. On ne se materialise pas immobile.
+ *
+ * DEUX ARGUMENTS MORTS DANS LE BUILD. `WarpBody` calcule une rotation
+ * (`FromToRotation`) et une vitesse projetee, les passe a `ReceiveWarpedBody`…
+ * qui ne lit ni l'une ni l'autre. Le portage ne les reproduit donc pas, et le
+ * dit ici : c'est une mesure sur l'IL, pas un raccourci.
+ */
+export const WARP = { duration: 6, arrivalGuard: 1, exitSpeed: 10 };
+
+export class DerelictWarps {
+  constructor(list = [], cfg = WARP) {
+    this.warps = list.map((w) => ({ data: w, arrivedAt: -Infinity, since: null }));
+    this.cfg = cfg;
+    this.events = [];
+    // Le jumeau, par nom ET par corps : deux `WarpVolume` portent le meme nom.
+    for (const w of this.warps) {
+      const s = w.data.sister;
+      w.jumeau = s
+        ? this.warps.find((o) => o.data.name === s.name && o.data.body === s.body)
+        : null;
+    }
+  }
+
+  get count() { return this.warps.length; }
+
+  /** Le passage le plus proche dont le volume contient le point, ou null. */
+  at(worldPoint, shiftOf = null) {
+    for (const w of this.warps) {
+      if (!w.data.volume) continue;
+      const d = shiftOf ? (shiftOf(w.data) || [0, 0, 0]) : [0, 0, 0];
+      const p = [worldPoint[0] - d[0], worldPoint[1] - d[1], worldPoint[2] - d[2]];
+      if (insideVolume(w.data, p)) return w;
+    }
+    return null;
+  }
+
+  /**
+   * @returns {{warp, arrival:number[], velocity:number[]}|null} le depart,
+   *   quand il a lieu — donc trois secondes apres l'entree, ou tout de suite
+   *   sur une sortie.
+   */
+  update(dt, now, worldPoint, shiftOf = null) {
+    const dedans = this.at(worldPoint, shiftOf);
+    for (const w of this.warps) {
+      const ici = w === dedans;
+      const garde = now <= w.arrivedAt + this.cfg.arrivalGuard;
+      if (w.data.onExit) {
+        // Sur la SORTIE : c'est le passage de dedans a dehors qui compte.
+        if (w.etait && !ici && !garde) { w.etait = ici; return this.partir(w, now, shiftOf); }
+        w.etait = ici;
+        continue;
+      }
+      w.etait = ici;
+      if (ici && w.since === null && !garde) w.since = now;
+      if (!ici) w.since = null;
+      if (w.since !== null && now - w.since >= this.cfg.duration / 2) {
+        w.since = null;
+        return this.partir(w, now, shiftOf);
+      }
+    }
+    return null;
+  }
+
+  /** Le jumeau recoit : `ReceiveWarpedBody`. */
+  partir(w, now, shiftOf = null) {
+    const j = w.jumeau;
+    if (!j) return null;
+    const d = shiftOf ? (shiftOf(j.data) || [0, 0, 0]) : [0, 0, 0];
+    const centre = [j.data.position[0] + d[0], j.data.position[1] + d[1],
+                    j.data.position[2] + d[2]];
+    const local = qrot(j.data.rotation || [0, 0, 0, 1], j.data.arrivalLocal || [0, 0, 0]);
+    const arrival = [centre[0] + local[0], centre[1] + local[1], centre[2] + local[2]];
+    const vers = normalize([centre[0] - arrival[0], centre[1] - arrival[1],
+                            centre[2] - arrival[2]]);
+    const signe = j.data.onExit ? 1 : -1;
+    j.arrivedAt = now;
+    j.since = null;
+    j.etait = true;
+    this.events.push(j.data.onExit ? "EnterDerelictZone" : "ExitDerelictZone");
+    return {
+      warp: w.data, receiver: j.data, arrival,
+      velocity: [vers[0] * this.cfg.exitSpeed * signe,
+                 vers[1] * this.cfg.exitSpeed * signe,
+                 vers[2] * this.cfg.exitSpeed * signe],
+    };
+  }
+
+  drain() { const e = this.events; this.events = []; return e; }
+}
+
 // --- le rattachement a la geometrie chargee --------------------------------
 
 /** Produit de deux quaternions [x, y, z, w], dans l'ordre d'Unity : a puis b. */
