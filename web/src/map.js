@@ -179,8 +179,9 @@ export class SolarMap {
    * @param playerPos position du joueur dans le repere courant
    * @param shipPos   position du vaisseau, ou null
    */
-  draw(playerPos, shipPos) {
+  draw(playerPos, shipPos, derelict = false) {
     this.player = playerPos || null;
+    this.derelict = !!derelict;
     if (!this.open) return;
     const c = this.canvas, ctx = c.getContext("2d");
     const w = c.width = c.clientWidth, h = c.height = c.clientHeight;
@@ -204,6 +205,11 @@ export class SolarMap {
 
     this.hits = [];
     const placedLabels = [];
+    // Le joueur et le vaisseau a l'ecran : `markerVisible` compare des PIXELS,
+    // pas des unites — c'est ce qui fait qu'un marqueur se masque au zoom et
+    // reapparait quand on s'ecarte.
+    const ecranJoueur = playerPos ? px([playerPos.x, playerPos.y, playerPos.z]) : null;
+    const ecranVaisseau = shipPos ? px([shipPos.x, shipPos.y, shipPos.z]) : null;
     for (const b of this.bodies) {
       const declare = this.markers.get(b.name) || this.markers.get(b.bodyName);
       const t = declare ? declare.type : markerType(b);
@@ -212,24 +218,28 @@ export class SolarMap {
       // un corps jamais approche reste en creux : la carte se remplit a mesure
       const sec = this.sectorOf[b.name];
       const known = !this.playerData || !sec || this.playerData.hasExplored(sec);
-      // _maxDisplayDistance : une lune ne s'affiche qu'a 5 000 unites, une
-      // planete a 50 000, le soleil toujours
-      if (this.player) {
-        const dd = Math.hypot(b.position[0] - this.player.x,
-                              b.position[1] - this.player.y,
-                              b.position[2] - this.player.z);
-        if (dd > (MARKER_MAX_DISTANCE[t] ?? 5000)) continue;
-      }
+      // `MapMarker.LateUpdate`, et non une regle du portage : la LOI vit dans
+      // `markerVisible`, juste au-dessus, et elle etait ecrite, eprouvee — et
+      // appelee par personne. Ce code en tenait une moitie a la main : la
+      // distance maximale, et le dixieme de pixel autour du joueur. Il lui
+      // manquait le VAISSEAU, le marqueur du joueur qui ne se masque jamais,
+      // et la zone brouillee qui efface tout (docs/74-etalons.md).
+      const dd = this.player
+        ? Math.hypot(b.position[0] - this.player.x, b.position[1] - this.player.y,
+                     b.position[2] - this.player.z)
+        : 0;
+      const dec = { type: t, maxDistance: MARKER_MAX_DISTANCE[t] ?? 5000 };
+      if (!markerVisible(dec, [x, y, dd], ecranJoueur, ecranVaisseau,
+                         this.derelict)) continue;
       const color = COLORS[t] || COLORS.Default;
       ctx.globalAlpha = known ? 1 : 0.28;
       ctx.fillStyle = color;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      // MapMarker : le crochet encadre le corps. Il disparait a moins de dix
-      // pixels du centre de l'ecran — c'est ce qui evite d'empiler tous les
-      // marqueurs sur le point vise.
-      if (Math.hypot(x - cx, y - cy) >= MARKER_MIN_SCREEN) {
-        this.bracket(ctx, x, y, color, Math.max(MARKER_ICON, r * 2 + 6));
-      }
+      // MapMarker : le crochet encadre le corps. Le test du dixieme de pixel a
+      // deja eu lieu — c'est `markerVisible` qui le porte maintenant, et il le
+      // fait autour du JOUEUR, pas du centre de l'ecran : la carte se deplace,
+      // et le joueur n'est pas toujours au milieu.
+      this.bracket(ctx, x, y, color, Math.max(MARKER_ICON, r * 2 + 6));
       if (this.selected === b) {
         ctx.strokeStyle = "#ffd9a0"; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(x, y, r + 6, 0, Math.PI * 2); ctx.stroke();

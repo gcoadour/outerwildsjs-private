@@ -62,6 +62,51 @@ function sansImports(t) {
 
 const compte = (t, nom) => (t.match(new RegExp(`\\b${nom}\\b`, "g")) || []).length;
 
+/**
+ * Les lois marquees `// @mesure` : des ETALONS, pas des mecanismes.
+ *
+ * Toutes les lois de ce depot ne sont pas faites pour tourner. `jumpHeight`
+ * rend `v^2 / 2g` et son commentaire le dit depuis toujours — « pour
+ * l'invariant » ; `terminalSpeed` et `terminalAngularSpeed` sont les regimes
+ * vers lesquels deux integrations convergent. Rien ne les appelle parce que
+ * rien ne DOIT les appeler : elles servent a verifier le moteur de l'exterieur,
+ * pas a le faire avancer.
+ *
+ * Sans cette marque, ce compte pousse a leur ecrire un appelant pour le
+ * plaisir du chiffre — c'est-a-dire a fabriquer exactement la dette qu'il
+ * cherche. Le marqueur se pose sur la LIGNE au-dessus de l'export, comme
+ * `// @lit` ([`docs/74`](../docs/74-etalons.md)).
+ */
+function etalons(brut) {
+  const out = new Set();
+  for (const m of brut.matchAll(/\/\/\s*@mesure[^\n]*\n\s*export\s+(?:async\s+)?(?:function|class|const)\s+(\w+)/g)) {
+    out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Les lois marquees `// @vide` : portees, gardees, et sans entree.
+ *
+ * Le troisieme cas legitime, et le depot l'a nomme trois fois en prose avant
+ * de le nommer ici : les dix-huit bouffees de docs/46, `inheritedAcceleration`
+ * de docs/68, la lampe des objets quantiques de docs/71. La mecanique est
+ * ecrite d'apres l'IL, elle est eprouvee — et la liste de ce a quoi elle
+ * s'applique est VIDE dans ce build.
+ *
+ * Ce n'est pas du travail a faire, c'est une mesure : c'est le build qui le
+ * dit, pas le portage qui renonce. Le marqueur exige une raison sur la meme
+ * ligne, pour qu'il ne devienne pas un moyen commode de faire baisser un
+ * chiffre.
+ */
+function vides(brut) {
+  const out = new Map();
+  for (const m of brut.matchAll(/\/\/\s*@vide\s+([^\n]+)\n\s*export\s+(?:async\s+)?(?:function|class|const)\s+(\w+)/g)) {
+    if (m[1].trim().length >= 10) out.set(m[2], m[1].trim());
+  }
+  return out;
+}
+
 export function lois() {
   const src = lister(join(ROOT, "web/src"));
   const moteur = src.filter((f) => !f.includes("/pipeline/"));
@@ -79,10 +124,16 @@ export function lois() {
   const out = [];
   for (const f of moteur) {
     const brut = readFileSync(f, "utf8");
+    const mesures = etalons(brut);
+    const sansEntree = vides(brut);
     const noms = new Set();
     for (const m of brut.matchAll(/^export (?:async )?function (\w+)/gm)) noms.add(m[1]);
     for (const m of brut.matchAll(/^export class (\w+)/gm)) noms.add(m[1]);
     for (const nom of noms) {
+      // Un etalon n'a pas a etre appele : c'est sa raison d'etre.
+      if (mesures.has(nom)) continue;
+      // Une loi sans entree n'a personne a qui s'appliquer, et le dit.
+      if (sansEntree.has(nom)) continue;
       // Appelee ailleurs dans le moteur, le pipeline, ou une page ?
       if ([...src, ...pages].some((g) => g !== f && compte(txt.get(g), nom) > 0)) continue;
       // Appelee dans son PROPRE fichier, au-dela de sa definition ? Une

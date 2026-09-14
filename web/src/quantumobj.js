@@ -127,6 +127,7 @@ export function locksOnSnapshot(distance, dansLeCadre, obj = QUANTIQUE) {
  * Une sonde posee a moins de cent unites PROTEGE l'objet — c'est la sonde qui
  * observe a votre place.
  */
+// @vide aucune des deux instances n'est `_isLightSensitive`, et `Awake` ne pose l'ecouteur que si elle l'est (docs/71)
 export function collapsesOnFlashlightOff(visible, distanceSonde = null,
                                          cfg = QUANTIQUE) {
   if (!visible) return false;

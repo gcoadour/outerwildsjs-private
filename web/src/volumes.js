@@ -543,9 +543,18 @@ export class Sandstorm {
    * @param shiftOf    decalage du corps porteur depuis la scene au repos
    * @returns {"enter"|"exit"|null}
    */
-  update(worldPoint, shiftOf = null) {
+  update(worldPoint, shiftOf = null, actif = true) {
     if (!this.volumes.length || !this.cylindres.length) return null;
+    // L'ENTONNOIR N'EST PAS TOUJOURS LA. Il pousse a une minute donnee de la
+    // boucle et se retire a une autre (`funnelActive`) : traverser l'endroit
+    // ou il SERA ne doit pas lever de tempete. Le portage levait la tempete
+    // sur la seule geometrie du volume, qui, elle, ne bouge pas.
     let dedans = false;
+    if (!actif) {
+      const avant = this.trigger.contains("joueur");
+      if (avant) { this.trigger.exitChild("joueur"); this.count--; return "exit"; }
+      return null;
+    }
     for (const c of this.cylindres) {
       if (!c.volume) continue;
       const d = shiftOf ? (shiftOf(c) || [0, 0, 0]) : [0, 0, 0];

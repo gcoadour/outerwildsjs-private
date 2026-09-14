@@ -109,7 +109,7 @@ import { underAsleep, noCollide } from "../web/src/physics.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
-import { QuantumMoon, segmentHitsSphere, orbitTilt, bodyOccluder,
+import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
@@ -133,7 +133,7 @@ import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
 import { oxygenZones, inOxygenZone } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
          Marshmallow } from "../web/src/consoles.js";
-import { lodThresholds, colliderLODNames } from "../web/src/lod.js";
+import { lodThresholds } from "../web/src/lod.js";
 import { segmentDepthInSphere, occludes, lookRotation, alignToObserver,
          CHECK_RADIUS, CHECK_DEPTH } from "../web/src/quantum.js";
 import { NoiseField, corruptionRange, corruptionThreshold } from "../web/src/bramble.js";
@@ -351,12 +351,16 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- lune quantique : occlusion et inclinaison ---------------------------
 {
+  // `occludes` porte la loi entiere : une sphere de rayon `_sphereCheckRadius`
+  // lancee, et un obstacle qui compte s'il la garde dedans sur `_checkDepth`.
+  // La forme booleenne d'a cote (`segmentHitsSphere`) n'etait qu'une moitie, et
+  // rien ne l'appelait (docs/74-etalons.md).
   check("un corps sur la ligne de vue masque",
-        segmentHitsSphere([0, 0, 0], [0, 0, 1000], [0, 0, 500], 100), true);
+        occludes([0, 0, 0], [0, 0, 1000], [0, 0, 500], 200, 0, 1), true);
   check("un corps a cote ne masque pas",
-        segmentHitsSphere([0, 0, 0], [0, 0, 1000], [400, 0, 500], 100), false);
+        occludes([0, 0, 0], [0, 0, 1000], [400, 0, 500], 100, 0, 1), false);
   check("un corps derriere la cible ne masque pas",
-        segmentHitsSphere([0, 0, 0], [0, 0, 500], [0, 0, 900], 100), false);
+        occludes([0, 0, 0], [0, 0, 500], [0, 0, 900], 100, 0, 1), false);
 
   check("inclinaison lue dans les champs",
         round(orbitTilt({ _orbitInclination: 30 }, "x"), 4),
@@ -1069,9 +1073,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("un seuil unique passe aussi", seuils.get("Cabane"), 0.05);
   check("une distance n'est pas une hauteur d'ecran",
         seuils.has("Distances"), false);
-  const cols = colliderLODNames(gameplay);
-  check("colliders par niveau de detail", cols.size, 2);
-  check("... nommes", cols.has("Rampe"), true);
+  // `colliderLODs` porte la meme liste, avec ce qui la rend utile : la portee
+  // et QUI reveille le groupe. La version qui ne rendait que les noms
+  // dupliquait celle-ci et n'avait aucun appelant (docs/74-etalons.md).
+  const cols = colliderLODs(gameplay);
+  check("colliders par niveau de detail", cols.length, 2);
+  check("... nommes", cols.some((g) => g.name === "Rampe"), true);
 
   const lod = new MeshLOD(LOD_RATIO, 400, seuils);
   check("un maillage nomme prend le seuil du build",
@@ -4899,6 +4906,72 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
                      angularVelocity: [0, 1, 0] };
     check("la vitesse du porteur s'ajoute",
           Math.round(matchInitialVelocity(mobile, [10, 0, 0])[0]), 100);
+  }
+}
+
+{
+  // --- LA QUEUE DES LOIS (docs/74-etalons.md) ---
+
+  // Les phares du vaisseau : 600 partout, et `min(limite, 600)` dans un
+  // secteur majeur. Le portage n'avait pas la valeur par defaut.
+  check("six cents unites de portee", SHIPLIGHT_RANGE, 600);
+  check("hors secteur, la portee pleine", shiplightRange(100, false), 600);
+  check("dans un secteur majeur sans limite, pleine aussi",
+        shiplightRange(0, true), 600);
+  check("l'epave les bride a cent", shiplightRange(100, true), 100);
+  check("et une limite plus large ne les elargit pas",
+        shiplightRange(9000, true), 600);
+
+  // `MapMarker.LateUpdate` : les trois regles que le portage n'avait pas.
+  {
+    const m = { type: "Planet", maxDistance: 50000 };
+    const joueur = [100, 100];
+    check("loin du joueur, le marqueur se voit",
+          markerVisible(m, [500, 500, 1000], joueur, null), true);
+    check("a moins de dix pixels du joueur, non",
+          markerVisible(m, [103, 102, 1000], joueur, null), false);
+    check("a moins de dix pixels du VAISSEAU non plus",
+          markerVisible(m, [500, 500, 1000], joueur, [502, 503]), false);
+    check("au-dela de sa distance maximale, non",
+          markerVisible(m, [500, 500, 99999], joueur, null), false);
+    check("derriere la camera non plus",
+          markerVisible(m, [500, 500, -1], joueur, null), false);
+    // Le marqueur du joueur sort AVANT tous les tests.
+    const moi = { type: "Player", maxDistance: 1 };
+    check("le marqueur du joueur ne se masque jamais",
+          markerVisible(moi, [100, 100, 5], joueur, [100, 100]), true);
+    // Et dans la zone brouillee, plus rien.
+    check("dans l'epave, aucun marqueur",
+          markerVisible(moi, [500, 500, 10], joueur, null, true), false);
+  }
+
+  // L'entonnoir n'existe qu'entre sa minute de pousse et celle de retrait.
+  {
+    const f = { growAfterMinutes: 5, shrinkAfterMinutes: 15 };
+    check("avant la pousse, pas d'entonnoir", funnelActive(4 * 60, f), false);
+    check("pendant, oui", funnelActive(10 * 60, f), true);
+    check("apres le retrait, non", funnelActive(16 * 60, f), false);
+    check("la minute de pousse compte", funnelActive(5 * 60, f), true);
+    check("celle du retrait, non", funnelActive(15 * 60, f), false);
+  }
+
+  // Et la tempete suit l'entonnoir : traverser l'endroit ou il SERA ne leve
+  // rien, parce qu'il n'y est pas encore.
+  {
+    const gp = { placed: {
+      SandstormVolume: [{ name: "V", body: "SandFunnel_Body", position: [0, 0, 0],
+                          fields: {} }],
+      ChildTriggerVolume: [{ name: "C", body: "SandFunnel_Body", position: [0, 0, 0],
+                             rotation: [0, 0, 0, 1],
+                             volume: { shape: "sphere", radius: 30, center: [0, 0, 0] } }],
+    } };
+    const o = new Sandstorm(sandstormVolumes(gp), childTriggers(gp));
+    check("entonnoir absent, rien ne se leve",
+          o.update([0, 0, 0], null, false), null);
+    check("entonnoir la, la tempete monte", o.update([0, 0, 0], null, true), "enter");
+    // Et s'il se retire pendant qu'on est dedans, la tempete tombe.
+    check("s'il se retire, elle tombe", o.update([0, 0, 0], null, false), "exit");
+    check("et l'ecran se calme", o.active, false);
   }
 }
 

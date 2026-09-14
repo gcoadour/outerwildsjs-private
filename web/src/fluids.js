@@ -488,6 +488,7 @@ export function applyDrag(vel, drag, dt) {
 }
 
 /** Vitesse limite de chute dans un fluide, pour une gravite donnee. */
+// @mesure — le regime vers lequel `applyDrag` converge, mesure de l'exterieur.
 export function terminalSpeed(gravity, drag) {
   return drag > 0 ? gravity / drag : Infinity;
 }

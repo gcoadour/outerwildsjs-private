@@ -61,19 +61,6 @@ export function lodThresholds(gameplay = {}) {
   return out;
 }
 
-/**
- * Objets portant un `ChildColliderLOD` (21 dans la scene).
- *
- * Le portage pose les colliders d'un bloc sur le corps ancre — 441 sur Timber
- * Hearth, 898 ms de construction. Le jeu, lui, ne garde en collision que ce qui
- * est assez pres. La liste sert de filtre : quand elle n'est pas vide, seuls
- * ses objets et leurs enfants entrent dans la construction differee.
- */
-export function colliderLODNames(gameplay = {}) {
-  return new Set(((gameplay.placed || {}).ChildColliderLOD || [])
-    .map((e) => e.name).filter(Boolean));
-}
-
 /** Portee de repli d'un groupe de colliders qui n'en declare aucune. */
 export const COLLIDER_LOD_RANGE = 200;
 

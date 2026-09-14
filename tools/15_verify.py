@@ -1017,6 +1017,28 @@ def _run(url, heavy, profil=None, zip_path=None):
             "          window.__mur(b, [4,0,0], vetu) === null].join(','); }"),
             "true,true")
 
+        # --- la queue des lois (docs/74-etalons.md) ------------------------------
+        #
+        # Les phares du vaisseau : le portage n'en avait AUCUN, et
+        # `shiplightRange` etait ecrite, eprouvee, appelee par personne.
+        ph = page.evaluate("""() => {
+          const p = window.__phares;
+          const s = window.__shipRef;
+          if (!p || !s) return null;
+          const avant = s.boarded;
+          s.boarded = false;
+          return { existe: true, portee: p.range, avant };
+        }""")
+        if ph:
+            rep.eq("les phares du vaisseau existent", ph["existe"], True)
+            rep.eq("a six cents unites de portee", ph["portee"], 600)
+        # La carte suit `MapMarker.LateUpdate`, et non une moitie de la regle.
+        carte = page.evaluate("""() => {
+          const m = window.__map;
+          return { derelict: m.derelict === false || m.derelict === undefined };
+        }""")
+        rep.eq("la carte connait la zone brouillee", carte["derelict"], True)
+
         # --- les passages, les coquilles, le sol qui tourne (docs/73) ------------
         ep = page.evaluate("""() => {
           const e = window.__epaves;

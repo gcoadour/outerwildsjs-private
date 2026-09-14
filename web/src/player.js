@@ -107,6 +107,7 @@ export function approach(v, target, accel, dt, step = FIXED_STEP) {
 }
 
 /** Hauteur d'un saut, pour l'invariant : v^2 / 2g. */
+// @mesure — un etalon, pas un mecanisme : le moteur integre, celui-ci verifie.
 export function jumpHeight(jumpSpeed, gravity) {
   return gravity > 0 ? (jumpSpeed * jumpSpeed) / (2 * gravity) : Infinity;
 }

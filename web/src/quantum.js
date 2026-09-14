@@ -46,28 +46,6 @@ export function orbitTilt(fields = {}, seed = "") {
 }
 
 /**
- * Un segment coupe-t-il une sphere ?
- *
- * C'est le test d'occlusion : la lune n'est observee que si RIEN ne se trouve
- * entre l'oeil et elle. Le jeu lance une sphere de `_sphereCheckRadius` sur une
- * profondeur de `_checkDepth` ; ici le test est analytique contre les corps du
- * systeme, ce qui coute trois produits scalaires au lieu d'un lancer de rayon
- * dans la scene, et ne depend pas de la geometrie chargee — une planete pas
- * encore telechargee masque quand meme la lune.
- */
-export function segmentHitsSphere(a, b, center, radius) {
-  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  const f = [a[0] - center[0], a[1] - center[1], a[2] - center[2]];
-  const dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-  if (dd < 1e-9) return false;
-  // parametre du point du segment le plus proche du centre, borne a [0, 1]
-  let t = -(f[0] * d[0] + f[1] * d[1] + f[2] * d[2]) / dd;
-  t = Math.max(0, Math.min(1, t));
-  const p = [a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t];
-  return Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2]) < radius;
-}
-
-/**
  * Longueur du segment qui passe A L'INTERIEUR d'une sphere.
  *
  * C'est ce que `_checkDepth` demande et que le test binaire ne donnait pas : le

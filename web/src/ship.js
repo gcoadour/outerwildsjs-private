@@ -84,6 +84,7 @@ export function spinStep(q, omega, dt) {
  * `couple / (1 - drag) x dt` par seconde a 60 im/s — c'est l'invariant garde
  * dans tests/09-jeu.mjs.
  */
+// @mesure — le regime que l'integration atteint, pas une etape de celle-ci.
 export function terminalAngularSpeed(torque, drag, step = 1 / 60) {
   return drag >= 1 ? Infinity : (torque * step) / (1 - drag);
 }

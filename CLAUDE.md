@@ -149,6 +149,13 @@ README : quand un chiffre bouge, les trois bougent ensemble.
   touchée avec les valeurs du build", r.part, 0)` gardait un raisonnement sous
   les dehors d'un chiffre, et se serait défendu contre sa propre correction
   ([`docs/49`](docs/49-queue.md)).
+- Une loi que **rien n'appelle** est signalée par `scripts/lois.mjs`. Deux cas
+  sont légitimes et se marquent sur la ligne au-dessus de l'export :
+  `// @mesure` pour un **étalon** — un régime vers lequel une intégration
+  converge, écrit pour être vérifié de l'extérieur et non appelé — et
+  `// @vide <raison>` pour une loi dont la liste d'entrées est **vide dans ce
+  build** (la raison est obligatoire). Tout le reste est du travail à faire
+  ([`docs/74`](docs/74-etalons.md)).
 - Une classe que le moteur lit **sous un nom français** se déclare par un
   marqueur `// @lit NomDeLaClasse` : c'est ce que `scripts/recensement.mjs`
   compte, et il retire les commentaires avant de compter — une classe citée en

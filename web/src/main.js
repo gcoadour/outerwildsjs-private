@@ -92,7 +92,7 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
-import { LockOn, aimedFrame, canFlyTo } from "./tracker.js";
+import { LockOn, aimedFrame, canFlyTo, matchedVelocity } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
 // existait, ses quarante verifications passaient, et aucun module du moteur ne
 // l'importait (docs/68-lois.md).
@@ -105,10 +105,12 @@ import { MarshmallowStick as BatonGuimauve, thermTime,
          STICK_LIGHTS } from "./held.js";
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
-import { loadLighting, LightField, ambientTarget, ambientStep } from "./lights.js";
+import { loadLighting, LightField, ambientTarget, ambientStep,
+         shiplightRange, SHIPLIGHT_RANGE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
-import { SandLevels, sandColumns, sandFunnels, markCrushing } from "./sand.js";
+import { SandLevels, sandColumns, sandFunnels, markCrushing,
+         funnelActive } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
@@ -1497,6 +1499,8 @@ async function boot() {
   // fonction qui le lit a le droit d'etre ecrite avant, pas d'etre APPELEE
   // avant.
   let departAFaire = true;
+  // Le joueur est-il dans la zone brouillee de l'epave ? La carte s'y efface.
+  let dansEpave = false;
 
   // Les effets d'image du joueur (docs/47-effets-image.md). `fx` tient l'etat,
   // `postfx` le rend. Les deux sont separes parce que l'etat s'eprouve sans
@@ -1616,6 +1620,20 @@ async function boot() {
   // rayon large est un repli assume, pas une valeur du build. Il ne raccourcit
   // plus le depart, qui se fait desormais au village, 471 u plus loin.
   const SHIP_REACH = 40;
+
+  // §O LES PHARES DU VAISSEAU. Le portage n'en avait aucun : `shiplightRange`
+  // etait ecrite, eprouvee, et appelee par personne.
+  //
+  // Six cents unites partout, et `min(limite du secteur, 600)` dans un secteur
+  // majeur : la dimension abandonnee les bride a CENT. Piloter dedans se fait
+  // donc a la lueur du tableau de bord, et c'est une des rares choses que le
+  // build dit explicitement d'un lieu.
+  const phares = new BABYLON.SpotLight("shiplight", BABYLON.Vector3.Zero(),
+    new BABYLON.Vector3(0, 0, 1), Math.PI / 2.6, 2, scene);
+  phares.range = SHIPLIGHT_RANGE;
+  phares.intensity = 1.1;
+  phares.setEnabled(false);
+  window.__phares = phares;
   // Portee de ramassage. Le `GearPickup` du build n'a pas de forme a lui : sa
   // zone d'interaction est un objet ENFANT (`InteractVolume`, une capsule de
   // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
@@ -2896,7 +2914,7 @@ async function boot() {
       if (focus) bits.push(focus.kind === "readable"
         ? `${focus.name} — texte disponible` : (focus.prompt || focus.name));
       hud2.textContent = bits.join("   ·   ");
-      solarMap.draw(player.pos, ship ? ship.pos : null);
+      solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
     }
     {
       const v = dialogue.view;
@@ -2930,6 +2948,20 @@ async function boot() {
                                 : Math.min(limite, secteurJeu.thrustLimit);
       }
       if (ship) ship.thrustLimit = limite;
+      // Les phares suivent la coque et s'eteignent des qu'on la quitte.
+      if (ship) {
+        const allumes = !!ship.boarded;
+        phares.setEnabled(allumes);
+        if (allumes) {
+          const a = ship.axes;
+          phares.position.set(ship.pos.x + a.fwd[0] * 2,
+                              ship.pos.y + a.fwd[1] * 2,
+                              ship.pos.z + a.fwd[2] * 2);
+          phares.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          phares.range = shiplightRange(
+            secteurJeu ? secteurJeu.shiplightLimit : null, !!secteurJeu);
+        }
+      }
       // L'eclairage ambiant suit `_ambientLightRange`, mesure depuis le centre
       // du secteur courant.
       //
@@ -3005,6 +3037,10 @@ async function boot() {
       const inside = derelicts.some((d) => Math.hypot(
         d.position[0] - playerWorld.x, d.position[1] - playerWorld.y,
         d.position[2] - playerWorld.z) < d.radius);
+      // `MapMarker.LateUpdate` efface TOUS les marqueurs dans la zone
+      // brouillee : on n'a pas de carte dans l'epave, et c'est ce qui la rend
+      // difficile a quitter.
+      dansEpave = inside;
       if (fog.setSuspended(inside)) {
         console.log(inside ? "EnterDerelictZone" : "ExitDerelictZone");
       }
@@ -3879,8 +3915,12 @@ async function boot() {
     // compte, passer d'un cylindre au suivant emettrait une sortie puis une
     // entree, et l'ecran clignoterait.
     {
+      // L'entonnoir pousse et se retire au fil de la boucle : la tempete
+      // n'existe qu'entre les deux, et son volume, lui, ne bouge pas.
+      const vivant = sand.funnels.length
+        ? sand.funnels.some((f) => funnelActive(loop.elapsed, f)) : true;
       const ev = tempete.update([playerWorld.x, playerWorld.y, playerWorld.z],
-                                (c) => decalageDuCorps(c.body, anchorPos));
+                                (c) => decalageDuCorps(c.body, anchorPos), vivant);
       if (ev === "enter") console.log("annonce : EnterSandstorm");
       if (ev === "exit") console.log("annonce : ExitSandstorm");
       const ps = systemeSable();
@@ -3969,7 +4009,11 @@ async function boot() {
         const t = lockOn.current.body;
         const v = frameVelocity(orbits, t);
         if (v) {
-          player.vel.x = v[0]; player.vel.y = v[1]; player.vel.z = v[2];
+          // `Autopilot.InitMatchVelocity`. Le build y va par la POUSSEE ; ce
+          // portage pose la vitesse, et la loi le dit a l'endroit ou elle est
+          // ecrite plutot qu'ici.
+          const vm = matchedVelocity(v);
+          player.vel.x = vm[0]; player.vel.y = vm[1]; player.vel.z = vm[2];
           console.log(`vitesse accordee a ${t.name}`);
         }
       }
