@@ -54,6 +54,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`28-hud.md`](28-hud.md) — jauges de ressources et invites à l'écran
 - [`30-consoles.md`](30-consoles.md) — ordinateur de bord, lampe, guimauve
 - [`33-mobile.md`](33-mobile.md) — **commandes tactiles à deux manches et jeu en paysage**
+- [`95-pnj-au-doigt.md`](95-pnj-au-doigt.md) — **parler aux PNJ au doigt : le dialogue vivait sous les zones de pilotage, et la tape ne survivait pas à un pouce**
 
 ## Ce qui manque
 

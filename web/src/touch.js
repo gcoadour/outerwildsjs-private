@@ -34,7 +34,19 @@ export const LOOK_DEAD_ZONE = 0.22;
 // d'autre de l'avant.
 export const SPRINT_AT = 0.95, SPRINT_CONE = 0.7;
 // Ce qui separe une tape d'un glissement : au-dela, c'est un regard.
-export const TAP_MS = 300, TAP_PX = 14;
+//
+// La premiere version comptait le CHEMIN — la somme des |dx| + |dy| de chaque
+// `pointermove` — et le bornait a 14 pixels. Un pouce ne tient pas immobile :
+// huit images a deux pixels de gigue font 32 pixels de chemin et zero de
+// deplacement. Mesure dans un vrai Chromium : une tape avec deux pixels de
+// gigue n'ouvrait aucun dialogue et tournait la camera a la place, et une tape
+// appuyee 400 ms n'en etait deja plus une (docs/95-pnj-au-doigt.md).
+//
+// La regle porte donc sur le DEPLACEMENT NET depuis le point de pose — c'est
+// ce que « sans avoir glisse » veut dire — et garde le chemin comme garde-fou,
+// bien plus large : un aller-retour revenu a son point de depart a bel et bien
+// glisse, et n'est pas une tape.
+export const TAP_MS = 500, TAP_PX = 16, TAP_PATH = 48;
 // Un doigt parcourt moins de pixels qu'une souris : le glissement est amplifie
 // d'autant, avant l'inversion et la sensibilite des reglages.
 export const LOOK_GAIN = 1.7;
@@ -75,6 +87,17 @@ export function lookCurve(mag) {
 /** Le manche de deplacement est-il pousse a fond vers l'avant ? */
 export function sprinting(v) {
   return v.mag >= SPRINT_AT && -v.uy >= SPRINT_CONE;
+}
+
+/**
+ * Ce contact etait-il une tape ?
+ *
+ * @param dx,dy  deplacement NET depuis le point de pose, en pixels
+ * @param path   chemin parcouru, somme des pas
+ * @param ms     duree du contact
+ */
+export function isTap(dx, dy, path, ms) {
+  return Math.hypot(dx, dy) <= TAP_PX && path <= TAP_PATH && ms < TAP_MS;
 }
 
 /**
@@ -495,9 +518,13 @@ export class TouchControls {
     if (!this.lookStick.up(e)) return;
     this.liveZones();
     // Tape breve et immobile : c'est l'action principale, celle que le jeu
-    // met sur E — parler, interagir, faire defiler un dialogue.
-    const dt = performance.now() - this.lookStart[2];
-    if (this.travel < TAP_PX && dt < TAP_MS) this.onKey("KeyE");
+    // met sur E — parler, interagir, faire defiler un dialogue. Le point de
+    // lever vient de l'evenement, et non du dernier `pointermove` : un doigt
+    // qui se leve en bougeant n'en envoie pas forcement un de plus.
+    const x = e.clientX === undefined ? this.last[0] : e.clientX;
+    const y = e.clientY === undefined ? this.last[1] : e.clientY;
+    if (isTap(x - this.lookStart[0], y - this.lookStart[1], this.travel,
+              performance.now() - this.lookStart[2])) this.onKey("KeyE");
   }
 
   /**

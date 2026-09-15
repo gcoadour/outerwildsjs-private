@@ -51,11 +51,19 @@ export function wrap(text, charsPerLine, maxLines) {
 }
 
 export class DialogueUI {
-  /** @param opts { onChoose(index), onNext() } — le choix au doigt */
+  /** @param opts { onChoose(index), onNext(), reserveOf() } — le choix au doigt */
   constructor(root, opts = {}) {
     this.root = root;
     this.scale = 1;
     this.cursor = 0;
+    // Place prise a droite par un amas de boutons qui recouvre la boite. Le
+    // losange d'action tactile est plus haut qu'elle (z-index 8 contre 6) : ce
+    // qui passe dessous ne se touche pas, et c'est le « Next » qui y tombait.
+    //
+    // C'est une FONCTION et non un nombre : la place se mesure sur la couche
+    // au moment ou l'on redimensionne, elle ne s'ecrit pas ici. Nulle au
+    // clavier, ou rien ne recouvre rien.
+    this.reserveOf = opts.reserveOf || null;
     this.onChoose = opts.onChoose || null;
     this.onNext = opts.onNext || null;
     this.build();
@@ -85,13 +93,15 @@ export class DialogueUI {
   /**
    * Les proportions du jeu sont conservees, mises a l'echelle de la fenetre.
    *
-   * Deux bornes s'y ajoutent, pour l'ecran large et bas d'un telephone tenu en
-   * paysage : la boite ne depasse jamais la largeur disponible, et le corps de
-   * police ne descend pas sous `MIN_FONT`.
+   * Trois bornes s'y ajoutent, pour l'ecran large et bas d'un telephone tenu en
+   * paysage : la boite ne depasse jamais la largeur disponible, elle s'arrete
+   * avant ce qui la recouvre (`reserveOf`), et le corps de police ne descend pas
+   * sous `MIN_FONT`.
    */
   resize() {
     const byHeight = Math.min(1, innerHeight / REF_H) * 1.35;
-    const byWidth = (innerWidth - 32) / LAYOUT.box[0];
+    const reserve = this.reserveOf ? this.reserveOf() : 0;
+    const byWidth = (innerWidth - 32 - reserve) / LAYOUT.box[0];
     this.scale = Math.min(byHeight, byWidth);
     const px = (v) => `${Math.round(v * this.scale)}px`;
     this.box.style.width = px(LAYOUT.box[0]);

@@ -135,8 +135,9 @@ import { Minimap, localMapPosition, MARKER_RADIUS, TRAIL_ANGLE,
          MINIMAP_EVENTS } from "../web/src/minimap.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
 import { envelope } from "../web/src/pipeline/extract/particles.js";
-import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
-         LOOK_DEAD_ZONE, SPRINT_AT } from "../web/src/touch.js";
+import { stickVector, lookCurve, sprinting, isTap, STICK_RADIUS, DEAD_ZONE,
+         LOOK_DEAD_ZONE, SPRINT_AT, TAP_MS, TAP_PX, TAP_PATH }
+  from "../web/src/touch.js";
 import { padState, padEdges, deadZone, padLookCurve, PAD_BUTTONS,
          padDisagreements, UNITY_VERS_NAVIGATEUR,
          PAD_DEAD_ZONE } from "../web/src/gamepad.js";
@@ -796,6 +797,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a fond en arriere : pas de course", sprinting(v(0, R)), false);
   check("pas tout a fait a fond : pas de course",
         sprinting(v(0, -R * (SPRINT_AT * 0.9))), false);
+
+  // La tape, c'est-a-dire l'action principale du jeu au doigt. La regle porte
+  // sur le DEPLACEMENT NET depuis le point de pose : la premiere version
+  // comptait le chemin, et la gigue d'un pouce pose suffisait a l'annuler —
+  // mesure dans un vrai Chromium, deux pixels de gigue par image n'ouvraient
+  // aucun dialogue (docs/95-pnj-au-doigt.md).
+  check("pose et releve au meme endroit : c'est une tape",
+        isTap(0, 0, 0, 100), true);
+  check("un pouce qui tremble tape quand meme",
+        isTap(1, -1, 32, 120), true);
+  check("appuyee mais immobile : encore une tape",
+        isTap(2, 2, 20, TAP_MS - 50), true);
+  check("glissee : c'est un regard", isTap(TAP_PX + 4, 0, 40, 120), false);
+  check("partie et revenue : elle a glisse", isTap(0, 0, TAP_PATH + 8, 200), false);
+  check("tenue trop longtemps : ce n'est plus une tape",
+        isTap(0, 0, 0, TAP_MS + 1), false);
+  // Les deux bornes se lisent l'une contre l'autre : le garde-fou de chemin
+  // doit laisser passer la gigue que la borne de deplacement accepte.
+  check("le chemin tolere est plus large que le deplacement",
+        TAP_PATH > TAP_PX, true);
 }
 
 // --- rotation propre des corps -----------------------------------------
