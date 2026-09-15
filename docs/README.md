@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`96-groupes-de-rendu.md`](96-groupes-de-rendu.md) — **le soleil visible au travers des planètes : le groupe de rendu 1 efface la profondeur, et un commentaire promettait depuis toujours une technique absente**
 - [`95-lots-partages.md`](95-lots-partages.md) — **un lot pour plusieurs corps : la planète de départ s'effaçait une demi-minute sur deux, au rythme de sa lune**
 - [`94-manette.md`](94-manette.md) — **deux tables pour une manette, et un champ qui était un commentaire déguisé en donnée**
 - [`93-commandes.md`](93-commandes.md) — **quatre lois de commande qui ne commandaient rien, dont une sensibilité qu'on pouvait régler sans rien sentir**

@@ -131,6 +131,9 @@ export class SupernovaView {
     cm.disableDepthWrite = true;
     this.corona.material = cm;
     this.corona.isPickable = false;
+    // Le groupe 1 pour passer apres l'opaque — et main.js lui retire
+    // l'effacement de profondeur que Babylon y met, sans quoi cette couronne se
+    // peint par-dessus la planete qui occulte l'etoile.
     this.corona.renderingGroupId = 1;
 
     // L'onde de choc est une coque qu'on regarde de l'INTERIEUR pendant les

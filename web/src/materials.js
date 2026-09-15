@@ -123,7 +123,10 @@ export function makeAtmosphere(BABYLON, scene, body, radius) {
   mat.disableDepthWrite = true;
   mesh.material = mat;
   mesh.isPickable = false;
-  // rendu apres l'opaque, sinon la coque masque la planete
+  // Rendu apres l'opaque, sinon la coque masque la planete. Le groupe 1 ne
+  // suffit PAS a le dire : Babylon efface le tampon de profondeur devant chaque
+  // groupe, et il faut le lui retirer pour que la coque reste occultable. C'est
+  // fait une fois pour toutes dans main.js, la ou le groupe est explique.
   mesh.renderingGroupId = 1;
   return { mesh, mat };
 }
