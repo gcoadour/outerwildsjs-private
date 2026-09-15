@@ -85,8 +85,16 @@ piloter, mais quand il pousse déjà à fond, il peut.
 
 **Une tape brève vaut `E`.** L'action principale du jeu est contextuelle et se
 déclenche partout ; lui demander de viser un bouton à chaque réplique de
-dialogue serait pénible. Une tape est un pointeur posé et relevé sans avoir
-glissé de plus de 14 pixels, en moins de 300 ms — au-delà, c'est un regard.
+dialogue serait pénible. Une tape est un pointeur posé et relevé **sans s'être
+déplacé** de plus de 16 pixels depuis son point de pose, en moins de 500 ms —
+au-delà, c'est un regard.
+
+La règle a d'abord porté sur le **chemin parcouru**, borné à 14 pixels, et elle
+refusait les tapes réelles : un pouce posé ne tient pas immobile, et huit images
+à deux pixels de gigue font 32 pixels de chemin pour zéro de déplacement. Le
+chemin reste comme garde-fou, à 48 pixels — un aller-retour revenu à son point
+de départ a bel et bien glissé — mais c'est le **déplacement net** qui tranche
+([`95-pnj-au-doigt.md`](95-pnj-au-doigt.md)).
 
 ## La grammaire d'une manette
 
@@ -125,7 +133,13 @@ Rien à chercher, rien qui réponde à côté.
 ```
 
 Les zones de pilotage sont **sous** l'interface : un appui destiné à une option
-de dialogue ou à une ligne de réglages ne leur est jamais volé. Les boutons sont
+de dialogue ou à une ligne de réglages ne leur est jamais volé. Ce tableau était
+faux jusqu'à [`95-pnj-au-doigt.md`](95-pnj-au-doigt.md) : `#dialogue` était un
+enfant de `#hud`, lequel est `position: fixed` et crée donc un **contexte
+d'empilement**. Son `z-index: 6` n'y valait que *dedans*, et `#hud` s'empile à
+`auto` — sous les zones de pilotage. Les options de dialogue étaient mangées par
+le manche gauche, et aucune réponse n'était choisissable au doigt. Il est
+désormais posé **à la racine**, ce que le tableau ci-dessus suppose. Les boutons sont
 **au-dessus de tout** : sans cela, ouvrir la carte — qui occupe l'écran entier —
 enfermerait le joueur dedans, faute de pouvoir viser « fermer ». Leur conteneur
 laisse passer les appuis ; seuls les boutons eux-mêmes les prennent.
@@ -224,6 +238,12 @@ Et surtout, depuis que le défaut ci-dessus a coûté deux manches silencieux :
 **ce que le doigt touche vraiment**, `elementFromPoint` aux deux endroits où les
 pouces se posent, qui doit être la zone de pilotage et rien d'autre.
 
+Ce contrôle-là ne regardait que ces deux points — ceux dont on savait déjà qu'ils
+marchaient. Il en regarde maintenant quatre de plus, aux endroits où le jeu
+demande de viser : le centre d'une **option de dialogue**, celui de son bouton
+**« Next »**, le chevauchement de la boîte avec le losange d'action, et la
+**tape sous un pouce qui tremble** ([`95`](95-pnj-au-doigt.md)).
+
 L'ouverture forcée `?touch=1` installe la disposition tactile sur un poste de
 bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
 `?look=swipe` choisissent le regard.
@@ -233,7 +253,11 @@ bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
 - **Le portrait** n'a pas d'interface propre, seulement un bandeau.
 - **La croix ne sort que dans un menu.** En vol elle ne servirait à rien, mais
   dans un dialogue les options se visent au doigt plutôt qu'avec elle — ce qui
-  marche, sans être le même geste que dans un menu.
+  marche depuis [`95`](95-pnj-au-doigt.md), sans être le même geste que dans un
+  menu.
+- **Le dialogue ne suspend pas le pilotage.** Le build bascule sur
+  `ConversationInput`, un jeu de commandes à part ; le portage laisse le manche
+  gauche déplacer pendant une conversation, au doigt comme au clavier.
 - **Rien n'est réglable depuis l'écran** : ni la taille des boutons, ni leur
   côté (le gaucher n'a pas d'option), ni la sensibilité tactile en propre — elle
   passe par le réglage de regard du jeu, ce qui est cohérent mais pas séparé. Le
@@ -246,4 +270,6 @@ bureau ; `?touch=0` l'interdit sur un appareil tactile. `?look=stick` et
   mêmes axes et les mêmes codes ([`35-monde.md`](35-monde.md) §7). Les trois
   couches — clavier, doigt, manette — s'additionnent sur la même machine.
 - **Une partie jouée sur un vrai téléphone.** Tout est vérifié au chiffre et à
-  l'émulation ; rien ne l'est encore au pouce.
+  l'émulation ; rien ne l'est encore au pouce — et la première fois qu'on a
+  regardé au pouce, quatre choses étaient cassées d'un coup
+  ([`95`](95-pnj-au-doigt.md)).

@@ -166,14 +166,46 @@ export class Sectors {
 
   /**
    * Active la geometrie des corps proches, desactive celle des autres.
+   *
+   * UN LOT PORTE PLUSIEURS CORPS, et c'est tout le piege de cette boucle. La
+   * decision se prend par CORPS — chacun a son secteur, son horizon, sa
+   * distance au joueur — mais elle s'applique par FICHIER, parce que c'est le
+   * conteneur glTF qu'on allume ou qu'on eteint. Or `timberhearth_pivot.gltf`
+   * contient la planete de depart ET sa lune, `brittlehollow_pivot.gltf` la
+   * planete et sa lune volcanique, `hourglasstwins_pivot.gltf` les deux
+   * jumelles, et `darkbramble_pivot.gltf` est en plus reclame par un volume
+   * sans puits de gravite. Appliquer chaque decision au passage revenait donc
+   * a laisser le DERNIER corps du lot decider pour tous les autres.
+   *
+   * Ce que cela donnait sur la planete de depart : l'Attlerock orbite a 541 u
+   * en une minute, son secteur a 75 d'horizon, donc 600 d'activation. Debout
+   * sur Timber Hearth (rayon 250), le joueur voit la lune passer de ~290 a
+   * ~790 u a chaque tour. La moitie du temps elle est hors de portee, elle
+   * eteignait le conteneur — et la planete sous les pieds du joueur
+   * disparaissait, pour revenir une demi-minute plus tard. Aleatoire vu du
+   * sol, reglee comme une horloge en realite.
+   *
+   * On collecte donc les demandes d'abord, on applique ensuite : un lot est
+   * affiche des que QUELQU'UN le reclame. C'est la seule reponse juste, car
+   * une lune eteinte ne rend rien tant que sa planete, elle, est visible :
+   * elles partagent le meme fichier.
+   *
    * @returns {actifs, total, secteur}
    */
   update(playerPos, framePos = null) {
-    let actifs = 0, total = 0;
+    let total = 0;
     this.current = null;
     // Fichiers encore a portee de chargement : c'est cette liste que
     // l'eviction consulte pour savoir ce qu'elle peut liberer.
     this.inRange = new Set();
+    const veut = new Map();        // fichier -> quelqu'un le veut affiche
+    const lots = new Map();        // fichier -> lot charge, s'il l'est
+    const demandeurs = [];         // un fichier par demandeur deja charge
+    const demande = (file, on, entry) => {
+      veut.set(file, veut.get(file) === true || on);
+      if (entry && !lots.has(file)) lots.set(file, entry);
+      if (entry) demandeurs.push(file);
+    };
     for (const b of this.bodies) {
       const file = this.fileFor ? this.fileFor(b) : (this.geoFor(b) || {}).file;
       if (!file) continue;   // corps sans geometrie exportee
@@ -191,11 +223,9 @@ export class Sectors {
         this.inRange.add(file);
         if (this.request) this.request(file);
       }
-      const entry = this.geoFor(b);
-      if (!entry) continue;   // pas encore charge : la sphere de substitution tient
-      if (on) actifs += 1;
-      if (entry.container.setEnabled) entry.container.setEnabled(on);
-      this.active[on ? "add" : "delete"](entry.file);
+      // le lot peut n'etre pas encore charge : la sphere de substitution
+      // tient jusque-la, et `demande` n'en retient alors que le voeu
+      demande(file, on, this.geoFor(b));
     }
     // Volumes sans puits de gravite : meme regle, mais leur position est fixe
     // et donnee en coordonnees monde, d'ou le passage dans le repere courant.
@@ -209,12 +239,19 @@ export class Sectors {
         this.inRange.add(v.file);
         if (this.request) this.request(v.file);
       }
-      const entry = this.entryFor ? this.entryFor(v.file) : null;
-      if (!entry) continue;
-      if (on) actifs += 1;
-      if (entry.container.setEnabled) entry.container.setEnabled(on);
-      this.active[on ? "add" : "delete"](entry.file);
+      demande(v.file, on, this.entryFor ? this.entryFor(v.file) : null);
     }
+    // L'application, une fois par fichier et une fois seulement.
+    for (const [file, on] of veut) {
+      const entry = lots.get(file);
+      if (!entry) continue;
+      if (entry.container.setEnabled) entry.container.setEnabled(on);
+      this.active[on ? "add" : "delete"](file);
+    }
+    // `actifs` compte les DEMANDEURS servis, pas les fichiers : c'est ce que
+    // `total` compte aussi, et l'affichage met les deux cote a cote.
+    let actifs = 0;
+    for (const file of demandeurs) if (veut.get(file)) actifs += 1;
     return { actifs, total, secteur: this.current };
   }
 

@@ -1840,6 +1840,24 @@ def _run(url, heavy, profil=None, zip_path=None):
           send('.tc-zone-look', 'pointerup', 900, 400, 3);
           document.querySelector('.tc-act').dispatchEvent(
             new PointerEvent('pointerdown', {pointerId: 4, bubbles: true}));
+
+          // LA MEME TAPE, SOUS UN POUCE QUI TREMBLE. C'est le geste reel, et
+          // c'est celui que la premiere regle refusait : elle comptait le
+          // chemin parcouru, or huit images a deux pixels de gigue en font
+          // trente-deux pour zero de deplacement. La tape devenait un regard,
+          // et l'action principale du jeu ne partait pas (docs/95).
+          send('.tc-zone-look', 'pointerdown', 900, 400, 5);
+          for (let i = 1; i <= 8; i++) {
+            send('.tc-zone-look', 'pointermove',
+                 900 + (i % 2 ? 2 : -2), 400 + (i % 3 ? 2 : -2), 5);
+          }
+          send('.tc-zone-look', 'pointerup', 900, 400, 5);
+          const apresGigue = vus.length;
+          // Et un vrai glissement n'en est toujours pas une.
+          send('.tc-zone-look', 'pointerdown', 900, 400, 6);
+          send('.tc-zone-look', 'pointermove', 960, 400, 6);
+          send('.tc-zone-look', 'pointerup', 960, 400, 6);
+          const apresGlissement = vus.length;
           t.onKey = onKey; t.onLook = onLook;
 
           // un menu ouvert remplace la manette par la croix et les deux
@@ -1864,12 +1882,47 @@ def _run(url, heavy, profil=None, zip_path=None):
           const pouceGauche = sous(innerWidth * 0.15, innerHeight * 0.72);
           const pouceDroit = sous(innerWidth * 0.62, innerHeight * 0.72);
 
+          // LE DIALOGUE AU DOIGT. Trois mesures, et les trois etaient fausses :
+          // les options etaient recouvertes par le manche gauche (#dialogue
+          // vivait dans #hud, qui est `position: fixed` et fait donc contexte
+          // d'empilement : son z-index 6 n'y valait que dedans), « Next »
+          // tombait sous le losange d'action, et il faisait 29 x 16 pixels la
+          // ou un doigt en demande 44 (docs/95-pnj-au-doigt.md).
+          //
+          // On ouvre une conversation a la main, on mesure, on remet l'etat :
+          // un controle ne doit rien changer.
+          const dial = window.__dialogue, dlgUI = window.__dlgUI;
+          const avantDlg = dial.active;
+          let dlg = null;
+          for (const c of dial.conversations) {
+            if (!c.tree || !dial.open(c)) continue;
+            while (dial.view && !dial.view.atEnd) dial.advance();
+            if (!dial.view) continue;              // branche close sans reponse
+            dlgUI.render(dial.view, false);
+            const boite = document.querySelector('.dlg-box').getBoundingClientRect();
+            const face = document.querySelector('.tc-face').getBoundingClientRect();
+            const cible = (el) => {
+              if (!el || el.hidden) return null;
+              const r = el.getBoundingClientRect();
+              const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+              return { h: Math.round(r.height),
+                       sous: e ? String(e.className || e.tagName) : 'rien' };
+            };
+            dlg = { chevauche: boite.right > face.left && boite.bottom > face.top,
+                    option: cible(document.querySelector('.dlg-option')),
+                    next: cible(document.querySelector('.dlg-next')) };
+            if (dlg.option) break;     // une conversation a reponses suffit
+          }
+          dial.active = avantDlg;
+          dlgUI.render(dial.view, false);
+
           const manches = document.querySelectorAll('#touch .tc-stick').length;
           const empreintes = document.querySelectorAll('#touch .tc-home').length;
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
           return {avant, course, relache, apresCourse, glisse, vitesse, arret,
-                  vus, suspendu, manches, empreintes, boutons, enVol, enMenu,
+                  vus, apresGigue, apresGlissement, dlg,
+                  suspendu, manches, empreintes, boutons, enVol, enMenu,
                   pouceGauche, pouceDroit};
         }""")
         rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
@@ -1884,7 +1937,12 @@ def _run(url, heavy, profil=None, zip_path=None):
                tactile["vitesse"], 900)
         rep.eq("manche droit relache : plus de rotation", tactile["arret"], 0)
         rep.eq("tape et bouton d'action donnent la touche du jeu",
-               tactile["vus"], ["KeyE", "KeyE"])
+               tactile["vus"][:2], ["KeyE", "KeyE"])
+        # Un pouce ne tient pas immobile : la tape doit survivre a sa gigue.
+        rep.eq("une tape sous un pouce qui tremble reste une tape",
+               tactile["apresGigue"], 3)
+        rep.eq("un glissement n'en est toujours pas une",
+               tactile["apresGlissement"], 3)
         rep.eq("un menu ouvert suspend le pilotage", tactile["suspendu"], True)
         # Rien au-dessus des zones de pilotage : le defaut qui rendait les deux
         # manches muets ne se voyait qu'ici.
@@ -1903,6 +1961,22 @@ def _run(url, heavy, profil=None, zip_path=None):
                tactile["enMenu"],
                ["Haut", "Gauche", "Droite", "Bas", "Valider", "Retour"])
         rep.eq("boutons tactiles en tout", tactile["boutons"], 19)
+
+        # Le dialogue au doigt. Sans conversation dans la scene il n'y a rien a
+        # mesurer ; avec le build, il y en a quatorze.
+        dlg = tactile["dlg"]
+        if dlg and dlg["option"]:
+            rep.eq("la boite de dialogue ne passe plus sous le losange d'action",
+                   dlg["chevauche"], False)
+            rep.eq("ce que le doigt touche sur une option, c'est l'option",
+                   dlg["option"]["sous"], "dlg-option dlg-sel")
+            rep.eq("une option fait la taille d'un doigt",
+                   dlg["option"]["h"] >= 36, True)
+            if dlg["next"]:
+                rep.eq("et « Next » est bien « Next », pas le bouton derriere",
+                       dlg["next"]["sous"], "dlg-next")
+                rep.eq("« Next » fait la taille d'un doigt",
+                       dlg["next"]["h"] >= 40, True)
 
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------

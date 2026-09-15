@@ -40,7 +40,16 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   touch-action: none;
 }
 @supports (height: 100dvh) { #map { height: 100dvh; } }
-/* Proportions reprises de DialogueGUI (voir web/src/dialogueui.js) */
+/* Proportions reprises de DialogueGUI (voir web/src/dialogueui.js).
+
+   ET SURTOUT : #dialogue est pose A LA RACINE, pas dans #hud. Le meme piege
+   que #gate et #map, une troisieme fois, et il coutait le dialogue entier au
+   doigt : #hud est `position: fixed`, donc il cree un contexte d'empilement,
+   et le z-index 6 ci-dessous n'y valait que DEDANS. Le bandeau s'empile a
+   `auto` — sous les zones de pilotage tactiles, qui sont a 4 — et les options
+   du dialogue etaient donc recouvertes par le manche gauche. Mesure :
+   `elementFromPoint` au centre d'une option rendait `tc-zone-move`
+   (docs/95-pnj-au-doigt.md). */
 #dialogue {
   position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
   z-index: 6; pointer-events: none;
@@ -533,7 +542,26 @@ body.touch .ow-prompts-bottom { bottom: 74px; }
 body.touch .ow-prompts-left {
   left: calc(10px + env(safe-area-inset-left)); bottom: 40px;
 }
-body.touch #dialogue { bottom: 66px; }
+/* Le losange d'action tient le coin bas-droit, et il est plus haut que le
+   dialogue (z-index 8 contre 6). La boite centree passait dessous : son
+   « Next », pose en bas a droite, tombait pile sur le bouton « descendre »,
+   qui prenait l'appui. Elle s'ancre donc a GAUCHE, et sa largeur est bornee
+   par la place qui reste (`DialogueUI.reserve`). */
+body.touch #dialogue {
+  left: calc(10px + env(safe-area-inset-left)); bottom: 66px;
+  transform: none;
+}
+/* Une cible de doigt fait au moins 44 px : c'est la regle des boutons
+   tactiles, et le dialogue ne l'avait jamais suivie — ses options faisaient
+   20 px de haut, et son « Next » 29 x 16. */
+body.touch .dlg-options { gap: 4px; }
+body.touch .dlg-option { padding: 9px 10px; }
+body.touch .dlg-next {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 78px; min-height: 40px; margin-top: 4px;
+  border: 1px solid rgba(255, 217, 160, .45); border-radius: 8px;
+  color: #ffd9a0;
+}
 body.touch #computer {
   top: 12%; width: min(560px, 68vw); padding: 12px 16px;
 }

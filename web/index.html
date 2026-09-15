@@ -101,10 +101,18 @@
 <!-- Zones de pilotage tactile : SOUS l'interface, pour que la carte, les
      dialogues et les reglages restent touchables par-dessus. -->
 <div id="touch" hidden></div>
+<!-- Le dialogue est un plan A LUI, et surtout PAS un enfant de #hud : #hud est
+     `position: fixed`, ce qui cree un contexte d'empilement, et le z-index 6
+     de #dialogue n'y valait que DEDANS. Le bandeau, lui, s'empile a `auto`,
+     donc sous les zones de pilotage tactiles (4) : les options du dialogue et
+     son bouton « Next » etaient recouverts par le manche gauche et par le
+     losange d'action, et aucune reponse n'etait choisissable au doigt
+     (docs/95-pnj-au-doigt.md). Troisieme visite du meme piege, apres #gate et
+     #map. -->
+<div id="dialogue" hidden></div>
 <div id="hud">
   <div id="status">Chargement…</div>
   <div id="hud2"></div>
-  <div id="dialogue" hidden></div>
   <div id="help">
     <b>ZQSD/WASD</b> se déplacer · <b>Espace</b> sauter · <b>Maj</b> monter · <b>Ctrl</b> descendre ·
     <b>Alt</b> + souris rouler · <b>E</b> interagir/parler · <b>Q</b> annuler · <b>1-9</b>/<b>↑↓⏎</b> répondre ·
@@ -116,7 +124,8 @@
   </div>
   <div id="help-touch">
     <b>manche gauche</b> se déplacer · <b>à fond devant</b> monter ·
-    <b>manche droit</b> regarder · <b>tape</b> interagir/parler
+    <b>manche droit</b> regarder · <b>tape</b> ou <b>« agir »</b> interagir, parler ·
+    <b>taper une réponse</b> répondre
   </div>
 </div>
 

@@ -1988,6 +1988,15 @@ async function boot() {
   const dlgUI = new DialogueUI(document.getElementById("dialogue"), {
     onChoose: (i) => { optionPressed = i + 1; },
     onNext: () => { interactPressed = true; },
+    // Au doigt, le losange d'action tient le coin bas-droit et passe PAR-DESSUS
+    // la boite (z-index 8 contre 6) : ce qu'elle glisse dessous ne se touche
+    // pas. La place se mesure sur la couche elle-meme plutot que de s'ecrire
+    // ici — elle change avec la taille des boutons et avec l'encoche.
+    reserveOf: () => {
+      const face = document.querySelector("#touchui .tc-face");
+      if (!face || !face.offsetParent) return 0;
+      return Math.max(0, Math.round(innerWidth - face.getBoundingClientRect().left - 10));
+    },
   });
 
   // Rendu de la sonde : une bille emissive — le prefabrique porte un
@@ -2042,6 +2051,7 @@ async function boot() {
                     radius: (b.gravity && b.gravity.upperSurfaceRadius) || 0 });
   }
   if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
+  window.__dlgUI = dlgUI;   // sonde de verification : le dialogue au doigt
   window.__map = solarMap;
   window.__autopilot = autopilot;
   window.__ship = !!ship;
@@ -2391,6 +2401,10 @@ async function boot() {
   // En paysage de telephone, le coin bas-droit revient aux boutons d'action :
   // la vue de sonde passe a gauche, sous les jauges.
   if (touch.enabled) probeCam.setViewport(0.02, 0.42, 0.26, 0.3);
+  // La couche existe enfin : la boite de dialogue peut mesurer la place que le
+  // losange d'action lui prend. Sans ce rappel, elle garde l'echelle calculee
+  // dans son constructeur, ou `#touchui` etait encore vide.
+  if (touch.enabled) dlgUI.resize();
   window.__touch = touch;   // sonde de verification
   // La carte capte glisser, pincer, taper et la molette quand elle est
   // ouverte. Les trois premiers sont des evenements de POINTEUR : le meme code
@@ -3334,8 +3348,20 @@ async function boot() {
       // interactif : elle emprunte donc la meme invite, avec son nom.
       const nearConsole = (!focus && !consoles.active && consoles.count)
         ? consoles.nearest(playerW) : null;
+      // §PNJ UN PERSONNAGE A PORTEE S'ANNONCE AU CENTRE, comme un objet vise.
+      // Il ne se disait qu'en fin du bandeau d'etat — lequel, au doigt, tient
+      // sur une ligne coupee aux 60 % de l'ecran : l'invite « parler a » y
+      // tombait toujours hors champ, et rien ne disait donc qu'il y avait
+      // quelqu'un a qui parler (docs/95-pnj-au-doigt.md).
+      //
+      // L'invite empruntee est celle de l'interaction, avec son icone et sa
+      // priorite ; le MOT, lui, est du portage — `Conversation` ne construit
+      // pas de `ScreenPrompt` dans l'alpha, et on ne pretend pas le contraire.
       const centre = focus ? P("InteractVolume._screenPrompt",
                                focus.prompt || focus.name)
+        : (convo && !dialogue.active)
+          ? P("InteractVolume._screenPrompt",
+              `Parler a ${convo.character || convo.name}`)
         : nearConsole ? P("InteractVolume._screenPrompt", `${nearConsole.name} (R)`)
         : null;
       prompts.set("center", (centre && !guiMode.hidden) ? [centre] : [], now);

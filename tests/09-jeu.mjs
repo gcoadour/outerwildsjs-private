@@ -128,15 +128,17 @@ import { Anglerfish, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
-         ambientColor, ambientTint, hsvToRgb } from "../web/src/sectors.js";
+         ambientColor, ambientTint, hsvToRgb, Sectors,
+         sectorMap } from "../web/src/sectors.js";
 import { entrywayTriggers, sunlessZones, isOutsideEntryway, Entryway,
          EffectZones, ZonePresence, zonesAround } from "../web/src/entryways.js";
 import { Minimap, localMapPosition, MARKER_RADIUS, TRAIL_ANGLE,
          MINIMAP_EVENTS } from "../web/src/minimap.js";
 import { transmitterCutoff, TRANSMITTER_LOWPASS, OPEN_BAND } from "../web/src/audio.js";
 import { envelope } from "../web/src/pipeline/extract/particles.js";
-import { stickVector, lookCurve, sprinting, STICK_RADIUS, DEAD_ZONE,
-         LOOK_DEAD_ZONE, SPRINT_AT } from "../web/src/touch.js";
+import { stickVector, lookCurve, sprinting, isTap, STICK_RADIUS, DEAD_ZONE,
+         LOOK_DEAD_ZONE, SPRINT_AT, TAP_MS, TAP_PX, TAP_PATH }
+  from "../web/src/touch.js";
 import { padState, padEdges, deadZone, padLookCurve, PAD_BUTTONS,
          padDisagreements, UNITY_VERS_NAVIGATEUR,
          PAD_DEAD_ZONE } from "../web/src/gamepad.js";
@@ -564,6 +566,69 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et boucle", petit.cursor.get("x.gltf"), 1);
 }
 
+// --- secteurs : un lot porte plusieurs corps -----------------------------
+//
+// La planete de depart disparaissait « au hasard » : l'Attlerock partage le
+// fichier de Timber Hearth, et sa distance d'activation (75 x 8 = 600) est
+// franchie deux fois par tour d'orbite — 541 u de rayon, une minute de
+// periode. Debout sur la planete, on voyait donc le sol s'effacer une
+// demi-minute sur deux, parce que la lune, le dernier corps du lot, eteignait
+// le conteneur pour tout le monde.
+{
+  const secteurs = sectorMap({ placed: { PlanetoidSector: [
+    { name: "Sector_TH", position: [0, 0, 0], fields: { _horizonRadius: 200 } },
+    { name: "Sector_Moon", position: [541, 0, 0], fields: { _horizonRadius: 75 } },
+  ] } });
+  const FICHIER = "timberhearth_pivot.gltf";
+  const lot = () => ({ file: FICHIER, container: {
+    enabled: null, setEnabled(v) { this.enabled = v; } } });
+  // l'ordre est celui qui faisait le defaut : la lune passe APRES sa planete
+  const corps = () => [
+    { name: "GravityWell_HomePlanet", position: [0, 0, 0], position0: [0, 0, 0],
+      gravity: { upperSurfaceRadius: 250 } },
+    { name: "GravityWell_Moon", position: [541, 0, 0], position0: [541, 0, 0],
+      gravity: { upperSurfaceRadius: 100 } },
+  ];
+  // le joueur est au sol, du cote oppose a la lune : 791 u l'en separent,
+  // au-dela des 600 de son activation
+  const auSol = { x: -250, y: 0, z: 0 };
+
+  const entry = lot();
+  const th = new Sectors(secteurs, corps(), () => entry, () => FICHIER);
+  const etat = th.update(auSol);
+  check("le lot de la planete de depart reste allume",
+        entry.container.enabled, true);
+  check("... et il compte comme actif", th.active.has(FICHIER), true);
+  check("les deux corps du lot sont servis", etat.actifs, 2);
+
+  // ce n'est pas un lot qu'on n'eteint jamais : loin des deux, il s'eteint
+  const loin = lot();
+  const parti = new Sectors(secteurs, corps(), () => loin, () => FICHIER);
+  parti.update({ x: 0, y: 0, z: 20000 });
+  check("loin de la planete comme de sa lune, le lot s'eteint",
+        loin.container.enabled, false);
+
+  // Meme regle par-dessus les deux boucles : `darkbramble_pivot.gltf` est
+  // reclame par un corps ET par un volume sans puits de gravite, qui n'ont ni
+  // la meme portee ni le meme tour de boucle. A 2 000 u, le corps (200 de
+  // rayon, donc 1 600 d'activation) ne le veut plus, le volume (400, donc
+  // 3 200) le veut encore : c'est la demande la plus large qui tient, et non
+  // celle de la derniere boucle.
+  const db = { file: "darkbramble_pivot.gltf", container: {
+    enabled: null, setEnabled(v) { this.enabled = v; } } };
+  const bramble = () => new Sectors(
+    new Map(), [{ name: "GravityWell_DarkBramble", position: [0, 0, 0],
+                  position0: [0, 0, 0], gravity: { upperSurfaceRadius: 200 } }],
+    () => db, () => db.file, null,
+    [{ file: db.file, position: [0, 0, 0], radius: 400 }], () => db);
+  bramble().update({ x: 0, y: 0, z: 2000 }, [0, 0, 0]);
+  check("le volume et le corps ne se contredisent plus",
+        db.container.enabled, true);
+  bramble().update({ x: 0, y: 0, z: 5000 }, [0, 0, 0]);
+  check("au-dela des deux, le lot part quand meme",
+        db.container.enabled, false);
+}
+
 // --- eviction -----------------------------------------------------------
 {
   const freed = [];
@@ -796,6 +861,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a fond en arriere : pas de course", sprinting(v(0, R)), false);
   check("pas tout a fait a fond : pas de course",
         sprinting(v(0, -R * (SPRINT_AT * 0.9))), false);
+
+  // La tape, c'est-a-dire l'action principale du jeu au doigt. La regle porte
+  // sur le DEPLACEMENT NET depuis le point de pose : la premiere version
+  // comptait le chemin, et la gigue d'un pouce pose suffisait a l'annuler —
+  // mesure dans un vrai Chromium, deux pixels de gigue par image n'ouvraient
+  // aucun dialogue (docs/95-pnj-au-doigt.md).
+  check("pose et releve au meme endroit : c'est une tape",
+        isTap(0, 0, 0, 100), true);
+  check("un pouce qui tremble tape quand meme",
+        isTap(1, -1, 32, 120), true);
+  check("appuyee mais immobile : encore une tape",
+        isTap(2, 2, 20, TAP_MS - 50), true);
+  check("glissee : c'est un regard", isTap(TAP_PX + 4, 0, 40, 120), false);
+  check("partie et revenue : elle a glisse", isTap(0, 0, TAP_PATH + 8, 200), false);
+  check("tenue trop longtemps : ce n'est plus une tape",
+        isTap(0, 0, 0, TAP_MS + 1), false);
+  // Les deux bornes se lisent l'une contre l'autre : le garde-fou de chemin
+  // doit laisser passer la gigue que la borne de deplacement accepte.
+  check("le chemin tolere est plus large que le deplacement",
+        TAP_PATH > TAP_PX, true);
 }
 
 // --- rotation propre des corps -----------------------------------------

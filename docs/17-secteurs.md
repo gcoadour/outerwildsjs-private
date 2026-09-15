@@ -37,6 +37,14 @@ du jeu, appliquée à l'échelle du corps plutôt qu'à celle du maillage.
 Le seuil d'activation est fixé à huit fois le rayon d'horizon — de 600 u pour
 les petits corps à 4 000 u pour Giant's Deep.
 
+**La décision se prend par corps, l'affichage se fait par fichier**, et quatre
+lots sur neuf portent plus d'un corps : une planète et sa lune vivent dans le
+même pivot. C'est donc l'**union** des demandes qui allume un lot, et non le
+dernier corps parcouru — faute de quoi l'Attlerock, qui sort de ses 600 u deux
+fois par minute, éteignait Timber Hearth sous les pieds du joueur
+([`95`](95-lots-partages.md)). Le compte de « corps actifs » ci-dessous est
+celui des demandeurs servis par un lot allumé.
+
 ## Vérifié
 
 | position | corps actifs | secteur | fichiers chargés |
