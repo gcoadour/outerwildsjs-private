@@ -184,6 +184,46 @@ def run_repli(url):
         rep.eq("le ciel sort de la chaine d'effets inchange",
                pixel_png(png, 20, 20), (5, 5, 13))
 
+        # L'ECLIPSE, et pourquoi elle se mesure ici.
+        #
+        # Babylon efface le tampon de profondeur devant chaque groupe de rendu.
+        # La couronne de l'etoile est dans le groupe 1, additive, et montee des
+        # la premiere image — `SunCoronaProgressBehavior` part a 0,12 d'alpha —
+        # si bien qu'elle se peignait PAR-DESSUS la planete qui occultait
+        # l'etoile : le soleil se voyait au travers des planetes. Rien sous Node
+        # ne peut voir cela ; il faut un vrai tampon de profondeur.
+        #
+        # On pose donc la camera sur l'axe etoile-planete, au-dela de la
+        # planete, et on lit DEUX pixels : le centre du disque occulte, qui doit
+        # rester la nuit de la planete, et la couronne juste a cote, qui doit
+        # rester visible. Le second compte autant que le premier — eteindre la
+        # couronne ferait passer le premier tout seul.
+        #
+        # Ce controle prend la main sur la camera et arrete la boucle de rendu.
+        # Il vient donc en DERNIER.
+        page.evaluate("""() => {
+          const scene = BABYLON.Engine.LastCreatedScene;
+          scene.getEngine().stopRenderLoop();
+          scene.onBeforeRenderObservable.clear();
+          const p = scene.getMeshByName('Planete').position;
+          const e = scene.getMeshByName('Etoile').position;
+          const cam = scene.activeCamera;
+          cam.position.copyFrom(p.add(p.subtract(e).normalize().scale(800)));
+          cam.setTarget(e);
+          scene.render();
+        }""")
+        vue = page.locator("canvas").first.screenshot()
+        vp = page.viewport_size
+        cx, cy = vp["width"] // 2, vp["height"] // 2
+        # 0,6 de la demi-hauteur, soit 22,8 degres a 70 de champ vertical : au
+        # large du limbe de la planete (17,4 degres a cette distance) et bien
+        # dans la couronne (37 degres). Le canal rouge suffit a les separer —
+        # l'orange de la couronne y monte a 67, la nuit de la planete a 7.
+        rep.at_most("la planete occulte l'etoile, couronne comprise",
+                    pixel_png(vue, cx, cy)[0], 12)
+        rep.at_least("et la couronne reste visible a cote",
+                     pixel_png(vue, cx, cy - int(cy * 0.6))[0], 40)
+
         browser.close()
     return rep
 

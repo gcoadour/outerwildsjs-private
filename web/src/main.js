@@ -178,8 +178,40 @@ async function boot() {
   const scene = new BABYLON.Scene(canvas ? engine : engine);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
 
-  // Le monde s'etendant sur ~100 000 unites, un depth buffer logarithmique
-  // evite le z-fighting entre le proche et le lointain.
+  // LE GROUPE DE RENDU 1 N'EST PAS UN CALQUE « APRES L'OPAQUE ».
+  //
+  // Babylon EFFACE le tampon de profondeur avant chaque groupe non vide —
+  // `RenderingManager.AUTOCLEAR` vaut vrai, et chacun des quatre groupes part
+  // avec `{autoClear: true, depth: true, stencil: true}`. Le groupe 1 ne dit
+  // donc pas « apres l'opaque » mais « par-dessus tout, quoi qu'il y ait
+  // devant ». Les quatre coques du portage y sont posees — la couronne de
+  // l'etoile et l'onde de choc (supernova.js), les coques atmospheriques
+  // (materials.js), la coque quantique — et toutes les quatre traversaient ce
+  // qui les occultait.
+  //
+  // CE QUE CELA DONNAIT A L'ECRAN, et des la premiere image d'une boucle et non
+  // a la supernova : `SunCoronaProgressBehavior` part a 0,12 d'alpha et non a
+  // zero, la couronne est donc montee au demarrage, large de 1,18 rayon solaire
+  // et additive. Une planete placee entre l'oeil et l'etoile recevait le soleil
+  // PAR-DESSUS elle. Mesure au centre du disque occulte, dans le navigateur :
+  // (69, 40, 19) — l'orange de la couronne — la ou la nuit de la planete donne
+  // (7, 6, 7). Le soleil se voyait au travers des planetes, en transparence.
+  //
+  // On garde le groupe, qui dit bien l'ordre voulu, et on lui retire le seul
+  // effacement dont personne ne voulait. Rien d'autre ne change : le melange
+  // alpha suffit deja a faire passer ces coques apres l'opaque, c'est la file
+  // transparente du groupe qui s'en charge — et elle, elle teste la profondeur.
+  scene.setRenderingAutoClearDepthStencil(1, false);
+
+  // PAS de tampon de profondeur logarithmique, et ce n'est pas un oubli : une
+  // ligne le promettait ici depuis le premier commit alors que rien n'a jamais
+  // pose `useLogarithmicDepth`. La mesure dit qu'il ne manque pas. Sur 24 bits
+  // avec le plan proche ci-dessous, la profondeur se resout a ~1,2e-6 x z^2 —
+  // 120 unites a 10 000, 750 a 25 000 — tandis que le corps le plus proche de
+  // l'etoile laisse 6 600 unites entre lui et sa surface : il faudrait regarder
+  // le systeme de 74 000 unites pour que les deux tombent dans le meme cran, et
+  // la planete y ferait un pixel. Le soleil qui traversait les planetes ne
+  // venait pas de la profondeur, mais du groupe de rendu ci-dessus.
   const camera = new BABYLON.FreeCamera("cam", BABYLON.Vector3.Zero(), scene);
   // `PlayerCamera` : plan proche a 0,05, plan lointain a 50 000. On garde le
   // proche du build et NON son lointain : le build n'affiche au-dela que des
