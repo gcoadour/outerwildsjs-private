@@ -24,38 +24,70 @@ const LOOPED = new Set(["Ambience", "Music", "Signal"]);
 /**
  * Pistes de l'AudioMixer. Le jeu en tient six, chacune avec son volume et ses
  * fondus : `MixEndTimes` fait tomber la musique et l'ambiance a zero quand la
- * supernova arrive, `MixDeath` isole la piste de mort.
+ * fin des temps commence, `MixDeath` isole la piste de mort.
+ *
+ * `AudioMixer.Awake` alloue SIX pistes, et `TrackNameToIndex` les numerote par
+ * `(int)Log2(drapeau)` : 1 Default, 2 Music, 4 Ambience, 8 EndTimes, 16 Signal,
+ * 32 Death. `Undefined` n'est pas une piste du build — c'est le nom que le
+ * portage donne a une source dont le drapeau ne se lit pas — et elle reste donc
+ * en dehors de ce qu'`isolate` parcourt.
  */
 export const TRACKS = ["Undefined", "Default", "Music", "Ambience",
                        "EndTimes", "Signal", "Death"];
+/** Les six vraies, dans l'ordre ou `_trackList` les range. */
+export const MIXED_TRACKS = ["Default", "Music", "Ambience",
+                             "EndTimes", "Signal", "Death"];
 
 export class AudioMixer {
   constructor() {
     this.volumes = {};
     this.fades = {};
     for (const t of TRACKS) this.volumes[t] = 1;
+    // `_mixLocked`. Le verrou est la moitie du mecanisme, et le portage n'en
+    // avait rien : `MixTrack` et `IsolateTrack` commencent tous deux par
+    // `if (_mixLocked) return`. Une fois la fin des temps mixee, plus rien ne
+    // peut relever la musique ni l'ambiance — c'est ce qui garantit que les
+    // quatre-vingt-dix dernieres secondes se jouent dans le silence, quoi que
+    // fasse ensuite le reste du jeu. Seul `MixDeath` force le passage, en
+    // deverrouillant avant et en reverrouillant apres.
+    this.locked = false;
   }
 
   /** AudioTrack.FadeTo : interpolation lineaire sur la duree donnee. */
   mix(track, target, duration = 1) {
+    if (this.locked) return false;
     this.fades[track] = { from: this.volumes[track] ?? 1, to: target,
                           duration: Math.max(1e-3, duration), t: 0 };
+    return true;
   }
 
   /** Toutes les pistes sauf une. */
   isolate(track, target, duration = 1) {
-    for (const t of TRACKS) if (t !== track) this.mix(t, target, duration);
+    if (this.locked) return false;
+    for (const t of MIXED_TRACKS) if (t !== track) this.mix(t, target, duration);
+    return true;
   }
 
+  /**
+   * `MixEndTimes(5)`, et c'est le controleur de musique qui la declenche sous
+   * quatre-vingt-dix secondes restantes — pas la supernova, qui vient apres.
+   */
   mixEndTimes(duration = 1) {
     this.mix("Music", 0, duration);
     this.mix("Ambience", 0, duration);
+    this.locked = true;
   }
 
-  mixDeath(duration = 1) { this.isolate("Death", 0, duration); }
+  /** `MixDeath` : deverrouille, isole la piste de mort, reverrouille. */
+  mixDeath(duration = 1) {
+    this.locked = false;
+    this.isolate("Death", 0, duration);
+    this.locked = true;
+  }
 
   reset() {
     this.fades = {};
+    this.locked = false;
     for (const t of TRACKS) this.volumes[t] = 1;
   }
 

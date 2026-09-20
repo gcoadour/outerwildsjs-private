@@ -145,7 +145,7 @@ import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
 import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          FieldAlignment, FIELD_ALIGN } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
-         TravelMusic, EndOfTimeMusic, THRUSTER_AUDIO,
+         TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
          UISounds } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
@@ -4043,12 +4043,25 @@ async function boot() {
 
     // --- mixage par piste ---
     //
-    // MixEndTimes fait tomber musique et ambiance a zero quand la supernova
-    // arrive ; MixDeath isole la piste de mort.
+    // MixEndTimes fait tomber musique et ambiance a zero quand la fin des temps
+    // commence ; MixDeath isole la piste de mort.
+    //
+    // Le declencheur etait faux de quatre-vingt-dix secondes. Le portage mixait
+    // a `loop.supernova`, c'est-a-dire a l'instant ou l'etoile explose ;
+    // `EndOfTimeMusicController.Update` le fait a `GetSecondsRemaining() < 90`,
+    // et il le fait ENSEMBLE avec l'entree de sa propre musique — le silence de
+    // la musique de voyage et de l'ambiance est ce sur quoi celle de la fin des
+    // temps se pose. Mixer a l'explosion, c'etait jouer les deux par-dessus
+    // pendant une minute et demie, puis faire le silence une fois tout fini.
+    //
+    // La duree, elle, est dans l'IL a cote du seuil : `MixEndTimes(5)`, et non
+    // trois. `END_OF_TIME.mix` la portait deja sans que personne l'appelle.
     mixer.update(dt);
-    if (loop.supernova && !mixedEndTimes) { mixer.mixEndTimes(3); mixedEndTimes = true; }
+    if (loop.endMusic && !mixedEndTimes) {
+      mixer.mixEndTimes(END_OF_TIME.mix); mixedEndTimes = true;
+    }
     if (loop.dead && !mixedDeath) { mixer.mixDeath(1); mixedDeath = true; }
-    if (!loop.supernova && !loop.dead && (mixedEndTimes || mixedDeath)) {
+    if (!loop.endMusic && !loop.dead && (mixedEndTimes || mixedDeath)) {
       mixer.reset(); mixedEndTimes = false; mixedDeath = false;
     }
 
@@ -4304,8 +4317,11 @@ async function boot() {
       : null;
     loop.update(dt, sunDist);
     // La musique de fin est une piste declenchee : elle ne se telecharge qu'au
-    // moment ou la supernova la demande, pas au demarrage.
-    if (loop.supernova && !endTimesCued) {
+    // moment ou la fin des temps la demande, pas au demarrage. Le moment est
+    // celui du controleur — quatre-vingt-dix secondes restantes, et pas dans
+    // une boucle protegee —, ce qui laisse une minute et demie pour la charger
+    // avant qu'on l'entende.
+    if (loop.endMusic && !endTimesCued) {
       endTimesCued = audio.cue("EndTimes") > 0;
     }
     // --- les causes de mort ---
@@ -4541,7 +4557,12 @@ async function boot() {
       }
       const g = regards.find((r) => r.data.name === t.gazeSwitch) || regards[0];
       if (!g || (!t.noeuds.inner && !t.noeuds.outer)) continue;
-      const v = webSpeeds(g.gazeFraction || 0, g.charge || 0);
+      // `GazeWebAnimator.Update` appelle `GetChargeFraction()`, qui vaut
+      // `_charge / _secondsToCharge`. Le portage lui passait `charge` — des
+      // SECONDES, de zero a trois. Au cube, la toile tournait donc jusqu'a
+      // vingt-sept fois trop vite : seize mille degres par seconde sur l'anneau
+      // interieur, la ou le build en veut six cents.
+      const v = webSpeeds(g.gazeFraction || 0, g.chargeFraction || 0);
       // Les vitesses sont en degres par seconde, et l'axe est celui de la
       // toile : son avant local, donc l'axe Z du noeud.
       for (const [k, n] of [["inner", t.noeuds.inner], ["outer", t.noeuds.outer]]) {
@@ -4550,7 +4571,11 @@ async function boot() {
       }
       // `webAlpha` : une fois la charge pleine, la toile s'efface en deux
       // secondes et le composant s'eteint. Le build ne la remontre jamais.
-      if ((g.charge || 0) >= 1 && t.pleinDepuis === null) t.pleinDepuis = now;
+      // La meme erreur d'unite decidait du fondu : `_isFading` se pose quand
+      // `GetChargeFraction() >= 1`, donc au bout des trois secondes, et le
+      // portage l'y mettait des la premiere — la toile s'effacait au tiers du
+      // regard, bien avant que la porte ne s'ouvre.
+      if ((g.chargeFraction || 0) >= 1 && t.pleinDepuis === null) t.pleinDepuis = now;
       if (t.pleinDepuis !== null) {
         const a = webAlpha(now - t.pleinDepuis);
         for (const n of [t.noeuds.inner, t.noeuds.outer]) {

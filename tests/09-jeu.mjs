@@ -112,7 +112,8 @@ import { playerConstants } from "../web/src/config.js";
 import { buildOrbits, advance, frameVelocity } from "../web/src/orbits.js";
 import { polarFields, polarDirection, strongestPolar,
          distanceToAxis } from "../web/src/gravity.js";
-import { rolloffModel, curveGain, AudioField } from "../web/src/audio.js";
+import { rolloffModel, curveGain, AudioField, AudioMixer,
+         MIXED_TRACKS } from "../web/src/audio.js";
 import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
 import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
 import { DialogueSystem } from "../web/src/dialogue.js";
@@ -253,6 +254,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(SHOCKWAVE_RADIUS / 27, 6));
   check("et elle ne depasse pas son rayon",
         shockwaveRadius(SHOCKWAVE_SECONDS * 10), SHOCKWAVE_RADIUS);
+
+  // LA FIN DES TEMPS COMMENCE AVANT LA SUPERNOVA, et le portage mixait a
+  // l'explosion. `EndOfTimeMusicController.Update` teste dans cet ordre :
+  // `GetPreventSupernova` d'abord, puis `GetSecondsRemaining() < 90`.
+  {
+    const m = new TimeLoop(18);
+    m.elapsed = m.duration - 91;
+    check("a quatre-vingt-onze secondes, pas encore", m.endMusic, false);
+    m.elapsed = m.duration - 90;
+    check("pile a quatre-vingt-dix non plus : la borne est stricte",
+          m.endMusic, false);
+    m.elapsed = m.duration - 89.9;
+    check("juste dessous, oui", m.endMusic, true);
+    check("et c'est bien avant l'explosion", m.supernova, false);
+    m.preventSupernova = true;
+    check("une boucle protegee n'a pas de musique de fin", m.endMusic, false);
+  }
 
   // `TimeLoop.Start` recalcule la prevention a partir des codes de lancement.
   const neuve = new TimeLoop(1);
@@ -3051,6 +3069,35 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   empechee.update(10, 10, { prevented: true });
   check("supernova empechee : la musique ne part pas", empechee.volume, 0);
 
+  // LE VERROU DU MIXEUR. `MixTrack` et `IsolateTrack` commencent tous deux par
+  // `if (_mixLocked) return`, et `MixEndTimes` le pose. Sans lui, n'importe
+  // quelle transition d'ambiance pouvait relever la musique pendant la fin des
+  // temps ; le portage n'avait pas ce verrou.
+  {
+    const mix = new AudioMixer();
+    check("le mixeur nait ouvert", mix.locked, false);
+    mix.mixEndTimes(END_OF_TIME.mix);
+    mix.update(END_OF_TIME.mix);
+    check("la musique est tombee", mix.volume("Music"), 0);
+    check("l'ambiance aussi", mix.volume("Ambience"), 0);
+    check("et la fin des temps, elle, reste entiere", mix.volume("EndTimes"), 1);
+    check("le mixage est verrouille", mix.locked, true);
+    check("plus rien ne remonte la musique", mix.mix("Music", 1, 1), false);
+    mix.update(1);
+    check("elle est restee a zero", mix.volume("Music"), 0);
+    // `MixDeath` est le seul a forcer le passage.
+    mix.mixDeath(1);
+    mix.update(1);
+    check("la mort, elle, passe le verrou", mix.volume("EndTimes"), 0);
+    check("et ne touche pas a sa propre piste", mix.volume("Death"), 1);
+    check("`Undefined` n'est pas une piste du build",
+          MIXED_TRACKS.includes("Undefined"), false);
+    check("il y en a six", MIXED_TRACKS.length, 6);
+    mix.reset();
+    check("le redemarrage de boucle rouvre tout", mix.locked, false);
+    check("et rend son volume a la musique", mix.volume("Music"), 1);
+  }
+
   // L'index des clips d'evenement : les familles se lisent dans l'ordre des
   // numeros du build, parce que le tirage se fait dessus.
   const ev = eventAudio({ events: [
@@ -3726,6 +3773,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et ne bouge pas sans charge", webSpeeds(1, 0).inner, 0);
   check("la toile s'efface en deux secondes", webAlpha(WEB.fade), 0);
   check("a mi-chemin, a moitie", webAlpha(1), 0.5);
+
+  // L'UNITE DE LA SECONDE ENTREE. `GazeWebAnimator.Update` appelle
+  // `GetChargeFraction()`, soit `_charge / _secondsToCharge`. Le moteur lui
+  // passait `charge`, des secondes — et au cube, trois secondes valent
+  // vingt-sept. L'invariant garde le rapport des deux, qui est ce qui se
+  // verrait a l'ecran.
+  const uneSeconde = new Regard(lus[0]);
+  uneSeconde.update(1, [0, 0, -3], droit, [0, 0, 0]);
+  check("apres une seconde, la charge vaut une seconde", uneSeconde.charge, 1);
+  check("mais sa FRACTION n'est qu'un tiers",
+        Number(uneSeconde.chargeFraction.toFixed(4)), Number((1 / 3).toFixed(4)));
+  check("la toile tourne alors au vingt-septieme de sa vitesse",
+        Number((webSpeeds(0, uneSeconde.chargeFraction).inner
+                / webSpeeds(0, 1).inner).toFixed(4)),
+        Number((1 / 27).toFixed(4)));
+  check("et elle ne commence pas a s'effacer",
+        uneSeconde.chargeFraction >= 1, false);
+  for (let i = 0; i < 20; i++) uneSeconde.update(0.1, [0, 0, -3], droit, [0, 0, 0]);
+  check("c'est au bout des trois secondes que le fondu part",
+        uneSeconde.chargeFraction >= 1, true);
 
   // La porte : les colliders se coupent d'un coup, l'alpha fond en une seconde.
   const porte = new Porte(energyGates({ placed: { EnergyGate: [

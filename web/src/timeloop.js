@@ -155,7 +155,17 @@ export class TimeLoop {
   get secondsRemaining() { return Math.max(0, this.duration - this.elapsed); }
   get fraction() { return Math.min(1, this.elapsed / this.duration); }
   get supernova() { return this.supernovaAt !== null; }
-  get endMusic() { return this.secondsRemaining < END_MUSIC_AT; }
+  /**
+   * `EndOfTimeMusicController.Update`, dans l'ordre exact ou il teste.
+   *
+   * Il commence par `GetPreventSupernova` et s'arrete la si c'est vrai : la
+   * boucle protegee — celle ou l'on n'a pas les codes — n'a PAS de musique de
+   * fin des temps, et le portage l'ignorait. Le reste est le seuil de
+   * quatre-vingt-dix secondes, borne stricte (`bge.un` saute a l'egalite).
+   */
+  get endMusic() {
+    return !this.preventSupernova && this.secondsRemaining < END_MUSIC_AT;
+  }
 
   /** Rayon atteint par l'onde de choc depuis le centre de l'etoile. */
   get shockwaveRadius() {
