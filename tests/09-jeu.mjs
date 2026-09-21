@@ -134,6 +134,7 @@ import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
+import { detachVelocity } from "../web/src/crust.js";
 import { Anglerfish, fromToAngular, fishStep, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
          leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
@@ -7098,6 +7099,41 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   r5.start();
   r5.reset();
   check("une remise a zero desarme", r5.update(9, 80), null);
+}
+
+
+// --- la croute qui lache : avec quelle vitesse (docs/110-croute.md) -------
+//
+// `DetachableFragment.Detach` donne au morceau la vitesse du POINT d'ou il se
+// detache. Le portage le lachait immobile, et il tombait droit.
+{
+  // Un corps qui tourne autour de +Y a un radian par seconde. Un point a dix
+  // unites sur +X s'y deplace a dix unites par seconde vers... +Z ou -Z, selon
+  // le sens, et c'est le produit vectoriel qui le dit.
+  const spin = { axis: [0, 1, 0], rate: 1 };
+  const v = detachVelocity([10, 0, 0], [0, 0, 0], spin);
+  check("un point a dix unites du centre part a dix unites par seconde",
+        Number(Math.hypot(v[0], v[1], v[2]).toFixed(6)), 10);
+  check("... perpendiculairement au rayon",
+        Number((v[0] * 10).toFixed(6)), 0);
+  check("... et perpendiculairement a l'axe", Number(v[1].toFixed(6)), 0);
+  check("le sens est celui du produit vectoriel",
+        v.map((x) => Math.round(x)).join(","), "0,0,-10");
+  // Deux fois plus loin, deux fois plus vite : c'est une rotation solide.
+  const loin = detachVelocity([20, 0, 0], [0, 0, 0], spin);
+  check("deux fois plus loin, deux fois plus vite",
+        Number(Math.hypot(...loin).toFixed(6)), 20);
+  // SUR L'AXE, rien ne bouge.
+  check("un point sur l'axe ne part pas",
+        detachVelocity([0, 5, 0], [0, 0, 0], spin).join(","), "0,0,0");
+  // Un corps qui ne tourne pas ne donne rien, et c'est le cas d'un corps sans
+  // `RotateTransform` ni vitesse de rotation initiale.
+  check("un corps fixe lache ses morceaux immobiles",
+        detachVelocity([10, 0, 0], [0, 0, 0], null).join(","), "0,0,0");
+  // Le centre compte : la vitesse se mesure depuis LUI, pas depuis l'origine.
+  check("la vitesse se mesure depuis le centre du corps",
+        Number(Math.hypot(...detachVelocity([110, 0, 0], [100, 0, 0],
+                                            spin)).toFixed(6)), 10);
 }
 
 report();

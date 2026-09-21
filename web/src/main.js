@@ -34,7 +34,7 @@ import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          jetpackPrompts } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
-import { crustCarriers, Crust } from "./crust.js";
+import { crustCarriers, Crust, detachVelocity } from "./crust.js";
 import { Interactables } from "./interact.js";
 import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
 import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT,
@@ -91,7 +91,7 @@ import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
          modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
-import { SpinField, sunElevation, spinPeriod } from "./spin.js";
+import { SpinField, sunElevation, spinPeriod, bodySpin } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
          dominantField } from "./gravity.js";
 // @autrement Tonemapping : quatre methodes de courbe et de cible de rendu,
@@ -4263,7 +4263,12 @@ async function boot() {
             f.node.position.copyFrom(local);
             return {
               pos: [local.x, local.y, local.z],
-              vel: [0, 0, 0],   // _escapeFromParentSpeed vaut 0 dans le build
+              // `Detach` : il part avec la VITESSE DU POINT d'ou il se detache.
+              // `_escapeFromParentSpeed` vaut 0 sur l'unique instance, donc
+              // rien ne l'ejecte — mais la rotation de la planete, elle, lui
+              // donne une vitesse, et il ne tombe pas droit (docs/110).
+              vel: detachVelocity([local.x, local.y, local.z],
+                                  [c.x, c.y, c.z], bodySpin(bhBody)),
               apply: (p) => f.node.position.set(p[0], p[1], p[2]),
               remove: () => {
                 f.node.setEnabled(false);
