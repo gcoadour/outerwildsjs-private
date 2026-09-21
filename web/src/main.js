@@ -2343,7 +2343,7 @@ async function boot() {
   // Sonde de verification du depart : le pose lu dans le build, la marche
   // jusqu'au vaisseau, et l'ecart des yeux au joueur — qui ne se mesure qu'une
   // fois la camera placee, donc dans le navigateur (docs/38-depart.md).
-  window.__start = { pose, walk, eye: () => ({
+  window.__start = { pose, walk, v0: null, eye: () => ({
     x: camera.position.x - player.pos.x,
     y: camera.position.y - player.pos.y,
     z: camera.position.z - player.pos.z }) };
@@ -2804,6 +2804,11 @@ async function boot() {
       departAFaire = false;
       const v0 = vitesseDeDepart([player.pos.x, player.pos.y, player.pos.z]);
       player.vel.x = v0[0]; player.vel.y = v0[1]; player.vel.z = v0[2];
+      // La vitesse DE DEPART, gardee telle quelle. Le controle navigateur
+      // lisait `player.vel` en cours de route et appelait cela « la vitesse
+      // initiale » : ce qu'il mesurait alors n'etait plus le depart mais ce
+      // que le joueur avait fait depuis (docs/111-passages.md).
+      window.__start.v0 = v0.slice();
       const jour = anchorBody ? spinPeriod(anchorBody) : null;
       if (jour) {
         console.log(`${anchorBody.name} : un tour en ${Math.round(jour)} s, `

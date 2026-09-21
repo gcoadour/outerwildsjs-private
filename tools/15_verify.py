@@ -1661,10 +1661,16 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("deux coquilles sonores", coq["n"], 2)
             rep.eq("concentriques sur Giant's Deep", sorted(coq["rayons"]), [205, 498])
             rep.at_least("appariees a leur source", coq["appariees"], 1)
-        # On part avec le sol : la vitesse initiale n'est pas zero.
+        # ON PART AVEC LE SOL, et c'est la vitesse DE DEPART qu'on mesure.
+        #
+        # Ce controle lisait `player.vel` en cours de parcours et appelait cela
+        # « la vitesse initiale ». Il mesurait donc ce que le joueur avait fait
+        # depuis — debout sans bouger, sa vitesse retombe, et le controle
+        # tombait avec elle des que le parcours s'allongeait (une extraction
+        # complete suffit). Le depart, lui, est un instant : on le garde.
         sol = page.evaluate("""() => {
-          const p = window.__player;
-          return p ? Math.hypot(p.vel.x, p.vel.y, p.vel.z) : null;
+          const v = window.__start && window.__start.v0;
+          return v ? Math.hypot(v[0], v[1], v[2]) : null;
         }""")
         if sol is not None:
             rep.check("le joueur ne part pas immobile sur un sol qui tourne",
