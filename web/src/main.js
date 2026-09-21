@@ -37,7 +37,8 @@ import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
 import { crustCarriers, Crust } from "./crust.js";
 import { Interactables } from "./interact.js";
 import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
-import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT } from "./start.js";
+import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT,
+         REVEIL, Reveil } from "./start.js";
 import { loadAudioMap, AudioField, AudioMixer, signalStrength,
          audioShells, AudioShells } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
@@ -1980,7 +1981,12 @@ async function boot() {
     player.vel.x = vDepart[0]; player.vel.y = vDepart[1]; player.vel.z = vDepart[2];
     // Une boucle qui recommence remet TOUT a l'etat de depart, le regard
     // compris : sinon on rouvre les yeux dans la direction ou l'on est mort.
-    yaw = yaw0; pitch = 0;
+    // Et l'on rouvre les yeux sur le ciel, comme au premier tour :
+    // `OnStartOfTimeLoop` rappelle `SpawnPlayer` a chaque boucle.
+    yaw = yaw0; pitch = -REVEIL.degreesY * Math.PI / 180;
+    reveil.start();
+    chargeA = performance.now() / 1000;
+    recentrage = null;
     if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
     if (ship) {
       ship.boarded = false;
@@ -2324,6 +2330,7 @@ async function boot() {
   // point d'entree de verification : oriente la camera sans passer par le
   // verrouillage de souris, pour les captures automatisees
   window.__look = (y, p) => { yaw = y; pitch = p; };
+  window.__regard = () => ({ yaw, pitch });   // sonde : le regard courant
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal
@@ -2338,7 +2345,16 @@ async function boot() {
   // --- entrees ---
   // Le lacet part de l'orientation du point d'apparition : c'est elle qui
   // decide de la premiere image du jeu.
-  let yaw = yaw0, pitch = 0;
+  // `SpawnPlayer` : on ouvre les yeux QUATRE-VINGTS DEGRES au-dessus de
+  // l'horizon. Le tangage de ce portage compte positif vers le BAS, d'ou le
+  // signe (docs/108-reveil.md).
+  let yaw = yaw0, pitch = -REVEIL.degreesY * Math.PI / 180;
+  const reveil = new Reveil();
+  reveil.start();
+  // `Time.timeSinceLevelLoad` : la boucle EST un rechargement de scene, ce que
+  // ce portage tient deja pour la pellicule du flashback.
+  let chargeA = performance.now() / 1000;
+  window.__reveil = reveil;
   // `CenterCamera` : le recentrage n'est pas un saut, c'est une DUREE tiree
   // d'une distance angulaire — `Sqrt(dx^2 + dy^2) / rate` — puis un SmoothStep
   // par-dessus (docs/69-assise.md). Le meme calcul que le demi-tour du corps,
@@ -2837,6 +2853,18 @@ async function boot() {
     // une DUREE, pas d'un coup. Le build recentre les deux degres ; ici le
     // lacet du corps est deja repris par `_matchRotation`, et il ne reste que
     // le tangage — le seul des deux que le portage tienne separement.
+    // §O LE REVEIL. Sept secondes le regard au ciel, puis la camera redescend
+    // seule a cinquante degres par seconde — sauf si le joueur a deja regarde
+    // plus bas que quarante-cinq degres, auquel cas on lui laisse la tete.
+    {
+      const degresY = -pitch * 180 / Math.PI;   // convention du build : + vers le haut
+      if (reveil.update(now - chargeA, degresY) === "centre") {
+        recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
+                       duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                           REVEIL.rate) };
+        console.log("reveil : la camera se recentre");
+      }
+    }
     if (recentrage) {
       const ecoule = now - recentrage.debut;
       // `UpdateSnapping` interpole les DEUX degres sous un meme SmoothStep. Le

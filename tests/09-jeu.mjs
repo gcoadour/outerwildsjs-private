@@ -175,7 +175,7 @@ import { convoControllers, treeFromController, PlayerData,
          selectTree, CONVO_RULES } from "../web/src/playerdata.js";
 import { parseWav, oggCrc, oggPage, muxOggOpus, interleave } from "../web/src/pipeline/audioenc.js";
 import { startPose, walkToShip, spawnPoints, isShipSpawn, nearestTo,
-         quatForward, horizonBasis, yawFor, PLAYER_RADIUS,
+         quatForward, horizonBasis, yawFor, PLAYER_RADIUS, REVEIL, Reveil,
          SPAWN_CLEARANCE } from "../web/src/start.js";
 
 const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
@@ -6977,6 +6977,51 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("... et les drapeaux tombent",
           `${p.phase}/${p.matching}/${p.target}`, "repos/false/null");
   }
+}
+
+
+// --- le reveil : sept secondes le regard au ciel (docs/108-reveil.md) ------
+{
+  check("on ouvre les yeux a quatre-vingts degres", REVEIL.degreesY, 80);
+  check("et la camera attend sept secondes", REVEIL.afterSeconds, 7);
+  check("puis redescend a cinquante degres par seconde", REVEIL.rate, 50);
+  // 80 / 50 : la descente elle-meme dure 1,6 s, par le meme calcul que le
+  // demi-tour du siege et le recentrage de la lunette.
+  check("soit 1,6 seconde de descente",
+        Number(snapDuration(REVEIL.degreesY, 0, 0, 0, REVEIL.rate).toFixed(3)), 1.6);
+
+  const r = new Reveil();
+  check("sans reveil arme, aucun ordre", r.update(99, 80), null);
+  r.start();
+  check("avant la septieme seconde, on ne bouge pas", r.update(6.9, 80), null);
+  check("... et le regard reste ou il est", r.update(3, 80), null);
+  check("a la septieme, la camera se recentre", r.update(7.01, 80), "centre");
+  check("et cela n'arrive qu'une fois", r.update(8, 80), null);
+
+  // LE JOUEUR GARDE LA MAIN : regarder sous quarante-cinq degres desarme.
+  const r2 = new Reveil();
+  r2.start();
+  check("regarder plus bas que 45 degres abandonne le recentrage",
+        r2.update(1, 44), null);
+  check("... et la septieme seconde ne le reveille plus", r2.update(9, 44), null);
+  // Juste au-dessus du seuil, il tient encore.
+  const r3 = new Reveil();
+  r3.start();
+  r3.update(1, 45);
+  check("a quarante-cinq pile, le recentrage tient encore", r3.update(7.5, 45), "centre");
+
+  // L'ORDRE DES DEUX TESTS EST CELUI DU BUILD : le recentrage part a la
+  // septieme seconde MEME si le regard est deja bas, parce que le test des
+  // quarante-cinq degres vient apres.
+  const r4 = new Reveil();
+  r4.start();
+  check("septieme seconde et regard bas : le recentrage part quand meme",
+        r4.update(7.5, 10), "centre");
+
+  const r5 = new Reveil();
+  r5.start();
+  r5.reset();
+  check("une remise a zero desarme", r5.update(9, 80), null);
 }
 
 report();

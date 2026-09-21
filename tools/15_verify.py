@@ -39,6 +39,20 @@ import threading
 
 CHROMIUM = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 
+# Le reveil, mesure dans la page. Sorti du corps de `_run` parce que son
+# texte JavaScript contiendrait des guillemets triples au milieu d'une
+# chaine qui en est deja faite.
+REVEIL_JS = '''() => {
+  const r = window.__reveil;
+  if (!r) return null;
+  return { arme: r.arme, seuil: r.cfg.degreesY,
+           attente: r.cfg.afterSeconds, taux: r.cfg.rate,
+           // Le regard, dans la convention du BUILD : positif vers le haut.
+           // Apres le recentrage il doit etre revenu pres de zero.
+           degresY: Math.round(-window.__regard().pitch * 180 / Math.PI) };
+}'''
+
+
 
 class Report:
     """Journal des controles, avec un verdict par ligne."""
@@ -927,6 +941,23 @@ def _run(url, heavy, profil=None, zip_path=None):
             # 471 u sur Timber Hearth : on demarre au village, pas au vaisseau.
             rep.at_least("le vaisseau est a distance de marche",
                          round(depart["marche"] or 0, 0), 100)
+
+        # --- le reveil (docs/108-reveil.md) ------------------------------------
+        #
+        # `SpawnPlayer` ouvre les yeux quatre-vingts degres au-dessus de
+        # l'horizon, et `Update` redescend seul a la septieme seconde. Ce qui ne
+        # se verifie qu'ici : que le module est bien BRANCHE — la loi elle-meme
+        # est eprouvee sans le jeu. Le parcours dure plus de sept secondes avant
+        # d'arriver ici, le recentrage a donc deja eu lieu.
+        reveil = page.evaluate(REVEIL_JS)
+        if reveil:
+            rep.eq("le reveil ouvre les yeux a quatre-vingts degres",
+                   reveil["seuil"], 80)
+            rep.eq("... apres sept secondes", reveil["attente"], 7)
+            rep.eq("... a cinquante degres par seconde", reveil["taux"], 50)
+            rep.eq("et le recentrage a eu lieu", reveil["arme"], False)
+            rep.at_most("le regard est redescendu pres de l'horizon",
+                        abs(reveil["degresY"]), 45)
         carburant0 = page.evaluate("() => window.__resources.fuel")
         if pose:
             page.keyboard.down("w")
