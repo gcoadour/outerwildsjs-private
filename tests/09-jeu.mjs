@@ -78,6 +78,7 @@ import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
 import { Interactables } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
+         ALIGN, slerpRate, steadyPitch, UpAligner,
          slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
@@ -6562,6 +6563,90 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("rend les commandes sans attendre", al2.locked, false);
   // Et la transition ne se rejoue pas tant que l'etat ne change pas.
   check("rester dans le champ n'annonce rien", al2.update(true, 2, 0), null);
+
+  // --- SE REDRESSER PREND DU TEMPS (docs/106-redressement.md) --------------
+  //
+  // `AlignWithDirection` n'etait lue nulle part : le portage prenait le bas du
+  // champ dominant tel quel, a chaque image.
+  check("le joueur est en mode 2, a cent", `${ALIGN.mode}/${ALIGN.rate}`, "2/100");
+  check("et on aligne son BAS", ALIGN.localAxis.join(","), "0,-1,0");
+  check("la moindre gravite suffit", ALIGN.fieldStrengthThreshold, 0);
+
+  // LE MODE 2 EST UNE VITESSE CONSTANTE, et c'est ce qu'il faut garder : le
+  // taux multiplie par l'ecart restant vaut toujours `rate * dt`.
+  const dtPhys = 1 / 50;
+  for (const ecart of [180, 90, 45, 10, 3]) {
+    check(`a ${ecart} degres, le pas vaut deux degres`,
+          Number((slerpRate(ecart, dtPhys) * ecart).toFixed(6)), 2);
+  }
+  check("sous deux degres, le taux est borne et le reste se franchit d'un coup",
+        slerpRate(1.5, dtPhys), 1);
+  check("un corps deja aligne le reste", slerpRate(0, dtPhys), 1);
+  // Le mode 1 est le seul qui ralentisse en approchant : c'est celui que le
+  // portage aurait ecrit de lui-meme, et ce n'est pas celui du joueur.
+  check("le mode 1, lui, est une fraction fixe",
+        Number(slerpRate(90, dtPhys, { mode: 1, rate: 100 }).toFixed(6)), 1);
+
+  // Cent degres par seconde : un demi-tour en 1,8 s.
+  {
+    const a = new UpAligner();
+    a.update([0, 1, 0], dtPhys);
+    check("la premiere image ne s'interpole pas", a.up.join(","), "0,1,0");
+    let pas = 0;
+    while (Math.abs(a.up[1] + 1) > 1e-9 && pas < 1000) {
+      a.update([0, -1, 0], dtPhys); pas += 1;
+    }
+    // 178 degres a 2 par pas, puis les deux derniers d'un coup : 90 pas.
+    check("un demi-tour prend quatre-vingt-dix pas de physique", pas, 90);
+    check("soit 1,8 seconde", Number((pas * dtPhys).toFixed(2)), 1.8);
+    check("et l'on arrive bien au but", Number(a.up[1].toFixed(6)), -1);
+  }
+  {
+    const a = new UpAligner();
+    a.update([0, 1, 0], dtPhys);
+    const un = a.update([1, 0, 0], dtPhys);
+    check("le premier pas d'un quart de tour fait deux degres",
+          Number(un.tourne.toFixed(4)), 2);
+  }
+
+  // `KeepCameraSteady` : le tangage rend ce que le corps prend, et rien
+  // d'autre — le lacet et le roulis ne sont pas compenses.
+  {
+    // Le haut bascule de dix degres dans le plan vertical de la camera : c'est
+    // du tangage pur, et il se rend en entier.
+    const d = 10 * Math.PI / 180;
+    const rendu = steadyPitch([0, 1, 0], [0, Math.cos(d), Math.sin(d)], [1, 0, 0]);
+    check("dix degres de bascule rendent dix degres de tangage",
+          Number(rendu.toFixed(4)), 10);
+    check("et l'autre sens rend l'autre signe",
+          Number(steadyPitch([0, 1, 0], [0, Math.cos(d), -Math.sin(d)],
+                             [1, 0, 0]).toFixed(4)), -10);
+    // Une bascule AUTOUR de l'avant est du roulis : projetee sur l'axe droit,
+    // elle ne laisse rien.
+    check("un roulis pur ne rend aucun tangage",
+          Number(steadyPitch([0, 1, 0], [Math.sin(d), Math.cos(d), 0],
+                             [1, 0, 0]).toFixed(4)), 0);
+  }
+
+  // `InitAlignment` rallume la compensation a chaque entree dans un champ, et
+  // `FixedUpdate` l'eteint sous un degre.
+  {
+    const a = new UpAligner();
+    a.update([0, 1, 0], dtPhys);
+    check("au reveil, rien a compenser", a.steady, false);
+    a.init();
+    check("entrer dans un champ la rallume", a.steady, true);
+    let pas = 0;
+    while (a.steady && pas < 1000) { a.update([0, -1, 0], dtPhys); pas += 1; }
+    check("elle s'eteint quand l'ecart passe sous un degre", a.steady, false);
+    // Quatre-vingt-onze et non quatre-vingt-dix : `FixedUpdate` teste l'ecart
+    // qu'il vient de MESURER, pas celui qu'il laisse. La derniere image de
+    // redressement en voit encore deux, et c'est la suivante qui eteint.
+    check("une image de plus que le redressement lui-meme", pas, 91);
+    a.reset();
+    check("une nouvelle boucle remet tout a plat",
+          `${a.up}/${a.steady}`, "null/false");
+  }
 }
 
 {

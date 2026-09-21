@@ -1815,6 +1815,50 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("la rupture ramene le champ en deux secondes", verrou["snap"], 2)
         rep.eq("et plus rien ne suit", verrou["apres"], None)
 
+        # --- se redresser prend 1,8 s (docs/106-redressement.md) --------------
+        #
+        # `AlignWithDirection` n'etait lue nulle part : le haut du joueur etait
+        # le bas du champ dominant, pris tel quel a chaque image. Ce controle
+        # mesure le module DANS la page, sur une copie, et remet l'etat — le
+        # verrouiller sur la vraie instance ferait basculer la partie.
+        redresse = page.evaluate("""() => {
+          const R = window.__redressement;
+          if (!R) return null;
+          const vrai = { up: R.up, degres: R.degres, steady: R.steady };
+          R.reset();
+          R.update([0, 1, 0], 1 / 50);
+          const premier = R.up.join(',');
+          R.init();
+          const rallume = R.steady;
+          let pas = 0;
+          while (Math.abs(R.up[1] + 1) > 1e-9 && pas < 1000) {
+            R.update([0, -1, 0], 1 / 50); pas += 1;
+          }
+          const arrive = R.up.map(v => Math.round(v * 1e6) / 1e6).join(',');
+          // Sans champ, rien ne bouge : le corps garde son orientation.
+          const fige = R.update(null, 1 / 50).tourne;
+          Object.assign(R, vrai);
+          return { premier, rallume, pas, secondes: Math.round(pas / 50 * 100) / 100,
+                   arrive, fige,
+                   // Le monde reel : le joueur DOIT etre aligne au repos.
+                   ecartCourant: Math.round(vrai.degres * 100) / 100,
+                   hautCourant: Array.isArray(vrai.up) };
+        }""")
+        if redresse:
+            rep.eq("la premiere image ne s'interpole pas", redresse["premier"], "0,1,0")
+            rep.eq("entrer dans un champ rallume la compensation",
+                   redresse["rallume"], True)
+            rep.eq("un demi-tour prend quatre-vingt-dix pas", redresse["pas"], 90)
+            rep.eq("soit 1,8 seconde a cinquante hertz", redresse["secondes"], 1.8)
+            rep.eq("et l'on arrive exactement au but", redresse["arrive"], "0,-1,0")
+            rep.eq("sans champ, le corps garde son orientation", redresse["fige"], 0)
+            rep.eq("le joueur a bien un haut dans la page",
+                   redresse["hautCourant"], True)
+            # Debout au village, le redressement est termine : l'ecart mesure a
+            # l'image d'avant est nul. Un ecart durable dirait que le haut voulu
+            # fuit — le signe qu'on interpole vers une cible qui bouge seule.
+            rep.eq("et il est aligne, au repos", redresse["ecartCourant"] < 1, True)
+
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #
         # Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME une seconde,
@@ -2102,8 +2146,8 @@ def _run(url, heavy, profil=None, zip_path=None):
             do { mots += dial.view.lines.join(' ').split(/\s+/).filter(Boolean).length;
                  dial.advance(); } while (dial.active);
             lecture.motsRendus = mots;
-            lecture.motsSource = plusLong.text.replace(/\r\n?|\n/g, ' ')
-              .split(/\s+/).filter(Boolean).filter((w) => w !== '@').length;
+            lecture.motsSource = plusLong.text.replace(/\\r\\n?|\\n/g, ' ')
+              .split(/\\s+/).filter(Boolean).filter((w) => w !== '@').length;
           }
 
           dial.active = avantDlg;

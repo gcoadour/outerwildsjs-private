@@ -105,6 +105,7 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| **se redresser** | 100 deg/s vers le bas du champ, et le tangage compense tant que ca dure ([`106`](106-redressement.md)) |
 | **objets lisibles** | les 34 textes s'affichent enfin, en pages de 70 x 5, `@` compris ([`105`](105-lire.md)) |
 | verrouillage de camera | cinq appelants, cinq vitesses : 2 pour un panneau, 5 pour le vaisseau modele ([`105`](105-lire.md)) |
 | ambiance par couches | 17 zones, arbitrées comme `AudioDetector` : **la couche 0 couvre les autres, les ex aequo jouent ensemble** ([`104`](104-arbitrage.md)) ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |

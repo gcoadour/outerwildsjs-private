@@ -147,7 +147,8 @@ import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
          LOCK_ON } from "./gear.js";
 import { AttachPoints, snapDuration, snapDegrees, turnFraction,
-         FieldAlignment, FIELD_ALIGN } from "./attach.js";
+         FieldAlignment, FIELD_ALIGN,
+         UpAligner, steadyPitch } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
          UISounds } from "./reactaudio.js";
@@ -1815,6 +1816,10 @@ async function boot() {
   // pendant qu'il le fait — a cinquante degres par seconde, moitie moins vite
   // que le demi-tour d'un siege (docs/79-alignement.md).
   const alignement = new FieldAlignment();
+  // Le redressement du corps vers le bas du champ : cent degres par seconde,
+  // et le tangage compense tant qu'il dure (docs/106-redressement.md).
+  const redressement = new UpAligner();
+  window.__redressement = redressement;
   window.__alignement = alignement;
   // Sonde de verification : la loi des invites de sac, telle qu'elle est.
   window.__jetpackPrompts = jetpackPrompts;
@@ -1990,6 +1995,12 @@ async function boot() {
     endMusic.reset();
     for (const r of repairs) r.reset();
     training.reset();
+    // Une boucle EST un rechargement de scene : `_isFirstFrame` redevient vrai,
+    // et le joueur se reveille aligne. Sans cela, la premiere seconde et demie
+    // d'une nouvelle boucle serait passee a se redresser depuis l'orientation
+    // du mort (docs/106-redressement.md).
+    alignement.reset();
+    redressement.reset();
     // La pellicule aussi : `Flashback.Start` recree `_snapshotRenders` a chaque
     // chargement de scene, et la boucle EST un rechargement de scene. Le
     // flashback d'une boucle ne montre que cette boucle-la — sans quoi il
@@ -2759,6 +2770,9 @@ async function boot() {
         // `StopSnapping()` : retrouver le sol rend les commandes TOUT DE
         // SUITE, et interrompt le recentrage en cours.
         recentrage = null;
+        // `InitAlignment` pose aussi `_keepCameraSteady = true` : le regard va
+        // rendre au tangage tout ce que le corps prend, jusqu'a un degre pres.
+        redressement.init();
       }
     }
 
@@ -2780,8 +2794,26 @@ async function boot() {
     // ce qu'il tient. `alignDir` porte donc la verticale a suivre, qui n'est
     // pas toujours la direction de la force (docs/36-audit.md §2.9).
     const ad = f ? (f.alignDir || f.dir) : null;
-    const up = ad ? new BABYLON.Vector3(-ad.x, -ad.y, -ad.z)
-                  : new BABYLON.Vector3(0, 1, 0);
+    // §M SE REDRESSER PREND 1,8 s POUR UN DEMI-TOUR. `AlignWithDirection` n'etait
+    // lue nulle part : le portage prenait le bas du champ dominant tel quel, a
+    // chaque image, et changer de champ faisait basculer le monde d'un coup. Le
+    // build y met cent degres par seconde, et retire du TANGAGE tout ce que le
+    // corps prend tant que l'ecart depasse un degre (docs/106-redressement.md).
+    const upVoulu = ad ? [-ad.x, -ad.y, -ad.z] : (redressement.up || [0, 1, 0]);
+    const upAvant = redressement.up;
+    const pas = redressement.update(upVoulu, dt);
+    const up = new BABYLON.Vector3(pas.up[0], pas.up[1], pas.up[2]);
+    if (redressement.steady && upAvant && pas.tourne > 0) {
+      // Le regard rend ce que le corps prend : la vue ne bascule pas avec lui.
+      // L'axe DROIT se prend sur le repere d'AVANT le pas — c'est celui autour
+      // duquel le mouvement vient d'avoir lieu.
+      const hbA = horizonBasis(upAvant);
+      const cyA = Math.cos(yaw), syA = Math.sin(yaw);
+      const dr = [hbA.north[0] * -syA + hbA.east[0] * cyA,
+                  hbA.north[1] * -syA + hbA.east[1] * cyA,
+                  hbA.north[2] * -syA + hbA.east[2] * cyA];
+      pitch -= steadyPitch(upAvant, pas.up, dr) * Math.PI / 180;
+    }
     // Le repere d'horizon vit dans start.js : le lacet lu sur le SpawnPoint et
     // le lacet de la camera doivent se mesurer dans le MEME repere, sinon
     // l'orientation du build arrive juste et la tete est tournee de travers.
