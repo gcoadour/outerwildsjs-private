@@ -170,6 +170,7 @@ async function boot() {
   const resources = new Resources(
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
+  window.__interactables = interactables;   // sonde : les trente-quatre lisibles
   const bodies = data.bodies;
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
@@ -2075,6 +2076,10 @@ async function boot() {
   // du projecteur de l'observatoire. La classe a ete RELUE dans l'IL a cette
   // occasion — celle du portage etait une paraphrase que rien n'appelait.
   const verrouCamera = new CameraLock();
+  // Ce que le verrou vise EN CE MOMENT. Le build n'a qu'un
+  // `PlayerLockOnTargeting` sur le corps du joueur : un seul verrou a la fois,
+  // et `LockOn` ecrase simplement le precedent.
+  let verrouCible = null;
   const ciblesVerrou = lockOnTargets(gameplay);
   window.__assise = { points: pointsAttache, verrou: verrouCamera,
                       cibles: ciblesVerrou };
@@ -3443,26 +3448,82 @@ async function boot() {
             }
           }
         }
+      } else if (interactPressed && !dialogue.active && focus
+                 && focus.kind === "readable" && focus.text) {
+        // §L ON LIT. `ReadableObject.OnPressInteract` ouvre la MEME boite de
+        // dialogue, en panneau de musee, et le texte des trente-quatre objets
+        // etait extrait depuis longtemps sans que rien ne l'affiche
+        // (docs/105-lire.md).
+        if (dialogue.read(focus)) {
+          bipUI("AdvanceText");
+          console.log(`lecture : ${focus.name}`);
+        }
       }
     }
     // Les annonces du build, drainees comme celles du vaisseau.
     for (const e of pointsAttache.drain()) console.log(`annonce : ${e}`);
 
-    // §J LE VERROUILLAGE DE CAMERA. Deux `PlayerLockOnTargeting` poses, dont
-    // celui des commandes du projecteur : s'en servir tourne le corps vers
-    // elles et RESSERRE le champ, `500 / distance` borne a vingt degres.
+    // §J LE VERROUILLAGE DE CAMERA, ET SES CINQ APPELANTS. Le corps tourne en
+    // LACET seulement, a une vitesse proportionnelle a l'ecart : l'approche est
+    // exponentielle, sans a-coup a la fin, et le tangage reste a la main
+    // pendant ce temps (docs/69-assise.md pour la loi).
     //
-    // Le corps tourne en LACET seulement, a une vitesse proportionnelle a
-    // l'ecart : l'approche est exponentielle, sans a-coup a la fin, et le
-    // tangage reste a la main pendant ce temps.
+    // Ce que ce portage n'avait pas : le build appelle `LockOn` a CINQ
+    // endroits, et chacun donne ses propres nombres — c'est ce qui fait qu'on
+    // pivote lentement vers un panneau et brusquement vers le vaisseau modele.
+    //
+    //   Conversation.StartConversation            3, zoom,    1
+    //   ReadableObject.OnPressInteract            2, SANS,    1
+    //   ShipComputer.EnterShipComputer            1, zoom,    8
+    //   RemoteFlightConsole.OnPressInteract       5, zoom,    1
+    //   SatelliteSnapshotController.OnPressInteract 1, SANS,  1
+    //
+    // Et la CIBLE n'est pas l'objet avec lequel on interagit : c'est un
+    // transform serialise a cote (`_attentionPoint`, `_modelShipBody`,
+    // `_projectionScreen`). Le portage visait le composant `PlayerLockOnTargeting`
+    // lui-meme, qui est pose sur le joueur et sur les commandes du projecteur —
+    // donc jamais sur ce qu'on regarde (docs/105-lire.md).
     {
-      const surCible = consoles.active
-        ? ciblesVerrou.find((c) => Math.hypot(c.position[0] - consoles.active.position[0],
-                                              c.position[1] - consoles.active.position[1],
-                                              c.position[2] - consoles.active.position[2]) < 2)
-        : null;
-      if (surCible && !verrouCamera.locked) verrouCamera.lockOn(surCible);
-      else if (!surCible && verrouCamera.locked) verrouCamera.breakLock();
+      const lu = dialogue.active && dialogue.active.reading;
+      const parle = dialogue.active && dialogue.active.convo;
+      let surCible = null, reglage = null;
+      if (lu) {
+        // `_attentionPoint` quand il y en a un, l'objet lui-meme sinon : quinze
+        // des trente-quatre n'en declarent pas.
+        surCible = lu.attention || { position: lu.world, body: lu.body };
+        reglage = { offset: [0, 0, 0], followRate: 2, useZoom: false, zoomSpeed: 1 };
+      } else if (parle) {
+        // L'offset (0, 0.5, 0) est LOCAL a l'interlocuteur. Sur un sol partage,
+        // il est parallele au haut du joueur — et `lockYawError` projette
+        // justement cette composante-la hors du lacet. Il ne change donc que la
+        // distance, donc le champ de vision, qui a moins de dix unites ne bouge
+        // pas non plus.
+        surCible = { position: parle.position, body: parle.body };
+        reglage = { offset: [0, 0.5, 0], followRate: 3, useZoom: true, zoomSpeed: 1 };
+      } else if (consoles.active) {
+        const c = consoles.active;
+        // La console de vol regarde le VAISSEAU MODELE, le satellite son ECRAN.
+        const cible = c.flight ? (c.targets && c.targets._modelShipBody)
+                               : (c.targets && c.targets._projectionScreen);
+        surCible = cible ? { position: cible.position, body: cible.body }
+                         : { position: c.position, body: c.body || null };
+        reglage = c.flight
+          ? { offset: [0, 0, 0], followRate: 5, useZoom: true, zoomSpeed: 1 }
+          : { offset: [0, 0, 0], followRate: 1, useZoom: false, zoomSpeed: 1 };
+      }
+      // `LockOn` est un EVENEMENT, pas un etat : on ne le rappelle qu'au
+      // changement de cible, d'ou la cle. La position, elle, se relit a chaque
+      // image — un interlocuteur pose sur une planete tourne avec elle.
+      const cle = lu ? `lu:${lu.name}:${lu.world.join()}`
+        : parle ? `parle:${parle.index}`
+        : consoles.active ? `console:${consoles.active.name}` : null;
+      if (cle && verrouCible !== cle) {
+        verrouCamera.lockOn(surCible, reglage);
+        verrouCible = cle;
+      } else if (!cle && verrouCamera.locked) {
+        verrouCamera.breakLock();
+        verrouCible = null;
+      }
       if (verrouCamera.locked) {
         const dec = decalageDuCorps(surCible.body, anchorPos) || [0, 0, 0];
         const versLa = [surCible.position[0] + dec[0] - playerW[0],
@@ -3843,15 +3904,15 @@ async function boot() {
         (quantum.observed ? " (observee)" : ` (${quantum.collapses} sauts)`));
       if (convo && !dialogue.active) bits.push(`E pour parler a ${convo.character || convo.name}`);
       if (focus) bits.push(focus.kind === "readable"
-        ? `${focus.name} — texte disponible` : (focus.prompt || focus.name));
+        ? `E pour lire ${focus.name}` : (focus.prompt || focus.name));
       hud2.textContent = bits.join("   ·   ");
       solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
     }
     {
+      // `_isMuseumSign` vient maintenant de la vue : un objet lisible le porte
+      // toujours (`DialogueBox(..., true)`), une conversation selon sa zone.
       const v = dialogue.view;
-      const sign = !!(dialogue.active && dialogue.active.convo &&
-                      dialogue.active.convo.isMuseumSign);
-      dlgUI.render(v, sign);
+      dlgUI.render(v, !!(v && v.sign));
     }
 
     // --- secteurs ---

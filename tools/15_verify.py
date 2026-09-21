@@ -2064,6 +2064,48 @@ def _run(url, heavy, profil=None, zip_path=None):
                     next: cible(document.querySelector('.dlg-next')) };
             if (dlg.option) break;     // une conversation a reponses suffit
           }
+
+          // LIRE UN PANNEAU. Les trente-quatre textes etaient extraits et
+          // affiches nulle part : `render` ne recevait jamais de vue de
+          // lecture. On en ouvre un long a la main, on compte les appuis, on
+          // verifie que la boite porte bien le style de panneau, et on remet
+          // l'etat (docs/105-lire.md).
+          let lecture = null;
+          const lisibles = (window.__interactables.items || [])
+            .filter((x) => x.kind === 'readable' && x.text);
+          const plusLong = lisibles.sort((a, b) => b.text.length - a.text.length)[0];
+          if (plusLong && dial.read(plusLong)) {
+            const v = dial.view;
+            dlgUI.render(v, !!v.sign);
+            const boite = document.querySelector('.dlg-box');
+            let appuis = 1;
+            while (dial.active && appuis < 40) { dial.advance(); appuis += 1; }
+            lecture = {
+              lisibles: lisibles.length,
+              sansTexte: (window.__interactables.items || [])
+                .filter((x) => x.kind === 'readable' && !x.text).length,
+              pages: v.pageCount,
+              lignes: v.lines.length,
+              plusLongueLigne: Math.max(0, ...v.lines.map((l) => l.length)),
+              panneau: v.sign === true,
+              style: boite.classList.contains('dlg-sign'),
+              options: v.options.length,
+              texteAffiche: document.querySelector('.dlg-text').textContent.length,
+              appuis,
+              ferme: dial.active === null,
+              // Rien n'est perdu : la somme des mots des pages est celle du
+              // texte, retours a la ligne mis a plat.
+              motsRendus: 0, motsSource: 0,
+            };
+            dial.read(plusLong);
+            let mots = 0;
+            do { mots += dial.view.lines.join(' ').split(/\s+/).filter(Boolean).length;
+                 dial.advance(); } while (dial.active);
+            lecture.motsRendus = mots;
+            lecture.motsSource = plusLong.text.replace(/\r\n?|\n/g, ' ')
+              .split(/\s+/).filter(Boolean).filter((w) => w !== '@').length;
+          }
+
           dial.active = avantDlg;
           dlgUI.render(dial.view, false);
 
@@ -2072,7 +2114,7 @@ def _run(url, heavy, profil=None, zip_path=None):
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
           return {avant, course, relache, apresCourse, glisse, vitesse, arret,
-                  vus, apresGigue, apresGlissement, dlg,
+                  vus, apresGigue, apresGlissement, dlg, lecture,
                   suspendu, manches, empreintes, boutons, enVol, enMenu,
                   pouceGauche, pouceDroit};
         }""")
@@ -2128,6 +2170,29 @@ def _run(url, heavy, profil=None, zip_path=None):
                        dlg["next"]["sous"], "dlg-next")
                 rep.eq("« Next » fait la taille d'un doigt",
                        dlg["next"]["h"] >= 40, True)
+
+        # --- lire un panneau (docs/105-lire.md) -------------------------------
+        lect = tactile["lecture"]
+        if lect:
+            rep.eq("trente-quatre objets lisibles, tous avec leur texte",
+                   lect["lisibles"], 34)
+            rep.eq("aucun objet lisible sans texte", lect["sansTexte"], 0)
+            rep.eq("le plus long se lit en plusieurs fois", lect["pages"] > 1, True)
+            rep.eq("une page de panneau tient cinq lignes", lect["lignes"], 5)
+            rep.eq("et aucune ligne ne depasse soixante-dix caracteres",
+                   lect["plusLongueLigne"] <= 70, True)
+            rep.eq("c'est un panneau, pas quelqu'un qui parle",
+                   lect["panneau"], True)
+            rep.eq("... et la boite porte le style de panneau", lect["style"], True)
+            rep.eq("un panneau n'offre aucune option", lect["options"], 0)
+            rep.eq("le texte arrive jusqu'au DOM", lect["texteAffiche"] > 0, True)
+            rep.eq("la lecture se termine au dernier appui", lect["ferme"], True)
+            rep.eq("... apres autant d'appuis que de pages",
+                   lect["appuis"], lect["pages"])
+            # L'invariant qui compte : le decoupage ne PERD rien. Ce module
+            # s'arretait a la premiere page et posait un « … » sur le reste.
+            rep.eq("et tous les mots du texte ont ete affiches",
+                   lect["motsRendus"], lect["motsSource"])
 
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------

@@ -30,6 +30,7 @@ import { shipProximity } from "../web/src/helmet.js";
 import { modelLandingSpots, modelShipBody,
          rocketKids } from "../web/src/modelship.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
+import { paginate, LAYOUT } from "../web/src/dialogueui.js";
 import { extractAudio, sniffContainer } from "../web/src/pipeline/extract/audio.js";
 import { extractDialogue } from "../web/src/pipeline/extract/dialogue.js";
 import { extractLighting } from "../web/src/pipeline/extract/lighting.js";
@@ -89,6 +90,41 @@ console.timeEnd("gameplay");
 const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
 check("objets lisibles", n("ReadableObject"), 34);
+// Ce que ces trente-quatre textes DEMANDENT, et que rien n'affichait : leur
+// longueur. Vingt et un depassent une page de panneau, vingt-deux portent au
+// moins une arobase — et l'arobase est une page de plus (docs/105-lire.md).
+{
+  const lus = gp.placed.ReadableObject || [];
+  check("tous portent leur texte", lus.every((x) => x.text), true);
+  check("vingt-deux portent au moins une coupure forcee",
+        lus.filter((x) => x.text.includes("@")).length, 22);
+  check("et l'arobase y est toujours isolee par des espaces",
+        lus.every((x) => [...x.text.matchAll(/.?@.?/g)]
+          .every((m) => /^ @( |$)/.test(m[0]))), true);
+  const enPages = lus.map((x) => paginate(x.text, LAYOUT.charsPerLine.museumSign,
+                                          LAYOUT.maxLines.museumSign));
+  check("vingt-deux se lisent en plusieurs fois",
+        enPages.filter((p) => p.length > 1).length, 22);
+  // Le meme vingt-deux que ci-dessus, et ce n'est pas une coincidence : aucun
+  // texte SANS arobase n'atteint la page de panneau (70 x 5 = 350 caracteres),
+  // et tout texte qui en porte une se lit forcement en deux fois. C'est cette
+  // raison-la que l'invariant garde, pas le chiffre qui en decoule.
+  check("aucun texte sans arobase ne remplit une page entiere",
+        Math.max(...lus.filter((x) => !x.text.includes("@"))
+          .map((x) => x.text.length)) < 70 * 5, true);
+  check("aucun ne se lit en zero page", enPages.every((p) => p.length > 0), true);
+  // `_attentionPoint` : ce qu'on regarde en lisant. Dix-neuf le declarent dans
+  // la scene ; les quinze autres n'en ont pas, et se regardent eux-memes.
+  check("dix-neuf declarent un point d'attention",
+        lus.filter((x) => x.targets && x.targets._attentionPoint).length, 19);
+  check("et un point d'attention porte toujours une position",
+        lus.every((x) => !(x.targets && x.targets._attentionPoint)
+                      || x.targets._attentionPoint.position.length === 3), true);
+  // La vitrine des billes : le point d'attention est la BILLE, pas le panneau.
+  const billes = lus.find((x) => x.targets && x.targets._attentionPoint
+                              && x.targets._attentionPoint.name === "Ball_Body");
+  check("la vitrine des billes regarde la bille", !!billes, true);
+}
 check("points d'apparition", n("SpawnPoint"), 16);
 
 // Ce qui bouge quand on ne le regarde pas (docs/71-quantique.md). Ni la statue

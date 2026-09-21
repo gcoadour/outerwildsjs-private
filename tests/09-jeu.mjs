@@ -120,6 +120,7 @@ import { rolloffModel, curveGain, AudioField, AudioMixer,
 import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
 import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
 import { DialogueSystem } from "../web/src/dialogue.js";
+import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
@@ -2903,6 +2904,84 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la boucle retient qu'on lui a parle", sys.stateOf(vu).ended, 1);
   sys.resetLoop();
   check("une nouvelle boucle remet le compteur a zero", sys.stateOf(vu).ended, 0);
+}
+
+// --- ce qu'on lit, et en combien d'appuis (docs/105-lire.md) ---------------
+//
+// `CalculateDisplayableDialogues` ne borne pas une ligne : il DECOUPE le texte
+// en unites affichables, et chacune coute un appui. Ce portage s'arretait a la
+// premiere et posait un « … » sur le reste.
+{
+  const cent = "mot ".repeat(50).trim();   // 50 mots de 3 lettres, 199 car
+  const p = paginate(cent, 50, 4);
+  check("une ligne se coupe a un espace, jamais dans un mot",
+        p.every((page) => page.every((l) => l.length <= 50)), true);
+  check("... et une page tient quatre lignes", p[0].length, 4);
+  check("deux cents caracteres ne tiennent pas en une page", p.length > 1, true);
+  check("rien n'est perdu en route",
+        p.flat().join(" ").split(" ").length, 50);
+
+  // Le build remplace TOUT retour a la ligne par un espace avant de mettre en
+  // page : les `\r\n` des panneaux ne sont pas des sauts de ligne.
+  check("les retours a la ligne d'origine deviennent des espaces",
+        paginate("a\r\nb\nc", 50, 4)[0].join("|"), "a b c");
+  check("et le texte est rogne aux extremites",
+        paginate("   bonjour   ", 50, 4)[0].join("|"), "bonjour");
+
+  // `forceNewLineCharacter` vaut 64, soit `@` : il termine la ligne ET la page.
+  const arobase = paginate("un deux @ trois quatre", 50, 4);
+  check("l'arobase termine la page", arobase.length, 2);
+  check("... la premiere tient ce qui precede", arobase[0].join("|"), "un deux");
+  check("... la seconde ce qui suit", arobase[1].join("|"), "trois quatre");
+  check("une arobase en fin de texte n'ouvre pas de page vide",
+        paginate("un deux @", 50, 4).length, 1);
+  check("un texte vide ne donne aucune page", paginate("", 50, 4).length, 0);
+
+  // Un panneau de musee a des lignes plus longues et une page plus haute :
+  // 70 x 5 contre 50 x 4. Le meme texte s'y lit en moins d'appuis.
+  const long = "mot ".repeat(120).trim();
+  check("un panneau tient plus de texte qu'un personnage",
+        paginate(long, 70, 5).length < paginate(long, 50, 4).length, true);
+
+  // LIRE UN OBJET : la meme boite, en panneau, sans nom ni options.
+  const lecteur = new DialogueSystem({ trees: {}, conversations: [] });
+  check("un objet sans texte ne s'ouvre pas", lecteur.read({ name: "x" }), false);
+  check("un objet avec texte s'ouvre",
+        lecteur.read({ name: "Plaque", text: long }), true);
+  const v0 = lecteur.view;
+  check("c'est un panneau", v0.sign, true);
+  check("... sans options", v0.options.length, 0);
+  check("... et il annonce ses pages", v0.pageCount > 1, true);
+  check("... en commencant par la premiere", v0.pageIndex, 0);
+  const pages = v0.pageCount;
+  for (let i = 1; i < pages; i++) {
+    lecteur.advance();
+    check(`page ${i + 1} sur ${pages}`, lecteur.view.pageIndex, i);
+  }
+  check("a la derniere page, on est au bout", lecteur.view.atEnd, true);
+  lecteur.advance();
+  check("un appui de plus referme la lecture", lecteur.active, null);
+
+  // La REPLIQUE d'une conversation se pagine aussi : c'est le meme calcul, et
+  // c'est ce qui manquait le plus — une replique longue perdait sa fin.
+  const bavard = new DialogueSystem({
+    trees: { A: { start: "s", branches: {
+      s: { talk: [long, "court"], options: [] } } } },
+    conversations: [],
+  });
+  bavard.open({ name: "z", character: "Slate", tree: "A", index: 0 });
+  check("la premiere replique tient plusieurs pages",
+        bavard.view.pageCount > 1, true);
+  check("et les options ne s'offrent pas avant la fin du texte",
+        bavard.view.options.length, 0);
+  const n = bavard.view.pageCount;
+  for (let i = 1; i < n; i++) bavard.advance();
+  check("apres la derniere page, on est encore sur la replique",
+        bavard.view.lineIndex, 0);
+  bavard.advance();
+  check("l'appui suivant passe a la replique d'apres", bavard.view.lineIndex, 1);
+  check("et le rang de page repart a zero", bavard.view.pageIndex, 0);
+  check("la replique courte tient en une page", bavard.view.pageCount, 1);
 }
 
 // --- le sable des jumelles ---------------------------------------------

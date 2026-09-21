@@ -380,7 +380,13 @@ export function remoteConsoles(gameplay = {}) {
   const out = [];
   for (const cls of ["RemoteFlightConsole", "SatelliteSnapshotController"]) {
     for (const e of placed[cls] || []) {
+      // `targets` porte ce que le verrouillage de camera regarde pendant qu'on
+      // tient la console : le VAISSEAU MODELE pour la console de vol,
+      // l'ECRAN DE PROJECTION pour le satellite. Ce n'est pas la console
+      // elle-meme, et c'est ce qui fait qu'on se tourne vers le bon objet
+      // (docs/105-lire.md).
       out.push({ name: e.name, kind: cls, position: e.position,
+                 body: e.body || null, targets: e.targets || null,
                  flight: cls === "RemoteFlightConsole" });
     }
   }

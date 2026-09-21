@@ -14,6 +14,39 @@
 // A noter : _countChars sert au retour a la ligne, pas a une revelation
 // progressive. Le jeu n'affiche pas le texte caractere par caractere, et je
 // n'ajoute donc pas cet effet.
+//
+// CE QUI MANQUAIT, ET QUI SE COMPTAIT EN APPUIS. Ces quatre nombres ne bornent
+// pas une ligne, ils DECOUPENT le texte : `CalculateDisplayableDialogues`
+// remplit `_displayableDialogues`, et chaque unite demande un appui de plus.
+// Ce module gardait les quatre nombres et coupait a la premiere page, avec un
+// « … » pour dire ce qu'il jetait. Vingt-deux des trente-quatre objets
+// lisibles du build depassent une page ; la moitie de leur texte n'etait
+// affichable nulle part (docs/105-lire.md).
+//
+// `forceNewLineCharacter` vaut 64, soit `@`, et le build en fait DEUX choses :
+// il termine la ligne, et il termine la PAGE (`_countlines == maxLinesToDisplay
+// || chars[i] == forceNewLineCharacter`). Vingt-deux des trente-quatre textes
+// en portent au moins un, toujours entoure d'espaces.
+//
+// LES SEPT AUTRES METHODES, ET CE QU'ON EN FAIT. `ShowDialogueBox` annonce
+// `EnterDialogueMode` a la premiere boite et se referme aussitot si le texte
+// est vide ; `ExitDialogueMode` annonce `ExitDialogueMode` et rearme ce
+// premier. Les deux annonces sont lues ailleurs (`modes.js`, `reactaudio.js`),
+// et l'etat de mode se deduit ici de `dialogue.active` plutot que d'un drapeau.
+//
+// `setNoOptionsDimensions`, `setOptionsDimensions`, `DisplayGUIElements`,
+// `ShowBox` et `DisplayText` sont de l'IMGUI : elles posent des rectangles a la
+// main, image par image, avec des ancres calculees sur la resolution. Ce
+// portage en garde les PROPORTIONS — c'est la table ci-dessus — et laisse le
+// navigateur poser les rectangles. Redessiner cinq methodes d'IMGUI pour
+// obtenir ce qu'une feuille de style fait mieux serait refaire un moteur
+// d'interface pour faire baisser un chiffre.
+//
+// CE QUE CE PORTAGE NE PEUT PAS TENIR : le build coupe aussi la ligne quand sa
+// LARGEUR RENDUE atteint celle de la boite (`_promptStyle.CalcSize`). Cette
+// mesure-la depend des metriques d'une police qu'Unity choisit lui-meme — le
+// champ `_font` est nul — et de la resolution. Le decoupage se fait donc ici au
+// compte de caracteres, et la boite du navigateur replie le reste en CSS.
 
 // @lit DialogueGUI
 // Proportions, curseur et limites de `DialogueGUI`, rapportees a sa hauteur.
@@ -30,24 +63,55 @@ export const LAYOUT = {
   options: [504, 140], cursor: [504, 35], choice: [140, 35],
   charsPerLine: { character: 50, museumSign: 70 },
   maxLines: { character: 4, museumSign: 5 },
+  // `forceNewLineCharacter = 64` dans le constructeur.
+  forceNewLine: "@",
   nextLabel: "Next",
 };
 
-/** Retour a la ligne au nombre de caracteres, comme le fait le jeu. */
-export function wrap(text, charsPerLine, maxLines) {
-  const words = String(text || "").split(/\s+/).filter(Boolean);
-  const lines = [];
+/**
+ * `CalculateDisplayableDialogues` : le texte en PAGES, pas en une seule.
+ *
+ *     _dialogueToDisplay = Regex.Replace(_dialogueToDisplay, "\r\n?|\n", " ");
+ *     _dialogueToDisplay = _dialogueToDisplay.Trim();
+ *     ... pour chaque espace, on regarde le mot suivant en entier ...
+ *         si _countChars >= maxCharsPerLine || largeur rendue >= largeur boite
+ *             on retire l'espace, on passe a la ligne, _countChars = 0
+ *     si _countlines == maxLinesToDisplay || c == forceNewLineCharacter
+ *         _displayableDialogues[_numDisplayableUnits++] = ce qu'on a
+ *
+ * Trois choses s'y lisent, et la premiere est la seule qui compte vraiment :
+ *
+ *   - le texte est **un paragraphe**. Les retours a la ligne d'origine sont
+ *     remplaces par des espaces avant toute mise en page, ce qui veut dire que
+ *     les `\r\n` des panneaux ne sont PAS des sauts de ligne a l'affichage ;
+ *   - la coupure se fait **a un espace**, jamais au milieu d'un mot : le build
+ *     regarde le mot suivant en entier avant de decider ;
+ *   - `@` termine la ligne ET la page.
+ *
+ * @returns {Array<Array<string>>} les pages, chacune une liste de lignes
+ */
+export function paginate(text, charsPerLine, maxLines) {
+  const plat = String(text || "").replace(/\r\n?|\n/g, " ").trim();
+  const pages = [];
+  let lignes = [];
   let cur = "";
-  for (const w of words) {
-    if (cur && (cur.length + 1 + w.length) > charsPerLine) {
-      lines.push(cur);
-      cur = w;
-    } else {
-      cur = cur ? `${cur} ${w}` : w;
+  const finPage = () => {
+    if (cur) { lignes.push(cur); cur = ""; }
+    if (lignes.length) pages.push(lignes);
+    lignes = [];
+  };
+  for (const bloc of plat.split(LAYOUT.forceNewLine)) {
+    for (const mot of bloc.split(/\s+/).filter(Boolean)) {
+      if (cur && cur.length + 1 + mot.length > charsPerLine) {
+        lignes.push(cur);
+        cur = "";
+        if (lignes.length >= maxLines) finPage();
+      }
+      cur = cur ? `${cur} ${mot}` : mot;
     }
+    finPage();
   }
-  if (cur) lines.push(cur);
-  return { lines: lines.slice(0, maxLines), overflow: lines.length > maxLines };
+  return pages;
 }
 
 export class DialogueUI {
@@ -123,13 +187,19 @@ export class DialogueUI {
   render(view, isSign = false) {
     if (!view) { this.hide(); return; }
     this.root.hidden = false;
-    const kind = isSign ? "museumSign" : "character";
-    const { lines, overflow } = wrap(view.line,
-      LAYOUT.charsPerLine[kind], LAYOUT.maxLines[kind]);
-
-    this.name.textContent = view.character +
-      (view.lineCount > 1 ? `  ${view.lineIndex + 1}/${view.lineCount}` : "");
-    this.text.textContent = lines.join("\n") + (overflow ? " …" : "");
+    // Le decoupage vient du systeme de dialogue, qui en tient l'INDEX : le
+    // nombre de pages est le nombre d'appuis qu'il reste, et cela ne peut pas
+    // vivre dans une couche qui se contente de dessiner.
+    const lines = view.lines || [];
+    // `_isMuseumSign` change les limites de decoupage — c'est fait en amont —
+    // et le FOND de la boite : un panneau n'a pas de nom de personnage.
+    this.box.classList.toggle("dlg-sign", !!isSign);
+    // Un texte long se lit en plusieurs fois : le compteur dit lequel des deux,
+    // et le « Next » ne ment donc plus sur ce qui suit.
+    const rang = view.pageCount > 1 ? `  ${view.pageIndex + 1}/${view.pageCount}`
+      : (view.lineCount > 1 ? `  ${view.lineIndex + 1}/${view.lineCount}` : "");
+    this.name.textContent = view.character + rang;
+    this.text.textContent = lines.join("\n");
 
     this.opts.textContent = "";
     if (view.options.length) {
