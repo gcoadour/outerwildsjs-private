@@ -2330,7 +2330,10 @@ async function boot() {
   // point d'entree de verification : oriente la camera sans passer par le
   // verrouillage de souris, pour les captures automatisees
   window.__look = (y, p) => { yaw = y; pitch = p; };
-  window.__regard = () => ({ yaw, pitch });   // sonde : le regard courant
+  // Sonde : le regard courant. PAS `__regard`, qui est deja pris par les
+  // toiles et les regards poses dans la scene — une collision de nom qui a
+  // fait tomber un controle sans rapport.
+  window.__regardCam = () => ({ yaw, pitch });
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal

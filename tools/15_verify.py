@@ -49,7 +49,7 @@ REVEIL_JS = '''() => {
            attente: r.cfg.afterSeconds, taux: r.cfg.rate,
            // Le regard, dans la convention du BUILD : positif vers le haut.
            // Apres le recentrage il doit etre revenu pres de zero.
-           degresY: Math.round(-window.__regard().pitch * 180 / Math.PI) };
+           degresY: Math.round(-window.__regardCam().pitch * 180 / Math.PI) };
 }'''
 
 
