@@ -23,6 +23,10 @@ const TEXTURES = [
   // s'affiche est tout l'enjeu.
   "AnglerfishLure", "EscapePodBeacon", "WoodsmanBeacon",
   "LocationText_BG",            // fond du menu des reglages
+  // `Flashback._finalImage` : l'image posee sur le plan porte-photo pendant les
+  // huit dixiemes de seconde ou le blanc monte. Le portage faisait un fondu au
+  // blanc nu, faute de l'avoir extraite (docs/98-flashback.md).
+  "FinalFlashbackImage",
 ];
 
 // Polices du jeu, par role.

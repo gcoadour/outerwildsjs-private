@@ -294,6 +294,13 @@ export function shiplightRange(sectorLimit, inMajorSector = true) {
  * point de depart — et non celle d'origine. Deux fondus qui se chevauchent
  * partent donc de la ou l'on en etait, sans a-coup.
  */
+/**
+ * `SatelliteSnapshotController` : deux secondes pour eteindre la salle, deux
+ * pour la rallumer. Le meme nombre des deux cotes, et c'est le seul appelant de
+ * `FadeIntensity` dans tout le build.
+ */
+export const SATELLITE_FADE = 2;
+
 export class FadeLight {
   constructor(intensity = 0) {
     this.intensity = intensity;

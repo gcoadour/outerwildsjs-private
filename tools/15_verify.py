@@ -39,6 +39,20 @@ import threading
 
 CHROMIUM = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 
+# Le reveil, mesure dans la page. Sorti du corps de `_run` parce que son
+# texte JavaScript contiendrait des guillemets triples au milieu d'une
+# chaine qui en est deja faite.
+REVEIL_JS = '''() => {
+  const r = window.__reveil;
+  if (!r) return null;
+  return { arme: r.arme, seuil: r.cfg.degreesY,
+           attente: r.cfg.afterSeconds, taux: r.cfg.rate,
+           // Le regard, dans la convention du BUILD : positif vers le haut.
+           // Apres le recentrage il doit etre revenu pres de zero.
+           degresY: Math.round(-window.__regardCam().pitch * 180 / Math.PI) };
+}'''
+
+
 
 class Report:
     """Journal des controles, avec un verdict par ligne."""
@@ -552,13 +566,44 @@ def _run(url, heavy, profil=None, zip_path=None):
                ["Close Map", "Zoom In/Out", "Pan View"])
         # La couche d'invites fonctionne : c'est ce que l'ancien controle
         # voulait dire, mesure la ou le build pose vraiment des invites.
-        rep.eq("icone de manette sur chaque invite",
-               page.evaluate("() => document.querySelectorAll('.ow-prompt-btn').length"),
-               page.evaluate("() => document.querySelectorAll('.ow-prompt').length"))
+        # Le compte seul ne disait pas LAQUELLE manquait : on compare les
+        # libelles, pour qu'un echec se lise sans relancer.
+        #
+        # Et il portait sur TOUTES les invites, ce qui etait trop dire :
+        # `ScreenPrompt` a un bouton FACULTATIF, et celle des codes de
+        # lancement — « Launch Codes Aquired », en bas — n'en a pas. Elle
+        # n'apparait qu'avec un profil qui connait les codes, ce qui a tenu
+        # l'erreur cachee. La couche qu'on mesure ici est celle de GAUCHE,
+        # celle que la carte remplit.
+        rep.eq("icone de manette sur chaque invite de gauche",
+               page.evaluate("""() => [...document.querySelectorAll(
+                   '.ow-prompts-left .ow-prompt')]
+                 .filter(n => !n.querySelector('.ow-prompt-btn'))
+                 .map(n => n.textContent.trim())"""),
+               [])
         page.evaluate("() => window.__map.pan(-0.5, -0.5, 1)")
         rep.check("le deplacement de la carte suit la distance de zoom",
                   page.evaluate("() => Math.abs(window.__map.focal[0]) > 1000"),
                   page.evaluate("() => Math.round(window.__map.focal[0])"), "!= 0")
+        # LES ORBITES DE LA CARTE (docs/100-carte.md). `MapOpenGL` porte cinq
+        # pointeurs de corps et cinq couleurs, rangés dans le meme ordre par
+        # `Start`. Le portage tracait tout d'un meme gris invente, au centre de
+        # l'ECRAN et non du Soleil.
+        carte = page.evaluate("""() => {
+          const m = window.__map;
+          return { n: m.orbits.length, corps: m.orbits.map((o) => o.body),
+                   alpha: m.orbitAlpha === undefined
+                     ? null : Math.round(m.orbitAlpha * 255),
+                   comete: m.cometColor.map((c) => Math.round(c * 255)) };
+        }""")
+        rep.eq("cinq orbites colorees", carte["n"], 5)
+        rep.eq("dans l'ordre de `_planetRadiusArray`", carte["corps"],
+               ["TimberHearth_Body", "FocalBody", "BrittleHollow_Body",
+                "GiantsDeep_Body", "DarkBramble_Body"])
+        # L'alpha vient du build quand l'extraction l'a portee ; sans elle, le
+        # repli explicite du module vaut la meme chose.
+        rep.eq("a l'alpha du build", carte["alpha"] in (130, None), True)
+        rep.eq("et la comete a sa propre couleur", carte["comete"], [194, 255, 251])
         page.evaluate("() => window.__map.recenter()")
         page.keyboard.press("Enter")
         page.wait_for_timeout(600)
@@ -620,32 +665,84 @@ def _run(url, heavy, profil=None, zip_path=None):
           return {mur: at(1400), milieu: at(1300), coeur: at(1200),
                   volumes: window.__fog.fog.volumes.length,
                   masques: window.__fog.cloaks.cloaks.length,
-                  lumieres: window.__fog.lights.lights.length};
+                  lumieres: window.__fog.lights.lights.length,
+                  // `FogLightIcons.lit` : combien d'icones sont VISIBLES a cet
+                  // instant. Hors du brouillard, aucune — le composant est
+                  // desactive, et leur alpha reste ou il est.
+                  allumees: window.__fog.lights.lit,
+                  // `FogDetector.StartFogFlash` : l'eclair des passages de
+                  // Dark Bramble, monte cubique puis descente cubique.
+                  eclair: (() => {
+                    const f = window.__fog.fog;
+                    const avant = f.density;
+                    f.startFlash(0.5, 3, 3, 100);
+                    const p = !!f.flash;
+                    f.flash = null; f.density = avant;
+                    return p;
+                  })()};
         }""")
         rep.eq("volumes de brouillard", fog["volumes"], 2)
         rep.eq("objets masques par le brouillard", fog["masques"], 7)
         rep.eq("lumieres dans le brouillard", fog["lumieres"], 6)
+        # Au depart on est sur Timber Hearth, a des milliers d'unites du
+        # brouillard : aucune icone n'a de raison d'etre allumee.
+        rep.eq("et aucune n'est allumee au village", fog["allumees"], 0)
+        rep.eq("l'eclair de brouillard s'arme", fog["eclair"], True)
         rep.eq("densite nulle au rayon exterieur", fog["mur"], 0)
         rep.near("decroissance cubique a mi-chemin", fog["milieu"], 0.00125, 1e-5)
         rep.near("densite pleine au rayon interieur", fog["coeur"], 0.01, 1e-5)
 
         # --- mort, flashback et supernova ---------------------------------------
+        # LE FLASHBACK REJOUE LES PHOTOS DE LA PARTIE (docs/98-flashback.md).
+        #
+        # Ce controle mesurait « 22 images, 8,21 s » comme des constantes. Ce
+        # n'en sont pas : vingt-deux est le rang ou la DUREE d'image touche son
+        # plancher, et la longueur de la sequence depend du nombre de photos
+        # prises, donc du temps qu'on a survecu.
         fin = page.evaluate("""() => {
           const d = window.__death, s = window.__supernova.stage;
           const fb = d.flashback;
           const at = (f, left, nova, r) => s.update({fraction: f, secondsRemaining: left,
                                                      supernova: nova, shockwaveRadius: r});
-          return {images: fb.frames.length, duree: +fb.duration.toFixed(2),
+          // Une sequence de vingt-deux photos, calculee et rendue : 5,409 s de
+          // defilement, 0,8 de blanc, plus 2 + 1 + 1 hors defilement.
+          const garde = { count: fb.count, running: fb.running, t: fb.t };
+          fb.start(22);
+          const vingtDeux = +fb.duration.toFixed(3);
+          fb.start(3);
+          const trois = +fb.duration.toFixed(3);
+          fb.start(garde.count); fb.running = garde.running; fb.t = garde.t;
+          return {vingtDeux, trois,
                   progression: at(0.5, 600, false, 0).phase,
                   contraction: +at(1, 0, false, 0).scale.toFixed(2),
                   explosion: at(1, 0, true, 5000).phase,
                   causes: Object.keys(window.__death.byCause).length};
         }""")
-        rep.eq("images du flashback", fin["images"], 22)
-        rep.eq("duree de la sequence de mort (s)", fin["duree"], 8.21)
+        rep.eq("vingt-deux photos : dix secondes deux", fin["vingtDeux"], 10.209)
+        rep.eq("trois photos : six secondes quatre", fin["trois"], 6.426)
         rep.eq("l'etoile se contracte avant d'exploser", fin["contraction"], 0.62)
         rep.eq("phase d'explosion", fin["explosion"], "explosion")
         rep.eq("aucune mort au demarrage", fin["causes"], 0)
+
+        # LA PELLICULE TOURNE POUR DE VRAI. Le controle precedent appelle la loi ;
+        # celui-ci regarde ce que la BOUCLE a photographie — la leçon de docs/97,
+        # appliquée tout de suite. Une photo part a cinq secondes de partie, et
+        # la page en a vu plus que cela avant d'arriver ici.
+        pellicule = page.evaluate("""() => {
+          const p = window.__pellicule;
+          if (!p) return null;
+          const n = p.photos.length;
+          const une = n ? p.photos[0] : null;
+          return { n, chrono: p.timer.taken,
+                   largeur: une ? une.width : 0, hauteur: une ? une.height : 0 };
+        }""")
+        rep.eq("la pellicule existe", pellicule is not None, True)
+        if pellicule:
+            rep.at_least("des photos ont ete prises", pellicule["n"], 1)
+            rep.eq("le chronometre en a compte autant",
+                   pellicule["chrono"] >= pellicule["n"], True)
+            rep.eq("elles font 256 pixels de cote",
+                   [pellicule["largeur"], pellicule["hauteur"]], [256, 256])
 
         # --- degats du vaisseau -------------------------------------------------
         # Les valeurs de l'alpha eteignent les degats localises : on verifie que
@@ -663,9 +760,31 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("modificateur de reacteur", dmg["moteur"], 0)
             rep.eq("coupure des propulseurs endommages", dmg["coupe"], False)
 
-        # --- champ de debris du trou blanc --------------------------------------
-        deb = page.evaluate("() => window.__debris ? window.__debris.radius : null")
-        rep.eq("rayon du champ de debris", deb, 750)
+        # --- le trou blanc, relu en entier (docs/102-trou-blanc.md) -------------
+        #
+        # Trois champs serialises, trois noms pris pour des lois. Ce controle
+        # garde ce que le portage en fait MAINTENANT, et surtout que le trou
+        # blanc a une ORIENTATION : sans elle il n'y a pas de « devant », et
+        # `ForceWarp` sort droit devant.
+        deb = page.evaluate("""() => {
+          const d = window.__debris;
+          if (!d) return null;
+          const f = window.__trouBlancFwd;
+          return { laisse: d.radius, pas: d.cfg.checkSeconds,
+                   depart: d.cfg.startScale, vitesse: d.cfg.exitSpeed,
+                   avant: f ? f.map((x) => Math.round(x * 1000) / 1000) : null,
+                   norme: f ? Math.round(Math.hypot(f[0], f[1], f[2]) * 1000) / 1000
+                            : null };
+        }""")
+        rep.eq("la laisse maximale est `_debrisRadius`", deb and deb["laisse"], 750)
+        rep.eq("une sortie par seconde au plus", deb and deb["pas"], 1)
+        rep.eq("un morceau entre a un dixieme de sa taille", deb and deb["depart"], 0.1)
+        rep.eq("et il part a vingt unites par seconde", deb and deb["vitesse"], 20)
+        # L'avant du trou blanc vient de `WANT_ROTATION` : il est unitaire, et
+        # il n'est PAS la verticale du monde — ce sur quoi le portage retombait.
+        rep.eq("le trou blanc a un avant", deb and deb["norme"], 1.0)
+        rep.eq("et ce n'est pas la verticale du monde",
+               deb and deb["avant"] != [0, 1, 0], True)
 
         # --- rotation propre des corps ------------------------------------------
         #
@@ -705,6 +824,17 @@ def _run(url, heavy, profil=None, zip_path=None):
           chaleur: window.__world.heat.length,
           controleurs: window.__world.controllers.length,
           seuilsLOD: window.__lod.seuils,
+          // L'EVICTION, VUE DE L'INTERIEUR. `Evictor.waiting` dit depuis
+          // combien de temps un lot est hors de portee, et `keep` protege le
+          // corps ancre — deux lois que rien n'appelait (docs/99). Le lot du
+          // corps de depart est protege des la construction : il ne doit donc
+          // JAMAIS accumuler d'absence, quoi qu'il arrive.
+          protege: [...window.__lod.evictor.protect][0] || null,
+          attenteProtege: window.__lod.evictor.waiting(
+            [...window.__lod.evictor.protect][0] || ""),
+          cielPret: window.__sky.ready,
+          nuagesDecrits: window.__sky.cloudCount,
+          nuagesRattaches: window.__sky.cloudsAttached,
         })""")
         rep.at_least("lumieres extraites de la scene", w["lumieres"], 1)
         rep.at_most("lumieres allumees a la fois", w["allumees"], 8)
@@ -715,6 +845,20 @@ def _run(url, heavy, profil=None, zip_path=None):
                            ("controleurs de dialogue", "controleurs"),
                            ("seuils de niveau de detail du build", "seuilsLOD")]:
             rep.at_least(label, w[key], 0)
+        rep.eq("un lot protege de l'eviction", bool(w["protege"]), True)
+        rep.eq("et il n'accumule aucune absence", w["attenteProtege"], 0)
+        # LES VINGT-QUATRE NUAGES. Le build en decrit vingt-quatre — tous
+        # nommes `PieceOfRing`, d'ou le rattachement par POSITION (docs/48) —
+        # et ce controle demande qu'ils soient TOUS rattaches. Les deux
+        # accesseurs existaient depuis ce lot-la, sans lecteur.
+        rep.eq("nuages decrits par le build", w["nuagesDecrits"], 24)
+        # Le rattachement attend le lot de geometrie qui PORTE les nuages, et il
+        # n'est pas celui de la voute : `sky.ready` peut etre vrai sans qu'un
+        # seul nuage soit pose. L'invariant est donc « rien de PARTIEL » — zero
+        # ou les vingt-quatre — ce qui garde le rattachement par position sans
+        # mesurer l'ordre de chargement.
+        rep.eq("les nuages se rattachent tous ou pas du tout",
+               w["nuagesRattaches"] in (0, w["nuagesDecrits"]), True)
 
         # --- brouillard : les RenderSettings, non plus recopies ------------------
         rs = page.evaluate("() => ({ couleur: window.__fog.fog.color,"
@@ -797,6 +941,23 @@ def _run(url, heavy, profil=None, zip_path=None):
             # 471 u sur Timber Hearth : on demarre au village, pas au vaisseau.
             rep.at_least("le vaisseau est a distance de marche",
                          round(depart["marche"] or 0, 0), 100)
+
+        # --- le reveil (docs/108-reveil.md) ------------------------------------
+        #
+        # `SpawnPlayer` ouvre les yeux quatre-vingts degres au-dessus de
+        # l'horizon, et `Update` redescend seul a la septieme seconde. Ce qui ne
+        # se verifie qu'ici : que le module est bien BRANCHE — la loi elle-meme
+        # est eprouvee sans le jeu. Le parcours dure plus de sept secondes avant
+        # d'arriver ici, le recentrage a donc deja eu lieu.
+        reveil = page.evaluate(REVEIL_JS)
+        if reveil:
+            rep.eq("le reveil ouvre les yeux a quatre-vingts degres",
+                   reveil["seuil"], 80)
+            rep.eq("... apres sept secondes", reveil["attente"], 7)
+            rep.eq("... a cinquante degres par seconde", reveil["taux"], 50)
+            rep.eq("et le recentrage a eu lieu", reveil["arme"], False)
+            rep.at_most("le regard est redescendu pres de l'horizon",
+                        abs(reveil["degresY"]), 45)
         carburant0 = page.evaluate("() => window.__resources.fuel")
         if pose:
             page.keyboard.down("w")
@@ -955,6 +1116,26 @@ def _run(url, heavy, profil=None, zip_path=None):
                    page.evaluate("() => window.__gui.minimap.allowVisibility("
                                  "{ helmetHUD: true, hasMinimap: true })"), True)
 
+        # LES JAUGES SONT SUR LA VISIERE (docs/99-lois-branchees.md).
+        #
+        # `HUDCameraScript` les eteint a `RemoveSuit` et les rallume a
+        # `HelmetHUDActivated`. Au demarrage on est au village, sans
+        # combinaison : il ne doit y avoir NI oxygene NI carburant a l'ecran.
+        # Le portage les affichait en permanence.
+        visiere = page.evaluate("""() => {
+          const h = window.__ui && window.__ui.resHUD;
+          const c = window.__casque && window.__casque.casque;
+          if (!h || !c) return null;
+          return { porte: c.worn, jauges: !h.box.hidden };
+        }""")
+        rep.eq("le casque et les jauges sont montes", visiere is not None, True)
+        if visiere:
+            rep.eq("sans combinaison, le casque n'est pas porte",
+                   visiere["porte"], False)
+            rep.eq("et les jauges ne sont pas a l'ecran", visiere["jauges"], False)
+            rep.eq("les deux disent la meme chose",
+                   visiere["jauges"], visiere["porte"])
+
         # --- la sonde, telle que le build la lance (docs/60-sonde.md) -----------
         #
         # Elle ne part qu'une fois RAMASSEE (docs/46, lot 7) : le portage la
@@ -968,15 +1149,34 @@ def _run(url, heavy, profil=None, zip_path=None):
         # frappe entiere tombe entre deux images, comme dans Unity qui latche
         # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
         # geste avant de mesurer.
-        # ... et il tient aussi a CE QUI PRECEDE. Six controles de plus inseres
-        # avant lui — six `page.evaluate`, aucune attente ajoutee — ont suffi a
-        # faire refuser le tir, et a les remettre en fin de parcours il repasse.
-        # On ne sait donc pas ce que ce controle mesure au juste : la fenetre de
-        # cinq metres, ou l'orientation ou le joueur se trouve a cet instant-la.
-        # Tant qu'il n'aura pas ete rendu independant du regard — en visant
-        # explicitement avant de tirer — rien ne doit s'inserer avant lui. Le
-        # lot des seuils est alle en fin de parcours pour cette raison, et c'est
-        # une dette, pas une solution.
+        # ... et il TENAIT aussi a ce qui le precede : six `page.evaluate` de
+        # plus inseres avant lui suffisaient a faire refuser le tir. La dette
+        # etait nommee — « tant qu'il n'aura pas ete rendu independant du
+        # regard, en visant explicitement avant de tirer » — et c'est ce que
+        # `vise()` fait maintenant.
+        #
+        # LA DETTE, ET CE QU'ELLE CACHAIT. Le controle ne mesurait pas la
+        # fenetre de tir : il mesurait ou le joueur avait derive pendant que
+        # les controles d'avant tournaient. Deux executions du MEME code
+        # donnaient deux resultats, selon la charge de la machine. Un invariant
+        # qui depend du temps qu'a pris le controle precedent ne garde rien.
+        #
+        # Ce qu'il garde maintenant est la LOI : `launchWindowLength` rend 200
+        # tant qu'on ignore comment marchent les sondes, et 5 ensuite. On vise
+        # donc le SOL pour le premier — bloque a cinq metres comme a deux
+        # cents — et le CIEL pour le second, degage dans les deux cas. Seule la
+        # longueur de la fenetre peut alors expliquer la difference.
+        def vise(tangage):
+            # Tangage POSITIF = vers le bas : `fwd` porte `up * (-sin p)`.
+            #
+            # On ne touche QUE le regard. Un premier jet mettait aussi la
+            # vitesse a zero pour « stabiliser » — ce qui arrache le joueur au
+            # sol qui l'emporte, et un controle plus loin mesure justement
+            # cette vitesse-la. Stabiliser un controle en cassant ce qu'un
+            # autre mesure n'est pas stabiliser.
+            page.evaluate("(p) => window.__look(0, p)", tangage)
+            page.wait_for_timeout(1200)
+
         def sonde_geste(duree_ms, attente_ms=9000):
             # Le bouton DROIT : `InputChannels.probe` est `mouse 1`, et les
             # trois statiques d'`OWInput` qui lancent, photographient et
@@ -989,12 +1189,30 @@ def _run(url, heavy, profil=None, zip_path=None):
         def etat_sonde():
             return page.evaluate("""() => {
               const t = window.__tools.probes, p = t.last;
+              const pl = window.__player;
               return { active: t.active, launched: t.launched,
                        ancree: !!(p && p.anchored),
                        lanterne: p ? Math.round(p.lantern) : 0,
                        vitesse: p ? Math.round(Math.hypot(...p.vel)) : 0,
                        cams: (window.__scene || BABYLON.Engine.LastCreatedScene)
-                               .activeCameras.map(c => c.name) };
+                               .activeCameras.map(c => c.name),
+                       // POURQUOI, quand elle ne part pas. Ce controle tient a
+                       // ce qui le precede, et jusqu'ici il ne disait que
+                       // « zero » — ce qui ne se diagnostique pas.
+                       charge: !!t.charging,
+                       aLaSonde: !!window.__lots.equipment.probe,
+                       sait: !!window.__pdata.knows('knowsHowProbesWork'),
+                       enDialogue: !!window.__dialogue.active,
+                       auSol: !!(pl && pl.grounded),
+                       vitesseJoueur: pl ? Math.round(
+                         Math.hypot(pl.vel.x, pl.vel.y, pl.vel.z) * 10) / 10 : null,
+                       // Le redressement est le suspect : s'il balance encore,
+                       // le sondage de sol cherche le sol dans la mauvaise
+                       // direction, et le joueur n'est au sol nulle part.
+                       ecartHaut: window.__redressement
+                         ? Math.round(window.__redressement.degres * 1000) / 1000 : null,
+                       compense: window.__redressement
+                         ? window.__redressement.steady : null };
             }""")
 
         sonde_geste(120)
@@ -1017,13 +1235,23 @@ def _run(url, heavy, profil=None, zip_path=None):
                  d.knowsHowProbesWork = false; d.save();
                  return d.knows('knowsHowProbesWork'); }"""),
                False)
+        # Le sol : bloque a cinq metres comme a deux cents.
+        vise(1.4)
         sonde_geste(120)
         rep.eq("et la fenetre de deux cents metres refuse le tir",
                etat_sonde()["launched"], 0)
-        # Une fois le geste appris, cinq metres suffisent.
+        # Une fois le geste appris, cinq metres suffisent — et le ciel les
+        # donne. C'est la SEULE difference entre les deux mesures.
         page.evaluate("() => window.__pdata.learn('knowsHowProbesWork')")
+        vise(-1.4)
         sonde_geste(120)
         etat = etat_sonde()
+        # Le refus se diagnostique, il ne se devine pas : ce controle tient a
+        # tout ce qui le precede, et jusqu'ici il ne disait que « zero ».
+        print("    etat du joueur au tir :",
+              {k: etat[k] for k in ("charge", "aLaSonde", "sait", "enDialogue",
+                                    "auSol", "vitesseJoueur", "ecartHaut",
+                                    "compense")})
         rep.eq("une fois le geste appris, elle part", etat["launched"], 1)
         rep.eq("et il n'y en a qu'UNE", etat["active"], 1)
         rep.eq("la sonde allume sa camera", etat["cams"], ["cam", "probeCam"])
@@ -1649,6 +1877,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("dos tourne, le demi-tour dure 1,8 s", duree["dos"], 1.8)
         rep.eq("de face, aucune duree", duree["face"], 0)
         rep.eq("et on se leve avec la vitesse du siege", duree["emporte"], 200)
+
         # Le verrouillage de camera, RELU dans l'IL : le corps tourne en lacet
         # a une vitesse proportionnelle a l'ecart, et le champ suit 500/d.
         verrou = page.evaluate("""() => {
@@ -1663,6 +1892,50 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("et le champ, cinq cents sur la distance", verrou["fov"], 25)
         rep.eq("la rupture ramene le champ en deux secondes", verrou["snap"], 2)
         rep.eq("et plus rien ne suit", verrou["apres"], None)
+
+        # --- se redresser prend 1,8 s (docs/106-redressement.md) --------------
+        #
+        # `AlignWithDirection` n'etait lue nulle part : le haut du joueur etait
+        # le bas du champ dominant, pris tel quel a chaque image. Ce controle
+        # mesure le module DANS la page, sur une copie, et remet l'etat — le
+        # verrouiller sur la vraie instance ferait basculer la partie.
+        redresse = page.evaluate("""() => {
+          const R = window.__redressement;
+          if (!R) return null;
+          const vrai = { up: R.up, degres: R.degres, steady: R.steady };
+          R.reset();
+          R.update([0, 1, 0], 1 / 50);
+          const premier = R.up.join(',');
+          R.init();
+          const rallume = R.steady;
+          let pas = 0;
+          while (Math.abs(R.up[1] + 1) > 1e-9 && pas < 1000) {
+            R.update([0, -1, 0], 1 / 50); pas += 1;
+          }
+          const arrive = R.up.map(v => Math.round(v * 1e6) / 1e6).join(',');
+          // Sans champ, rien ne bouge : le corps garde son orientation.
+          const fige = R.update(null, 1 / 50).tourne;
+          Object.assign(R, vrai);
+          return { premier, rallume, pas, secondes: Math.round(pas / 50 * 100) / 100,
+                   arrive, fige,
+                   // Le monde reel : le joueur DOIT etre aligne au repos.
+                   ecartCourant: Math.round(vrai.degres * 100) / 100,
+                   hautCourant: Array.isArray(vrai.up) };
+        }""")
+        if redresse:
+            rep.eq("la premiere image ne s'interpole pas", redresse["premier"], "0,1,0")
+            rep.eq("entrer dans un champ rallume la compensation",
+                   redresse["rallume"], True)
+            rep.eq("un demi-tour prend quatre-vingt-dix pas", redresse["pas"], 90)
+            rep.eq("soit 1,8 seconde a cinquante hertz", redresse["secondes"], 1.8)
+            rep.eq("et l'on arrive exactement au but", redresse["arrive"], "0,-1,0")
+            rep.eq("sans champ, le corps garde son orientation", redresse["fige"], 0)
+            rep.eq("le joueur a bien un haut dans la page",
+                   redresse["hautCourant"], True)
+            # Debout au village, le redressement est termine : l'ecart mesure a
+            # l'image d'avant est nul. Un ecart durable dirait que le haut voulu
+            # fuit — le signe qu'on interpole vers une cible qui bouge seule.
+            rep.eq("et il est aligne, au repos", redresse["ecartCourant"] < 1, True)
 
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #
@@ -1913,6 +2186,48 @@ def _run(url, heavy, profil=None, zip_path=None):
                     next: cible(document.querySelector('.dlg-next')) };
             if (dlg.option) break;     // une conversation a reponses suffit
           }
+
+          // LIRE UN PANNEAU. Les trente-quatre textes etaient extraits et
+          // affiches nulle part : `render` ne recevait jamais de vue de
+          // lecture. On en ouvre un long a la main, on compte les appuis, on
+          // verifie que la boite porte bien le style de panneau, et on remet
+          // l'etat (docs/105-lire.md).
+          let lecture = null;
+          const lisibles = (window.__interactables.items || [])
+            .filter((x) => x.kind === 'readable' && x.text);
+          const plusLong = lisibles.sort((a, b) => b.text.length - a.text.length)[0];
+          if (plusLong && dial.read(plusLong)) {
+            const v = dial.view;
+            dlgUI.render(v, !!v.sign);
+            const boite = document.querySelector('.dlg-box');
+            let appuis = 0;
+            while (dial.active && appuis < 40) { dial.advance(); appuis += 1; }
+            lecture = {
+              lisibles: lisibles.length,
+              sansTexte: (window.__interactables.items || [])
+                .filter((x) => x.kind === 'readable' && !x.text).length,
+              pages: v.pageCount,
+              lignes: v.lines.length,
+              plusLongueLigne: Math.max(0, ...v.lines.map((l) => l.length)),
+              panneau: v.sign === true,
+              style: boite.classList.contains('dlg-sign'),
+              options: v.options.length,
+              texteAffiche: document.querySelector('.dlg-text').textContent.length,
+              appuis,
+              ferme: dial.active === null,
+              // Rien n'est perdu : la somme des mots des pages est celle du
+              // texte, retours a la ligne mis a plat.
+              motsRendus: 0, motsSource: 0,
+            };
+            dial.read(plusLong);
+            let mots = 0;
+            do { mots += dial.view.lines.join(' ').split(/\s+/).filter(Boolean).length;
+                 dial.advance(); } while (dial.active);
+            lecture.motsRendus = mots;
+            lecture.motsSource = plusLong.text.replace(/\\r\\n?|\\n/g, ' ')
+              .split(/\\s+/).filter(Boolean).filter((w) => w !== '@').length;
+          }
+
           dial.active = avantDlg;
           dlgUI.render(dial.view, false);
 
@@ -1921,7 +2236,7 @@ def _run(url, heavy, profil=None, zip_path=None):
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
           return {avant, course, relache, apresCourse, glisse, vitesse, arret,
-                  vus, apresGigue, apresGlissement, dlg,
+                  vus, apresGigue, apresGlissement, dlg, lecture,
                   suspendu, manches, empreintes, boutons, enVol, enMenu,
                   pouceGauche, pouceDroit};
         }""")
@@ -1977,6 +2292,34 @@ def _run(url, heavy, profil=None, zip_path=None):
                        dlg["next"]["sous"], "dlg-next")
                 rep.eq("« Next » fait la taille d'un doigt",
                        dlg["next"]["h"] >= 40, True)
+
+        # --- lire un panneau (docs/105-lire.md) -------------------------------
+        lect = tactile["lecture"]
+        if lect:
+            rep.eq("trente-quatre objets lisibles, tous avec leur texte",
+                   lect["lisibles"], 34)
+            rep.eq("aucun objet lisible sans texte", lect["sansTexte"], 0)
+            rep.eq("le plus long se lit en plusieurs fois", lect["pages"] > 1, True)
+            # Cinq lignes AU PLUS : le plus long des trente-quatre commence par
+            # une phrase courte suivie d'une arobase, et sa premiere page ne
+            # fait donc qu'une ligne. C'est le plafond qui est la loi.
+            rep.eq("une page de panneau tient cinq lignes au plus",
+                   1 <= lect["lignes"] <= 5, True)
+            rep.eq("et aucune ligne ne depasse soixante-dix caracteres",
+                   lect["plusLongueLigne"] <= 70, True)
+            rep.eq("c'est un panneau, pas quelqu'un qui parle",
+                   lect["panneau"], True)
+            rep.eq("... et la boite porte le style de panneau", lect["style"], True)
+            rep.eq("un panneau n'offre aucune option", lect["options"], 0)
+            rep.eq("le texte arrive jusqu'au DOM", lect["texteAffiche"] > 0, True)
+            rep.eq("la lecture se termine au dernier appui", lect["ferme"], True)
+            rep.eq("... apres autant d'appuis que de pages",
+                   lect["appuis"], lect["pages"])
+            rep.eq("et il en faut plus d'un", lect["pages"] > 1, True)
+            # L'invariant qui compte : le decoupage ne PERD rien. Ce module
+            # s'arretait a la premiere page et posait un « … » sur le reste.
+            rep.eq("et tous les mots du texte ont ete affiches",
+                   lect["motsRendus"], lect["motsSource"])
 
         if heavy:
             # --- croute de Brittle Hollow (demande de charger la planete) -------
@@ -2051,6 +2394,15 @@ def _run(url, heavy, profil=None, zip_path=None):
             grotte: (z.find(x => x.name === "CaveVolume01") || {}).entryways
                       ? z.find(x => x.name === "CaveVolume01").entryways.length : -1,
             couches: a.playing.map(l => l.name).sort(),
+            // L'arbitrage du build : une seule tete par couche, et la couche 0
+            // couvre tout ce qui lui est inferieur (docs/104-arbitrage.md).
+            parCouche: a.playing.reduce((m, l) => (m[l.layer] = (m[l.layer] || 0) + 1, m), {}),
+            // Ce que le melangeur donne au moteur, source par source.
+            cles: a.playing.map(l => l.key).sort(),
+            jourNuit: a.etats.filter(e => e.jourNuit).map(e => e.zone.name).sort(),
+            // Le jour se lit sur les positions du monde, pas sur un drapeau :
+            // si `jourDe` jetait, tout ce qui suit serait fige.
+            jours: a.etats.filter(e => e.jourNuit).map(e => e.jour),
           };
         }""")
         if amb:
@@ -2064,6 +2416,24 @@ def _run(url, heavy, profil=None, zip_path=None):
                       all("Cave" not in (n or "") for n in amb["couches"]),
                       amb["couches"], "aucune Cave*")
             rep.at_least("et au moins une couche sonne", len(amb["couches"]), 1)
+            # `ActivateLayer` n'active que la tete de couche — mais un
+            # `DayNightAudioVolume` porte DEUX sources, qui se croisent a
+            # l'aube. Le compte par couche vaut donc 1, ou 2 pendant la
+            # bascule, jamais plus.
+            rep.check("au plus deux sources par couche, et seulement en bascule",
+                      all(n <= 2 for n in amb["parCouche"].values()),
+                      amb["parCouche"], "<= 2 par couche")
+            rep.eq("chaque source sonnante a sa propre cle",
+                   len(set(amb["cles"])), len(amb["cles"]))
+            rep.eq("les trois volumes jour/nuit sont montes comme tels",
+                   ",".join(amb["jourNuit"]),
+                   "VillageAmbience_Day,VillageMusic,WindyAmbience")
+            # `IsDay` a besoin du centre de la planete, du point et du soleil.
+            # Une seule position manquante et le booleen resterait a `true`
+            # pour les trois, quelle que soit l'heure.
+            rep.check("et leur jour se lit sans exception",
+                      all(isinstance(j, bool) for j in amb["jours"]),
+                      amb["jours"], "trois booleens")
 
         # --- ce que les seuils commandent encore (docs/85-chambre.md) ----------
         #
@@ -2263,6 +2633,96 @@ def _run(url, heavy, profil=None, zip_path=None):
         # --- les deux tables de manette (docs/94-manette.md) ------------------
         rep.eq("les deux tables de manette s'accordent dans la page",
                page.evaluate("() => window.__padAccord"), [])
+
+        # --- ET ON S'ASSIED POUR DE VRAI (docs/97-assise-instantanee.md) -----
+        #
+        # EN DERNIER, et c'est la moitie du controle : embarquer perturbe le
+        # vaisseau — la touche d'interaction est aussi celle du pilote
+        # automatique (docs/61), l'assise pose un point d'accrochage, et les
+        # annonces de piste gardent la trace du decollage. Place plus haut, ce
+        # bloc faisait echouer trois controles qui n'avaient rien a voir : un
+        # controle qui change l'etat du jeu se met a la fin, ou il ne peut plus
+        # mentir a personne.
+        # ET ON S'ASSIED PAR LE CHEMIN DE LA BOUCLE, PAS EN APPELANT LA LOI.
+        #
+        # Les trois controles ci-dessus appellent `attach()` a la main, avec un
+        # tableau, et mesurent 1,8 s. La boucle, elle, passait l'avant du joueur
+        # tel que Babylon le tient — un `Vector3` —, que le module indexe en
+        # `v[0]` : longueur NaN, angle zero, duree zero. On s'asseyait D'UN COUP
+        # a tous les points d'accrochage, et rien ne le disait : une duree nulle
+        # est aussi celle d'un joueur deja aligne (docs/97).
+        #
+        # L'invariant porte donc sur ce QUI a servi au calcul — la seule chose
+        # qui distingue les deux zeros — et il faut pour cela un embarquement
+        # REEL : codes de lancement, joueur a portee, touche d'interaction.
+        # Le joueur est un corps Havok : lui ecrire `pos` ne sert a rien, la
+        # position est RELUE du noeud a chaque pas (`Player.stepPhysics`). On
+        # le teleporte donc comme la boucle le fait elle-meme.
+        approche = """() => {
+          const s = window.__shipRef, p = window.__player;
+          if (!s || !p || !p.body || !window.__pdata) return false;
+          window.__pdata.knowsLaunchCodes = true;
+          s.boarded = false;
+          window.__assise.points.detach([0, 0, 0]);
+          const agg = p.body;
+          agg.transformNode.position.set(s.pos.x + 2, s.pos.y + 2, s.pos.z + 2);
+          agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+          agg.body.setAngularVelocity(BABYLON.Vector3.Zero());
+          return true;
+        }"""
+        lecture = """() => {
+          const pt = window.__assise.points.current;
+          if (!pt) return null;
+          const v = pt.initForward;
+          if (!Array.isArray(v)) return { tableau: false };
+          return { tableau: true,
+                   fini: v.every((x) => Number.isFinite(x)),
+                   norme: Math.round(Math.hypot(v[0], v[1], v[2]) * 1000) / 1000,
+                   duree: Number.isFinite(pt.turnDuration) };
+        }"""
+        codesAvant = page.evaluate(
+            "() => !!(window.__pdata && window.__pdata.knowsLaunchCodes)")
+        avant = None
+        # Une image peut durer une seconde en rendu logiciel : on retente.
+        for _ in range(4):
+            if not page.evaluate(approche):
+                break
+            page.keyboard.press("KeyE")
+            page.wait_for_timeout(1200)
+            avant = page.evaluate(lecture)
+            if avant:
+                break
+        rep.eq("la touche d'interaction assied pour de vrai",
+               avant is not None, True)
+        if avant:
+            rep.eq("et le siege recoit un vrai vecteur, pas un Vector3",
+                   avant["tableau"], True)
+            if avant["tableau"]:
+                rep.eq("dont les trois composantes sont finies",
+                       avant["fini"], True)
+                rep.eq("et qui est unitaire", avant["norme"], 1.0)
+                rep.eq("la duree du demi-tour est donc un nombre",
+                       avant["duree"], True)
+        # ON REND CE QU'ON A PRIS, meme en fin de parcours : les codes de
+        # lancement commandent la prevention de la supernova et l'armement de la
+        # sphere de remise a zero, et la touche d'interaction est AUSSI celle du
+        # pilote automatique (docs/61) — la meme frappe qui assied l'engage une
+        # fois assis. Les annonces de piste, elles, ne se touchent pas : un
+        # controle ne doit pas effacer ce qu'un autre a mesure.
+        page.evaluate("""(codes) => {
+          const s = window.__shipRef;
+          s.boarded = false;
+          window.__assise.points.detach([0, 0, 0]);
+          window.__assise.points.drain();
+          const siege = window.__assise.points.points.find(
+            (p) => p.name === "FlightConsole");
+          if (siege && siege.follow) siege.follow(null);
+          const a = window.__autopilot;
+          if (a && a.engaged) a.abort();
+          window.__pdata.knowsLaunchCodes = codes;
+        }""", codesAvant)
+        page.wait_for_timeout(600)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()

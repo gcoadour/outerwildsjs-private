@@ -93,6 +93,7 @@ export function terminalAngularSpeed(torque, drag, step = 1 / 60) {
 export class Ship {
   constructor(consts, node, startPos, damageFields = {}, engines = []) {
     this.thrust = consts._maxTranslationalThrust ?? 50;
+    this.field = null;        // le champ dominant de la derniere image
     this.angularDrag = consts._angularDrag ?? 0.92;
     this.rotationalThrust = consts._maxRotationalThrust ?? 2;
     // `_usePhysicsToRotate` : vrai dans le build. Faux ferait retomber le
@@ -290,6 +291,9 @@ export class Ship {
 
   update(dt, bodies, input, basis, world = null) {
     const f = dominantField(bodies, this.pos, world);
+    // Le pilote automatique en a besoin : la distance de freinage du build
+    // compte la gravite le long de l'axe d'approche (docs/107-pilote.md).
+    this.field = f;
     if (f) {
       this.vel.x += f.dir.x * f.magnitude * dt;
       this.vel.y += f.dir.y * f.magnitude * dt;

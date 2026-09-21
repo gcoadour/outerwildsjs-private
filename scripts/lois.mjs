@@ -70,6 +70,17 @@ const MOTS_CLES = new Set(["constructor", "if", "for", "while", "switch", "catch
 const compte = (t, nom) => (t.match(new RegExp(`\\b${nom}\\b`, "g")) || []).length;
 
 /**
+ * Le meme marqueur, pose au-dessus d'une methode plutot que d'un export.
+ *
+ * La ligne suivante est une definition de methode — indentation, nom,
+ * parenthese — et non un `export`, ce qui suffit a les distinguer : dans
+ * `export function x(`, le mot qui precede la parenthese n'est pas colle a
+ * l'indentation.
+ */
+const METHODE_MARQUEE = (mot) => new RegExp(
+  `\\/\\/\\s*@${mot}([^\\n]*)\\n\\s+(?:static\\s+)?(?:async\\s+)?(?:get\\s+|set\\s+)?(\\w+)\\s*\\(`, "g");
+
+/**
  * Les lois marquees `// @mesure` : des ETALONS, pas des mecanismes.
  *
  * Toutes les lois de ce depot ne sont pas faites pour tourner. `jumpHeight`
@@ -89,6 +100,11 @@ function etalons(brut) {
   for (const m of brut.matchAll(/\/\/\s*@mesure[^\n]*\n\s*export\s+(?:async\s+)?(?:function|class|const)\s+(\w+)/g)) {
     out.add(m[1]);
   }
+  // Et au-dessus d'une METHODE, depuis que ce compte les voit
+  // ([`docs/90`](../docs/90-methodes.md)) : les deux echappatoires doivent
+  // couvrir tout ce que le compte couvre, sans quoi une methode marquee reste
+  // dans la liste et le marqueur ment.
+  for (const m of brut.matchAll(METHODE_MARQUEE("mesure"))) out.add(m[2]);
   return out;
 }
 
@@ -109,6 +125,9 @@ function etalons(brut) {
 function vides(brut) {
   const out = new Map();
   for (const m of brut.matchAll(/\/\/\s*@vide\s+([^\n]+)\n\s*export\s+(?:async\s+)?(?:function|class|const)\s+(\w+)/g)) {
+    if (m[1].trim().length >= 10) out.set(m[2], m[1].trim());
+  }
+  for (const m of brut.matchAll(METHODE_MARQUEE("vide\\s+"))) {
     if (m[1].trim().length >= 10) out.set(m[2], m[1].trim());
   }
   return out;

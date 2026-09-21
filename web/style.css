@@ -69,6 +69,14 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   border-bottom: 1px solid rgba(255, 217, 160, .2); padding-bottom: 6px;
 }
 .dlg-text { white-space: pre-wrap; line-height: 1.55; }
+/*
+ * `_isMuseumSign` : `DialogueBox` reçoit une chaîne vide en guise de nom, et
+ * `DialogueGUI` dessine un autre fond. Ce n'est pas quelqu'un qui parle, c'est
+ * quelque chose qu'on lit — 70 caractères par ligne au lieu de 50, et le nom de
+ * l'objet en sobre.
+ */
+.dlg-sign { border-left-color: #9fb3cc; }
+.dlg-sign .dlg-name { color: #9fb3cc; font-style: italic; }
 .dlg-options { display: flex; flex-direction: column; gap: 2px; }
 .dlg-option {
   color: #9fb3cc; padding: 2px 6px;
@@ -139,6 +147,19 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 .ow-flashback {
   position: absolute; inset: 0; background: #fff; pointer-events: none;
   opacity: 0;
+}
+/* Les photos du flashback : le jeu en prend une toutes les cinq secondes et
+   les rejoue à rebours sur un quad qui avance vers la caméra. Ici c'est un
+   canevas plein écran mis à l'échelle — le quad qui se rapproche et l'image
+   qui grandit sont la même chose vue de l'œil (docs/98).
+   `--zoom` vient de la position du plan, `--twirl` de `TwirlEffect.angle`,
+   `--flou` de `GlowEffect.blurIterations`. */
+.ow-flashback-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; pointer-events: none; background: #000;
+  image-rendering: auto;
+  transform: scale(var(--zoom, 1)) rotate(var(--twirl, 0deg));
+  filter: blur(var(--flou, 0px)) saturate(0.7) contrast(1.1);
 }
 /* « low fuel / low health / low oxygen », a droite du centre de l'ecran :
    PlayerResourceGUI.OnGUI les pose a x = largeur/2 + 50, en corps 20, rouge */
@@ -555,7 +576,15 @@ body.touch #dialogue {
    tactiles, et le dialogue ne l'avait jamais suivie — ses options faisaient
    20 px de haut, et son « Next » 29 x 16. */
 body.touch .dlg-options { gap: 4px; }
-body.touch .dlg-option { padding: 9px 10px; }
+/* La hauteur ETAIT une somme : 9 px de marge en haut, 9 en bas, et la hauteur
+   de ligne de la police au milieu. Elle dépassait 36 px quand « Gill Sans MT »
+   était chargée, et retombait dessous quand le navigateur lui substituait autre
+   chose — une mesure qui dépend d'un fichier de police téléchargé n'est pas une
+   règle, c'est une coïncidence. On la pose donc. */
+body.touch .dlg-option {
+  padding: 9px 10px; min-height: 44px;
+  display: flex; align-items: center;
+}
 body.touch .dlg-next {
   display: flex; align-items: center; justify-content: center;
   min-width: 78px; min-height: 40px; margin-top: 4px;

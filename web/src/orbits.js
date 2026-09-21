@@ -20,6 +20,9 @@
 // soleil etant lui en inverse du carre, ses satellites retrouvent le
 // v = sqrt(mu/r) keplerien : leurs vitesses decroissent bien en 1/sqrt(r).
 
+// @autrement OWRigidbody : vingt-neuf methodes qui transmettent a un Rigidbody
+// de PhysX, la ou ce portage a Havok et son propre integrateur. Les refaire une
+// par une serait reecrire un moteur physique pour faire baisser un chiffre.
 // @lit OWRigidbody, InitialMotion, InitialVelocity
 // Les corps mobiles et leur mouvement de depart.
 

@@ -137,10 +137,11 @@ export class Flashlight {
     this.light.direction.copyFrom(forward);
   }
 
-  /** L'invite ne s'affiche que dans le noir, lampe eteinte. */
-  promptVisible(inDark, inShip, inMap, inDialogue) {
-    return !this.on && !inShip && !inMap && !inDialogue && inDark;
-  }
+  // L'invite de lampe ne vit plus ici. Elle y a ete ecrite en quatre
+  // conditions devinees ; `Flashlight.CheckPromptStatus` en a SEPT, et
+  // `flashlightPromptVisible` plus bas les porte toutes. Garder les deux, c'est
+  // garder un piege : la version courte a l'air juste, et `lois.mjs` l'a
+  // trouvee morte depuis le lot ou la longue l'a remplacee.
 }
 
 /**
@@ -263,22 +264,86 @@ export function heatAt(sources, world, shiftOf = null) {
   return best;
 }
 
+/**
+ * Les trois seuils de couleur de `Marshmallow.Update`, et son delai.
+ *
+ * Le build ne raisonne jamais sur le niveau de grillage pour ces trois-la : il
+ * raisonne sur la composante ROUGE de la couleur courante, qui vaut
+ * `_initR - _toastLevel`. C'est le meme nombre a une soustraction pres, et
+ * c'est cette soustraction qui fait que la guimauve brule AVANT d'atteindre 1 :
+ *
+ *   r < 0,25  la flamme prend           (`_pSys.renderer.enabled`)
+ *   r < 0,08  la guimauve est perdue    (`ResetMarshmallow`)
+ *
+ * Et une fois la flamme prise, `_toastLevel += 0,001` PAR IMAGE, chaleur ou
+ * pas : on ne rattrape pas une guimauve qui a pris feu, on la regarde finir.
+ * Le pas est par image et non par seconde — c'est ecrit ainsi dans l'IL, sans
+ * `deltaTime`, comme le glissement des points d'accrochage.
+ */
+export const MALLOW = {
+  flame: 0.25,        // composante rouge en dessous de laquelle ca s'enflamme
+  lost: 0.08,         // ... et en dessous de laquelle il n'en reste rien
+  burnStep: 0.001,    // par IMAGE, une fois la flamme prise
+  respawn: 0.8,       // secondes avant qu'une nouvelle n'apparaisse
+};
+
 export class Marshmallow {
-  constructor(baseColor = [1, 0.98, 0.9]) {
+  constructor(baseColor = [1, 0.98, 0.9], cfg = MALLOW) {
     this.base = baseColor;
+    this.cfg = cfg;
     this.toast = 0;
     this.eaten = 0;
     this.held = false;
+    // `_justReset` / `_resetTime` : entre la guimauve perdue (ou mangee) et la
+    // suivante, il n'y a rien sur le baton pendant huit dixiemes de seconde.
+    this.gone = false;
+    this.goneFor = 0;
+    this.burned = 0;      // combien on en a laisse bruler
   }
 
-  get edible() { return this.held && this.toast >= MIN_TOAST; }
-  get burnt() { return this.toast >= 1; }
+  /** La composante rouge courante, celle sur laquelle le build decide. */
+  get red() { return Math.max(0, this.base[0] - this.toast); }
+
+  /** `_pSys.renderer.enabled` : la flamme a pris. */
+  get aflame() { return !this.gone && this.held && this.red < this.cfg.flame; }
+
+  get edible() { return !this.gone && this.held && this.toast >= MIN_TOAST; }
+
+  /**
+   * Il n'en reste rien. Ce n'etait pas `toast >= 1` : avec un rouge d'origine
+   * a 1, le build la perd des 0,92 — soit AVANT le grillage complet, et donc
+   * avant que le portage ne s'en apercoive.
+   */
+  get burnt() { return this.red < this.cfg.lost; }
 
   /** @param heat chaleur totale recue, 0 a 100 */
   update(dt, heat) {
-    if (!this.held || heat <= 0) return this.toast;
-    this.toast = Math.min(1.2, this.toast + heat / (COOK_TIME * 100) * dt);
+    // La guimauve perdue ou mangee revient apres son delai, entiere.
+    if (this.gone) {
+      this.goneFor += dt;
+      if (this.goneFor >= this.cfg.respawn) {
+        this.gone = false; this.goneFor = 0; this.toast = 0;
+      }
+      return this.toast;
+    }
+    if (!this.held) return this.toast;
+    if (heat > 0) {
+      this.toast = Math.min(1.2, this.toast + heat / (COOK_TIME * 100) * dt);
+    }
+    // `if (_pSys.renderer.enabled && _toastLevel < 1) _toastLevel += 0.001`.
+    // L'ordre compte : le build lit la flamme de l'image PRECEDENTE, puis
+    // recalcule la couleur, puis rallume ou non la flamme.
+    if (this.aflame && this.toast < 1) this.toast += this.cfg.burnStep;
+    if (this.burnt) { this.burned += 1; this.vanish(); }
     return this.toast;
+  }
+
+  /** `ResetMarshmallow`, branche « elle etait la » : elle disparait. */
+  vanish() {
+    if (this.gone) return false;
+    this.gone = true;
+    this.goneFor = 0;
+    return true;
   }
 
   /** Couleur courante : chaque composante moins le niveau de grillage. */
@@ -289,8 +354,9 @@ export class Marshmallow {
   eat() {
     if (!this.edible) return false;
     this.eaten += 1;
-    this.toast = 0;
-    this.held = false;
+    // `_eaten = true` puis `ResetMarshmallow` : on ne repart pas d'une
+    // guimauve crue dans la seconde, on repart de rien pendant 0,8 s.
+    this.vanish();
     return true;
   }
 }
@@ -314,7 +380,13 @@ export function remoteConsoles(gameplay = {}) {
   const out = [];
   for (const cls of ["RemoteFlightConsole", "SatelliteSnapshotController"]) {
     for (const e of placed[cls] || []) {
+      // `targets` porte ce que le verrouillage de camera regarde pendant qu'on
+      // tient la console : le VAISSEAU MODELE pour la console de vol,
+      // l'ECRAN DE PROJECTION pour le satellite. Ce n'est pas la console
+      // elle-meme, et c'est ce qui fait qu'on se tourne vers le bon objet
+      // (docs/105-lire.md).
       out.push({ name: e.name, kind: cls, position: e.position,
+                 body: e.body || null, targets: e.targets || null,
                  flight: cls === "RemoteFlightConsole" });
     }
   }

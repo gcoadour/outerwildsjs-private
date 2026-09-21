@@ -22,6 +22,9 @@
 // lecture — c'est un debordement VOULU, qui sature l'ecran. On garde les
 // nombres tels quels, et c'est le rendu qui les borne.
 
+// @autrement GlowEffect : les six methodes sont les passes d'un flou additif a
+// N iterations. Le portage porte la GRANDEUR — `blurIterations`, de 2 a 32 — et
+// la rend avec ce que le navigateur a, sans refaire les passes (docs/103).
 // @lit PlayerCameraEffectController, GlowEffect, Vignetting, GrayscaleEffect, TwirlEffect
 // L'etat des six effets d'image de la camera du joueur (docs/47).
 

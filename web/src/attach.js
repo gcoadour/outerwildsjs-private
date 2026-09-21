@@ -44,6 +44,7 @@
 
 import { angleBetween, qmul, qconj, qrot } from "./decor.js";
 import { smoothStep } from "./tower.js";
+import { horizonBasis } from "./start.js";
 
 /** Constructeur de `PlayerAttachPoint`. La scene contredit les trois drapeaux. */
 export const ATTACHE = {
@@ -56,6 +57,27 @@ export const ATTACHE = {
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const IDENTITE = [0, 0, 0, 1];
+
+/**
+ * Un vecteur, qu'il vienne du portage ou de Babylon.
+ *
+ * Ce module vit du cote « logique pure » : il indexe `v[0]`, `v[1]`, `v[2]`.
+ * Le moteur, lui, tient l'avant du joueur dans un `BABYLON.Vector3`, et le lui
+ * passait tel quel. `v[0]` valait alors `undefined`, `Math.hypot` rendait NaN,
+ * `normalize` retombait sur le vecteur nul, l'angle valait zero — et la duree
+ * du demi-tour avec lui. **On s'asseyait d'un coup**, a tous les points
+ * d'accrochage, depuis toujours, pendant que les controles mesuraient 1,8 s en
+ * appelant la loi a la main avec un tableau (docs/97).
+ *
+ * Trois appelants faisaient la faute ; la garder au bord du module la rend
+ * impossible a refaire par un quatrieme.
+ */
+function vec3(v) {
+  if (!v) return null;
+  if (Array.isArray(v)) return v;
+  if (typeof v.x === "number") return [v.x, v.y, v.z];
+  return v;
+}
 
 /**
  * `Vector3.Angle(joueur.forward, point.forward) / _rotationRate`.
@@ -209,13 +231,19 @@ export class AttachPoint {
     const f = this.frame(shift);
     this.attached = true;
     this.since = now;
-    this.localPosition = toLocal(f, joueur.position);
+    this.localPosition = toLocal(f, vec3(joueur.position));
     // La rotation du joueur DANS le repere du point : c'est d'elle que part le
     // slerp vers l'identite, c'est-a-dire vers « aligne sur le point ».
     this.initLocalRotation = qmul(qconj(f.rotation), joueur.rotation || IDENTITE);
-    this.turnDuration = turnDuration(joueur.forward || qrot(joueur.rotation || IDENTITE,
-                                                            [0, 0, 1]),
-                                     this.forward(), this.rotationRate);
+    // Gardee, et pas seulement consommee : c'est la seule trace de ce sur quoi
+    // la duree a ete calculee, et donc la seule chose qu'un controle en
+    // NAVIGATEUR peut interroger apres un vrai embarquement. Le defaut qui a
+    // dormi ici — un `Vector3` la ou le module attend un tableau — ne se voit
+    // pas dans `turnDuration`, qui vaut alors zero comme un joueur deja aligne.
+    this.initForward = vec3(joueur.forward)
+      || qrot(joueur.rotation || IDENTITE, [0, 0, 1]);
+    this.turnDuration = turnDuration(this.initForward, this.forward(),
+                                     this.rotationRate);
     return { centerCamera: this.centerCamera, rate: this.rotationRate,
              lock: this.lockPlayerTurning };
   }
@@ -380,6 +408,237 @@ export class AttachPoints {
 // joueur, tenu en lacet et tangage. La rotation discrete n'a donc rien a
 // tourner, et ce qui reste est ce qui se sent : les commandes verrouillees et
 // la camera qui revient au centre. C'est dit ici plutot que passe sous silence.
+
+// --- SE REDRESSER PREND DU TEMPS (docs/106-redressement.md) -----------------
+//
+// @lit AlignWithDirection, AlignWithField
+//
+// `AlignWithDirection` n'etait lue nulle part, et elle porte la loi du
+// mouvement : a quelle VITESSE le corps du joueur bascule vers un nouveau bas.
+// Le portage prenait le bas du champ dominant tel quel, a chaque image. Changer
+// de champ — se poser, passer d'une planete a sa lune, entrer dans une grotte —
+// faisait donc basculer le monde d'un coup.
+//
+//   _currentDirection   = transform.TransformDirection(_localAlignmentAxis);
+//   _alignmentDirection = GetAlignmentDirection();
+//   _degreesToTarget    = Vector3.Angle(_currentDirection, _alignmentDirection);
+//   if (_degreesToTarget == 0) _degreesToTarget = 0.0001f;
+//   switch (_interpolationMode) {
+//       1: _adjustedSlerpRate = _interpolationRate * fixedDeltaTime;
+//       2: _adjustedSlerpRate = _interpolationRate / _degreesToTarget * fixedDeltaTime;
+//       3: _adjustedSlerpRate = _interpolationRate / Pow(_degreesToTarget, 2) * fixedDeltaTime;
+//   }
+//   _adjustedSlerpRate = Mathf.Clamp01(_adjustedSlerpRate);
+//   rigidbody.rotation = Slerp(identity, FromToRotation(courant, cible),
+//                              _adjustedSlerpRate) * GetRotation();
+//
+// LE MODE 2 EST UNE VITESSE CONSTANTE, et il faut le calculer pour le voir. Le
+// taux est une FRACTION du chemin restant ; diviser par l'ecart restant annule
+// donc l'ecart : `rate * ecart = _interpolationRate * dt`. A cinquante hertz,
+// c'est 2 degres par pas de physique quelle que soit la distance — soit
+// **cent degres par seconde**, et 1,8 s pour un demi-tour complet.
+//
+// Sous deux degres, le taux depasse 1 et `Clamp01` le ramene : les deux
+// derniers degres se franchissent d'un coup. Ce n'est pas une approximation,
+// c'est la fin de l'interpolation.
+//
+// Le joueur porte `_localAlignmentAxis = (0, -1, 0)` : ce qu'on aligne est son
+// BAS, sur la direction de l'acceleration. Et `_fieldStrengthThreshold` vaut 0,
+// donc la moindre gravite suffit a se redresser (`CheckAlignmentRequirements`
+// teste `magnitude > seuil`, strictement).
+
+/** L'instance posee sur `Player_Body`, et elle est seule. */
+export const ALIGN = { mode: 2, rate: 100, localAxis: [0, -1, 0],
+                       usePhysics: false, fieldStrengthThreshold: 0,
+                       steadyDegrees: 1 };
+
+/**
+ * `_adjustedSlerpRate` : la fraction du chemin restant parcourue CETTE image.
+ *
+ * Le `0.0001` du build n'est pas une precaution contre la division par zero —
+ * il la remplace par un taux enorme, que `Clamp01` ramene a 1. Un corps deja
+ * aligne le reste.
+ */
+export function slerpRate(degresRestants, dt, cfg = ALIGN) {
+  const d = degresRestants === 0 ? 1e-4 : degresRestants;
+  let r;
+  if (cfg.mode === 1) r = cfg.rate * dt;
+  else if (cfg.mode === 2) r = cfg.rate / d * dt;
+  else if (cfg.mode === 3) r = cfg.rate / (d * d) * dt;
+  else r = 1;
+  return Math.min(1, Math.max(0, r));
+}
+
+/** Angle non signe entre deux directions, en degres — `Vector3.Angle`. */
+function angleDeg(a, b) {
+  const la = Math.hypot(a[0], a[1], a[2]), lb = Math.hypot(b[0], b[1], b[2]);
+  if (!la || !lb) return 0;
+  const c = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb);
+  return Math.acos(Math.max(-1, Math.min(1, c))) * 180 / Math.PI;
+}
+
+/**
+ * Un pas de l'interpolation : la direction courante vers la cible.
+ *
+ * `Slerp(identity, FromToRotation(a, b), t)` applique a `a` n'est rien d'autre
+ * que l'interpolation spherique de `a` vers `b` a la fraction `t`. On la fait
+ * donc directement, sans passer par un quaternion qu'on jetterait aussitot.
+ */
+export function alignStep(courant, cible, dt, cfg = ALIGN) {
+  const ecart = angleDeg(courant, cible);
+  const t = slerpRate(ecart, dt, cfg);
+  const lc = Math.hypot(...courant), lb = Math.hypot(...cible);
+  if (!lc || !lb) return { direction: [...courant], degres: ecart, taux: t };
+  const a = courant.map((v) => v / lc), b = cible.map((v) => v / lb);
+  const cos = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
+  const theta = Math.acos(cos);
+  // Colineaires : rien a interpoler. Opposes : `FromToRotation` choisit un axe
+  // perpendiculaire quelconque, et ce portage en fait autant.
+  if (theta < 1e-6) return { direction: b, degres: ecart, taux: t };
+  let out;
+  if (Math.PI - theta < 1e-6) {
+    const ref = Math.abs(a[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
+    const n = [a[1] * ref[2] - a[2] * ref[1], a[2] * ref[0] - a[0] * ref[2],
+               a[0] * ref[1] - a[1] * ref[0]];
+    const ln = Math.hypot(...n);
+    const u = n.map((v) => v / ln);
+    const ang = Math.PI * t, s = Math.sin(ang), co = Math.cos(ang);
+    const d = u[0] * a[0] + u[1] * a[1] + u[2] * a[2];
+    out = [a[0] * co + (u[1] * a[2] - u[2] * a[1]) * s + u[0] * d * (1 - co),
+           a[1] * co + (u[2] * a[0] - u[0] * a[2]) * s + u[1] * d * (1 - co),
+           a[2] * co + (u[0] * a[1] - u[1] * a[0]) * s + u[2] * d * (1 - co)];
+  } else {
+    const s = Math.sin(theta);
+    const k1 = Math.sin((1 - t) * theta) / s, k2 = Math.sin(t * theta) / s;
+    out = [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
+  }
+  const l = Math.hypot(...out) || 1;
+  return { direction: out.map((v) => v / l), degres: ecart, taux: t };
+}
+
+/**
+ * `KeepCameraSteady` : le tangage rend ce que le corps prend.
+ *
+ *   Vector3 plat = _alignmentDirection - Project(_alignmentDirection, transform.right);
+ *   float deg = -Vector3.Angle(transform.TransformDirection(_localAlignmentAxis), plat)
+ *             * Mathf.Sign(Vector3.Dot(transform.forward, _alignmentDirection));
+ *   _playerCameraController.AddDegreesY(deg * _adjustedSlerpRate);
+ *
+ * `InitAlignment` allume ce drapeau a CHAQUE entree dans un champ, et
+ * `FixedUpdate` l'eteint des que l'ecart passe sous un degre. Pendant tout le
+ * redressement, la part de TANGAGE du mouvement est retiree du regard : le
+ * corps pivote sous vous, la vue ne bouge pas. Sans cela, se poser fait
+ * basculer l'horizon — ce qui est, au sens propre, le contraire de ce que le
+ * jeu fait.
+ *
+ * Le lacet et le roulis, eux, ne sont PAS compenses : seule la composante
+ * autour de l'axe droit de la camera l'est, et c'est ce que dit la projection.
+ *
+ * C'est la transcription litterale, et elle sert d'etalon a `steadyLook` — qui
+ * est ce que ce portage applique, pour une raison ecrite la-bas.
+ *
+ * @returns {number} les degres de tangage a RETIRER, signes
+ */
+// @mesure
+export function steadyPitch(upAvant, upApres, droite) {
+  const plat = (v) => {
+    const d = v[0] * droite[0] + v[1] * droite[1] + v[2] * droite[2];
+    return [v[0] - droite[0] * d, v[1] - droite[1] * d, v[2] - droite[2] * d];
+  };
+  const a = plat(upAvant), b = plat(upApres);
+  const la = Math.hypot(...a), lb = Math.hypot(...b);
+  if (!la || !lb) return 0;
+  const ang = angleDeg(a, b);
+  // Le signe vient du sens de rotation autour de l'axe droit.
+  const n = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+             a[0] * b[1] - a[1] * b[0]];
+  const s = n[0] * droite[0] + n[1] * droite[1] + n[2] * droite[2];
+  return s < 0 ? -ang : ang;
+}
+
+/**
+ * Ce que ce portage applique : le regard ne bouge PAS, et les deux angles avec.
+ *
+ * POURQUOI PAS `steadyPitch` TEL QUEL. Le build n'ecrit qu'un `AddDegreesY`
+ * parce que son CAP vit sur le `Rigidbody` : redresser le corps autour de son
+ * axe droit ne change pas la reference a laquelle le lacet se mesure. Ici, le
+ * lacet se mesure sur un repere d'horizon RE-DERIVE du haut a chaque image
+ * (`horizonBasis`) — donc bouger le haut bouge aussi la reference du lacet, et
+ * ne corriger que le tangage laisse la vue deriver. Mesure : pour huit degres
+ * de redressement, 8,7 degres de derive sans rien, 3,4 avec le seul tangage.
+ *
+ * Les deux lois coincident quand le repere ne tourne pas — c'est le cas a
+ * lacet nul, et le test le garde. Ce qui est reproduit est l'EFFET, qui est la
+ * loi : pendant que le corps se redresse, la vue reste ou elle etait.
+ *
+ * @param fwdMonde l'avant AVANT le pas, en coordonnees monde
+ * @param upApres  le haut APRES le pas
+ * @returns {{yaw:number, pitch:number}} les angles a poser, en RADIANS
+ */
+export function steadyLook(fwdMonde, upApres) {
+  const { up: u, east, north } = horizonBasis(upApres);
+  const l = Math.hypot(...fwdMonde) || 1;
+  const f = fwdMonde.map((v) => v / l);
+  const k = f[0] * u[0] + f[1] * u[1] + f[2] * u[2];
+  // `fwd = north*cy*cp + east*sy*cp - up*sp` : le tangage se lit sur la
+  // composante verticale, le lacet sur ce qu'il en reste.
+  const pitch = Math.asin(Math.max(-1, Math.min(1, -k)));
+  const plat = [f[0] - u[0] * k, f[1] - u[1] * k, f[2] - u[2] * k];
+  const lp = Math.hypot(...plat);
+  // Regard exactement vertical : aucun azimut. On garde le lacet d'avant,
+  // comme `yawFor` rend null dans ce cas.
+  if (lp < 1e-9) return { yaw: null, pitch };
+  const p = plat.map((v) => v / lp);
+  const cy = p[0] * north[0] + p[1] * north[1] + p[2] * north[2];
+  const sy = p[0] * east[0] + p[1] * east[1] + p[2] * east[2];
+  return { yaw: Math.atan2(sy, cy), pitch };
+}
+
+/**
+ * Le HAUT du joueur, qui rejoint celui du champ a cent degres par seconde.
+ *
+ * Etat pur : on lui donne le haut voulu et un pas de temps, il rend le haut a
+ * appliquer. `steady` dit si le redressement est encore en cours, donc si le
+ * tangage doit etre compense.
+ */
+export class UpAligner {
+  constructor(cfg = ALIGN) {
+    this.cfg = cfg;
+    this.up = null;
+    this.degres = 0;
+    this.steady = false;    // `_keepCameraSteady`
+  }
+
+  /** `InitAlignment` : entrer dans un champ rallume la compensation. */
+  init() { this.steady = true; }
+
+  /**
+   * @param cible le haut voulu, unitaire
+   * @returns {{up:Array, tourne:number}} le haut a appliquer, et de combien de
+   *   degres il a tourne cette image
+   */
+  update(cible, dt) {
+    // Pas de champ : `_doAlignment` est faux, le corps garde son orientation.
+    // Et tant qu'on n'a JAMAIS eu de champ, on ne se donne pas de haut : semer
+    // une verticale du monde ferait converger le premier champ trouve depuis
+    // elle, au lieu d'y etre deja.
+    if (!cible) return { up: this.up, tourne: 0 };
+    // La toute premiere image ne s'interpole pas : `_isFirstFrame` aligne le
+    // joueur d'office, sans quoi une partie commencerait couche.
+    if (!this.up) { this.up = [...cible]; this.degres = 0; this.steady = false;
+                    return { up: this.up, tourne: 0 }; }
+    const avant = this.up;
+    const pas = alignStep(avant, cible, dt, this.cfg);
+    this.degres = pas.degres;
+    this.up = pas.direction;
+    // `if (_degreesToTarget < 1f) _keepCameraSteady = false;` — le test porte
+    // sur l'ecart AVANT le pas, comme dans le build.
+    if (this.steady && pas.degres < this.cfg.steadyDegrees) this.steady = false;
+    return { up: this.up, tourne: angleDeg(avant, this.up) };
+  }
+
+  reset() { this.up = null; this.degres = 0; this.steady = false; }
+}
 
 /** `BreakAlignment` passe 50 a `CenterCamera` et a `InitDiscreteRotation`. */
 export const FIELD_ALIGN = { rate: 50 };

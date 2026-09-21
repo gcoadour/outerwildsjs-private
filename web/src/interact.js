@@ -40,9 +40,17 @@ export class Interactables {
       });
     }
     for (const x of placed.ReadableObject || []) {
+      // `_attentionPoint` : ce que le joueur se tourne pour regarder pendant
+      // qu'il lit, et ce n'est PAS toujours le panneau. Le point d'attention de
+      // la vitrine des billes est `Ball_Body`, la bille elle-meme, un metre
+      // plus haut que le volume de lecture. Dix-neuf des trente-quatre en
+      // declarent un ; les quinze autres se regardent eux-memes.
+      const att = (x.targets && x.targets._attentionPoint) || null;
       this.items.push({
         kind: "readable", name: x.name, world: x.position,
         range: 3, prompt: null, text: x.text || null,
+        attention: att ? { position: att.position, body: att.body } : null,
+        body: x.body || null,
       });
     }
     // Les sept `InteractZone` : une invite, et une FENETRE DE VUE.

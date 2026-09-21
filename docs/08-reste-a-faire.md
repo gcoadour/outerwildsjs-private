@@ -20,7 +20,8 @@ lisait**.
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
-> | `lois.mjs` — ce que le portage **appelle** | **20** methodes sans appelant ([`90`](90-methodes.md)) |
+> | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **96 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`111`](111-passages.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -74,7 +75,7 @@ portage.
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
-| mort et flashback | 5 causes, 22 images, 8,21 s, commandes coupées |
+| mort et flashback | 5 causes, commandes coupées, et les **photos de la partie** rejouées à rebours — autant qu'on a survécu de fois cinq secondes ([`98`](98-flashback.md)) |
 | supernova | progression, contraction, explosion, onde de choc |
 | dégâts du vaisseau | pièces, propulseurs coupés, destruction |
 | LOD par maillage | hauteur relative à l'écran, parcours tournant |
@@ -104,7 +105,19 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
-| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |
+| **passages anciens** | on arrive avec la vitesse du point d'arrivee, et tourne vers ce qu'il regarde ([`111`](111-passages.md)) |
+| croute de Brittle Hollow | un morceau part avec la vitesse du point d'ou il lache ([`110`](110-croute.md)) |
+| **anglerfish** | il DEPASSE sa proie, accelere en 0,42 s, et ne se retourne pas quand on est derriere ([`109`](109-anglerfish.md)) |
+| **le reveil** | 80 degres au ciel, 7 s, puis 1,6 s de descente — et le joueur garde la main ([`108`](108-reveil.md)) |
+| **pilote automatique** | l'asservissement du build, la gravite dans le freinage, et les quatre messages remis a l'endroit ([`107`](107-pilote.md)) |
+| accorder sa vitesse | par la POUSSEE, aux trois endroits qui la posaient : l'écart divisé par la poussée ([`107`](107-pilote.md)) |
+| **se redresser** | 100 deg/s vers le bas du champ, et le tangage compense tant que ca dure ([`106`](106-redressement.md)) |
+| **objets lisibles** | les 34 textes s'affichent enfin, en pages de 70 x 5, `@` compris ([`105`](105-lire.md)) |
+| verrouillage de camera | cinq appelants, cinq vitesses : 2 pour un panneau, 5 pour le vaisseau modele ([`105`](105-lire.md)) |
+| ambiance par couches | 17 zones, arbitrées comme `AudioDetector` : **la couche 0 couvre les autres, les ex aequo jouent ensemble** ([`104`](104-arbitrage.md)) ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |
+| fondu d'ambiance | linéaire, et d'une **durée** repartant de la valeur courante — pas d'un rythme ([`104`](104-arbitrage.md)) |
+| aube et crépuscule | `_dayWindow` = la **largeur de l'arc de jour**, 200° pour 180° de géométrie ; les deux clips se **croisent** ([`104`](104-arbitrage.md)) |
+| tête de lecture | la boucle du vent repart au hasard, la musique du village **reprend à la même note** ([`104`](104-arbitrage.md)) |
 | référentiels déclarés | 14 volumes : le build dit l'ancre, la gravité complète |
 | distances du pilote auto | 1 000 / 2 500 et l'alignement, lus dans le build |
 | décor vivant | 15 panneaux, 8 visages, 10 buses, 6 passages anciens |
@@ -176,6 +189,25 @@ portage.
 | le bâton sort au feu | `BeginRoasting` / `StopRoasting` : une touche inventée en moins ([`80`](80-invites.md)) |
 | **invulnérable au premier tour** | tant qu'on n'a pas les codes et qu'on n'est pas monté dans le vaisseau ([`81`](81-invulnerable.md)) |
 | tutoriel de la sonde | **3 photos en vol** puis la sonde détruite, et non le premier tir ([`81`](81-invulnerable.md)) |
+| **la fin des temps** | le mixage à **90 s restantes** et non à l'explosion, `MixEndTimes(5)`, et le verrou qui tient le silence ([`97`](97-assise-instantanee.md)) |
+| toile du regard | la fraction de charge, et non les secondes : elle tournait 27 fois trop vite ([`97`](97-assise-instantanee.md)) |
+| **s'asseoir prend du temps** | 1,8 s dos tourné : un `Vector3` passé pour un tableau rendait l'assise instantanée ([`97`](97-assise-instantanee.md)) |
+| la lunette fait taire le monde | `IsolateTrack(Signal, 0,2, 1)` : on trouve un émetteur par le silence ([`97`](97-assise-instantanee.md)) |
+| la lunette pendant l'assise | le suivi se suspend, et en sortir **recommence** le demi-tour ([`97`](97-assise-instantanee.md)) |
+| **la guimauve prend feu** | flamme à `r < 0,25`, perdue à `r < 0,08`, une neuve 0,8 s plus tard ([`97`](97-assise-instantanee.md)) |
+| voyants d'avarie | le **masque**, pas les pièces mortes — et rangés `4, 1, 16, 8, 2` ([`97`](97-assise-instantanee.md)) |
+| **le flashback** | les photos de la partie, à rebours, le plan qui avance, le flou qui efface ([`98`](98-flashback.md)) |
+| état de mort du joueur | `PlayerState._isDead`, et c'est lui qui arrête les photos ([`98`](98-flashback.md)) |
+| passages de Dark Bramble | l'**éclair de brouillard** du build, monté à l'entrée, et non l'éclair bleu du téléporteur ([`99`](99-lois-branchees.md)) |
+| projecteur du satellite | la salle s'éteint en 2 s pendant qu'on regarde ([`99`](99-lois-branchees.md)) |
+| nouvelle partie | `CreateNewPlayerSave`, au menu des réglages faute de menu-titre ([`99`](99-lois-branchees.md)) |
+| jauges du casque | elles sont **sur la visière** : sans combinaison, il n'y en a pas ([`99`](99-lois-branchees.md)) |
+| orbites de la carte | cinq couleurs du build, centrées sur le **Soleil**, et l'ellipse de la comète ([`100`](100-carte.md)) |
+| **sauter ne décolle pas** | la poussée horizontale se coupe au sol et demande un geste pour revenir ([`101`](101-sac-dorsal.md)) |
+| panne sèche | rien ne pousse à zéro, et il faut 5 % pour repartir ([`101`](101-sac-dorsal.md)) |
+| **sortie du trou blanc** | droit devant, à son rayon, à 20 u/s — le cône est pour les débris ([`102`](102-trou-blanc.md)) |
+| champ de débris | un par seconde, il grandit en 0,96 s, et une laisse le retient ([`102`](102-trou-blanc.md)) |
+| on ressort en regardant la sortie | `ReceiveWarpedPlayer` aligne le regard avant de déplacer le corps ([`103`](103-refait.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
@@ -219,7 +251,7 @@ dans l'alpha.
 | ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |
 | les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
 | ~~le modèle de sonde~~ | **faux, mesuré** ([`60`](60-sonde.md)) : `_probePrefab` vise `sharedassets1.assets:2295` et s'y résout du premier coup. Le recensement ne lisait que `level0`, et l'alpha range les préfabriqués ailleurs. Dix nœuds, huit classes, deux caméras |
-| les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
+| ~~les images du flashback~~ | **faux, lu** ([`98`](98-flashback.md)) : `Flashback.TakeSnapshot` rend la caméra du joueur dans une `RenderTexture` de 256 × 256 **toutes les cinq secondes**, et la mort les rejoue à rebours. La mémoire visuelle n'est pas un objet de scène — elle se remplit à l'exécution, et c'est pour cela qu'un recensement ne la voyait pas |
 | la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
 | ~~l'entraînement et le ciblage~~ | **faux, mesuré** : `PlayerLockOnTargeting` ×2 (dont une sur `Player_Body`) et `ZeroGTrainingManager` sont dans le build ([`45`](45-recensement-mesure.md)) |
 

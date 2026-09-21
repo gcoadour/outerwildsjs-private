@@ -36,6 +36,8 @@ OW_BUILD=... node scripts/il.mjs --enum <Enumeration>
 OW_BUILD=... node scripts/composants.mjs <Classe>       # les instances de la scene
 OW_BUILD=... node scripts/evenements.mjs   # ce que le jeu annonce, et ce qu'on en nomme
 node scripts/lois.mjs              # ce que le portage a ecrit, et ce qu'il appelle
+OW_BUILD=... node scripts/refait.mjs [--tout]  # ce que le build FAIT dans une
+                                   # classe qu'on lit, et ce qu'on n'en refait pas
 
 # Servir la page telle qu'elle sera publiee (web/ est la racine du site)
 web/fetch-deps.sh                  # Babylon.js + Havok dans web/vendor/, non versionne
@@ -164,3 +166,12 @@ README : quand un chiffre bouge, les trois bougent ensemble.
   compte, et il retire les commentaires avant de compter — une classe citée en
   prose n'est pas une classe lue ([`docs/47`](docs/47-effets-image.md),
   [`docs/50`](docs/50-regard.md)).
+- **Une classe lue peut l'être à moitié.** `scripts/refait.mjs` liste, pour
+  chaque `@lit`, les **méthodes** que le build lui donne et que le module ne
+  nomme pas. Il compte des noms — donc une **liste de pistes**, jamais un
+  pourcentage — et il lit les commentaires, à l'inverse du recensement, parce
+  qu'un portage qui refait une méthode la cite au-dessus du code qui la refait.
+  Une seule échappatoire, avec raison obligatoire : `// @autrement <Classe> :
+  <raison>`, pour une classe dont le portage fait la même chose par un autre
+  chemin assumé — Havok à la place de PhysX, la chaîne d'effets de Babylon à la
+  place d'un shader d'Unity 4 ([`docs/103`](docs/103-refait.md)).

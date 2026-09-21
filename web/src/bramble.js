@@ -27,6 +27,12 @@ export const FISH = {
   escapeDistance: 300,
   habitatRadius: 1200,
   noiseRadius: 200,
+  // `AddAngularVelocityChange(w * 0.1f)` : le predateur ne tourne qu'un DIXIEME
+  // du chemin par pas de physique. C'est toute sa faiblesse.
+  turnPart: 0.1,
+  // `SetAngularVelocity(GetAngularVelocity() * 0.95f)` a l'arret : sa rotation
+  // s'eteint de cinq pour cent par pas, il ne s'immobilise pas net.
+  restSpin: 0.95,
   // Distance a laquelle le predateur attrape. Le build ne la donne PAS : il
   // decrit la detection et la poursuite, pas la prise, qui passe par un volume
   // de collision sur la bouche. 25 unites est l'ordre de grandeur du maillage
@@ -35,6 +41,82 @@ export const FISH = {
 };
 
 const dist = (a, b) => Math.hypot(a[0] - b.x, a[1] - b.y, a[2] - b.z);
+
+/**
+ * `OWPhysics.FromToAngularVelocity(de, vers)`, et son piege.
+ *
+ *     Vector3 c = Cross(de.normalized, vers.normalized);
+ *     float angle = Mathf.Asin(c.magnitude);
+ *     return c.normalized * angle / Time.fixedDeltaTime;
+ *
+ * L'ANGLE VIENT D'UN ARCSINUS, pas d'un arccosinus. Il plafonne donc a
+ * quatre-vingt-dix degres et REDESCEND au-dela : une cible pile derriere donne
+ * un produit vectoriel presque nul, donc un angle presque nul, donc un
+ * predateur qui ne se retourne pas. Ce n'est pas une approximation du build,
+ * c'est un angle mort — et il se joue (docs/109-anglerfish.md).
+ *
+ * @returns {{axe:Array, angle:number}} l'axe unitaire et l'angle en radians
+ */
+export function fromToAngular(de, vers) {
+  const ld = Math.hypot(de[0], de[1], de[2]) || 1;
+  const lv = Math.hypot(vers[0], vers[1], vers[2]) || 1;
+  const a = [de[0] / ld, de[1] / ld, de[2] / ld];
+  const b = [vers[0] / lv, vers[1] / lv, vers[2] / lv];
+  const c = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+             a[0] * b[1] - a[1] * b[0]];
+  const m = Math.hypot(c[0], c[1], c[2]);
+  const angle = Math.asin(Math.min(1, m));
+  if (m < 1e-9) return { axe: [0, 0, 0], angle: 0 };
+  return { axe: [c[0] / m, c[1] / m, c[2] / m], angle };
+}
+
+/** Rotation d'un vecteur autour d'un axe unitaire, formule de Rodrigues. */
+function tourne(v, axe, ang) {
+  const co = Math.cos(ang), si = Math.sin(ang);
+  const d = axe[0] * v[0] + axe[1] * v[1] + axe[2] * v[2];
+  return [v[0] * co + (axe[1] * v[2] - axe[2] * v[1]) * si + axe[0] * d * (1 - co),
+          v[1] * co + (axe[2] * v[0] - axe[0] * v[2]) * si + axe[1] * d * (1 - co),
+          v[2] * co + (axe[0] * v[1] - axe[1] * v[0]) * si + axe[2] * d * (1 - co)];
+}
+
+/**
+ * De combien le predateur tourne pendant `dt`, et a quelle vitesse il va.
+ *
+ *     Vector3 w = FromToAngularVelocity(transform.forward, vers);
+ *     _anglerBody.SetAngularVelocity(Vector3.zero);
+ *     _anglerBody.AddAngularVelocityChange(w * 0.1f);
+ *     float v = Min(relative.magnitude + _acceleration, vitesseMax);
+ *     _anglerBody.SetVelocity(transform.forward * v + bramble.GetVelocity());
+ *
+ * DEUX CHOSES QUE CE PORTAGE N'AVAIT PAS, et ce sont celles qui se jouent :
+ *
+ *   - IL NE VA PAS DROIT SUR SA PROIE. Il oriente son AVANT d'un dixieme du
+ *     chemin par pas de physique, et avance le long de cet avant. Il depasse,
+ *     il vire large, et c'est ce qui permet de l'esquiver. Le portage le
+ *     deplacait droit vers la cible, ce qui en faisait un missile ;
+ *   - IL ACCELERE EN UNE DEMI-SECONDE. `+ _acceleration` est ajoute PAR PAS DE
+ *     PHYSIQUE, sans `deltaTime` : deux unites par seconde toutes les vingt
+ *     millisecondes, soit cent unites par seconde carree. Les quarante-deux de
+ *     la poursuite sont atteintes en vingt et un pas — 0,42 s. Le portage
+ *     lisait `acceleration * dt` et mettait vingt et une SECONDES.
+ *
+ * Les deux constantes du build sont par PAS ; on les ramene au temps ecoule,
+ * comme `approach` le fait pour la marche, ce qui garde le comportement exact a
+ * cinquante hertz sans dependre de la cadence d'images.
+ */
+export function fishStep(avant, vers, vitesse, vitesseMax, dt, cfg = FISH,
+                         step = 0.02) {
+  const { axe, angle } = fromToAngular(avant, vers);
+  // Un dixieme PAR PAS : sur `dt`, autant de dixiemes qu'il y a de pas — mais
+  // jamais plus que le chemin qui reste.
+  const part = angle > 0
+    ? Math.min(angle, angle * cfg.turnPart * (dt / step)) : 0;
+  const neuf = angle > 0 ? tourne(avant, axe, part) : avant.slice();
+  const l = Math.hypot(neuf[0], neuf[1], neuf[2]) || 1;
+  const v = Math.min(vitesse + cfg.acceleration * (dt / step), vitesseMax);
+  return { forward: [neuf[0] / l, neuf[1] / l, neuf[2] / l], speed: v,
+           angle, tourne: part };
+}
 
 /**
  * Le bruit, tel que les predateurs l'entendent.
@@ -84,13 +166,32 @@ export class NoiseField {
 }
 
 export class Anglerfish {
+  /** Nouvelle boucle : le predateur oublie, et sa proie revit. */
+  reset() {
+    this.position = this.home.slice();
+    this.state = "repos";
+    this.speed = 0;
+    this.spin = 0;
+    this.caught = false;
+    this.forward = [0, 0, 1];
+  }
+
   constructor(home, cfg = FISH) {
     this.cfg = cfg;
     this.home = home.slice();
     this.position = home.slice();
+    // `ChangeState(AnglerState)` pose l'etat et annonce `OnChangeAnglerState`.
+    // Les trois etats du build sont `Lurking`, `Investigating` et `Chasing` ;
+    // ce sont les trois que voici, et c'est `FixedUpdate` qui les separe : le
+    // premier ne bouge pas, les deux autres passent par `UpdateMovement` avec
+    // une cible et une vitesse differentes.
     this.state = "repos";     // repos | inspecte | poursuit
     this.speed = 0;
     this.caught = false;      // le joueur est dans la bouche
+    // Son AVANT. Le build le tient sur le transform du poisson ; ici il fait
+    // partie de son etat, parce que c'est lui qu'on oriente et lui qu'on suit.
+    this.forward = [0, 0, 1];
+    this.spin = 0;            // ce qui reste de sa rotation, a l'arret
   }
 
   /**
@@ -133,23 +234,36 @@ export class Anglerfish {
                                              : [player.x, player.y, player.z]);
     const want = this.state === "poursuit" ? this.cfg.chaseSpeed
                : this.state === "inspecte" ? this.cfg.investigateSpeed : 0;
-    // acceleration bornee : le predateur ne change pas de vitesse d'un coup
-    this.speed += Math.sign(want - this.speed) *
-                  Math.min(Math.abs(want - this.speed), this.cfg.acceleration * dt);
 
-    if (this.speed > 0.01) {
-      const v = [target[0] - this.position[0], target[1] - this.position[1],
-                 target[2] - this.position[2]];
-      const L = Math.hypot(...v) || 1;
+    if (this.state === "repos") {
+      // `FixedUpdate`, branche `Lurking` : il s'arrete NET — sa vitesse devient
+      // celle de Dark Bramble — et seule sa rotation s'eteint, de cinq pour
+      // cent par pas. Il ne rentre pas chez lui, il attend sur place.
+      this.speed = 0;
+      this.spin *= Math.pow(this.cfg.restSpin, dt / 0.02);
+    } else {
+      const vers = [target[0] - this.position[0], target[1] - this.position[1],
+                    target[2] - this.position[2]];
+      const pas = fishStep(this.forward, vers, this.speed, want, dt, this.cfg);
+      this.forward = pas.forward;
+      this.speed = pas.speed;
+      this.spin = pas.tourne / Math.max(1e-9, dt);
+      // IL AVANCE LE LONG DE SON AVANT, pas vers sa cible : c'est la
+      // difference, et c'est elle qui le rend esquivable.
       for (let i = 0; i < 3; i++) {
-        this.position[i] += (v[i] / L) * this.speed * dt;
+        this.position[i] += this.forward[i] * this.speed * dt;
       }
     }
     // La prise : un predateur qui atteint sa proie la mange. C'est la seule
     // consequence qui manquait — jusqu'ici on pouvait se faire poursuivre sans
     // rien risquer.
-    this.caught = this.state !== "repos" &&
-                  dist(this.position, player) < this.cfg.catchRadius;
+    // ON NE SE FAIT DEVORER QU'UNE FOIS, ET CELA NE SE DEFAIT PAS. Le drapeau
+    // etait recalcule a chaque image : depuis que le predateur DEPASSE sa proie
+    // au lieu de la viser, il la traverse en une image et s'en eloigne — et la
+    // prise s'annulait toute seule a l'image d'apres. Dans le build, la bouche
+    // est un volume de collision, et y entrer tue.
+    if (this.state !== "repos"
+        && dist(this.position, player) < this.cfg.catchRadius) this.caught = true;
     return this.state;
   }
 }

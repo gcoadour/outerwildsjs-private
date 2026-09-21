@@ -269,8 +269,29 @@ export function meteorLaunchers(gameplay) {
 /** Le delai minimal entre deux departs, lu dans l'IL. */
 export const TELEPORT_COOLDOWN = 5;
 
-/** Les six passages, avec leur arrivee resolue. */
+/**
+ * Les six passages, avec leur arrivee resolue.
+ *
+ * `_receiver` est resolu par `ownerInfo`, qui rend un nom, une position et un
+ * corps — mais PAS de rotation. Or `RelocateBody` pose la rotation du
+ * recepteur sur ce qui arrive. On rejoint donc le recepteur POSE, qui la porte
+ * depuis que `WANT_ROTATION` le compte (docs/111-passages.md).
+ */
 export function teleporters(gameplay) {
+  const recepteurs = (gameplay.placed || {}).AncientTeleportReceiver || [];
+  const poseDe = (info) => {
+    if (!info) return null;
+    // Par le nom quand il suffit, par la position sinon : deux recepteurs
+    // peuvent porter le meme nom, aucun ne partage un point de l'espace.
+    let best = null, bestD = 1;
+    for (const r of recepteurs) {
+      const d = Math.hypot(r.position[0] - info.position[0],
+                           r.position[1] - info.position[1],
+                           r.position[2] - info.position[2]);
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best && best.rotation ? best.rotation : null;
+  };
   return ((gameplay.placed || {}).AncientTeleporter || []).map((c) => {
     const f = c.fields || {};
     const t = c.targets || {};
@@ -278,6 +299,8 @@ export function teleporters(gameplay) {
       name: c.name, body: c.body || null,
       position: c.position, rotation: c.rotation || null, volume: c.volume || null,
       receiver: t._receiver || null,
+      // La pose du recepteur : c'est elle qu'on prend en arrivant.
+      receiverRotation: poseDe(t._receiver),
       // La cible de VUE n'est pas toujours l'arrivee : deux passages visent un
       // troisieme objet, et c'est sur lui que l'alignement se mesure.
       viewTarget: t._alternateViewTarget || t._receiver || null,
@@ -337,7 +360,11 @@ export class Teleporters {
       // la geometrie du systeme, pas sur la presence. Ce qui change, c'est
       // qu'il emporte ou non le joueur.
       const carries = !!(at && t.volume && insideVolume(t, at));
-      this.lastFired = { teleporter: t, carries, arrival: w.receiver || w.target };
+      this.lastFired = { teleporter: t, carries, arrival: w.receiver || w.target,
+                         // `SetRotation(transform.rotation)` : l'avant et le
+                         // haut du recepteur, si la scene les donne.
+                         forward: w.receiverForward || null,
+                         up: w.receiverUp || null };
       return this.lastFired;
     }
     return null;
@@ -396,11 +423,37 @@ export function warps(gameplay) {
  */
 export const WARP = { duration: 6, arrivalGuard: 1, exitSpeed: 10 };
 
+/**
+ * L'ECLAIR DE BROUILLARD, et ses deux formes.
+ *
+ * `DerelictWarp` ne fait pas clignoter l'ecran : il epaissit le BROUILLARD.
+ * Les deux appels sont ecrits a cote du deplacement, et le portage n'avait ni
+ * l'un ni l'autre — il jouait a la place l'eclair bleu du teleporteur ancien,
+ * qui appartient a une tout autre mecanique.
+ *
+ *   OnTriggerEnter : StartFogFlash(0.5f, _warpDuration * 0.5f, _warpDuration * 0.5f)
+ *   OnTriggerExit  : StartFogFlash(0.5f, 0f, _warpDuration * 0.5f)
+ *
+ * Soit, avec `_warpDuration` a 6 : trois secondes pour monter, trois pour
+ * redescendre — et le deplacement tombe EXACTEMENT au sommet. Sur une sortie,
+ * la montee est nulle : le brouillard est deja dense a l'instant ou l'on
+ * bascule, et il se dissipe en trois secondes de l'autre cote.
+ */
+export function fogFlashOf(cfg = WARP, onExit = false) {
+  const moitie = cfg.duration * 0.5;
+  return { peak: 0.5, fadeIn: onExit ? 0 : moitie, fadeOut: moitie };
+}
+
 export class DerelictWarps {
   constructor(list = [], cfg = WARP) {
     this.warps = list.map((w) => ({ data: w, arrivedAt: -Infinity, since: null }));
     this.cfg = cfg;
     this.events = [];
+    // Les eclairs de brouillard demandes depuis le dernier drainage. Ils ne
+    // partent pas au meme instant que le deplacement — celui d'une ENTREE part
+    // trois secondes avant — et ils ne peuvent donc pas etre la valeur de
+    // retour d'`update`.
+    this.flashes = [];
     // Le jumeau, par nom ET par corps : deux `WarpVolume` portent le meme nom.
     for (const w of this.warps) {
       const s = w.data.sister;
@@ -435,12 +488,22 @@ export class DerelictWarps {
       const garde = now <= w.arrivedAt + this.cfg.arrivalGuard;
       if (w.data.onExit) {
         // Sur la SORTIE : c'est le passage de dedans a dehors qui compte.
-        if (w.etait && !ici && !garde) { w.etait = ici; return this.partir(w, now, shiftOf); }
+        if (w.etait && !ici && !garde) {
+          w.etait = ici;
+          // `OnTriggerExit` : pas de montee, le brouillard est deja la.
+          this.flashes.push(fogFlashOf(this.cfg, true));
+          return this.partir(w, now, shiftOf);
+        }
         w.etait = ici;
         continue;
       }
       w.etait = ici;
-      if (ici && w.since === null && !garde) w.since = now;
+      if (ici && w.since === null && !garde) {
+        w.since = now;
+        // `OnTriggerEnter` allume l'eclair A L'ENTREE, pas au depart : c'est
+        // lui qui fait les trois secondes d'enfoncement.
+        this.flashes.push(fogFlashOf(this.cfg, false));
+      }
       if (!ici) w.since = null;
       if (w.since !== null && now - w.since >= this.cfg.duration / 2) {
         w.since = null;
@@ -475,6 +538,9 @@ export class DerelictWarps {
   }
 
   drain() { const e = this.events; this.events = []; return e; }
+
+  /** Les eclairs de brouillard demandes depuis le dernier appel. */
+  drainFlashes() { const f = this.flashes; this.flashes = []; return f; }
 }
 
 // --- le rattachement a la geometrie chargee --------------------------------

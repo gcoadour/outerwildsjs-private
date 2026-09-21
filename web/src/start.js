@@ -35,6 +35,72 @@
 // Le point d'apparition, son regard, et la relocalisation du joueur au
 // redemarrage de la boucle.
 
+/**
+ * LE REVEIL : on ouvre les yeux sur le ciel, et la camera redescend seule.
+ *
+ *     SpawnPlayer()
+ *         if (_initialSpawnPoint == GetSpawnPoint(SpawnLocation.HomePlanet)) {
+ *             _cameraController.SetDegreesY(80f);
+ *             _doCamAutoCenter = true;
+ *         }
+ *     Update()
+ *         if (_doCamAutoCenter) {
+ *             if (Time.timeSinceLevelLoad > 7f) {
+ *                 _cameraController.CenterCamera(50f);
+ *                 _doCamAutoCenter = false;
+ *             }
+ *             if (_cameraController.GetDegreesY() < 45f) _doCamAutoCenter = false;
+ *         }
+ *
+ * Le portage commençait la partie le regard a l'horizon. Le build vous fait
+ * ouvrir les yeux QUATRE-VINGTS DEGRES PLUS HAUT, et vous y laisse SEPT
+ * SECONDES avant de redescendre tout seul a cinquante degres par seconde —
+ * donc 1,6 s de descente. C'est la premiere chose que le jeu fait, et elle
+ * n'etait pas la (docs/108-reveil.md).
+ *
+ * SENS DU SIGNE, ET IL SE LIT. `UpdateRotation` compose la rotation par
+ * `Quaternion.AngleAxis(_degreesY, -Vector3.right)` : autour de l'oppose de
+ * l'axe droit, donc un `_degreesY` positif leve le regard. Quatre-vingts
+ * degres, c'est le ciel — le tangage de ce portage etant compte a l'envers
+ * (positif vers le bas), la valeur y arrive changee de signe.
+ *
+ * ET LE JOUEUR GARDE LA MAIN : des que son propre regard passe sous
+ * quarante-cinq degres, le recentrage est abandonne. On ne lui reprend pas la
+ * tete s'il a deja commence a regarder ailleurs.
+ */
+export const REVEIL = { degreesY: 80, afterSeconds: 7, rate: 50, giveUpBelow: 45 };
+
+/**
+ * L'etat du recentrage de reveil, tel que `PlayerSpawner.Update` le tient.
+ *
+ * L'ordre des deux tests est celui du build, et il compte : le recentrage part
+ * a la septieme seconde MEME si le regard est deja bas, parce que le test de
+ * quarante-cinq degres vient apres et ne fait qu'eteindre un drapeau deja
+ * eteint.
+ */
+export class Reveil {
+  constructor(cfg = REVEIL) { this.cfg = cfg; this.arme = false; }
+
+  /** `SpawnPlayer` au point d'apparition de la planete natale. */
+  start() { this.arme = true; }
+
+  /**
+   * @param depuisChargement secondes depuis le chargement de la scene — et la
+   *   boucle EST un rechargement de scene, donc le compte repart a chaque tour
+   * @param degresY le regard, dans la convention du BUILD (positif vers le haut)
+   * @returns {"centre"|null} l'ordre de recentrage, une seule fois
+   */
+  update(depuisChargement, degresY) {
+    if (!this.arme) return null;
+    let ordre = null;
+    if (depuisChargement > this.cfg.afterSeconds) { ordre = "centre"; this.arme = false; }
+    if (degresY < this.cfg.giveUpBelow) this.arme = false;
+    return ordre;
+  }
+
+  reset() { this.arme = false; }
+}
+
 /** Hauteur des yeux au-dessus du centre du corps du joueur. */
 export const EYE_HEIGHT = 1.2;
 

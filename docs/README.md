@@ -58,6 +58,21 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`111-passages.md`](111-passages.md) — **on n'arrive pas quelque part, on y arrive *avec* quelque chose : la vitesse du point d'arrivée et le regard du récepteur, que le portage ne posait ni l'un ni l'autre**
+- [`110-croute.md`](110-croute.md) — **un morceau de croûte ne tombe pas droit : il part avec la vitesse du point d'où il se détache, et un champ à zéro ne veut pas dire que rien ne se passe**
+- [`109-anglerfish.md`](109-anglerfish.md) — **le prédateur ne va pas droit sur vous : il oriente son avant d'un dixième par pas, accélère en une demi-seconde au lieu de vingt et une, et ne se retourne pas quand on est pile derrière**
+- [`108-reveil.md`](108-reveil.md) — **la premiere chose que le jeu fait, et elle n'etait pas la : on ouvre les yeux quatre-vingts degres au-dessus de l'horizon, et la camera redescend seule a la septieme seconde**
+- [`107-pilote.md`](107-pilote.md) — **le pilote automatique n'a pas de phases, il a une méthode : un asservissement là où le portage posait la vitesse, une distance de freinage qui compte la gravité, et quatre messages mal aiguillés dont un que rien n'affichait**
+- [`106-redressement.md`](106-redressement.md) — **se redresser prend 1,8 seconde : un mode d'interpolation qui est une vitesse constante, un regard qui ne bouge pas pendant ce temps — et une transcription littérale qui tenait dans une représentation que ce portage n'a pas**
+- [`105-lire.md`](105-lire.md) — **trente-quatre textes extraits et affichés nulle part : la pagination qui compte des appuis, et les cinq verrous de caméra qui ont chacun leur vitesse**
+- [`104-arbitrage.md`](104-arbitrage.md) — **l'ambiance ne s'additionne pas, elle s'arbitre : la couche 0 couvre les autres, les ex aequo jouent ensemble, et trois règles que le portage avait inventées sous un test**
+- [`103-refait.md`](103-refait.md) — **le quatrième dénominateur : pour chaque classe qu'on déclare lire, ce que le build y fait et qu'on n'en refait pas — 49 méthodes sur 159**
+- [`102-trou-blanc.md`](102-trou-blanc.md) — **le trou blanc éjecte en ligne droite, pas dans un cône : trois champs sérialisés, trois noms pris pour des lois, et un champ de débris qui est une laisse**
+- [`101-sac-dorsal.md`](101-sac-dorsal.md) — **sauter ne décolle pas : la poussée horizontale est coupée à l'atterrissage et ne revient qu'à un geste délibéré, et la panne sèche a cinq pour cent d'hystérésis**
+- [`100-carte.md`](100-carte.md) — **la carte du système : cinq couleurs d'orbite au lieu d'un gris inventé, l'ellipse de la comète, et des cercles qui étaient centrés sur le joueur plutôt que sur le Soleil**
+- [`99-lois-branchees.md`](99-lois-branchees.md) — **les vingt lois que rien n'appelait, fermées par quatre issues différentes : le mauvais éclair aux passages de Dark Bramble, une estimation qui contredisait le vrai modèle, les jauges qui sont sur la visière, et un compte dont les échappatoires ne voyaient pas ce qu'il comptait**
+- [`98-flashback.md`](98-flashback.md) — **le flashback rejoue votre partie : une photo toutes les cinq secondes, 256 × 256, repassée à rebours — et le portage avait écrit que le build n'en gardait aucune**
+- [`97-assise-instantanee.md`](97-assise-instantanee.md) — **on s'asseyait d'un coup : un `Vector3` passé à un module qui attend un tableau, et un contrôle navigateur qui appelait la loi lui-même — plus la lunette qui fait taire le monde, la guimauve qui prend feu, et les voyants d'avarie rangés à l'envers**
 - [`96-groupes-de-rendu.md`](96-groupes-de-rendu.md) — **le soleil visible au travers des planètes : le groupe de rendu 1 efface la profondeur, et un commentaire promettait depuis toujours une technique absente**
 - [`95-lots-partages.md`](95-lots-partages.md) — **un lot pour plusieurs corps : la planète de départ s'effaçait une demi-minute sur deux, au rythme de sa lune**
 - [`94-manette.md`](94-manette.md) — **deux tables pour une manette, et un champ qui était un commentaire déguisé en donnée**

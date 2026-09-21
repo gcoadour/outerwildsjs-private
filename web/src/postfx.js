@@ -17,6 +17,10 @@
 // (main.js), qui reproduit le `TonemappingManager` du build — eteint par
 // defaut, allume par l'option.
 
+// @autrement BloomAndLensFlares : les six methodes sont les passes d'un shader
+// de bloom d'Unity 4. Le portage en vise le RESULTAT avec la chaine d'effets de
+// Babylon, ce que docs/08 dit depuis toujours : une implementation originale, et
+// non une transposition (docs/103-refait.md).
 // @lit BloomAndLensFlares, NoiseEffect, NoiseAndGrain
 // Le rendu de ces effets — refait, pas transpose (docs/47).
 

@@ -58,6 +58,21 @@ import { impactDamage, DAMAGE } from "./autopilot.js";
 export const LOCATIONS = { avant: 1, haut: 2, arriere: 4, gauche: 8, droite: 16 };
 export const ALL_LOCATIONS = 31;
 
+/**
+ * L'ordre des voyants du casque, qui n'est pas celui des drapeaux.
+ *
+ * `HUDDamageDisplay.OnDamageShip` lit le masque dans un ordre ecrit a la main,
+ * et c'est lui qui range les icones : `mask & 4` va au voyant 0, `mask & 1` au
+ * 1, `mask & 16` au 2, `mask & 8` au 3, `mask & 2` au 4. Soit, en clair :
+ *
+ *     arriere, avant, droite, gauche, haut
+ *
+ * Le portage rangeait ses voyants dans l'ordre de `LOCATIONS` — avant, haut,
+ * arriere, gauche, droite — c'est-a-dire que trois voyants sur cinq
+ * designaient la mauvaise piece.
+ */
+export const ALERT_ORDER = ["arriere", "avant", "droite", "gauche", "haut"];
+
 /** `ThrusterLocation` : dix buses, cinq par cote. */
 export const THRUSTERS = ["Left", "FrontLeft", "TopLeft", "BottomLeft", "BackLeft",
                           "Right", "FrontRight", "TopRight", "BottomRight", "BackRight"];

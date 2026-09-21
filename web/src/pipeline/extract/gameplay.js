@@ -5,7 +5,12 @@ const SINGLETONS = ["PlayerResources", "JetpackThrusterModel", "ShipThrusterMode
                     "ThrusterModel", "ShipDamageController", "PlayerCharacterController",
                     // `_loopDurationInMinutes` vaut 18 dans la scene, et le
                     // portage avait ecrit 20 de memoire (docs/88-boucle.md).
-                    "Autopilot", "ShipBody", "PlayerBody", "TimeLoop"];
+                    "Autopilot", "ShipBody", "PlayerBody", "TimeLoop",
+                    // `MapOpenGL` dessine les orbites de la carte : cinq
+                    // cercles, une couleur par corps, et l'ELLIPSE de la
+                    // comete. Le portage tracait tout d'un meme gris invente
+                    // (docs/100-carte.md).
+                    "MapOpenGL"];
 const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "OWAudioSource", "Conversation", "AudioTransmitter", "SpawnPoint",
                 "QuantumMoon", "QuantumOrbit", "QuantumFogBoundary", "FogVolume",
@@ -194,7 +199,15 @@ const WANT_VOLUME = new RegExp([
  */
 // `ShipBody` s'y ajoute : les capteurs de pad sont ses enfants, et ramener
 // leur position dans SON repere demande sa pose de repos (docs/89-pose.md).
-const WANT_ROTATION = /^(spawnpoint|shipbody)$/i;
+// `WhiteHoleVolume` aussi : `ForceWarp` sort DROIT DEVANT lui, et
+// `GetRandomExitTrajectory` incline autour de son avant et de son haut. Sans
+// son orientation, il n'y a pas de « devant » a suivre (docs/102-trou-blanc.md).
+// `AncientTeleportReceiver` enfin : `RelocateBody` pose la ROTATION du
+// recepteur sur le corps qui arrive. On ne debarque pas dans la direction ou
+// l'on marchait, on debarque tourne vers ce que le recepteur regarde
+// (docs/111-passages.md).
+const WANT_ROTATION =
+  /^(spawnpoint|shipbody|whiteholevolume|ancientteleportreceiver)$/i;
 
 /** Composants dont le PARENT designe ce qu'ils commandent. */
 const WANT_PARENTS = /^EntrywayTrigger$/i;

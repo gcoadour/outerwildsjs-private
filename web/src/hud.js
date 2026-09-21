@@ -175,6 +175,33 @@ export class ResourceHUD {
   damage(now) { this.vignetteUntil = now + this.r.vignetteFade; }
 
   setExposed(on) { this.exposed = !!on; }
+
+  /**
+   * `HUDCameraScript` : les jauges sont DESSINEES SUR LA VISIERE.
+   *
+   * Trois evenements les commandent, et le portage n'en avait aucun :
+   *
+   *   OnRemoveSuit           _isHUDOn = false, _HUDElements.SetActive(false)
+   *   OnHelmetHUDActivated   _isHUDOn = true,  _HUDElements.SetActive(true)
+   *   OnChangeGUIMode        le mode cache les efface, en sortir les rend
+   *                          a `_isHUDOn` — pas a « visibles »
+   *
+   * Les deux premiers passent par `GUIMode.IsHiddenMode()` avant d'agir : on
+   * n'allume pas des jauges dans un mode qui les cache. Sans combinaison, au
+   * village, il n'y a donc PAS d'oxygene ni de carburant a l'ecran — ce qui
+   * est la moindre des choses pour un affichage pose sur un casque qu'on ne
+   * porte pas.
+   *
+   * La vignette rouge et les avertissements suivent : ils sont dans le meme
+   * `_HUDElements`.
+   */
+  setHelmetOn(on) {
+    const montre = !!on;
+    this.box.hidden = !montre;
+    this.vignette.hidden = !montre;
+    this.warnings.hidden = !montre;
+    this.helmetOn = montre;
+  }
 }
 
 /**

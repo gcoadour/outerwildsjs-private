@@ -16,7 +16,8 @@ import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          reglagesDe } from "../web/src/cameraeffects.js";
 import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
-import { mapMarkers, markerVisible } from "../web/src/map.js";
+import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
+         COMET_ELLIPSE, fociDistance, orbitStyle } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
@@ -31,15 +32,16 @@ import { elevators, Elevator as Cabine, LaunchTerminal, landedOn, LandingPads,
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
 import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
-         COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
+         COMPRESSION_GRACE, PlayerState, JetpackGate, JETPACK,
+         inputAngle } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
-         FadeLight, DayNightTracker } from "../web/src/lights.js";
+         FadeLight, SATELLITE_FADE, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
 import { MarshmallowStick as Baton, thermTime, THERM_HEAT_SPAN,
          STICK_CLIPS, STICK_LIGHTS } from "../web/src/held.js";
-import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo, matchedVelocity,
+import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo,
          LOCK_NEAR, BRACKET_RATE } from "../web/src/tracker.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
          ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
@@ -50,7 +52,7 @@ import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAccelerati
          BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
-import { ambienceZones, winnersByLayer, clipOf,
+import { ambienceZones, zonesActives, isDay,
          AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
          probePrompts, radiationEmitters,
@@ -61,7 +63,7 @@ import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
 import { tornadoPivots, TornadoPivots, matchTransforms,
          disposableContainers, MeteorLaunchers, METEOR, warps, WARP,
-         DerelictWarps } from "../web/src/decor.js";
+         DerelictWarps, fogFlashOf } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
@@ -76,6 +78,7 @@ import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
 import { Interactables } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
+         ALIGN, slerpRate, steadyPitch, steadyLook, UpAligner,
          slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
@@ -97,12 +100,13 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          snapshotSize, probeIcon, probeReadout, probeLabelPos,
          selfDestructed, angleEntre } from "../web/src/probe.js";
 
-import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
+import { Flashback, PlayerDeathHandler, FLASHBACK, SnapshotTimer,
+         frameLengths, displayTimes } from "../web/src/death.js";
 import { Settings } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
-import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
+import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION } from "../web/src/ship.js";
@@ -112,10 +116,16 @@ import { playerConstants } from "../web/src/config.js";
 import { buildOrbits, advance, frameVelocity } from "../web/src/orbits.js";
 import { polarFields, polarDirection, strongestPolar,
          distanceToAxis } from "../web/src/gravity.js";
-import { rolloffModel, curveGain, AudioField } from "../web/src/audio.js";
+import { rolloffModel, curveGain, AudioField, AudioMixer,
+         MIXED_TRACKS } from "../web/src/audio.js";
 import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
 import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
 import { DialogueSystem } from "../web/src/dialogue.js";
+import { AUTOPILOT_MESSAGES } from "../web/src/hud.js";
+import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
+         brakingDistance, flyStep, autopilotRotation,
+         autopilotMessageKey } from "../web/src/autopilot.js";
+import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide } from "../web/src/physics.js";
@@ -124,8 +134,10 @@ import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
-import { Anglerfish, FISH } from "../web/src/bramble.js";
-import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
+import { detachVelocity } from "../web/src/crust.js";
+import { Anglerfish, fromToAngular, fishStep, FISH } from "../web/src/bramble.js";
+import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
+         leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
          ambientColor, ambientTint, hsvToRgb, Sectors,
@@ -154,7 +166,7 @@ import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
 import { oxygenZones, inOxygenZone,
          Resources as Ressources } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
-         Marshmallow } from "../web/src/consoles.js";
+         Marshmallow, MALLOW } from "../web/src/consoles.js";
 import { lodThresholds } from "../web/src/lod.js";
 import { segmentDepthInSphere, occludes, lookRotation, alignToObserver,
          CHECK_RADIUS, CHECK_DEPTH } from "../web/src/quantum.js";
@@ -164,35 +176,113 @@ import { convoControllers, treeFromController, PlayerData,
          selectTree, CONVO_RULES } from "../web/src/playerdata.js";
 import { parseWav, oggCrc, oggPage, muxOggOpus, interleave } from "../web/src/pipeline/audioenc.js";
 import { startPose, walkToShip, spawnPoints, isShipSpawn, nearestTo,
-         quatForward, horizonBasis, yawFor, PLAYER_RADIUS,
+         quatForward, horizonBasis, yawFor, PLAYER_RADIUS, REVEIL, Reveil,
          SPAWN_CLEARANCE } from "../web/src/start.js";
 
 const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- flashback ---------------------------------------------------------
 //
-// Les quatre constantes du build donnent le reste : 0,6 x 0,9^n reste au-dessus
-// de 0,06 pour n de 0 a 21.
+// LE FLASHBACK REJOUE DES PHOTOS DE LA PARTIE (docs/98-flashback.md).
+//
+// `Flashback.TakeSnapshot` rend la camera du joueur dans une `RenderTexture` de
+// 256 par 256 toutes les cinq secondes, et la mort les repasse A REBOURS. Ce
+// fichier comptait « vingt-deux images » comme une constante : vingt-deux est
+// le rang ou la DUREE d'image touche son plancher de 0,06, pas le nombre de
+// photos — celui-la, c'est le temps qu'on a survecu divise par cinq.
 {
-  const fb = new Flashback();
-  check("images du flashback", fb.frames.length, 22);
-  check("premiere image", round(fb.frames[0]), FLASHBACK.firstFrame);
-  check("derniere image au-dessus du plancher", fb.frames[21] >= FLASHBACK.minFrame, true);
-  check("image suivante sous le plancher",
-        round(fb.frames[21] * FLASHBACK.decay, 4) < FLASHBACK.minFrame, true);
-  check("duree totale de la sequence", round(fb.duration, 2), 8.21);
+  check("la premiere image dure 0,6 s", frameLengths(1)[0], FLASHBACK.firstFrame);
+  check("chacune dure 0,9 fois la precedente",
+        round(frameLengths(2)[1] / frameLengths(2)[0], 4), FLASHBACK.decay);
+  const cent = frameLengths(100);
+  check("la vingt-deuxieme est encore au-dessus du plancher",
+        cent[21] >= FLASHBACK.minFrame, true);
+  check("la vingt-troisieme est le plancher", cent[22], FLASHBACK.minFrame);
+  check("et toutes les suivantes aussi", cent[99], FLASHBACK.minFrame);
 
-  fb.start();
+  // `_imageDisplayTimes[count - 1 - i]` : la borne du RANG i est rangee a
+  // l'index de la PHOTO. Le defilement part du dernier index et descend.
+  const t22 = displayTimes(22);
+  check("vingt-deux bornes", t22.length, 22);
+  check("la derniere photo sort au bout de sa propre duree",
+        round(t22[21], 4), round(FLASHBACK.firstFrame, 4));
+  check("et la premiere porte la duree totale",
+        round(t22[0], 3), round(frameLengths(22).reduce((a, b) => a + b, 0), 3));
+
+  // Vingt-deux photos, c'est 5,409 s de defilement et 6,209 avec le blanc.
+  const fb = new Flashback();
+  fb.start(22);
+  check("defilement plus fondu", round(fb.total, 3), 6.209);
+  // Deux secondes d'attente, une d'amorce, la sequence, une de plus avant que
+  // la boucle ne reparte.
+  check("de la mort au redemarrage", round(fb.duration, 3), 10.209);
+
+  // LA LONGUEUR DEPEND DE QUAND ON MEURT. C'est tout l'enjeu.
+  const court = new Flashback(); court.start(3);
+  const long = new Flashback(); long.start(120);
+  check("trois photos font une sequence courte", round(court.total, 3), 2.426);
+  check("cent vingt en font une longue", long.total > 10, true);
+  check("et zero photo ne laisse que le blanc",
+        (() => { const v = new Flashback(); v.start(0); return v.total; })(),
+        FLASHBACK.fade);
+
+  // On part de la PLUS RECENTE, et on remonte.
+  fb.start(22);
+  check("le defilement part de la derniere photo", fb.index, 21);
+  let vus = [];
+  let s = null;
+  for (let i = 0; i < 2000; i++) {
+    s = fb.update(0.02);
+    if (s.index >= 0 && vus[vus.length - 1] !== s.index) vus.push(s.index);
+    if (s.fini) break;
+  }
+  check("on a vu les vingt-deux", vus.length, 22);
+  check("de la plus recente a la plus ancienne",
+        vus[0] === 21 && vus[21] === 0, true);
+  check("et jamais en avant", vus.every((v, i) => i === 0 || v < vus[i - 1]), true);
+
+  // Les phases, dans l'ordre du build.
+  fb.start(22);
   const seen = [];
   let guard = 0;
   for (;;) {
-    const s = fb.update(0.02);
-    if (!seen.includes(s.phase)) seen.push(s.phase);
-    if (s.fini || ++guard > 1000) break;
+    const st = fb.update(0.02);
+    if (!seen.includes(st.phase)) seen.push(st.phase);
+    if (st.fini || ++guard > 2000) break;
   }
   check("phases traversees dans l'ordre", seen.join(">"),
-        "attente>images>fondu>fini");
-  check("le voile est plein a la fin", fb.update(0).alpha, 0);
+        "attente>images>fondu>fin>fini");
+
+  // Le plan avance de douze a une demie, le flou monte de 2 a 32.
+  fb.start(22);
+  fb.update(FLASHBACK.delay + FLASHBACK.prime + 0.001);
+  const debut = fb.update(0);
+  check("le plan part de douze", round(debut.plane, 1), FLASHBACK.planeFrom);
+  check("et le flou est au minimum", debut.glow, FLASHBACK.glowMin);
+  fb.update(fb.total - 0.001);
+  const finale = fb.update(0);
+  check("il finit a une demie", round(finale.plane, 1), FLASHBACK.planeTo);
+  check("et le flou au maximum", finale.glow, FLASHBACK.glowMax);
+  check("le voile est plein a la fin", round(finale.alpha, 2), 1);
+
+  // LE TOURBILLON NE SE CALE SUR RIEN : `7 * sin(t * 0.5)`.
+  const tb = new Flashback();
+  tb.start(4);
+  const a = tb.update(Math.PI).twirl;       // sin(pi/2) = 1
+  check("le tourbillon atteint sept degres", round(a, 3), FLASHBACK.twirl);
+
+  // LA PHOTO DES CINQ SECONDES, et ses trois conditions.
+  const chrono = new SnapshotTimer();
+  check("rien avant la troisieme seconde", chrono.due(2), false);
+  check("ni a la quatrieme : il faut cinq secondes d'ecart", chrono.due(4), false);
+  check("la premiere photo part a cinq secondes", chrono.due(5.01), true);
+  check("et pas deux fois", chrono.due(5.02), false);
+  check("la suivante cinq secondes plus tard", chrono.due(10.02), true);
+  check("un mort ne photographie plus", chrono.due(20, true), false);
+  check("et son chronometre ne bouge pas non plus", chrono.due(20.01), true);
+  check("deux photos sur une minute et demie de vie", chrono.taken, 3);
+  check("une boucle de dix-huit minutes en laisse deux cent seize",
+        Math.floor(18 * 60 / FLASHBACK.snapshotEvery), 216);
 }
 
 // --- causes de mort ----------------------------------------------------
@@ -204,10 +294,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("cause retenue", d.cause, "digestion");
   check("une seule mort comptee", d.deaths, 1);
 
-  // la sequence entiere doit s'ecouler avant que la boucle ne reparte
+  // La sequence entiere doit s'ecouler avant que la boucle ne reparte, et sa
+  // longueur depend de la pellicule : sans photo, il ne reste que l'attente,
+  // l'amorce, le fondu au blanc et la seconde d'avant le redemarrage.
   let t = 0, done = false;
-  while (t < 20 && !done) { done = d.update(0.05); t += 0.05; }
-  check("redemarrage apres la sequence", round(t, 2), 8.25);
+  while (t < 30 && !done) { done = d.update(0.05); t += 0.05; }
+  // 2 + 1 + 0,8 + 1 = 4,8, plus le pas de temps qui la depasse.
+  check("mort sans photo : la sequence la plus courte du jeu",
+        round(d.flashback.duration, 2), 4.8);
+  check("et la boucle repart juste apres", t - d.flashback.duration < 0.15, true);
+  d.revive();
+  // Avec les photos d'une partie de deux minutes, c'est autre chose.
+  d.snapshotCount = () => 24;
+  d.kill("impact");
+  check("la sequence connait ses photos", d.flashback.count, 24);
+  t = 0; done = false;
+  while (t < 30 && !done) { done = d.update(0.05); t += 0.05; }
+  check("et elle dure plus longtemps", t > 10, true);
   d.revive();
   check("vivant apres revive", d.dead, false);
 }
@@ -253,6 +356,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(SHOCKWAVE_RADIUS / 27, 6));
   check("et elle ne depasse pas son rayon",
         shockwaveRadius(SHOCKWAVE_SECONDS * 10), SHOCKWAVE_RADIUS);
+
+  // LA FIN DES TEMPS COMMENCE AVANT LA SUPERNOVA, et le portage mixait a
+  // l'explosion. `EndOfTimeMusicController.Update` teste dans cet ordre :
+  // `GetPreventSupernova` d'abord, puis `GetSecondsRemaining() < 90`.
+  {
+    const m = new TimeLoop(18);
+    m.elapsed = m.duration - 91;
+    check("a quatre-vingt-onze secondes, pas encore", m.endMusic, false);
+    m.elapsed = m.duration - 90;
+    check("pile a quatre-vingt-dix non plus : la borne est stricte",
+          m.endMusic, false);
+    m.elapsed = m.duration - 89.9;
+    check("juste dessous, oui", m.endMusic, true);
+    check("et c'est bien avant l'explosion", m.supernova, false);
+    m.preventSupernova = true;
+    check("une boucle protegee n'a pas de musique de fin", m.endMusic, false);
+  }
 
   // `TimeLoop.Start` recalcule la prevention a partir des codes de lancement.
   const neuve = new TimeLoop(1);
@@ -300,6 +420,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // L'anneau : depasser dix ramene a un, pas a dix.
   check("dix puis un", reg.step(10, 1), 1);
   check("un puis dix", reg.step(1, -1), 10);
+
+  // LA NOUVELLE PARTIE. `TitleScreenMenu.ToggleOption` appelle
+  // `TriggerLoad(true, ...)` sur deux de ses cinq options, et `TriggerLoad`
+  // appelle `CreateNewPlayerSave` : une partie neuve EFFACE la sauvegarde. Le
+  // portage n'a pas de menu-titre et `PlayerData.wipe` n'etait donc appelee de
+  // nulle part. C'est un AJOUT au menu des reglages, et il demande DEUX
+  // validations la ou le build n'en demande aucune : une nouvelle partie est
+  // ici a une touche d'une partie en cours.
+  {
+    const m = new Settings(null);
+    const i = m.options.findIndex((o) => o.key === "newGame");
+    check("la nouvelle partie est au menu", i >= 0, true);
+    m.index = i;
+    check("le premier appui ne fait rien", m.toggle(0), null);
+    check("mais il arme", m.confirmNewGame, true);
+    check("et le libelle le dit", m.label(m.options[i]).includes("confirmer"), true);
+    check("le second appui la declenche", m.toggle(0), "newGame");
+    check("et ferme le menu", m.open, false);
+    check("l'armement retombe", m.confirmNewGame, false);
+    // Quitter la ligne desarme : on ne laisse pas un effacement arme derriere.
+    m.index = i;
+    m.toggle(0);
+    m.move(1);
+    check("changer de ligne desarme", m.confirmNewGame, false);
+  }
 
   // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------
   //
@@ -392,6 +537,27 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
   // Une piece DEJA abimee peut toujours l'etre davantage.
   check("mais une deja touchee, si", trois.impact(20, [0, 0, 1]).part > 0, true);
+
+  // L'ORDRE DES VOYANTS DU CASQUE N'EST PAS CELUI DES DRAPEAUX.
+  //
+  // `HUDDamageDisplay.OnDamageShip` lit le masque a la main, et c'est cette
+  // lecture qui range les icones : 4, 1, 16, 8, 2. Le portage rangeait ses
+  // voyants dans l'ordre de l'enumeration, ce qui en deplacait trois sur cinq.
+  check("cinq voyants", ALERT_ORDER.length, 5);
+  check("et leur ordre est celui de l'IL",
+        ALERT_ORDER.join(","), "arriere,avant,droite,gauche,haut");
+  check("qui est celui des drapeaux 4, 1, 16, 8, 2",
+        ALERT_ORDER.map((k) => LOCATIONS[k]).join(","), "4,1,16,8,2");
+  {
+    // Un choc a l'arriere allume le PREMIER voyant, pas le troisieme.
+    const seul = new ShipDamage({ _shipTotalHealth: 1e9 });
+    seul.impact(20, [0, 0, -1]);
+    const allumes = ALERT_ORDER.map((k) => seul.alerted.includes(k));
+    check("l'arriere touche allume le voyant de tete",
+          allumes.join(","), "true,false,false,false,false");
+    check("et la piece n'a pas besoin d'etre morte pour cela",
+          seul.parts.arriere.dead, false);
+  }
 
   // LA PIECE EST LA PLUS PROCHE DU POINT, quand on a les reacteurs.
   const moteurs = engineComponents({ placed: { EngineComponent: [
@@ -522,6 +688,82 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   for (let i = 0; i < 200; i++) fish.update(0.1, player, true);
   check("le predateur poursuit le bruit", fish.state, "poursuit");
   check("il finit par attraper", fish.caught, true);
+
+  // --- COMMENT il attrape, et pourquoi on peut l'esquiver (docs/109) -------
+  //
+  // `UpdateMovement` n'envoie pas le predateur SUR sa proie : il oriente son
+  // avant d'un dixieme du chemin par pas de physique, et avance le long de cet
+  // avant. Le portage le deplacait droit vers la cible, ce qui en faisait un
+  // missile que rien ne pouvait semer.
+  {
+    // `FromToAngularVelocity` prend un ARCSINUS : l'angle plafonne a
+    // quatre-vingt-dix degres et redescend au-dela.
+    const d = (r) => Math.round(r * 180 / Math.PI);
+    check("de face, aucun angle",
+          d(fromToAngular([0, 0, 1], [0, 0, 1]).angle), 0);
+    check("a quarante-cinq degres, quarante-cinq",
+          d(fromToAngular([0, 0, 1], [1, 0, 1]).angle), 45);
+    check("a quatre-vingt-dix, quatre-vingt-dix",
+          d(fromToAngular([0, 0, 1], [1, 0, 0]).angle), 90);
+    // L'ANGLE MORT : a cent trente-cinq degres l'arcsinus rend quarante-cinq,
+    // et pile derriere il rend ZERO. Le predateur ne se retourne pas.
+    check("a cent trente-cinq, l'arcsinus rend quarante-cinq",
+          d(fromToAngular([0, 0, 1], [1, 0, -1]).angle), 45);
+    check("et pile derriere, il ne tourne pas du tout",
+          d(fromToAngular([0, 0, 1], [0, 0, -1]).angle), 0);
+
+    // Un dixieme du chemin par pas de physique : a cinquante hertz, il faut
+    // une poignee de pas pour se mettre dans l'axe.
+    const un = fishStep([0, 0, 1], [1, 0, 0], 0, FISH.chaseSpeed, 0.02);
+    check("il ne tourne qu'un dixieme du chemin par pas",
+          Number((un.tourne / un.angle).toFixed(6)), 0.1);
+    check("le dixieme est celui du build", FISH.turnPart, 0.1);
+
+    // IL ACCELERE EN UNE DEMI-SECONDE : `+ _acceleration` est par PAS, sans
+    // deltaTime. Vingt et un pas pour atteindre quarante-deux.
+    let v = 0, pas = 0;
+    while (v < FISH.chaseSpeed && pas < 1000) {
+      v = fishStep([0, 0, 1], [0, 0, 1], v, FISH.chaseSpeed, 0.02).speed;
+      pas += 1;
+    }
+    check("il atteint sa vitesse de poursuite en vingt et un pas", pas, 21);
+    check("... soit 0,42 seconde", Number((pas * 0.02).toFixed(2)), 0.42);
+    // La lecture `acceleration * dt` aurait mis vingt et une SECONDES.
+    check("et non vingt et une secondes",
+          Number((FISH.chaseSpeed / FISH.acceleration).toFixed(0)), 21);
+
+    // IL DEPASSE SA PROIE. Le poisson lance a pleine vitesse, la cible de cote :
+    // il la survole et repasse. C'est ce qui le rend esquivable, et c'est la
+    // difference qu'on mesure.
+    const p = new Anglerfish([0, 0, 0]);
+    const proie = { x: 30, y: 0, z: 0 };
+    let loin = 0;
+    for (let i = 0; i < 40; i++) {
+      p.update(0.1, proie, true);
+      loin = Math.max(loin, Math.hypot(p.position[0] - 30, p.position[1],
+                                       p.position[2]));
+    }
+    check("il s'eloigne de sa proie apres l'avoir depassee",
+          loin > FISH.catchRadius, true);
+    // ... et la prise, elle, ne se defait pas : il l'a traversee en chemin.
+    check("mais la prise, elle, tient", p.caught, true);
+
+    // A L'ARRET il ne rentre pas chez lui : il s'immobilise sur place, et sa
+    // rotation s'eteint de cinq pour cent par pas.
+    const calme2 = new Anglerfish([0, 0, 0]);
+    calme2.position = [100, 0, 0];
+    calme2.spin = 1;
+    calme2.update(0.02, { x: 9999, y: 0, z: 0 }, false);
+    check("au repos, il ne bouge plus", calme2.position.join(","), "100,0,0");
+    check("... et sa rotation s'eteint de cinq pour cent",
+          Number(calme2.spin.toFixed(6)), 0.95);
+    check("le facteur est celui du build", FISH.restSpin, 0.95);
+
+    // La remise a zero d'une boucle rend la proie a la vie.
+    p.reset();
+    check("une nouvelle boucle desengloutit", p.caught, false);
+    check("... et le predateur rentre chez lui", p.position.join(","), "0,0,0");
+  }
   const calme = new Anglerfish([0, 0, 0]);
   calme.update(0.1, { x: 10, y: 0, z: 0 }, false);
   check("immobile et silencieux, on ne risque rien", calme.caught, false);
@@ -653,28 +895,85 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("un fichier protege ne part jamais", freed.length, 1);
 }
 
-// --- champ de debris du trou blanc --------------------------------------
+// --- le trou blanc, relu en entier (docs/102-trou-blanc.md) --------------
 {
-  const field = new DebrisField(750, 2);
-  check("rayon de debris", field.radius, DEBRIS_RADIUS);
+  const field = new DebrisField();
+  check("la laisse maximale est `_debrisRadius`", field.radius, DEBRIS_RADIUS);
   field.swallow("Shard_01"); field.swallow("Shard_02");
   check("deux morceaux en file", field.pending, 2);
-  check("rien ne ressort avant le delai", field.update(1.9).length, 0);
-  check("un morceau ressort", field.update(0.2).length, 1);
-  check("... un seul a la fois", field.grown, 1);
-  field.update(2);
-  check("puis le suivant", field.grown, 2);
-  check("file vide", field.pending, 0);
+  // UNE SORTIE PAR SECONDE AU PLUS, et seulement si la sphere est libre.
+  check("sortie prise : rien ne part", field.update(2, false).length, 0);
+  check("et cela se compte", field.blocked >= 1, true);
+  check("sortie libre : rien ne part TOUT DE SUITE non plus",
+        field.update(0.02, true).length, 0);
+  check("mais un morceau a commence a grandir", field.scale, WHITE_HOLE.startScale);
+  check("la file a diminue", field.pending, 1);
+  // IL GRANDIT PAR PAS DE PHYSIQUE : x1,05, quarante-sept pas.
+  check("quarante-huit pas pour passer de 0,1 a 1", growSteps(), 48);
+  check("il n'est pas encore sorti", field.update(0.5).length, 0);
+  check("et il a grossi", field.scale > WHITE_HOLE.startScale, true);
+  const parti = field.update(0.6);
+  check("un peu moins d'une seconde, et il part", parti.length, 1);
+  check("a sa taille pleine", parti[0].scale, 1);
+  check("un seul a la fois", field.grown, 1);
 
-  const p = field.items[0].position;
-  check("dans la sphere de debris",
-        Math.hypot(p[0], p[1], p[2]) <= 750 + 1e-9, true);
-  check("placement reproductible",
-        JSON.stringify(new DebrisField(750, 2).place("Shard_01")),
-        JSON.stringify(p));
-  check("deux morceaux ne se superposent pas",
-        JSON.stringify(field.items[0].position) !==
-        JSON.stringify(field.items[1].position), true);
+  // LA DIRECTION : entre quinze et trente degres de l'avant, jamais dans l'axe.
+  const avant = [0, 0, 1], haut = [0, 1, 0];
+  const angle = (d) => Math.acos(Math.max(-1, Math.min(1,
+    d[0] * avant[0] + d[1] * avant[1] + d[2] * avant[2]))) * 180 / Math.PI;
+  check("le plancher du cone est a quinze degres",
+        round(angle(exitTrajectory(avant, haut, 0, 0)), 3), WHITE_HOLE.coneFloorDeg);
+  check("et son plafond a la MOITIE de `_exitConeAngle`",
+        round(angle(exitTrajectory(avant, haut, 1, 0)), 3),
+        WHITE_HOLE.exitConeDeg / 2);
+  check("rien ne sort dans l'axe",
+        angle(exitTrajectory(avant, haut, 0, 0.37)) >= WHITE_HOLE.coneFloorDeg - 1e-6,
+        true);
+  check("le tour d'azimut fait bien le tour",
+        round(Math.hypot(...exitTrajectory(avant, haut, 0.5, 0.75)), 6), 1);
+  const lance = field.launch(parti[0], avant, haut);
+  check("et il part a vingt unites par seconde",
+        round(Math.hypot(...lance.velocity), 6), WHITE_HOLE.exitSpeed);
+
+  // LA LAISSE : rien en deca de 80 %, puis un freinage QUADRATIQUE.
+  check("dans les quatre cinquiemes, rien ne freine", leashBrake(400, 750), 0);
+  check("a quatre-vingts pour cent non plus", leashBrake(600, 750), 0);
+  check("a mi-chemin du reste, un quart", round(leashBrake(675, 750), 6), 0.25);
+  check("au bout de la laisse, plein", leashBrake(750, 750), 1);
+  check("et au-dela, pas davantage", leashBrake(2000, 750), 1);
+
+  // ON RESSORT EN REGARDANT LA SORTIE. `ReceiveWarpedPlayer` aligne l'avant de
+  // la camera sur celui du trou blanc avant meme de deplacer le corps.
+  {
+    const haut = [0, 1, 0];
+    const lacet = (d) => BlackHole.lookTowardExit(d, haut);
+    const est = lacet([1, 0, 0]), nord = lacet([0, 0, 1]);
+    check("deux directions donnent deux lacets", est !== nord, true);
+    // Par le plus court chemin : les lacets sont des angles, pas des nombres.
+    const ecart = (a, b) => {
+      let d = a - b;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return Math.abs(d);
+    };
+    check("un quart de tour les separe",
+          round(ecart(est, nord), 4), round(Math.PI / 2, 4));
+    check("la composante verticale ne compte pas",
+          round(lacet([1, 5, 0]), 6), round(est, 6));
+    check("une sortie verticale n'a pas de lacet", lacet([0, 1, 0]), null);
+  }
+
+  // LA LAISSE EST TIREE DU NOM : reproductible, et entre 150 et 750.
+  const a = new DebrisField(); a.swallow("Shard_01");
+  const b = new DebrisField(); b.swallow("Shard_01");
+  check("la meme croute ressort de la meme facon",
+        a.queue[0].leash, b.queue[0].leash);
+  check("et la laisse tient dans ses bornes",
+        a.queue[0].leash >= 750 * WHITE_HOLE.leashMin
+        && a.queue[0].leash <= 750, true);
+  const c = new DebrisField(); c.swallow("Shard_02");
+  check("deux morceaux n'ont pas la meme",
+        a.queue[0].leash !== c.queue[0].leash, true);
 }
 
 // --- eclairage ambiant par secteur --------------------------------------
@@ -919,13 +1218,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // avec lui, le monde lui parait tourner en sens inverse.
   const sky = field.toFrame(anchor, [1000, 0, 0]);
   check("le ciel a tourne d'un quart de tour", round(sky[2], 3), 1000);
-  check("... dans le sens inverse du corps",
-        round(field.toWorld(anchor, [1000, 0, 0])[2], 3), -1000);
+  check("... et l'axe X n'y est plus", round(sky[0], 3), 0);
+  check("c'est une rotation : la norme ne bouge pas",
+        round(Math.hypot(...sky), 3), 1000);
   const ground = field.toFrame(anchor, [0, 0, 0]);
   check("le centre du corps ancre reste immobile",
         round(Math.hypot(...ground), 6), 0);
-  const back = field.toWorld(anchor, sky);
-  check("aller-retour monde/repere sans perte", round(back[0], 3), 1000);
+  // Un demi-tour envoie X sur -X : c'est ce qui fixe le SENS, et l'inverse
+  // `toWorld` n'a plus a l'attester (docs/99).
+  field.advance(1);
+  check("... et le sens : un demi-tour retourne l'axe",
+        round(field.toFrame(anchor, [1000, 0, 0])[0], 3), -1000);
+  field.advance(2);   // on revient ou l'on etait
 
   // Cycle jour/nuit : le soleil passe sous l'horizon local a mi-tour.
   const up = [1, 0, 0];
@@ -1322,16 +1626,74 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a mi-rayon, la moitie", heatAt(heat, [52, 0, 0]), 50);
   check("hors du volume, rien", heatAt(heat, [60, 0, 0]), 0);
 
-  // _cookTime = 5 : a chaleur 100, cinq secondes pour arriver a 1. La guimauve
-  // cuit donc au feu, et non sur commande.
+  // _cookTime = 5 : a chaleur 100, le grillage monte de 0,2 par seconde. La
+  // guimauve cuit donc au feu, et non sur commande.
   const m = new Marshmallow();
   m.held = true;
-  for (let i = 0; i < 500; i++) m.update(0.01, heatAt(heat, [50, 0, 0]));
-  check("cinq secondes au feu : guimauve a point", round(m.toast, 2), 1);
+  for (let i = 0; i < 300; i++) m.update(0.01, heatAt(heat, [50, 0, 0]));
+  check("trois secondes au feu, et elle est mangeable", round(m.toast, 2), 0.6);
+  check("c'est le seuil du build", m.edible, true);
+  check("et elle n'a pas encore pris feu", m.aflame, false);
   const loin = new Marshmallow();
   loin.held = true;
   for (let i = 0; i < 500; i++) loin.update(0.01, heatAt(heat, [60, 0, 0]));
   check("loin du feu, elle ne cuit pas", loin.toast, 0);
+
+  // ON NE CUIT PAS UNE GUIMAUVE JUSQU'A UN. Le build ne regarde pas le niveau
+  // de grillage mais la composante ROUGE de sa couleur — `_initR - _toastLevel`
+  // — et il l'enflamme a 0,25, puis la DETRUIT a 0,08. Le portage attendait
+  // `toast >= 1`, qui n'arrive jamais : il n'avait donc ni la flamme, ni la
+  // perte, ni la fenetre etroite ou l'on peut encore manger.
+  {
+    const feu = new Marshmallow();
+    feu.held = true;
+    const pas = () => feu.update(0.01, 100);
+    let t = 0;
+    while (!feu.aflame && t < 1000) { pas(); t += 1; }
+    check("elle prend feu bien avant d'etre noire",
+          round(feu.toast, 2), round(1 - MALLOW.flame, 2));
+    check("et il reste de quoi la manger a cet instant", feu.edible, true);
+    let apres = 0;
+    while (!feu.gone && apres < 1000) { pas(); apres += 1; }
+    check("une fois en feu, elle est perdue en moins d'une seconde",
+          apres * 0.01 < 1, true);
+    check("il n'en reste rien", feu.gone, true);
+    check("et on ne la mange plus", feu.edible, false);
+    // `ResetMarshmallow` : huit dixiemes de seconde, puis une neuve.
+    feu.update(MALLOW.respawn / 2, 0);
+    check("a mi-delai, toujours rien", feu.gone, true);
+    feu.update(MALLOW.respawn / 2 + 1e-6, 0);
+    check("apres 0,8 s, il y en a une neuve", feu.gone, false);
+    check("et elle est crue", feu.toast, 0);
+  }
+
+  // LA FLAMME NE S'ETEINT PAS QUAND ON S'ELOIGNE. `_toastLevel += 0,001` par
+  // IMAGE, sans `deltaTime` et sans chaleur : une guimauve qui a pris feu finit
+  // de bruler toute seule.
+  {
+    const seule = new Marshmallow();
+    seule.held = true;
+    seule.toast = 1 - MALLOW.flame + 1e-6;  // juste passe l'allumage
+    check("elle est en feu", seule.aflame, true);
+    const avant = seule.toast;
+    seule.update(0.016, 0);                 // aucune chaleur
+    check("elle brule quand meme", seule.toast > avant, true);
+    check("d'un pas par image, pas par seconde",
+          round(seule.toast - avant, 6), MALLOW.burnStep);
+  }
+
+  // Manger la fait disparaitre aussi : `_eaten = true` PUIS `ResetMarshmallow`.
+  {
+    const mangee = new Marshmallow();
+    mangee.held = true;
+    mangee.toast = 0.7;
+    check("elle se mange", mangee.eat(), true);
+    check("et il n'y a plus rien sur le baton", mangee.gone, true);
+    check("on ne la mange pas deux fois", mangee.eat(), false);
+    mangee.update(MALLOW.respawn, 0);
+    check("la suivante arrive apres le meme delai", mangee.gone, false);
+    check("le compte des mangees tient", mangee.eaten, 1);
+  }
 }
 
 // --- consoles a camera deportee -----------------------------------------
@@ -1491,7 +1853,10 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         deathCamera({ phase: "fini", fini: true }).drop, 0);
   const debut = deathCamera({ phase: "attente", fini: false, t: 0 });
   check("la chute commence en douceur", debut.drop, 0);
-  const fin = deathCamera({ phase: "attente", fini: false, t: 2 });
+  // L'attente dure trois secondes : deux avant `StartFlashback`, une de plus
+  // avant que le plan n'apparaisse (docs/98).
+  const fin = deathCamera({ phase: "attente", fini: false,
+                            t: FLASHBACK.delay + FLASHBACK.prime });
   check("elle est complete au bout du delai", round(fin.drop, 3), DEATH_FALL.drop);
   check("pendant les images, la camera reste basse",
         deathCamera({ phase: "images", fini: false, t: 3 }).roll, DEATH_FALL.roll);
@@ -1777,6 +2142,72 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(r.jetpackAccel({ forward: 1, right: 0, up: false }, vertical,
                              { x: 0, y: 1, z: 0 }).z, 3), 7);
   check("le sac dorsal qui pousse se declare", r.jetpack, true);
+
+  // LES DEUX VERROUS DU SAC DORSAL (docs/101-sac-dorsal.md).
+  //
+  // Les trois controles ci-dessus ne mesurent la poussee laterale que parce
+  // que le premier a ouvert le verrou : il appuyait sur MONTER, ce qui est
+  // l'une des trois conditions de `ReadTranslationalInput`. Dit ici pour que
+  // l'ordre de ces lignes cesse d'etre un hasard qui porte un resultat.
+  check("le verrou est ouvert depuis la premiere poussee verticale",
+        r.gate.horizontal, true);
+  {
+    // 1. LE CARBURANT, AVEC SON HYSTERESIS DE CINQ POUR CENT.
+    const g = new JetpackGate();
+    check("plein, rien n'est coupe", g.fuel(1), false);
+    check("a sec, la panne commence", g.fuel(0), true);
+    check("et elle ne se declare qu'une fois", g.fuel(0), false);
+    check("plus rien ne pousse", g.read([1, 1, 1]).join(","), "0,0,0");
+    check("une goutte ne suffit pas", g.fuel(0.04), false);
+    check("la panne tient toujours", g.depleted, true);
+    g.fuel(JETPACK.refuelFraction + 1e-6);
+    check("au-dessus de cinq pour cent, elle est levee", g.depleted, false);
+
+    // 2. LA POUSSEE HORIZONTALE APRES UN SAUT.
+    const h = new JetpackGate();
+    h.fuel(1);
+    // On court vers l'avant, puis on saute : la commande du decollage est
+    // retenue, et le verrou est ferme.
+    h.setGrounded(false, [0, 0, 1]);
+    check("au decollage, l'horizontale est coupee", h.horizontal, false);
+    check("... et la commande avant ne passe pas",
+          h.read([0, 0, 1]).join(","), "0,0,0");
+    // `ThrusterController.FixedUpdate` lit la commande PUIS teste le verrou :
+    // l'image qui l'ouvre est donc deja celle qui pousse.
+    check("appuyer sur monter ouvre le verrou, des cette image",
+          h.read([0, 1, 1]).join(","), "0,1,1");
+    check("et il reste ouvert", h.horizontal, true);
+
+    // Meme chose, mais sans jamais toucher au vertical : il faut CHANGER DE
+    // CAP de plus de soixante degres.
+    const k = new JetpackGate();
+    k.fuel(1);
+    k.setGrounded(false, [0, 0, 1]);
+    check("tenir le meme cap ne rouvre rien",
+          k.read([0, 0, 1]).join(",") + "|" + k.horizontal, "0,0,0|false");
+    // Quarante-cinq degres : pas assez.
+    const q = Math.SQRT1_2;
+    check("quarante-cinq degres non plus",
+          k.read([q, 0, q]).join(",") + "|" + k.horizontal, "0,0,0|false");
+    check("l'angle mesure bien quarante-cinq degres",
+          Math.round(inputAngle([0, 0, 1], [q, 0, q])), 45);
+    // Quatre-vingt-dix : au-dela des soixante, et la commande est pleine.
+    check("un quart de tour, oui — et la poussee part dans la meme image",
+          k.read([1, 0, 0]).join(",") + "|" + k.horizontal, "1,0,0|true");
+
+    // Une commande FAIBLE ne compte pas, meme a contresens.
+    const f = new JetpackGate();
+    f.fuel(1);
+    f.setGrounded(false, [0, 0, 1]);
+    check("une commande sous un demi ne rouvre rien",
+          f.read([0, 0, -0.4]).join(",") + "|" + f.horizontal, "0,0,0|false");
+
+    // Se reposer referme tout.
+    k.setGrounded(true);
+    check("atterrir referme le verrou", k.horizontal, false);
+    check("et la course au sol ne pousse plus lateralement",
+          k.read([1, 0, 0]).join(","), "0,0,0");
+  }
 
   // Les constantes viennent des DEUX composants, et rien n'est invente : ce
   // que le build ne donne pas est absent, `Player` complete avec son repli.
@@ -2557,6 +2988,84 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("une nouvelle boucle remet le compteur a zero", sys.stateOf(vu).ended, 0);
 }
 
+// --- ce qu'on lit, et en combien d'appuis (docs/105-lire.md) ---------------
+//
+// `CalculateDisplayableDialogues` ne borne pas une ligne : il DECOUPE le texte
+// en unites affichables, et chacune coute un appui. Ce portage s'arretait a la
+// premiere et posait un « … » sur le reste.
+{
+  const cent = "mot ".repeat(50).trim();   // 50 mots de 3 lettres, 199 car
+  const p = paginate(cent, 50, 4);
+  check("une ligne se coupe a un espace, jamais dans un mot",
+        p.every((page) => page.every((l) => l.length <= 50)), true);
+  check("... et une page tient quatre lignes", p[0].length, 4);
+  check("deux cents caracteres ne tiennent pas en une page", p.length > 1, true);
+  check("rien n'est perdu en route",
+        p.flat().join(" ").split(" ").length, 50);
+
+  // Le build remplace TOUT retour a la ligne par un espace avant de mettre en
+  // page : les `\r\n` des panneaux ne sont pas des sauts de ligne.
+  check("les retours a la ligne d'origine deviennent des espaces",
+        paginate("a\r\nb\nc", 50, 4)[0].join("|"), "a b c");
+  check("et le texte est rogne aux extremites",
+        paginate("   bonjour   ", 50, 4)[0].join("|"), "bonjour");
+
+  // `forceNewLineCharacter` vaut 64, soit `@` : il termine la ligne ET la page.
+  const arobase = paginate("un deux @ trois quatre", 50, 4);
+  check("l'arobase termine la page", arobase.length, 2);
+  check("... la premiere tient ce qui precede", arobase[0].join("|"), "un deux");
+  check("... la seconde ce qui suit", arobase[1].join("|"), "trois quatre");
+  check("une arobase en fin de texte n'ouvre pas de page vide",
+        paginate("un deux @", 50, 4).length, 1);
+  check("un texte vide ne donne aucune page", paginate("", 50, 4).length, 0);
+
+  // Un panneau de musee a des lignes plus longues et une page plus haute :
+  // 70 x 5 contre 50 x 4. Le meme texte s'y lit en moins d'appuis.
+  const long = "mot ".repeat(120).trim();
+  check("un panneau tient plus de texte qu'un personnage",
+        paginate(long, 70, 5).length < paginate(long, 50, 4).length, true);
+
+  // LIRE UN OBJET : la meme boite, en panneau, sans nom ni options.
+  const lecteur = new DialogueSystem({ trees: {}, conversations: [] });
+  check("un objet sans texte ne s'ouvre pas", lecteur.read({ name: "x" }), false);
+  check("un objet avec texte s'ouvre",
+        lecteur.read({ name: "Plaque", text: long }), true);
+  const v0 = lecteur.view;
+  check("c'est un panneau", v0.sign, true);
+  check("... sans options", v0.options.length, 0);
+  check("... et il annonce ses pages", v0.pageCount > 1, true);
+  check("... en commencant par la premiere", v0.pageIndex, 0);
+  const pages = v0.pageCount;
+  for (let i = 1; i < pages; i++) {
+    lecteur.advance();
+    check(`page ${i + 1} sur ${pages}`, lecteur.view.pageIndex, i);
+  }
+  check("a la derniere page, on est au bout", lecteur.view.atEnd, true);
+  lecteur.advance();
+  check("un appui de plus referme la lecture", lecteur.active, null);
+
+  // La REPLIQUE d'une conversation se pagine aussi : c'est le meme calcul, et
+  // c'est ce qui manquait le plus — une replique longue perdait sa fin.
+  const bavard = new DialogueSystem({
+    trees: { A: { start: "s", branches: {
+      s: { talk: [long, "court"], options: [] } } } },
+    conversations: [],
+  });
+  bavard.open({ name: "z", character: "Slate", tree: "A", index: 0 });
+  check("la premiere replique tient plusieurs pages",
+        bavard.view.pageCount > 1, true);
+  check("et les options ne s'offrent pas avant la fin du texte",
+        bavard.view.options.length, 0);
+  const n = bavard.view.pageCount;
+  for (let i = 1; i < n; i++) bavard.advance();
+  check("apres la derniere page, on est encore sur la replique",
+        bavard.view.lineIndex, 0);
+  bavard.advance();
+  check("l'appui suivant passe a la replique d'apres", bavard.view.lineIndex, 1);
+  check("et le rang de page repart a zero", bavard.view.pageIndex, 0);
+  check("la replique courte tient en une page", bavard.view.pageCount, 1);
+}
+
 // --- le sable des jumelles ---------------------------------------------
 //
 // Les quatre nombres sont ceux des deux instances posees dans le build ; la loi
@@ -2728,54 +3237,130 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         "Atmosphere,MusicVolume");
   check("a 101, la musique est sortie", ou(zones, [101, 0, 0]).length, 1);
 
-  const g = winnersByLayer(ou(zones, [0, 0, 0]));
-  check("trois couches gagnees", g.size, 3);
-  check("dans la couche 1, la grotte couvre l'atmosphere", g.get(1).name, "CaveVolume");
-  check("la couche 0 revient au sas", g.get(0).name, "Hatch");
-  check("hors de la grotte, l'atmosphere reprend la couche 1",
-        winnersByLayer(ou(zones, [50, 0, 0])).get(1).name, "Atmosphere");
+  // L'ARBITRAGE, tel que `AudioDetector.UpdateActivation` le fait — et non tel
+  // que ce test le croyait. Il gardait trois regles inventees, et les trois
+  // sont fausses (docs/104-arbitrage.md).
+  const noms = (l) => zonesActives(l).map((z) => z.name).sort().join(",");
 
-  // A priorite egale, la plus petite zone gagne : une piece est plus precise
-  // qu'une atmosphere, et c'est la seule regle qui donne un resultat stable.
+  // La couche 0 ne joue pas A COTE des autres : elle concourt contre le
+  // meilleur de toutes. Le sas est a 100, rien ne l'approche, tout se tait.
+  check("dans le sas, le sas seul", noms(ou(zones, [0, 0, 0])), "Hatch");
+  // Hors du sas, la couche 0 est vide : `GetHighestPriority(0)` vaut -1, elle
+  // perd contre n'importe quoi, et toutes les autres couches jouent.
+  check("hors du sas, l'atmosphere et la musique jouent ensemble",
+        noms(ou(zones, [50, 0, 0])), "Atmosphere,MusicVolume");
+
+  // A egalite, TOUTES jouent : `ActivateLayer` remonte la liste tant que la
+  // priorite egale la plus haute. « La plus petite gagne » etait une invention.
   const exaequo = [zone("grande", 1, 0, 250, "a.ogg"), zone("petite", 1, 0, 20, "b.ogg")];
-  check("a egalite, la plus petite l'emporte",
-        winnersByLayer(ou(exaequo, [0, 0, 0])).get(1).name, "petite");
+  check("a egalite, les deux sonnent ensemble",
+        noms(ou(exaequo, [0, 0, 0])), "grande,petite");
 
-  const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg", { nightFile: "nuit.ogg" });
-  check("de jour, le clip du jour", clipOf(nuit, false), "jour.ogg");
-  check("de nuit, celui de la nuit", clipOf(nuit, true), "nuit.ogg");
-  check("sans clip de nuit, on garde celui du jour",
-        clipOf(zone("x", 1, 0, 10, "jour.ogg"), true), "jour.ogg");
+  // Le musee (couche 0, priorite 2) eteint le village ; le fluide des
+  // profondeurs (couche 1, priorite 3) eteint le musee a son tour, et rend du
+  // meme coup la parole a toutes les couches non nulles.
+  const musee = [zone("MuseumVolume", 0, 2, 40, "musee.ogg"),
+                 zone("Atmosphere", 1, 0, 250, "atmo.ogg"),
+                 zone("VillageMusic", 2, 0, 200, "village.ogg")];
+  check("le musee couvre le village", noms(ou(musee, [0, 0, 0])), "MuseumVolume");
+  const profond = [...musee, zone("DeepFluid", 1, 3, 300, "fluide.ogg")];
+  check("mais le fluide des profondeurs couvre le musee",
+        noms(ou(profond, [0, 0, 0])), "DeepFluid,VillageMusic");
+  // La musique du village revient, elle, parce qu'elle est en tete de SA
+  // couche : quand la couche 0 perd, toutes les autres jouent — chacune sa
+  // tete, et l'atmosphere n'est pas celle de la sienne.
 
-  // Les fondus : deux secondes de montee, deux de descente.
+  // `IsDay` : `_dayWindow` est la largeur de l'arc de jour, pas un angle au
+  // soleil. Planete a l'origine, soleil tres loin sur +x, rayon 100.
+  const soleil = [-100000, 0, 0];
+  check("face au soleil, il fait jour",
+        isDay(200, [0, 0, 0], [-100, 0, 0], soleil), true);
+  check("a l'oppose, il fait nuit",
+        isDay(200, [0, 0, 0], [100, 0, 0], soleil), false);
+  // Le terminateur geometrique est a 90 degres du point subsolaire ; la
+  // fenetre de 200 porte le jour jusqu'a 100. Dix degres de rab.
+  const surLaSphere = (deg) => [-100 * Math.cos(deg * Math.PI / 180),
+                                100 * Math.sin(deg * Math.PI / 180), 0];
+  check("le jour deborde de dix degres sur la nuit",
+        isDay(200, [0, 0, 0], surLaSphere(99), soleil), true);
+  check("et s'arrete a cent", isDay(200, [0, 0, 0], surLaSphere(101), soleil), false);
+  check("une fenetre de 180 s'arreterait au terminateur",
+        isDay(180, [0, 0, 0], surLaSphere(91), soleil), false);
+
+  // LES FONDUS. La trame qui ACTIVE ne sonne pas encore : `Activate` pose
+  // l'instant de depart, et `UpdateLocalFade` n'a pas encore couru.
   const mix = new AmbienceMixer(zones);
   mix.update(1, [0, 0, 0]);
-  const c1 = mix.playing.find((l) => l.layer === 1);
-  check("a mi-fondu, la couche 1 est a la moitie", Number(c1.gain.toFixed(3)), 0.5);
+  check("la trame qui active ne sonne pas encore", mix.playing.length, 0);
   mix.update(1, [0, 0, 0]);
-  check("deux secondes plus tard, elle est pleine",
-        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 1);
-  check("et les trois couches sonnent ensemble", mix.playing.length, 3);
-
-  // Sortir de tout : chaque couche redescend a son rythme, puis se tait.
+  check("une seconde plus tard, le sas est a mi-fondu",
+        Number(mix.playing[0].gain.toFixed(3)), 0.5);
+  check("et il est seul a sonner", mix.playing.map((l) => l.name).join(","), "Hatch");
+  mix.update(1, [0, 0, 0]);
+  check("puis il est plein", Number(mix.playing[0].gain.toFixed(3)), 1);
   mix.update(1, [1000, 0, 0]);
-  check("en sortant, la couche 1 redescend",
-        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 0.5);
   mix.update(2, [1000, 0, 0]);
-  check("puis se tait tout a fait", mix.playing.length, 0);
+  check("en sortant de tout, plus rien ne sonne", mix.playing.length, 0);
 
-  // Changer de zone dans une couche : on libere la place avant de la prendre.
-  const m2 = new AmbienceMixer(zones);
-  m2.update(5, [50, 0, 0]);
-  check("l'atmosphere tient la couche 1",
-        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
-  m2.update(1, [0, 0, 0]);
-  check("entrer dans la grotte fait d'abord baisser l'atmosphere",
-        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
-  m2.update(1.1, [0, 0, 0]);
-  m2.update(0.1, [0, 0, 0]);
-  check("puis la grotte prend la couche",
-        m2.playing.find((l) => l.layer === 1).name, "CaveVolume");
+  // LE PIEGE DE `FadeTo` : la duree est remise a neuf depuis la valeur
+  // COURANTE. Une montee coupee a mi-chemin ne redescend pas en une seconde,
+  // elle se redonne les deux secondes entieres pour la moitie qui reste. Un
+  // gain avance a `dt / duree` — ce que ce portage faisait — donnerait 0 ici.
+  const m3 = new AmbienceMixer([zone("Atmosphere", 1, 0, 250, "atmo.ogg")]);
+  m3.update(0.01, [0, 0, 0]);
+  m3.update(1, [0, 0, 0]);
+  check("a mi-montee", Number(m3.playing[0].gain.toFixed(3)), 0.5);
+  m3.update(0.01, [1000, 0, 0]);
+  m3.update(1, [1000, 0, 0]);
+  check("la descente repart de la moitie et se redonne deux secondes",
+        Number(m3.playing[0].gain.toFixed(3)), 0.25);
+
+  // L'AUBE : `UpdatePlayState` monte l'une pendant que l'autre descend. Les
+  // deux clips se croisent, ils ne se relaient pas.
+  const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg",
+                    { nightFile: "nuit.ogg", kind: "DayNightAudioVolume" });
+  const m4 = new AmbienceMixer([nuit]);
+  m4.update(0.01, [0, 0, 0], { night: true });
+  m4.update(2, [0, 0, 0], { night: true });
+  check("la nuit, c'est le clip de nuit",
+        m4.playing.map((l) => `${l.file}@${l.gain.toFixed(2)}`).join(","),
+        "nuit.ogg@1.00");
+  m4.update(0.01, [0, 0, 0], { night: false });
+  m4.update(1, [0, 0, 0], { night: false });
+  check("a l'aube les deux clips se croisent a mi-chemin",
+        m4.playing.map((l) => `${l.file}@${l.gain.toFixed(2)}`).sort().join(","),
+        "jour.ogg@0.50,nuit.ogg@0.50");
+
+  // `VillageMusic` : un volume jour/nuit SANS clip de nuit, et le seul du build
+  // a porter `_pauseOnFadeOut`. La nuit elle se tait ; au jour elle reprend a
+  // la note ou on l'avait laissee, et le moteur le sait par `rembobine`.
+  const musique = zone("VillageMusic", 2, 0, 200, "village.ogg",
+                       { kind: "DayNightAudioVolume", nightFile: null,
+                         fade: 5, pauseOnFadeOut: true });
+  const m5 = new AmbienceMixer([musique]);
+  m5.update(0.01, [0, 0, 0]);
+  m5.update(5, [0, 0, 0]);
+  check("la musique du village joue de jour",
+        Number(m5.playing[0].gain.toFixed(3)), 1);
+  check("et son fondu dure cinq secondes, pas deux", musique.fade, 5);
+  m5.update(0.01, [0, 0, 0], { night: true });
+  m5.update(5, [0, 0, 0], { night: true });
+  check("la nuit elle se tait, faute de clip de nuit", m5.playing.length, 0);
+  check("mise en PAUSE, donc sans rembobiner", m5.etats[0].jourF.rembobine, false);
+  m5.update(0.01, [0, 0, 0]);
+  m5.update(1, [0, 0, 0]);
+  check("au jour elle reprend ou elle en etait", m5.playing[0].rembobine, false);
+
+  // `_randomizePlayhead` : les deux ambiances qui le portent repartent d'un
+  // point tire au hasard, et seulement quand la source ne joue PAS.
+  const vent = zone("WindyAmbience", 1, 0, 300, "vent.ogg", { randomize: true });
+  const m6 = new AmbienceMixer([vent], { alea: () => 0.42 });
+  m6.update(0.01, [0, 0, 0]);
+  check("le vent repart d'un point tire au hasard", m6.playing.length, 0);
+  m6.update(1, [0, 0, 0]);
+  check("... et ce point est celui du tirage", m6.playing[0].offset, 0.42);
+  check("... la source est bien rembobinee, pas reprise",
+        m6.playing[0].rembobine, true);
 }
 
 // --- ce que docs/44-reste-a-migrer.md demandait -----------------------------
@@ -3050,6 +3635,35 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const empechee = new EndOfTimeMusic();
   empechee.update(10, 10, { prevented: true });
   check("supernova empechee : la musique ne part pas", empechee.volume, 0);
+
+  // LE VERROU DU MIXEUR. `MixTrack` et `IsolateTrack` commencent tous deux par
+  // `if (_mixLocked) return`, et `MixEndTimes` le pose. Sans lui, n'importe
+  // quelle transition d'ambiance pouvait relever la musique pendant la fin des
+  // temps ; le portage n'avait pas ce verrou.
+  {
+    const mix = new AudioMixer();
+    check("le mixeur nait ouvert", mix.locked, false);
+    mix.mixEndTimes(END_OF_TIME.mix);
+    mix.update(END_OF_TIME.mix);
+    check("la musique est tombee", mix.volume("Music"), 0);
+    check("l'ambiance aussi", mix.volume("Ambience"), 0);
+    check("et la fin des temps, elle, reste entiere", mix.volume("EndTimes"), 1);
+    check("le mixage est verrouille", mix.locked, true);
+    check("plus rien ne remonte la musique", mix.mix("Music", 1, 1), false);
+    mix.update(1);
+    check("elle est restee a zero", mix.volume("Music"), 0);
+    // `MixDeath` est le seul a forcer le passage.
+    mix.mixDeath(1);
+    mix.update(1);
+    check("la mort, elle, passe le verrou", mix.volume("EndTimes"), 0);
+    check("et ne touche pas a sa propre piste", mix.volume("Death"), 1);
+    check("`Undefined` n'est pas une piste du build",
+          MIXED_TRACKS.includes("Undefined"), false);
+    check("il y en a six", MIXED_TRACKS.length, 6);
+    mix.reset();
+    check("le redemarrage de boucle rouvre tout", mix.locked, false);
+    check("et rend son volume a la musique", mix.volume("Music"), 1);
+  }
 
   // L'index des clips d'evenement : les familles se lisent dans l'ordre des
   // numeros du build, parce que le tirage se fait dessus.
@@ -3599,6 +4213,39 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // par gravite ne pouvait pas la trouver.
   check("un marqueur peut n'etre porte par aucun corps", marq[4].body, null);
 
+  // LES ORBITES DE LA CARTE (docs/100-carte.md). `MapOpenGL.Start` range cinq
+  // corps et cinq couleurs dans le meme ordre, `OnPostRender` trace un cercle
+  // par corps dans la sienne. Le portage les tracait toutes d'un meme gris.
+  check("cinq orbites colorees", ORBIT_COLORS.length, 5);
+  check("dans l'ordre de `_planetRadiusArray`",
+        ORBIT_COLORS.map((o) => o.body).join(","),
+        "TimberHearth_Body,FocalBody,BrittleHollow_Body,GiantsDeep_Body,DarkBramble_Body");
+  check("l'alpha commune du build", Math.round(ORBIT_ALPHA * 255), 130);
+  check("le bleu de Timber Hearth",
+        orbitStyle(ORBIT_COLORS[0].rgb), "rgba(139,194,255,0.510)");
+  check("et le vert de Dark Bramble",
+        orbitStyle(ORBIT_COLORS[4].rgb), "rgba(128,203,134,0.510)");
+  check("la comete a sa propre couleur, hors du tableau",
+        orbitStyle(COMET_COLOR), "rgba(194,255,251,0.510)");
+
+  // L'ELLIPSE DE LA COMETE. Les demi-axes viennent du constructeur de
+  // `MapOpenGL`, et `_fociDistance` s'en deduit : c = sqrt(a^2 - b^2).
+  check("un demi-grand axe de treize mille deux cents",
+        Math.round(COMET_ELLIPSE.a), 13198);
+  check("un demi-petit axe de sept mille six cents",
+        Math.round(COMET_ELLIPSE.b), 7582);
+  check("le foyer est a dix mille huit cents du centre",
+        Math.round(fociDistance()), 10802);
+  // ET LE SOLEIL EST BIEN A UN FOYER. La verification tient en une addition :
+  // `a + c` doit rendre l'aphelie, c'est-a-dire l'endroit exact ou la scene
+  // pose la comete — 24 000 du Soleil. C'est ce qui prouve que les deux
+  // nombres du constructeur sont bien CETTE ellipse-ci, et non des valeurs
+  // laissees d'un autre corps.
+  check("son aphelie tombe ou la scene la pose",
+        Math.round(COMET_ELLIPSE.a + fociDistance()), 24000);
+  check("et son perihelie la fait passer dans le systeme interieur",
+        Math.round(COMET_ELLIPSE.a - fociDistance()), 2395);
+
   // La visibilite, dans l'ordre ou `LateUpdate` decide.
   const planete = marq[0], lune = marq[1], joueur = marq[3];
   check("trop loin, une lune disparait",
@@ -3726,6 +4373,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et ne bouge pas sans charge", webSpeeds(1, 0).inner, 0);
   check("la toile s'efface en deux secondes", webAlpha(WEB.fade), 0);
   check("a mi-chemin, a moitie", webAlpha(1), 0.5);
+
+  // L'UNITE DE LA SECONDE ENTREE. `GazeWebAnimator.Update` appelle
+  // `GetChargeFraction()`, soit `_charge / _secondsToCharge`. Le moteur lui
+  // passait `charge`, des secondes — et au cube, trois secondes valent
+  // vingt-sept. L'invariant garde le rapport des deux, qui est ce qui se
+  // verrait a l'ecran.
+  const uneSeconde = new Regard(lus[0]);
+  uneSeconde.update(1, [0, 0, -3], droit, [0, 0, 0]);
+  check("apres une seconde, la charge vaut une seconde", uneSeconde.charge, 1);
+  check("mais sa FRACTION n'est qu'un tiers",
+        Number(uneSeconde.chargeFraction.toFixed(4)), Number((1 / 3).toFixed(4)));
+  check("la toile tourne alors au vingt-septieme de sa vitesse",
+        Number((webSpeeds(0, uneSeconde.chargeFraction).inner
+                / webSpeeds(0, 1).inner).toFixed(4)),
+        Number((1 / 27).toFixed(4)));
+  check("et elle ne commence pas a s'effacer",
+        uneSeconde.chargeFraction >= 1, false);
+  for (let i = 0; i < 20; i++) uneSeconde.update(0.1, [0, 0, -3], droit, [0, 0, 0]);
+  check("c'est au bout des trois secondes que le fondu part",
+        uneSeconde.chargeFraction >= 1, true);
 
   // La porte : les colliders se coupent d'un coup, l'alpha fond en une seconde.
   const porte = new Porte(energyGates({ placed: { EnergyGate: [
@@ -4056,6 +4723,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   lampe.update(3);
   check("et atteint sa cible", lampe.intensity, 1);
   check("puis s'arrete", lampe.fading, false);
+
+  // SON SEUL APPELANT DANS TOUT LE BUILD : le projecteur du satellite. Prendre
+  // la console eteint la salle en deux secondes, la lacher la rallume en deux
+  // secondes — et le portage n'appelait `FadeIntensity` de nulle part.
+  check("deux secondes dans les deux sens", SATELLITE_FADE, 2);
+  const salle = new FadeLight(1.4);
+  salle.fadeIntensity(0, SATELLITE_FADE, 0);
+  salle.update(SATELLITE_FADE);
+  check("la salle s'eteint", salle.intensity, 0);
+  salle.fadeIntensity(1.4, SATELLITE_FADE, SATELLITE_FADE);
+  salle.update(SATELLITE_FADE * 2);
+  check("et se rallume a son intensite d'origine", round(salle.intensity, 3), 1.4);
 
   // Le jour et la nuit : ce sont les TRANSITIONS qui manquaient.
   const cycle = new DayNightTracker(false);
@@ -4606,8 +5285,6 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("y etre deja, non", canFlyTo(500, 1000), false);
   check("et un referentiel qui l'interdit, non plus",
         canFlyTo(5000, 1000, false), false);
-  check("accorder sa vitesse la copie",
-        matchedVelocity([1, 2, 3]).join(","), "1,2,3");
 
   // --- ce qui boucle et ce qui ne boucle pas (docs/63) ---
   //
@@ -4945,6 +5622,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   lunette.exitTelescope({ position: [0, 0, -1], rotation: [0, 1, 0, 0] }, 9);
   check("en sortir le restaure", lunette.matchRotation, true);
   check("et redemarre le demi-tour depuis maintenant", lunette.since, 9);
+
+  // L'AVANT DU JOUEUR VIENT DE BABYLON, ET C'EST UN `Vector3`.
+  //
+  // Le moteur passait cet objet tel quel a un module qui indexe `v[0]` : la
+  // longueur devenait NaN, l'angle zero, et la duree du demi-tour zero avec
+  // lui. On s'asseyait D'UN COUP a tous les points d'accrochage, pendant que
+  // ce fichier mesurait 1,8 s en appelant la loi avec un tableau. L'invariant
+  // porte donc sur les DEUX formes, et sur leur egalite.
+  {
+    const rate = 100;
+    const dos = { position: [0, 0, -1], rotation: [0, 1, 0, 0] };
+    const tab = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    tab.attach({ ...dos, forward: [0, 0, -1] }, 0);
+    check("dos tourne, le demi-tour dure 1,8 s", round(tab.turnDuration, 3),
+          round(180 / rate, 3));
+    const bab = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    bab.attach({ ...dos, forward: { x: 0, y: 0, z: -1 } }, 0);
+    check("un Vector3 de Babylon donne la meme duree",
+          round(bab.turnDuration, 3), round(tab.turnDuration, 3));
+    check("et ce n'est surtout pas zero", bab.turnDuration > 0, true);
+    const face = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    face.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1],
+                  forward: { x: 0, y: 0, z: 1 } }, 0);
+    check("arriver de face n'en demande aucune", face.turnDuration, 0);
+  }
 
   // Un seul point a la fois.
   const tous = new AttachPoints([
@@ -5471,6 +6173,34 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la garde empeche le renvoi immediat",
         res.update(0.1, 3.5, [1000, 0, 0]), null);
 
+  // L'ECLAIR DE BROUILLARD, ET QUAND IL PART.
+  //
+  // `OnTriggerEnter` appelle `StartFogFlash(0.5, _warpDuration * 0.5,
+  // _warpDuration * 0.5)` a l'ENTREE, pas au depart : le brouillard monte
+  // pendant les trois secondes d'enfoncement, et le deplacement tombe au
+  // sommet. Le portage jouait a la place l'eclair bleu du teleporteur ancien.
+  {
+    const e = fogFlashOf(WARP, false);
+    check("l'eclair d'entree monte trois secondes", e.fadeIn, WARP.duration / 2);
+    check("et redescend en trois", e.fadeOut, WARP.duration / 2);
+    check("a une demi-densite", e.peak, 0.5);
+    const x = fogFlashOf(WARP, true);
+    check("celui d'une sortie ne monte pas", x.fadeIn, 0);
+    check("il est deja la, et se dissipe", x.fadeOut, WARP.duration / 2);
+
+    const f = new DerelictWarps(warps(gpW));
+    check("rien a l'ouverture", f.drainFlashes().length, 0);
+    f.update(0.1, 0, [0, 0, 0]);
+    const lot = f.drainFlashes();
+    check("entrer allume l'eclair tout de suite", lot.length, 1);
+    check("et c'est celui qui monte", lot[0].fadeIn, WARP.duration / 2);
+    f.update(0.1, 1.5, [0, 0, 0]);
+    check("rester dedans ne le rallume pas", f.drainFlashes().length, 0);
+    const part = f.update(0.1, 3, [0, 0, 0]);
+    check("le depart, lui, vient trois secondes plus tard", part !== null, true);
+    check("sans second eclair", f.drainFlashes().length, 0);
+  }
+
   // Sortir d'un volume `_warpOnExit` part TOUT DE SUITE.
   const gpX = { placed: { DerelictWarp: [
     { name: "WarpVolume", body: "DerelictDimension_Body", position: [0, 0, 0],
@@ -5485,8 +6215,11 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const bord = new DerelictWarps(warps(gpX));
   bord.update(0.1, 0, [0, 0, 0]);                 // dedans
   check("rester dedans ne fait rien", bord.update(0.1, 1, [0, 0, 0]), null);
+  bord.drainFlashes();
   const sortie = bord.update(0.1, 2, [10000, 0, 0]);
   check("en sortir part tout de suite", sortie !== null, true);
+  const eclairSortie = bord.drainFlashes();
+  check("avec son eclair, sans montee", eclairSortie.length && eclairSortie[0].fadeIn, 0);
   check("et cela s'annonce", bord.drain().includes("ExitDerelictZone"), true);
   check("le drainage vide", bord.drain().length, 0);
 
@@ -5909,6 +6642,159 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("rend les commandes sans attendre", al2.locked, false);
   // Et la transition ne se rejoue pas tant que l'etat ne change pas.
   check("rester dans le champ n'annonce rien", al2.update(true, 2, 0), null);
+
+  // --- SE REDRESSER PREND DU TEMPS (docs/106-redressement.md) --------------
+  //
+  // `AlignWithDirection` n'etait lue nulle part : le portage prenait le bas du
+  // champ dominant tel quel, a chaque image.
+  check("le joueur est en mode 2, a cent", `${ALIGN.mode}/${ALIGN.rate}`, "2/100");
+  check("et on aligne son BAS", ALIGN.localAxis.join(","), "0,-1,0");
+  check("la moindre gravite suffit", ALIGN.fieldStrengthThreshold, 0);
+
+  // LE MODE 2 EST UNE VITESSE CONSTANTE, et c'est ce qu'il faut garder : le
+  // taux multiplie par l'ecart restant vaut toujours `rate * dt`.
+  const dtPhys = 1 / 50;
+  for (const ecart of [180, 90, 45, 10, 3]) {
+    check(`a ${ecart} degres, le pas vaut deux degres`,
+          Number((slerpRate(ecart, dtPhys) * ecart).toFixed(6)), 2);
+  }
+  check("sous deux degres, le taux est borne et le reste se franchit d'un coup",
+        slerpRate(1.5, dtPhys), 1);
+  check("un corps deja aligne le reste", slerpRate(0, dtPhys), 1);
+  // Le mode 1 est le seul qui ralentisse en approchant : c'est celui que le
+  // portage aurait ecrit de lui-meme, et ce n'est pas celui du joueur.
+  check("le mode 1, lui, est une fraction fixe",
+        Number(slerpRate(90, dtPhys, { mode: 1, rate: 100 }).toFixed(6)), 1);
+
+  // Cent degres par seconde : un demi-tour en 1,8 s.
+  {
+    const a = new UpAligner();
+    // Sans champ, on ne se donne AUCUN haut : semer la verticale du monde en
+    // attendant ferait converger le premier champ trouve depuis elle, et le
+    // regard pose au point d'apparition ne designerait pas ce qu'il designe.
+    check("sans champ, aucun haut", a.update(null, dtPhys).up, null);
+    check("... et rien n'a tourne", a.update(null, dtPhys).tourne, 0);
+    a.update([0, 1, 0], dtPhys);
+    check("le premier champ trouve ne s'interpole pas", a.up.join(","), "0,1,0");
+    let pas = 0;
+    while (Math.abs(a.up[1] + 1) > 1e-9 && pas < 1000) {
+      a.update([0, -1, 0], dtPhys); pas += 1;
+    }
+    // 178 degres a 2 par pas, puis les deux derniers d'un coup : 90 pas.
+    check("un demi-tour prend quatre-vingt-dix pas de physique", pas, 90);
+    check("soit 1,8 seconde", Number((pas * dtPhys).toFixed(2)), 1.8);
+    check("et l'on arrive bien au but", Number(a.up[1].toFixed(6)), -1);
+  }
+  {
+    const a = new UpAligner();
+    a.update([0, 1, 0], dtPhys);
+    const un = a.update([1, 0, 0], dtPhys);
+    check("le premier pas d'un quart de tour fait deux degres",
+          Number(un.tourne.toFixed(4)), 2);
+  }
+
+  // `KeepCameraSteady` : le tangage rend ce que le corps prend, et rien
+  // d'autre — le lacet et le roulis ne sont pas compenses.
+  {
+    // Le haut bascule de dix degres dans le plan vertical de la camera : c'est
+    // du tangage pur, et il se rend en entier.
+    const d = 10 * Math.PI / 180;
+    const rendu = steadyPitch([0, 1, 0], [0, Math.cos(d), Math.sin(d)], [1, 0, 0]);
+    check("dix degres de bascule rendent dix degres de tangage",
+          Number(rendu.toFixed(4)), 10);
+    check("et l'autre sens rend l'autre signe",
+          Number(steadyPitch([0, 1, 0], [0, Math.cos(d), -Math.sin(d)],
+                             [1, 0, 0]).toFixed(4)), -10);
+    // Une bascule AUTOUR de l'avant est du roulis : projetee sur l'axe droit,
+    // elle ne laisse rien.
+    check("un roulis pur ne rend aucun tangage",
+          Number(steadyPitch([0, 1, 0], [Math.sin(d), Math.cos(d), 0],
+                             [1, 0, 0]).toFixed(4)), 0);
+  }
+
+  // CE QUE LE PORTAGE APPLIQUE, ET POURQUOI CE N'EST PAS `steadyPitch` TEL
+  // QUEL. Le but est un EFFET : la vue ne bouge pas pendant que le corps se
+  // redresse. Ce test le mesure directement — l'avant MONDE avant et apres.
+  {
+    const avant = (up, lacet, tangage) => {
+      const { east, north } = horizonBasis(up);
+      const cy = Math.cos(lacet), sy = Math.sin(lacet);
+      const cp = Math.cos(tangage), sp = Math.sin(tangage);
+      return [north[0] * cy * cp + east[0] * sy * cp + up[0] * -sp,
+              north[1] * cy * cp + east[1] * sy * cp + up[1] * -sp,
+              north[2] * cy * cp + east[2] * sy * cp + up[2] * -sp];
+    };
+    const droite = (up, lacet) => {
+      const { east, north } = horizonBasis(up);
+      const cy = Math.cos(lacet), sy = Math.sin(lacet);
+      return [north[0] * -sy + east[0] * cy, north[1] * -sy + east[1] * cy,
+              north[2] * -sy + east[2] * cy];
+    };
+    const tourne = (v, axe, ang) => {
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const k = axe[0] * v[0] + axe[1] * v[1] + axe[2] * v[2];
+      return [v[0] * c + (axe[1] * v[2] - axe[2] * v[1]) * s + axe[0] * k * (1 - c),
+              v[1] * c + (axe[2] * v[0] - axe[0] * v[2]) * s + axe[1] * k * (1 - c),
+              v[2] * c + (axe[0] * v[1] - axe[1] * v[0]) * s + axe[2] * k * (1 - c)];
+    };
+    const ecart = (a, b) => Math.acos(Math.max(-1, Math.min(1,
+      a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180 / Math.PI;
+
+    const u0 = [0.2, 0.5, -0.84].map((v, _, t) =>
+      v / Math.hypot(t[0], t[1], t[2]));
+    const huit = 8 * Math.PI / 180;
+    let pire = 0, pireSansRien = 0, pireTangageSeul = 0;
+    for (const lacet of [0, 0.7, 2.1, -1.3]) {
+      for (const tangage of [0, 0.3, -0.4]) {
+        const dr = droite(u0, lacet);
+        const f0 = avant(u0, lacet, tangage);
+        const u1 = tourne(u0, dr, huit);
+        const vu = steadyLook(f0, u1);
+        pire = Math.max(pire, ecart(f0, avant(u1, vu.yaw, vu.pitch)));
+        pireSansRien = Math.max(pireSansRien, ecart(f0, avant(u1, lacet, tangage)));
+        pireTangageSeul = Math.max(pireTangageSeul, ecart(f0,
+          avant(u1, lacet, tangage - steadyPitch(u0, u1, dr) * Math.PI / 180)));
+      }
+    }
+    check("le regard ne bouge pas d'un millieme de degre",
+          pire < 1e-3, true);
+    // Les deux chiffres qui disent pourquoi le tangage seul ne suffit pas ici.
+    check("sans rien faire, la vue derive avec le corps",
+          Math.round(pireSansRien * 10) / 10 >= 8, true);
+    check("et le tangage seul n'en rattrape qu'une partie",
+          pireTangageSeul > 1 && pireTangageSeul < pireSansRien, true);
+
+    // A LACET NUL, le repere ne tourne pas et les deux lois coincident : c'est
+    // ce qui rattache `steadyLook` a la ligne du build.
+    {
+      const dr = droite([0, 1, 0], 0);
+      const u1 = tourne([0, 1, 0], dr, huit);
+      const vu = steadyLook(avant([0, 1, 0], 0, 0.25), u1);
+      const litteral = 0.25 - steadyPitch([0, 1, 0], u1, dr) * Math.PI / 180;
+      check("a lacet nul, les deux lois donnent le meme tangage",
+            Number((vu.pitch - litteral).toFixed(9)), 0);
+    }
+  }
+
+  // `InitAlignment` rallume la compensation a chaque entree dans un champ, et
+  // `FixedUpdate` l'eteint sous un degre.
+  {
+    const a = new UpAligner();
+    a.update([0, 1, 0], dtPhys);
+    check("au reveil, rien a compenser", a.steady, false);
+    a.init();
+    check("entrer dans un champ la rallume", a.steady, true);
+    let pas = 0;
+    while (a.steady && pas < 1000) { a.update([0, -1, 0], dtPhys); pas += 1; }
+    check("elle s'eteint quand l'ecart passe sous un degre", a.steady, false);
+    // Quatre-vingt-onze et non quatre-vingt-dix : `FixedUpdate` teste l'ecart
+    // qu'il vient de MESURER, pas celui qu'il laisse. La derniere image de
+    // redressement en voit encore deux, et c'est la suivante qui eteint.
+    check("une image de plus que le redressement lui-meme", pas, 91);
+    a.reset();
+    check("une nouvelle boucle remet tout a plat",
+          `${a.up}/${a.steady}`, "null/false");
+  }
 }
 
 {
@@ -6002,6 +6888,252 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   r2.dead = true;
   check("un mort reste mort, protege ou non", r2.hurt(10), 0);
   check("et il l'est toujours", r2.dead, true);
+}
+
+
+// --- le pilote automatique, tel que ReadTranslationalInput le fait ---------
+//
+// Ce module n'avait AUCUN test, et ses quatre phases etaient une
+// reconstruction de bon sens (docs/107-pilote.md).
+{
+  const dt = 1 / 50;
+
+  // `GetRelativeVelocity(frame)` rend `frame.velocity - self.velocity` : le
+  // Δv qu'il reste a AJOUTER, et non notre vitesse vue du referentiel.
+  check("le delta de vitesse est celui qu'on doit ajouter",
+        relativeDelta([0, 0, 0], [10, 0, 0]).join(","), "-10,0,0");
+
+  // La composante signee : le build l'ecrit en trois lignes, c'est un produit
+  // scalaire avec l'axe unitaire.
+  check("la composante le long d'un axe est signee",
+        alongAxis([3, 0, 0], [2, 0, 0]), 3);
+  check("... et negative a contresens", alongAxis([-3, 0, 0], [2, 0, 0]), -3);
+  check("un axe nul ne divise par rien", alongAxis([1, 1, 1], [0, 0, 0]), 0);
+
+  // L'EGALISATION est un asservissement : a fond tant que l'ecart depasse ce
+  // qu'une image comble, juste ce qu'il faut en dessous.
+  {
+    const p1 = matchVelocityStep([100, 0, 0], 50, dt);
+    check("loin du but, on pousse a fond", p1.frac, 1);
+    check("... et il reste ce qu'on n'a pas comble",
+          Number(p1.reste.toFixed(6)), 99);
+    check("... ce n'est donc pas fini", p1.done, false);
+    // 50 x 1/50 = 1 : sous une unite, on ne pousse que la fraction utile.
+    const p2 = matchVelocityStep([0.4, 0, 0], 50, dt);
+    check("pres du but, on ne pousse que ce qu'il faut", Number(p2.frac.toFixed(6)), 0.4);
+    check("... et il ne reste rien", Number(p2.reste.toFixed(9)), 0);
+    check("... c'est fini", p2.done, true);
+    check("le seuil est le centieme d'unite par seconde", AUTOPILOT.matched, 0.01);
+  }
+
+  // LA DISTANCE DE FREINAGE compte la gravite et le referentiel.
+  check("sans gravite, c'est v carre sur deux fois la poussee",
+        brakingDistance(100, 50), 100);
+  // Tomber VERS la cible retranche de la deceleration : le freinage s'allonge.
+  check("tomber vers la cible allonge le freinage",
+        brakingDistance(100, 50, -10) > brakingDistance(100, 50), true);
+  check("... et exactement de combien",
+        Number(brakingDistance(100, 50, -10).toFixed(4)), 125);
+  check("une gravite qui aide le freinage le raccourcit",
+        Number(brakingDistance(100, 50, 10).toFixed(4)),
+        Number((10000 / 120).toFixed(4)));
+  // Une deceleration nulle ou negative ne rend pas un nombre negatif : on ne
+  // peut pas freiner, donc la distance est infinie.
+  check("sans deceleration, on ne freine jamais",
+        brakingDistance(100, 50, -50), Infinity);
+
+  // L'ORDRE DES DECISIONS EST LA LOI.
+  const vers = [1000, 0, 0];
+  // 1. on s'eloigne de plus d'une unite par seconde -> realignement
+  {
+    const r = flyStep({ vers, rel: [5, 0, 0], maxThrust: 50 });
+    check("s'eloigner fait realigner", r.phase, "alignement");
+    check("... et la vitesse d'approche est negative", r.vApproche, -5);
+    check("... on pousse dans le sens du delta", r.input.join(","), "1,0,0");
+  }
+  // 2. la distance de freinage depasse ce qui reste -> retro-fusees
+  {
+    const r = flyStep({ vers: [100, 0, 0], rel: [-200, 0, 0], maxThrust: 50 });
+    check("trop pres et trop vite : retro-fusees", r.retro, true);
+    check("... et l'on passe a l'egalisation", r.phase, "egalisation");
+    check("... sans direction de poussee", r.input, null);
+  }
+  // 3. la derive de travers depasse le dixieme de la poussee
+  {
+    const r = flyStep({ vers, rel: [-1, 20, 0], maxThrust: 50 });
+    check("une derive de travers fait realigner", r.phase, "alignement");
+    check("le seuil est le dixieme de la poussee", AUTOPILOT.lateralPart, 10);
+    // En fermant a plus de dix, la poussee axiale est coupee : tout va dans la
+    // correction de travers.
+    const vite = flyStep({ vers, rel: [-20, 20, 0], maxThrust: 50 });
+    check("en fermant vite, on ne pousse plus que de travers",
+          vite.input.map((v) => Number(v.toFixed(6))).join(","), "0,1,0");
+  }
+  // 4. l'approche : on pousse vers la cible, et la poussee axiale s'inverse
+  //    quand on ferme deja.
+  {
+    const immobile = flyStep({ vers, rel: [0, 0, 0], maxThrust: 50 });
+    check("a l'arret, on pousse droit vers la cible", immobile.phase, "approche");
+    check("... c'est-a-dire le long de l'axe", immobile.input.join(","), "1,0,0");
+    const ferme = flyStep({ vers, rel: [-1, 0, 0], maxThrust: 50 });
+    check("en fermant doucement, on approche encore", ferme.phase, "approche");
+    check("... et la poussee axiale s'inverse pour accelerer",
+          ferme.input.join(","), "1,0,0");
+  }
+
+  // `ReadRotationalInput` rend zero : le pilote ne tourne RIEN.
+  check("le pilote automatique ne tourne rien",
+        autopilotRotation().join(","), "0,0,0");
+
+  // LES QUATRE MESSAGES, ET LEURS DRAPEAUX. `AutopilotGUI.Update` les teste
+  // dans cet ordre, et ce portage les avait mal apparies : « approche »
+  // affichait « stage 3 », qui est l'egalisation PENDANT un vol, et « vol »
+  // affichait « stage 2 », qui est `_isApproachingDestination`.
+  check("egaliser pendant un vol, c'est stage 3",
+        autopilotMessageKey({ matching: true, flying: true }), "approche");
+  check("egaliser sans destination, c'est le message simple",
+        autopilotMessageKey({ matching: true, flying: false }), "egalisation");
+  check("s'aligner, c'est stage 1",
+        autopilotMessageKey({ liningUp: true }), "alignement");
+  check("approcher, c'est stage 2",
+        autopilotMessageKey({ approaching: true }), "vol");
+  // L'egalisation passe AVANT les deux autres : le build teste
+  // `IsMatchingVelocity()` en premier.
+  check("l'egalisation couvre l'alignement",
+        autopilotMessageKey({ matching: true, liningUp: true }), "egalisation");
+  check("et sans drapeau, aucun message", autopilotMessageKey({}), null);
+  // Les quatre cles existent bien au catalogue, avec les textes du build.
+  check("stage 1", AUTOPILOT_MESSAGES.alignement[0], "stage 1: aligning flight path");
+  check("stage 2", AUTOPILOT_MESSAGES.vol[0],
+        "stage 2: accelerating towards destination");
+  check("stage 3", AUTOPILOT_MESSAGES.approche[0], "stage 3: firing retro-rockets");
+  check("et le message simple", AUTOPILOT_MESSAGES.egalisation[0],
+        "matching target velocity");
+
+  // ACCORDER SA VITESSE SANS DESTINATION : l'autre geste, et son message.
+  {
+    const v = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, thrust: 50 };
+    const p = new Autopilot(v, []);
+    p.matchVelocity({ name: "c", position: [0, 0, 0], velocity: [50, 0, 0],
+                      gravity: { upperSurfaceRadius: 10 } });
+    check("le message est celui de l'egalisation simple", p.phase, "egalisation");
+    check("... et l'on ne vole vers rien", p.flying, false);
+    let n = 0;
+    while (p.engaged && n < 1000) { p.update(1 / 50); n += 1; }
+    check("cinquante unites par seconde prennent une seconde", n, 50);
+    check("... et rien n'est annonce comme une arrivee", p.arrived, false);
+  }
+
+  // BOUT A BOUT : accorder sa vitesse prend |Δv| / poussee, et non zero.
+  {
+    const vaisseau = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 },
+                       thrust: 50, speed: 0 };
+    const cible = { name: "Cible", position: [0, 0, 0], velocity: [100, 0, 0],
+                    gravity: { upperSurfaceRadius: 10 } };
+    const pilote = new Autopilot(vaisseau, []);
+    pilote.engage(cible);
+    pilote.matching = true;        // `InitMatchVelocity`
+    let pas = 0;
+    while (pilote.engaged && pas < 1000) { pilote.update(dt); pas += 1; }
+    // 100 u/s a 50 u/s^2 : deux secondes, soit cent pas de physique.
+    check("accorder cent unites par seconde prend deux secondes", pas, 100);
+    check("... et la vitesse est bien celle de la cible",
+          Number(vaisseau.vel.x.toFixed(6)), 100);
+    check("... le pilote s'est arrete tout seul", pilote.phase, "repos");
+    check("... en annoncant l'arrivee", pilote.arrived, true);
+  }
+
+  // `Abort` dit s'il y avait quelque chose a abandonner.
+  {
+    const p = new Autopilot({ pos: { x: 0, y: 0, z: 0 },
+                              vel: { x: 0, y: 0, z: 0 }, thrust: 50 }, []);
+    check("abandonner au repos n'annonce rien", p.abort(), false);
+    p.engage({ name: "x", position: [1000, 0, 0],
+               gravity: { upperSurfaceRadius: 10 } });
+    check("engage, l'abandon s'annonce", p.abort(), true);
+    check("... et les drapeaux tombent",
+          `${p.phase}/${p.matching}/${p.target}`, "repos/false/null");
+  }
+}
+
+
+// --- le reveil : sept secondes le regard au ciel (docs/108-reveil.md) ------
+{
+  check("on ouvre les yeux a quatre-vingts degres", REVEIL.degreesY, 80);
+  check("et la camera attend sept secondes", REVEIL.afterSeconds, 7);
+  check("puis redescend a cinquante degres par seconde", REVEIL.rate, 50);
+  // 80 / 50 : la descente elle-meme dure 1,6 s, par le meme calcul que le
+  // demi-tour du siege et le recentrage de la lunette.
+  check("soit 1,6 seconde de descente",
+        Number(snapDuration(REVEIL.degreesY, 0, 0, 0, REVEIL.rate).toFixed(3)), 1.6);
+
+  const r = new Reveil();
+  check("sans reveil arme, aucun ordre", r.update(99, 80), null);
+  r.start();
+  check("avant la septieme seconde, on ne bouge pas", r.update(6.9, 80), null);
+  check("... et le regard reste ou il est", r.update(3, 80), null);
+  check("a la septieme, la camera se recentre", r.update(7.01, 80), "centre");
+  check("et cela n'arrive qu'une fois", r.update(8, 80), null);
+
+  // LE JOUEUR GARDE LA MAIN : regarder sous quarante-cinq degres desarme.
+  const r2 = new Reveil();
+  r2.start();
+  check("regarder plus bas que 45 degres abandonne le recentrage",
+        r2.update(1, 44), null);
+  check("... et la septieme seconde ne le reveille plus", r2.update(9, 44), null);
+  // Juste au-dessus du seuil, il tient encore.
+  const r3 = new Reveil();
+  r3.start();
+  r3.update(1, 45);
+  check("a quarante-cinq pile, le recentrage tient encore", r3.update(7.5, 45), "centre");
+
+  // L'ORDRE DES DEUX TESTS EST CELUI DU BUILD : le recentrage part a la
+  // septieme seconde MEME si le regard est deja bas, parce que le test des
+  // quarante-cinq degres vient apres.
+  const r4 = new Reveil();
+  r4.start();
+  check("septieme seconde et regard bas : le recentrage part quand meme",
+        r4.update(7.5, 10), "centre");
+
+  const r5 = new Reveil();
+  r5.start();
+  r5.reset();
+  check("une remise a zero desarme", r5.update(9, 80), null);
+}
+
+
+// --- la croute qui lache : avec quelle vitesse (docs/110-croute.md) -------
+//
+// `DetachableFragment.Detach` donne au morceau la vitesse du POINT d'ou il se
+// detache. Le portage le lachait immobile, et il tombait droit.
+{
+  // Un corps qui tourne autour de +Y a un radian par seconde. Un point a dix
+  // unites sur +X s'y deplace a dix unites par seconde vers... +Z ou -Z, selon
+  // le sens, et c'est le produit vectoriel qui le dit.
+  const spin = { axis: [0, 1, 0], rate: 1 };
+  const v = detachVelocity([10, 0, 0], [0, 0, 0], spin);
+  check("un point a dix unites du centre part a dix unites par seconde",
+        Number(Math.hypot(v[0], v[1], v[2]).toFixed(6)), 10);
+  check("... perpendiculairement au rayon",
+        Number((v[0] * 10).toFixed(6)), 0);
+  check("... et perpendiculairement a l'axe", Number(v[1].toFixed(6)), 0);
+  check("le sens est celui du produit vectoriel",
+        v.map((x) => Math.round(x)).join(","), "0,0,-10");
+  // Deux fois plus loin, deux fois plus vite : c'est une rotation solide.
+  const loin = detachVelocity([20, 0, 0], [0, 0, 0], spin);
+  check("deux fois plus loin, deux fois plus vite",
+        Number(Math.hypot(...loin).toFixed(6)), 20);
+  // SUR L'AXE, rien ne bouge.
+  check("un point sur l'axe ne part pas",
+        detachVelocity([0, 5, 0], [0, 0, 0], spin).join(","), "0,0,0");
+  // Un corps qui ne tourne pas ne donne rien, et c'est le cas d'un corps sans
+  // `RotateTransform` ni vitesse de rotation initiale.
+  check("un corps fixe lache ses morceaux immobiles",
+        detachVelocity([10, 0, 0], [0, 0, 0], null).join(","), "0,0,0");
+  // Le centre compte : la vitesse se mesure depuis LUI, pas depuis l'origine.
+  check("la vitesse se mesure depuis le centre du corps",
+        Number(Math.hypot(...detachVelocity([110, 0, 0], [100, 0, 0],
+                                            spin)).toFixed(6)), 10);
 }
 
 report();

@@ -37,6 +37,47 @@
 
 export const FIELD_PARENT_ONLY = 2;
 
+/**
+ * `DetachableFragment.Init(masse, trainee, vitesseDeFuite, detectionDeChamp)`
+ * et `Detach()`, qui est tout ce qui se passe au moment ou un morceau lache.
+ *
+ *     parent.rigidbody.mass -= _mass;
+ *     self.rigidbody.mass    = _mass;
+ *     Vector3 fuite = _escapeFromParentSpeed
+ *                   * (self.worldCoM - parent.worldCoM).normalized;
+ *     self.SetVelocity(parent.GetPointVelocity(self.worldCoM) + fuite);
+ *     self.SetAngularVelocity(parent.GetAngularVelocity());
+ *
+ * L'UNIQUE INSTANCE DE LA SCENE porte `_mass = 100`, `_dragFactor = 0` et
+ * `_escapeFromParentSpeed = 0`. Deux des quatre champs d'`Init` sont donc
+ * NULS dans ce build : le morceau n'est pas ejecte, et rien ne le freine. Ce
+ * qui reste est la seule chose qui se voie, et elle manquait —
+ *
+ *   **il part avec la vitesse du point d'ou il se detache.**
+ *
+ * `GetPointVelocity(p)` d'un corps qui tourne vaut `omega x (p - centre)`. Un
+ * fragment de la croute de Brittle Hollow ne tombe donc pas droit : il garde
+ * la vitesse que la rotation de la planete lui donnait, et s'ecarte en spirale.
+ * Le portage le lachait immobile (docs/110-croute.md).
+ *
+ * Le transfert de masse, lui, n'a pas d'equivalent ici : ce portage n'a pas de
+ * `Rigidbody` pour la planete, et sa gravite vient d'un champ analytique que
+ * cent unites de moins ne changent pas.
+ *
+ * @param point   position du fragment, dans le repere du conteneur
+ * @param centre  centre du corps parent, meme repere
+ * @param spin    `bodySpin(corps)` : axe unitaire et rad/s, ou null
+ */
+export function detachVelocity(point, centre, spin) {
+  if (!spin) return [0, 0, 0];
+  const r = [point[0] - centre[0], point[1] - centre[1], point[2] - centre[2]];
+  const w = [spin.axis[0] * spin.rate, spin.axis[1] * spin.rate,
+             spin.axis[2] * spin.rate];
+  return [w[1] * r[2] - w[2] * r[1],
+          w[2] * r[0] - w[0] * r[2],
+          w[0] * r[1] - w[1] * r[0]];
+}
+
 /** Porteurs de croute, avec leurs proprietes de fragment. */
 export function crustCarriers(gameplay) {
   return ((gameplay.placed || {}).MakeChildrenBreakable || []).map((c) => {
