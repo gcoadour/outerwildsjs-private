@@ -112,6 +112,92 @@ export function jumpHeight(jumpSpeed, gravity) {
   return gravity > 0 ? (jumpSpeed * jumpSpeed) / (2 * gravity) : Infinity;
 }
 
+/**
+ * `PlayerJetpackController` : DEUX verrous sur la poussee, que le portage
+ * n'avait ni l'un ni l'autre.
+ *
+ * 1. LE CARBURANT A VIDE, AVEC HYSTERESIS. `Update` pose `_isFuelDepleted` des
+ *    que la fraction touche zero — et il abandonne le pilote automatique au
+ *    passage — mais il ne le retire qu'au-DESSUS de cinq pour cent. Tomber en
+ *    panne ne se repare donc pas d'une goutte : il faut avoir refait le plein
+ *    d'un vingtieme avant que le sac reparte.
+ *
+ * 2. LA POUSSEE HORIZONTALE NE REPART PAS TOUTE SEULE APRES UN SAUT.
+ *    `OnBecomeGrounded` la coupe (`_isHorizontalThrustEnabled = false`), et
+ *    `OnBecomeUngrounded` retient la commande DU MOMENT DU DECOLLAGE
+ *    (`_translationAtJump`). En l'air, elle ne revient que si l'une des trois
+ *    conditions de `ReadTranslationalInput` est remplie :
+ *
+ *      - la commande depasse 0,5 ET s'ecarte de plus de SOIXANTE degres de
+ *        celle du decollage — on a change d'avis, donc on pousse vraiment ;
+ *      - on appuie sur monter ou descendre, quel que soit le reste ;
+ *      - la poussee de rotation est deja engagee.
+ *
+ *    C'est ce qui empeche un simple saut de devenir un envol : courir puis
+ *    sauter ne vous propulse pas, il faut un GESTE de plus. Le portage poussait
+ *    lateralement dans tous les cas, et le saut y valait decollage.
+ */
+export const JETPACK = {
+  refuelFraction: 0.05,   // au-dessus, la panne est levee
+  minMagnitude: 0.5,      // en deca, le changement de cap ne compte pas
+  turnDegrees: 60,        // l'ecart qui rallume la poussee horizontale
+};
+
+/** L'angle non signe entre deux commandes, en degres (`Vector3.Angle`). */
+export function inputAngle(a, b) {
+  const la = Math.hypot(a[0], a[1], a[2]), lb = Math.hypot(b[0], b[1], b[2]);
+  if (la < 1e-9 || lb < 1e-9) return 0;
+  const d = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb);
+  return Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
+}
+
+export class JetpackGate {
+  constructor(cfg = JETPACK) {
+    this.cfg = cfg;
+    this.depleted = false;
+    this.grounded = true;
+    this.horizontal = false;
+    this.atJump = [0, 0, 0];
+  }
+
+  /**
+   * `Update`, premier bloc. @returns true si la panne vient de commencer —
+   * c'est a cet instant que le build abandonne le pilote automatique.
+   */
+  fuel(fraction) {
+    if (!(fraction > 0)) {
+      if (this.depleted) return false;
+      this.depleted = true;
+      return true;
+    }
+    if (this.depleted && fraction > this.cfg.refuelFraction) this.depleted = false;
+    return false;
+  }
+
+  /** `OnBecomeGrounded` / `OnBecomeUngrounded`, sur la TRANSITION. */
+  setGrounded(grounded, input = [0, 0, 0]) {
+    const g = !!grounded;
+    if (g === this.grounded) return;
+    this.grounded = g;
+    if (g) this.horizontal = false;
+    else this.atJump = [input[0], input[1], input[2]];
+  }
+
+  /**
+   * `ReadTranslationalInput`. @param input [droite, haut - bas, avant]
+   * @returns la commande effective, deja privee de ce qui est coupe
+   */
+  read(input, rotational = false) {
+    if (this.depleted) return [0, 0, 0];
+    if (!this.grounded) {
+      const gros = Math.hypot(input[0], input[1], input[2]) > this.cfg.minMagnitude;
+      const vire = gros && inputAngle(this.atJump, input) > this.cfg.turnDegrees;
+      if (vire || Math.abs(input[1]) > 0 || rotational) this.horizontal = true;
+    }
+    return this.horizontal ? [input[0], input[1], input[2]] : [0, input[1], 0];
+  }
+}
+
 export class Player {
   constructor(consts, start) {
     this.c = { ...PLAYER_FALLBACK, ...(consts || {}) };
@@ -122,6 +208,9 @@ export class Player {
     this.field = null;
     this.fluid = null;    // volume de fluide traverse, ou null
     this.jetpack = false; // le sac dorsal pousse-t-il ? (c'est lui qui brule)
+    // Les deux verrous de `PlayerJetpackController` : la panne de carburant et
+    // la poussee horizontale qui ne repart pas apres un saut.
+    this.gate = new JetpackGate();
     this.tumble = 0;      // temps restant de desequilibre, en secondes
     this.wasJump = false;   // front de touche du saut
     this.mass = this.c.mass;
@@ -198,7 +287,15 @@ export class Player {
     const lat = surf ? c.surfaceLateralThrust : c.maxTranslationalThrust;
     const ver = surf ? c.surfaceVerticalThrust : c.maxTranslationalThrust;
     const a = { x: 0, y: 0, z: 0 };
-    const fwd = input.forward || 0, rgt = input.right || 0;
+    // `ThrusterController.FixedUpdate` lit la commande, puis MET A ZERO x et z
+    // — et rien d'autre — quand la poussee horizontale est coupee. La commande
+    // du build est `(thrustX, thrustUp - thrustDown, thrustZ)` : on la compose
+    // dans cet ordre, on la passe au verrou, et on reprend ce qui en sort.
+    const brut = [input.right || 0,
+                  (input.up ? 1 : 0) - (input.down ? 1 : 0),
+                  input.forward || 0];
+    this.gate.setGrounded(this.grounded, brut);
+    const [rgt, vert, fwd] = this.gate.read(brut);
     if (fwd || rgt) {
       a.x += (basis.fwd.x * fwd + basis.right.x * rgt) * lat;
       a.y += (basis.fwd.y * fwd + basis.right.y * rgt) * lat;
@@ -207,7 +304,6 @@ export class Player {
     // `thrustUp` et `thrustDown` sont DEUX canaux — majuscule et controle — et
     // le portage n'avait que le premier. Descendre au sac dorsal etait donc
     // impossible : on ne pouvait que couper la poussee et tomber.
-    const vert = (input.up ? 1 : 0) - (input.down ? 1 : 0);
     if (vert) { a.x += up.x * ver * vert; a.y += up.y * ver * vert; a.z += up.z * ver * vert; }
     this.jetpack = !!(fwd || rgt || vert);
     return a;

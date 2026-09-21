@@ -746,9 +746,31 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("modificateur de reacteur", dmg["moteur"], 0)
             rep.eq("coupure des propulseurs endommages", dmg["coupe"], False)
 
-        # --- champ de debris du trou blanc --------------------------------------
-        deb = page.evaluate("() => window.__debris ? window.__debris.radius : null")
-        rep.eq("rayon du champ de debris", deb, 750)
+        # --- le trou blanc, relu en entier (docs/102-trou-blanc.md) -------------
+        #
+        # Trois champs serialises, trois noms pris pour des lois. Ce controle
+        # garde ce que le portage en fait MAINTENANT, et surtout que le trou
+        # blanc a une ORIENTATION : sans elle il n'y a pas de « devant », et
+        # `ForceWarp` sort droit devant.
+        deb = page.evaluate("""() => {
+          const d = window.__debris;
+          if (!d) return null;
+          const f = window.__trouBlancFwd;
+          return { laisse: d.radius, pas: d.cfg.checkSeconds,
+                   depart: d.cfg.startScale, vitesse: d.cfg.exitSpeed,
+                   avant: f ? f.map((x) => Math.round(x * 1000) / 1000) : null,
+                   norme: f ? Math.round(Math.hypot(f[0], f[1], f[2]) * 1000) / 1000
+                            : null };
+        }""")
+        rep.eq("la laisse maximale est `_debrisRadius`", deb and deb["laisse"], 750)
+        rep.eq("une sortie par seconde au plus", deb and deb["pas"], 1)
+        rep.eq("un morceau entre a un dixieme de sa taille", deb and deb["depart"], 0.1)
+        rep.eq("et il part a vingt unites par seconde", deb and deb["vitesse"], 20)
+        # L'avant du trou blanc vient de `WANT_ROTATION` : il est unitaire, et
+        # il n'est PAS la verticale du monde — ce sur quoi le portage retombait.
+        rep.eq("le trou blanc a un avant", deb and deb["norme"], 1.0)
+        rep.eq("et ce n'est pas la verticale du monde",
+               deb and deb["avant"] != [0, 1, 0], True)
 
         # --- rotation propre des corps ------------------------------------------
         #

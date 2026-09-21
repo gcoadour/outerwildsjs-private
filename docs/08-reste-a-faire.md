@@ -190,6 +190,10 @@ portage.
 | nouvelle partie | `CreateNewPlayerSave`, au menu des réglages faute de menu-titre ([`99`](99-lois-branchees.md)) |
 | jauges du casque | elles sont **sur la visière** : sans combinaison, il n'y en a pas ([`99`](99-lois-branchees.md)) |
 | orbites de la carte | cinq couleurs du build, centrées sur le **Soleil**, et l'ellipse de la comète ([`100`](100-carte.md)) |
+| **sauter ne décolle pas** | la poussée horizontale se coupe au sol et demande un geste pour revenir ([`101`](101-sac-dorsal.md)) |
+| panne sèche | rien ne pousse à zéro, et il faut 5 % pour repartir ([`101`](101-sac-dorsal.md)) |
+| **sortie du trou blanc** | droit devant, à son rayon, à 20 u/s — le cône est pour les débris ([`102`](102-trou-blanc.md)) |
+| champ de débris | un par seconde, il grandit en 0,96 s, et une laisse le retient ([`102`](102-trou-blanc.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

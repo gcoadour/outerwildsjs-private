@@ -32,7 +32,8 @@ import { elevators, Elevator as Cabine, LaunchTerminal, landedOn, LandingPads,
 import { sandScale, sandProgress, funnelScale, funnelActive,
          sandColumns, sandFunnels, markCrushing, SandLevels } from "../web/src/sand.js";
 import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
-         COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
+         COMPRESSION_GRACE, PlayerState, JetpackGate, JETPACK,
+         inputAngle } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
          FadeLight, SATELLITE_FADE, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
@@ -128,7 +129,8 @@ import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
-import { DebrisField, DEBRIS_RADIUS } from "../web/src/blackhole.js";
+import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
+         leashBrake, growSteps } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
          ambientColor, ambientTint, hsvToRgb, Sectors,
@@ -810,28 +812,64 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("un fichier protege ne part jamais", freed.length, 1);
 }
 
-// --- champ de debris du trou blanc --------------------------------------
+// --- le trou blanc, relu en entier (docs/102-trou-blanc.md) --------------
 {
-  const field = new DebrisField(750, 2);
-  check("rayon de debris", field.radius, DEBRIS_RADIUS);
+  const field = new DebrisField();
+  check("la laisse maximale est `_debrisRadius`", field.radius, DEBRIS_RADIUS);
   field.swallow("Shard_01"); field.swallow("Shard_02");
   check("deux morceaux en file", field.pending, 2);
-  check("rien ne ressort avant le delai", field.update(1.9).length, 0);
-  check("un morceau ressort", field.update(0.2).length, 1);
-  check("... un seul a la fois", field.grown, 1);
-  field.update(2);
-  check("puis le suivant", field.grown, 2);
-  check("file vide", field.pending, 0);
+  // UNE SORTIE PAR SECONDE AU PLUS, et seulement si la sphere est libre.
+  check("sortie prise : rien ne part", field.update(2, false).length, 0);
+  check("et cela se compte", field.blocked >= 1, true);
+  check("sortie libre : rien ne part TOUT DE SUITE non plus",
+        field.update(0.02, true).length, 0);
+  check("mais un morceau a commence a grandir", field.scale, WHITE_HOLE.startScale);
+  check("la file a diminue", field.pending, 1);
+  // IL GRANDIT PAR PAS DE PHYSIQUE : x1,05, quarante-sept pas.
+  check("quarante-huit pas pour passer de 0,1 a 1", growSteps(), 48);
+  check("il n'est pas encore sorti", field.update(0.5).length, 0);
+  check("et il a grossi", field.scale > WHITE_HOLE.startScale, true);
+  const parti = field.update(0.6);
+  check("un peu moins d'une seconde, et il part", parti.length, 1);
+  check("a sa taille pleine", parti[0].scale, 1);
+  check("un seul a la fois", field.grown, 1);
 
-  const p = field.items[0].position;
-  check("dans la sphere de debris",
-        Math.hypot(p[0], p[1], p[2]) <= 750 + 1e-9, true);
-  check("placement reproductible",
-        JSON.stringify(new DebrisField(750, 2).place("Shard_01")),
-        JSON.stringify(p));
-  check("deux morceaux ne se superposent pas",
-        JSON.stringify(field.items[0].position) !==
-        JSON.stringify(field.items[1].position), true);
+  // LA DIRECTION : entre quinze et trente degres de l'avant, jamais dans l'axe.
+  const avant = [0, 0, 1], haut = [0, 1, 0];
+  const angle = (d) => Math.acos(Math.max(-1, Math.min(1,
+    d[0] * avant[0] + d[1] * avant[1] + d[2] * avant[2]))) * 180 / Math.PI;
+  check("le plancher du cone est a quinze degres",
+        round(angle(exitTrajectory(avant, haut, 0, 0)), 3), WHITE_HOLE.coneFloorDeg);
+  check("et son plafond a la MOITIE de `_exitConeAngle`",
+        round(angle(exitTrajectory(avant, haut, 1, 0)), 3),
+        WHITE_HOLE.exitConeDeg / 2);
+  check("rien ne sort dans l'axe",
+        angle(exitTrajectory(avant, haut, 0, 0.37)) >= WHITE_HOLE.coneFloorDeg - 1e-6,
+        true);
+  check("le tour d'azimut fait bien le tour",
+        round(Math.hypot(...exitTrajectory(avant, haut, 0.5, 0.75)), 6), 1);
+  const lance = field.launch(parti[0], avant, haut);
+  check("et il part a vingt unites par seconde",
+        round(Math.hypot(...lance.velocity), 6), WHITE_HOLE.exitSpeed);
+
+  // LA LAISSE : rien en deca de 80 %, puis un freinage QUADRATIQUE.
+  check("dans les quatre cinquiemes, rien ne freine", leashBrake(400, 750), 0);
+  check("a quatre-vingts pour cent non plus", leashBrake(600, 750), 0);
+  check("a mi-chemin du reste, un quart", round(leashBrake(675, 750), 6), 0.25);
+  check("au bout de la laisse, plein", leashBrake(750, 750), 1);
+  check("et au-dela, pas davantage", leashBrake(2000, 750), 1);
+
+  // LA LAISSE EST TIREE DU NOM : reproductible, et entre 150 et 750.
+  const a = new DebrisField(); a.swallow("Shard_01");
+  const b = new DebrisField(); b.swallow("Shard_01");
+  check("la meme croute ressort de la meme facon",
+        a.queue[0].leash, b.queue[0].leash);
+  check("et la laisse tient dans ses bornes",
+        a.queue[0].leash >= 750 * WHITE_HOLE.leashMin
+        && a.queue[0].leash <= 750, true);
+  const c = new DebrisField(); c.swallow("Shard_02");
+  check("deux morceaux n'ont pas la meme",
+        a.queue[0].leash !== c.queue[0].leash, true);
 }
 
 // --- eclairage ambiant par secteur --------------------------------------
@@ -2000,6 +2038,72 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(r.jetpackAccel({ forward: 1, right: 0, up: false }, vertical,
                              { x: 0, y: 1, z: 0 }).z, 3), 7);
   check("le sac dorsal qui pousse se declare", r.jetpack, true);
+
+  // LES DEUX VERROUS DU SAC DORSAL (docs/101-sac-dorsal.md).
+  //
+  // Les trois controles ci-dessus ne mesurent la poussee laterale que parce
+  // que le premier a ouvert le verrou : il appuyait sur MONTER, ce qui est
+  // l'une des trois conditions de `ReadTranslationalInput`. Dit ici pour que
+  // l'ordre de ces lignes cesse d'etre un hasard qui porte un resultat.
+  check("le verrou est ouvert depuis la premiere poussee verticale",
+        r.gate.horizontal, true);
+  {
+    // 1. LE CARBURANT, AVEC SON HYSTERESIS DE CINQ POUR CENT.
+    const g = new JetpackGate();
+    check("plein, rien n'est coupe", g.fuel(1), false);
+    check("a sec, la panne commence", g.fuel(0), true);
+    check("et elle ne se declare qu'une fois", g.fuel(0), false);
+    check("plus rien ne pousse", g.read([1, 1, 1]).join(","), "0,0,0");
+    check("une goutte ne suffit pas", g.fuel(0.04), false);
+    check("la panne tient toujours", g.depleted, true);
+    g.fuel(JETPACK.refuelFraction + 1e-6);
+    check("au-dessus de cinq pour cent, elle est levee", g.depleted, false);
+
+    // 2. LA POUSSEE HORIZONTALE APRES UN SAUT.
+    const h = new JetpackGate();
+    h.fuel(1);
+    // On court vers l'avant, puis on saute : la commande du decollage est
+    // retenue, et le verrou est ferme.
+    h.setGrounded(false, [0, 0, 1]);
+    check("au decollage, l'horizontale est coupee", h.horizontal, false);
+    check("... et la commande avant ne passe pas",
+          h.read([0, 0, 1]).join(","), "0,0,0");
+    // `ThrusterController.FixedUpdate` lit la commande PUIS teste le verrou :
+    // l'image qui l'ouvre est donc deja celle qui pousse.
+    check("appuyer sur monter ouvre le verrou, des cette image",
+          h.read([0, 1, 1]).join(","), "0,1,1");
+    check("et il reste ouvert", h.horizontal, true);
+
+    // Meme chose, mais sans jamais toucher au vertical : il faut CHANGER DE
+    // CAP de plus de soixante degres.
+    const k = new JetpackGate();
+    k.fuel(1);
+    k.setGrounded(false, [0, 0, 1]);
+    check("tenir le meme cap ne rouvre rien",
+          k.read([0, 0, 1]).join(",") + "|" + k.horizontal, "0,0,0|false");
+    // Quarante-cinq degres : pas assez.
+    const q = Math.SQRT1_2;
+    check("quarante-cinq degres non plus",
+          k.read([q, 0, q]).join(",") + "|" + k.horizontal, "0,0,0|false");
+    check("l'angle mesure bien quarante-cinq degres",
+          Math.round(inputAngle([0, 0, 1], [q, 0, q])), 45);
+    // Quatre-vingt-dix : au-dela des soixante, et la commande est pleine.
+    check("un quart de tour, oui — et la poussee part dans la meme image",
+          k.read([1, 0, 0]).join(",") + "|" + k.horizontal, "1,0,0|true");
+
+    // Une commande FAIBLE ne compte pas, meme a contresens.
+    const f = new JetpackGate();
+    f.fuel(1);
+    f.setGrounded(false, [0, 0, 1]);
+    check("une commande sous un demi ne rouvre rien",
+          f.read([0, 0, -0.4]).join(",") + "|" + f.horizontal, "0,0,0|false");
+
+    // Se reposer referme tout.
+    k.setGrounded(true);
+    check("atterrir referme le verrou", k.horizontal, false);
+    check("et la course au sol ne pousse plus lateralement",
+          k.read([1, 0, 0]).join(","), "0,0,0");
+  }
 
   // Les constantes viennent des DEUX composants, et rien n'est invente : ce
   // que le build ne donne pas est absent, `Player` complete avec son repli.

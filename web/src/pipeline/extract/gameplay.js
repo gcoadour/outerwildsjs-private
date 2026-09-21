@@ -199,7 +199,10 @@ const WANT_VOLUME = new RegExp([
  */
 // `ShipBody` s'y ajoute : les capteurs de pad sont ses enfants, et ramener
 // leur position dans SON repere demande sa pose de repos (docs/89-pose.md).
-const WANT_ROTATION = /^(spawnpoint|shipbody)$/i;
+// `WhiteHoleVolume` aussi : `ForceWarp` sort DROIT DEVANT lui, et
+// `GetRandomExitTrajectory` incline autour de son avant et de son haut. Sans
+// son orientation, il n'y a pas de « devant » a suivre (docs/102-trou-blanc.md).
+const WANT_ROTATION = /^(spawnpoint|shipbody|whiteholevolume)$/i;
 
 /** Composants dont le PARENT designe ce qu'ils commandent. */
 const WANT_PARENTS = /^EntrywayTrigger$/i;

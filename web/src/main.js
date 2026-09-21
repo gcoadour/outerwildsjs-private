@@ -53,7 +53,8 @@ import { QuantumMoon, quantumHosts, bodyOccluder,
 import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
          statueParts, planarCandidate, slopeOK,
          QUANTIQUE } from "./quantumobj.js";
-import { BlackHole, DebrisField } from "./blackhole.js";
+import { BlackHole, DebrisField, WHITE_HOLE, leashBrake,
+         growSteps } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
@@ -1560,24 +1561,50 @@ async function boot() {
                     (whiteVol.fields || {})._radius || 50) : null;
   window.__blackhole = blackHole;
 
-  // Champ de debris du trou blanc : ce que le trou noir avale ressort la-bas,
-  // un morceau apres l'autre, dans une sphere de 750 unites.
-  const debris = whiteVol
-    ? new DebrisField((whiteVol.fields || {})._debrisRadius || 750) : null;
+  // §X LE CHAMP DE DEBRIS, RELU (docs/102-trou-blanc.md). Ce que le trou noir
+  // avale ne se disperse pas dans une sphere : il SORT du trou blanc, un
+  // morceau par seconde au plus, apres avoir grandi d'un dixieme a sa taille
+  // pleine, et s'en eloigne jusqu'a ce que sa laisse le retienne.
+  const debris = whiteVol ? new DebrisField() : null;
+  // L'avant et le haut du trou blanc : c'est autour d'eux que tout se decide.
+  // `WANT_ROTATION` les donne depuis ce lot ; sans eux, on retombe sur la
+  // verticale du monde, et le portage n'avait que cela.
+  const trouBlancAxes = (() => {
+    const r = whiteVol && whiteVol.rotation;
+    return r ? { fwd: qrotDecor(r, [0, 0, 1]), up: qrotDecor(r, [0, 1, 0]) }
+             : { fwd: [0, 1, 0], up: [0, 0, 1] };
+  })();
   const debrisMeshes = [];
   let debrisBase = null;
+  // Le maillage du morceau qui grandit encore : il n'est pas dans la liste des
+  // partis, et il occupe la bouche du trou blanc pendant sa croissance.
+  let debrisPousse = null;
+  let debrisMat = null;
   window.__debris = debris;
+  window.__trouBlancFwd = trouBlancAxes.fwd;   // sonde de verification
+  if (debris) {
+    console.log(`trou blanc : sortie a ${WHITE_HOLE.radius} u, cone `
+      + `${WHITE_HOLE.coneFloorDeg}-${WHITE_HOLE.exitConeDeg / 2} deg, `
+      + `${growSteps()} pas de croissance`);
+  }
 
   function syncDebris(dt, framePos) {
     if (!debris) return;
-    const fresh = debris.update(dt);
+    // `Physics.CheckSphere(position, _radius)` : rien ne sort dans une sortie
+    // occupee. Ici l'occupant qui compte est le dernier morceau parti, tant
+    // qu'il n'a pas quitte la sphere — c'est ce que le build mesure aussi.
+    const libre = !debrisMeshes.some(({ item }) => item.pos
+      && Math.hypot(item.pos[0], item.pos[1], item.pos[2]) < WHITE_HOLE.radius);
+    const fresh = debris.update(dt, libre);
+    if (!debrisMat && (fresh.length || debris.growing)) {
+      debrisMat = new BABYLON.StandardMaterial("debrisMat", scene);
+      debrisMat.diffuseColor = new BABYLON.Color3(0.32, 0.28, 0.30);
+      debrisMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    }
     if (fresh.length && !debrisBase) {
       debrisBase = BABYLON.MeshBuilder.CreateSphere("debris",
         { diameter: 24, segments: 6 }, scene);
-      const m = new BABYLON.StandardMaterial("debrisMat", scene);
-      m.diffuseColor = new BABYLON.Color3(0.32, 0.28, 0.30);
-      m.specularColor = new BABYLON.Color3(0, 0, 0);
-      debrisBase.material = m;
+      debrisBase.material = debrisMat;
       debrisBase.isPickable = false;
       MeshLOD.pin(debrisBase);
     }
@@ -1588,14 +1615,59 @@ async function boot() {
       const inst = debrisMeshes.length
         ? debrisBase.createInstance(`debris_${item.seed}`) : debrisBase;
       inst.isPickable = false;
+      // Il part de la bouche du trou blanc, a vingt unites par seconde, dans
+      // le cone de quinze a trente degres autour de son avant.
+      const l = debris.launch(item, trouBlancAxes.fwd, trouBlancAxes.up);
+      item.pos = [0, 0, 0];
+      item.vel = l.velocity;
       debrisMeshes.push({ inst, item });
+    }
+    // §X LE MORCEAU QUI GRANDIT SE VOIT. Il passe presque une seconde a la
+    // bouche du trou blanc, d'un dixieme de sa taille a sa taille pleine : le
+    // cacher jusqu'au depart, c'est perdre la seule chose que ce mecanisme
+    // donne a regarder. Il a donc son maillage a lui, cree quand il entre et
+    // rendu a la file quand il part.
+    if (debris.growing) {
+      if (!debrisPousse) {
+        // Un maillage a lui, et non une instance : les instances dependent
+        // d'un maillage source allume, et le morceau qui grandit peut etre le
+        // tout premier — il n'y a alors pas encore de source.
+        debrisPousse = BABYLON.MeshBuilder.CreateSphere("debris_pousse",
+          { diameter: 24, segments: 6 }, scene);
+        debrisPousse.isPickable = false;
+        debrisPousse.material = debrisMat;
+        MeshLOD.pin(debrisPousse);
+      }
+      debrisPousse.scaling.setAll(debris.scale);
+      debrisPousse.position.set(whiteVol.position[0] - framePos[0],
+                                whiteVol.position[1] - framePos[1],
+                                whiteVol.position[2] - framePos[2]);
+    } else if (debrisPousse) {
+      debrisPousse.dispose();
+      debrisPousse = null;
     }
     if (!debrisMeshes.length) return;
     const base = whiteVol.position;
     for (const { inst, item } of debrisMeshes) {
-      inst.position.set(base[0] - framePos[0] + item.position[0],
-                        base[1] - framePos[1] + item.position[1],
-                        base[2] - framePos[2] + item.position[2]);
+      if (item.pos) {
+        // `DebrisLeash.FixedUpdate` : rien ne freine en deca de 80 % de la
+        // laisse, puis le carre de la fraction restante s'oppose a la vitesse
+        // RELATIVE. Le trou blanc est l'ancre, et dans ce repere il est fixe.
+        const d = Math.hypot(item.pos[0], item.pos[1], item.pos[2]);
+        const k = leashBrake(d, item.leash);
+        if (k > 0) {
+          item.vel[0] -= item.vel[0] * k * dt;
+          item.vel[1] -= item.vel[1] * k * dt;
+          item.vel[2] -= item.vel[2] * k * dt;
+        }
+        item.pos[0] += item.vel[0] * dt;
+        item.pos[1] += item.vel[1] * dt;
+        item.pos[2] += item.vel[2] * dt;
+      }
+      const p = item.pos || [0, 0, 0];
+      inst.position.set(base[0] - framePos[0] + p[0],
+                        base[1] - framePos[1] + p[1],
+                        base[2] - framePos[2] + p[2]);
     }
   }
 
@@ -3887,7 +3959,10 @@ async function boot() {
 
     // --- trou noir : capture puis ejection au trou blanc ---
     if (blackHole) {
-      const t = blackHole.capture(player.pos, anchorPos);
+      // `ForceWarp` sort DROIT DEVANT le trou blanc : son avant, et non une
+      // verticale quelconque. Le portage tirait au hasard dans un cone qui,
+      // lui, n'appartient qu'aux debris (docs/102-trou-blanc.md).
+      const t = blackHole.capture(player.pos, anchorPos, trouBlancAxes.fwd);
       if (t) {
         // `OnPlayerEnterBlackHole` : l'image se visse de 220 a 360 degres en
         // deux secondes. C'est ce qui fait qu'on ne voit pas la coupure.
@@ -4935,6 +5010,16 @@ async function boot() {
       const sec = resources.fuel <= 0;
       if (sec && !sacASec) bipUI("PlaySuitWarningSound");
       sacASec = sec;
+      // §W LA PANNE SECHE A UNE HYSTERESIS. `PlayerJetpackController.Update`
+      // pose `_isFuelDepleted` des que la fraction touche zero, et ne le
+      // retire qu'au-DESSUS de cinq pour cent : une goutte ne suffit pas a
+      // repartir. Il abandonne aussi le pilote automatique a cet instant, ce
+      // que le portage ne faisait pas — on se laissait guider vers une cible
+      // sans avoir de quoi freiner.
+      if (player.gate.fuel(resources.fuel / resources.maxFuel)) {
+        if (autopilot && autopilot.engaged) autopilot.abort();
+        console.log("panne seche : le sac dorsal se coupe");
+      }
       // La zone suit le vaisseau : elle est posee SUR lui, et il vole.
       presDuVaisseau = zonesVaisseau.length === 0 || !!ship.boarded
         || zonesVaisseau.some((z) => z.volume && Math.hypot(
