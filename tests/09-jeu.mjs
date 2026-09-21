@@ -78,7 +78,7 @@ import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
 import { Interactables } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
-         ALIGN, slerpRate, steadyPitch, UpAligner,
+         ALIGN, slerpRate, steadyPitch, steadyLook, UpAligner,
          slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
@@ -6626,6 +6626,70 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("un roulis pur ne rend aucun tangage",
           Number(steadyPitch([0, 1, 0], [Math.sin(d), Math.cos(d), 0],
                              [1, 0, 0]).toFixed(4)), 0);
+  }
+
+  // CE QUE LE PORTAGE APPLIQUE, ET POURQUOI CE N'EST PAS `steadyPitch` TEL
+  // QUEL. Le but est un EFFET : la vue ne bouge pas pendant que le corps se
+  // redresse. Ce test le mesure directement — l'avant MONDE avant et apres.
+  {
+    const avant = (up, lacet, tangage) => {
+      const { east, north } = horizonBasis(up);
+      const cy = Math.cos(lacet), sy = Math.sin(lacet);
+      const cp = Math.cos(tangage), sp = Math.sin(tangage);
+      return [north[0] * cy * cp + east[0] * sy * cp + up[0] * -sp,
+              north[1] * cy * cp + east[1] * sy * cp + up[1] * -sp,
+              north[2] * cy * cp + east[2] * sy * cp + up[2] * -sp];
+    };
+    const droite = (up, lacet) => {
+      const { east, north } = horizonBasis(up);
+      const cy = Math.cos(lacet), sy = Math.sin(lacet);
+      return [north[0] * -sy + east[0] * cy, north[1] * -sy + east[1] * cy,
+              north[2] * -sy + east[2] * cy];
+    };
+    const tourne = (v, axe, ang) => {
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const k = axe[0] * v[0] + axe[1] * v[1] + axe[2] * v[2];
+      return [v[0] * c + (axe[1] * v[2] - axe[2] * v[1]) * s + axe[0] * k * (1 - c),
+              v[1] * c + (axe[2] * v[0] - axe[0] * v[2]) * s + axe[1] * k * (1 - c),
+              v[2] * c + (axe[0] * v[1] - axe[1] * v[0]) * s + axe[2] * k * (1 - c)];
+    };
+    const ecart = (a, b) => Math.acos(Math.max(-1, Math.min(1,
+      a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180 / Math.PI;
+
+    const u0 = [0.2, 0.5, -0.84].map((v, _, t) =>
+      v / Math.hypot(t[0], t[1], t[2]));
+    const huit = 8 * Math.PI / 180;
+    let pire = 0, pireSansRien = 0, pireTangageSeul = 0;
+    for (const lacet of [0, 0.7, 2.1, -1.3]) {
+      for (const tangage of [0, 0.3, -0.4]) {
+        const dr = droite(u0, lacet);
+        const f0 = avant(u0, lacet, tangage);
+        const u1 = tourne(u0, dr, huit);
+        const vu = steadyLook(f0, u1);
+        pire = Math.max(pire, ecart(f0, avant(u1, vu.yaw, vu.pitch)));
+        pireSansRien = Math.max(pireSansRien, ecart(f0, avant(u1, lacet, tangage)));
+        pireTangageSeul = Math.max(pireTangageSeul, ecart(f0,
+          avant(u1, lacet, tangage - steadyPitch(u0, u1, dr) * Math.PI / 180)));
+      }
+    }
+    check("le regard ne bouge pas d'un millieme de degre",
+          pire < 1e-3, true);
+    // Les deux chiffres qui disent pourquoi le tangage seul ne suffit pas ici.
+    check("sans rien faire, la vue derive avec le corps",
+          Math.round(pireSansRien * 10) / 10 >= 8, true);
+    check("et le tangage seul n'en rattrape qu'une partie",
+          pireTangageSeul > 1 && pireTangageSeul < pireSansRien, true);
+
+    // A LACET NUL, le repere ne tourne pas et les deux lois coincident : c'est
+    // ce qui rattache `steadyLook` a la ligne du build.
+    {
+      const dr = droite([0, 1, 0], 0);
+      const u1 = tourne([0, 1, 0], dr, huit);
+      const vu = steadyLook(avant([0, 1, 0], 0, 0.25), u1);
+      const litteral = 0.25 - steadyPitch([0, 1, 0], u1, dr) * Math.PI / 180;
+      check("a lacet nul, les deux lois donnent le meme tangage",
+            Number((vu.pitch - litteral).toFixed(9)), 0);
+    }
   }
 
   // `InitAlignment` rallume la compensation a chaque entree dans un champ, et

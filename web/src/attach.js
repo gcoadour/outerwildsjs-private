@@ -44,6 +44,7 @@
 
 import { angleBetween, qmul, qconj, qrot } from "./decor.js";
 import { smoothStep } from "./tower.js";
+import { horizonBasis } from "./start.js";
 
 /** Constructeur de `PlayerAttachPoint`. La scene contredit les trois drapeaux. */
 export const ATTACHE = {
@@ -533,8 +534,12 @@ export function alignStep(courant, cible, dt, cfg = ALIGN) {
  * Le lacet et le roulis, eux, ne sont PAS compenses : seule la composante
  * autour de l'axe droit de la camera l'est, et c'est ce que dit la projection.
  *
+ * C'est la transcription litterale, et elle sert d'etalon a `steadyLook` — qui
+ * est ce que ce portage applique, pour une raison ecrite la-bas.
+ *
  * @returns {number} les degres de tangage a RETIRER, signes
  */
+// @mesure
 export function steadyPitch(upAvant, upApres, droite) {
   const plat = (v) => {
     const d = v[0] * droite[0] + v[1] * droite[1] + v[2] * droite[2];
@@ -549,6 +554,44 @@ export function steadyPitch(upAvant, upApres, droite) {
              a[0] * b[1] - a[1] * b[0]];
   const s = n[0] * droite[0] + n[1] * droite[1] + n[2] * droite[2];
   return s < 0 ? -ang : ang;
+}
+
+/**
+ * Ce que ce portage applique : le regard ne bouge PAS, et les deux angles avec.
+ *
+ * POURQUOI PAS `steadyPitch` TEL QUEL. Le build n'ecrit qu'un `AddDegreesY`
+ * parce que son CAP vit sur le `Rigidbody` : redresser le corps autour de son
+ * axe droit ne change pas la reference a laquelle le lacet se mesure. Ici, le
+ * lacet se mesure sur un repere d'horizon RE-DERIVE du haut a chaque image
+ * (`horizonBasis`) — donc bouger le haut bouge aussi la reference du lacet, et
+ * ne corriger que le tangage laisse la vue deriver. Mesure : pour huit degres
+ * de redressement, 8,7 degres de derive sans rien, 3,4 avec le seul tangage.
+ *
+ * Les deux lois coincident quand le repere ne tourne pas — c'est le cas a
+ * lacet nul, et le test le garde. Ce qui est reproduit est l'EFFET, qui est la
+ * loi : pendant que le corps se redresse, la vue reste ou elle etait.
+ *
+ * @param fwdMonde l'avant AVANT le pas, en coordonnees monde
+ * @param upApres  le haut APRES le pas
+ * @returns {{yaw:number, pitch:number}} les angles a poser, en RADIANS
+ */
+export function steadyLook(fwdMonde, upApres) {
+  const { up: u, east, north } = horizonBasis(upApres);
+  const l = Math.hypot(...fwdMonde) || 1;
+  const f = fwdMonde.map((v) => v / l);
+  const k = f[0] * u[0] + f[1] * u[1] + f[2] * u[2];
+  // `fwd = north*cy*cp + east*sy*cp - up*sp` : le tangage se lit sur la
+  // composante verticale, le lacet sur ce qu'il en reste.
+  const pitch = Math.asin(Math.max(-1, Math.min(1, -k)));
+  const plat = [f[0] - u[0] * k, f[1] - u[1] * k, f[2] - u[2] * k];
+  const lp = Math.hypot(...plat);
+  // Regard exactement vertical : aucun azimut. On garde le lacet d'avant,
+  // comme `yawFor` rend null dans ce cas.
+  if (lp < 1e-9) return { yaw: null, pitch };
+  const p = plat.map((v) => v / lp);
+  const cy = p[0] * north[0] + p[1] * north[1] + p[2] * north[2];
+  const sy = p[0] * east[0] + p[1] * east[1] + p[2] * east[2];
+  return { yaw: Math.atan2(sy, cy), pitch };
 }
 
 /**

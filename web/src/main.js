@@ -148,7 +148,7 @@ import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          LOCK_ON } from "./gear.js";
 import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          FieldAlignment, FIELD_ALIGN,
-         UpAligner, steadyPitch } from "./attach.js";
+         UpAligner, steadyPitch, steadyLook } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
          UISounds } from "./reactaudio.js";
@@ -2804,15 +2804,20 @@ async function boot() {
     const pas = redressement.update(upVoulu, dt);
     const up = new BABYLON.Vector3(pas.up[0], pas.up[1], pas.up[2]);
     if (redressement.steady && upAvant && pas.tourne > 0) {
-      // Le regard rend ce que le corps prend : la vue ne bascule pas avec lui.
-      // L'axe DROIT se prend sur le repere d'AVANT le pas — c'est celui autour
-      // duquel le mouvement vient d'avoir lieu.
+      // Le regard reste ou il etait : on reconstruit l'avant MONDE dans le
+      // repere d'avant le pas, et on redit les deux angles dans celui d'apres.
+      // Le build n'ecrit qu'un `AddDegreesY` parce que son cap vit sur le
+      // `Rigidbody` ; ici le lacet se mesure sur un repere re-derive du haut,
+      // donc ne corriger que le tangage laisserait la vue deriver.
       const hbA = horizonBasis(upAvant);
       const cyA = Math.cos(yaw), syA = Math.sin(yaw);
-      const dr = [hbA.north[0] * -syA + hbA.east[0] * cyA,
-                  hbA.north[1] * -syA + hbA.east[1] * cyA,
-                  hbA.north[2] * -syA + hbA.east[2] * cyA];
-      pitch -= steadyPitch(upAvant, pas.up, dr) * Math.PI / 180;
+      const cpA = Math.cos(pitch), spA = Math.sin(pitch);
+      const f0 = [hbA.north[0] * cyA * cpA + hbA.east[0] * syA * cpA + upAvant[0] * -spA,
+                  hbA.north[1] * cyA * cpA + hbA.east[1] * syA * cpA + upAvant[1] * -spA,
+                  hbA.north[2] * cyA * cpA + hbA.east[2] * syA * cpA + upAvant[2] * -spA];
+      const vu = steadyLook(f0, pas.up);
+      if (vu.yaw !== null) yaw = vu.yaw;
+      pitch = vu.pitch;
     }
     // Le repere d'horizon vit dans start.js : le lacet lu sur le SpawnPoint et
     // le lacet de la camera doivent se mesurer dans le MEME repere, sinon

@@ -2122,7 +2122,7 @@ def _run(url, heavy, profil=None, zip_path=None):
             const v = dial.view;
             dlgUI.render(v, !!v.sign);
             const boite = document.querySelector('.dlg-box');
-            let appuis = 1;
+            let appuis = 0;
             while (dial.active && appuis < 40) { dial.advance(); appuis += 1; }
             lecture = {
               lisibles: lisibles.length,
@@ -2222,7 +2222,11 @@ def _run(url, heavy, profil=None, zip_path=None):
                    lect["lisibles"], 34)
             rep.eq("aucun objet lisible sans texte", lect["sansTexte"], 0)
             rep.eq("le plus long se lit en plusieurs fois", lect["pages"] > 1, True)
-            rep.eq("une page de panneau tient cinq lignes", lect["lignes"], 5)
+            # Cinq lignes AU PLUS : le plus long des trente-quatre commence par
+            # une phrase courte suivie d'une arobase, et sa premiere page ne
+            # fait donc qu'une ligne. C'est le plafond qui est la loi.
+            rep.eq("une page de panneau tient cinq lignes au plus",
+                   1 <= lect["lignes"] <= 5, True)
             rep.eq("et aucune ligne ne depasse soixante-dix caracteres",
                    lect["plusLongueLigne"] <= 70, True)
             rep.eq("c'est un panneau, pas quelqu'un qui parle",
@@ -2233,6 +2237,7 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("la lecture se termine au dernier appui", lect["ferme"], True)
             rep.eq("... apres autant d'appuis que de pages",
                    lect["appuis"], lect["pages"])
+            rep.eq("et il en faut plus d'un", lect["pages"] > 1, True)
             # L'invariant qui compte : le decoupage ne PERD rien. Ce module
             # s'arretait a la premiere page et posait un « … » sur le reste.
             rep.eq("et tous les mots du texte ont ete affiches",
