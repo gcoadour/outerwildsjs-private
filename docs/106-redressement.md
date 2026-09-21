@@ -98,13 +98,48 @@ autour de l'axe droit de la caméra l'est, et c'est ce que dit la projection.
 > Sans cette compensation, se poser fait basculer l'horizon — ce qui est, au
 > sens propre, le contraire de ce que le jeu fait.
 
+### Pourquoi la transcription littérale ne suffisait pas ici
+
+Le premier jet portait la ligne du build telle quelle : `pitch -= steadyPitch(…)`.
+Le contrôle navigateur a dit ce que le calcul seul ne disait pas — **six
+contrôles de la sonde sont tombés**. Son tir dépend de l'orientation du joueur à
+cet instant-là, et le vérificateur le signale depuis longtemps
+([`46`](46-migration-lots.md)) : *« rien ne doit s'insérer avant lui »*.
+
+La cause est une différence de **représentation**, pas de loi. Le build n'écrit
+qu'un `AddDegreesY` parce que son **cap vit sur le `Rigidbody`** : redresser le
+corps autour de son axe droit ne change pas la référence à laquelle le lacet se
+mesure. Ici, le lacet se mesure sur un repère d'horizon **re-dérivé du haut à
+chaque image** (`horizonBasis`) — donc bouger le haut bouge aussi la référence
+du lacet, et ne corriger que le tangage laisse la vue dériver :
+
+| pour 8° de redressement | dérive de la vue |
+|---|---|
+| sans rien faire | **8,7°** |
+| avec le seul tangage | **3,4°** |
+| avec `steadyLook` | **< 0,001°** |
+
+Ce qui est reproduit est donc l'**effet**, qui est la loi : pendant que le corps
+se redresse, la vue reste où elle était. `steadyLook` reconstruit l'avant
+*monde* dans le repère d'avant le pas et redit les deux angles dans celui
+d'après.
+
+`steadyPitch` reste au dépôt, marquée `// @mesure` : c'est la transcription
+littérale, et elle sert d'**étalon**. À lacet nul le repère ne tourne pas, les
+deux lois coïncident, et c'est ce que le test garde — c'est le rattachement de
+`steadyLook` à la ligne du build.
+
+> Un portage qui transcrit une ligne sans vérifier qu'elle produit le même
+> effet transcrit la lettre et perd la loi. Ici, la lettre tenait dans une
+> représentation que ce portage n'a pas.
+
 ## 3. Ce que le portage en garde, et ce qu'il ne peut pas
 
 Ce portage n'a qu'une orientation : le regard **est** l'orientation du joueur,
 tenue en lacet et tangage au-dessus d'un repère d'horizon
 ([`79`](79-alignement.md)). Le haut de ce repère est ce qui s'interpole
-désormais, à cent degrés par seconde, et le tangage est corrigé de ce que le
-haut vient de prendre.
+désormais, à cent degrés par seconde, et les deux angles sont redits dans le
+repère d'après pour que la vue ne bouge pas — pour la raison écrite plus haut.
 
 Ce qui ne se transpose pas : le `-0,1°` autour de `Cross(courant, cible)` que le
 build applique quand il n'est **ni** en compensation **ni** en rotation
@@ -117,8 +152,10 @@ nulle part, et il n'a pas d'équivalent dans un modèle qui ne tient pas de
 
 - `tests/09-jeu.mjs` — le produit `taux × écart` constant à cinq écarts
   différents, la borne sous deux degrés, les quatre-vingt-dix pas d'un
-  demi-tour, les quatre-vingt-onze de la compensation ; et `steadyPitch`, qui
-  rend dix degrés pour une bascule de dix et **rien** pour un roulis pur.
+  demi-tour, les quatre-vingt-onze de la compensation ; `steadyPitch`, qui rend
+  dix degrés pour une bascule de dix et **rien** pour un roulis pur ; et
+  surtout l'effet lui-même — l'avant **monde** mesuré avant et après, à douze
+  couples de lacet et de tangage, sous le millième de degré.
 - `tools/15_verify.py --profil` — le module dans la page, sur une copie de son
   état : quatre-vingt-dix pas, 1,8 s, l'arrivée exacte, et **rien ne bouge sans
   champ**. Plus une mesure du monde réel : debout au village, l'écart est nul —
