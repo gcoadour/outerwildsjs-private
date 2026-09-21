@@ -1641,6 +1641,33 @@ def _run(url, heavy, profil=None, zip_path=None):
                    ["EnterFlightConsole"])
             rep.eq("et l'autopilote repond au poste",
                    page.evaluate("() => window.__modes.permet('Autopilot')"), True)
+            # CE QUE LA BOUCLE PASSE VRAIMENT AU POINT D'ACCROCHAGE.
+            #
+            # Les trois controles ci-dessus appellent `attach()` a la main avec
+            # un tableau, et mesurent 1,8 s. La boucle, elle, lui donnait l'avant
+            # du joueur tel que Babylon le tient — un `Vector3` —, que le module
+            # indexe en `v[0]` : longueur NaN, angle zero, duree zero. On
+            # s'asseyait d'un coup partout, et rien ne le disait, parce qu'une
+            # duree nulle est aussi celle d'un joueur deja aligne.
+            #
+            # L'invariant porte donc sur ce QUI a servi au calcul, pas sur son
+            # resultat — c'est le seul endroit ou les deux se distinguent.
+            avant = page.evaluate("""() => {
+              const p = window.__assise.points.current;
+              if (!p) return null;
+              const v = p.initForward;
+              return { tableau: Array.isArray(v),
+                       fini: !!v && v.every(x => Number.isFinite(x)),
+                       norme: Math.round(Math.hypot(v[0], v[1], v[2]) * 1000) / 1000,
+                       duree: Number.isFinite(p.turnDuration) };
+            }""")
+            rep.eq("le siege recoit un vrai vecteur, pas un Vector3",
+                   avant and avant["tableau"], True)
+            rep.eq("dont les trois composantes sont finies",
+                   avant and avant["fini"], True)
+            rep.eq("et qui est unitaire", avant and avant["norme"], 1.0)
+            rep.eq("la duree du demi-tour est donc un nombre",
+                   avant and avant["duree"], True)
             page.evaluate("() => { window.__shipRef.boarded = false;"
                           "  window.__assise.points.detach([0,0,0]);"
                           "  window.__assise.points.drain(); }")

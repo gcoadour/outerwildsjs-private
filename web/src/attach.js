@@ -58,6 +58,27 @@ const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const IDENTITE = [0, 0, 0, 1];
 
 /**
+ * Un vecteur, qu'il vienne du portage ou de Babylon.
+ *
+ * Ce module vit du cote « logique pure » : il indexe `v[0]`, `v[1]`, `v[2]`.
+ * Le moteur, lui, tient l'avant du joueur dans un `BABYLON.Vector3`, et le lui
+ * passait tel quel. `v[0]` valait alors `undefined`, `Math.hypot` rendait NaN,
+ * `normalize` retombait sur le vecteur nul, l'angle valait zero — et la duree
+ * du demi-tour avec lui. **On s'asseyait d'un coup**, a tous les points
+ * d'accrochage, depuis toujours, pendant que les controles mesuraient 1,8 s en
+ * appelant la loi a la main avec un tableau (docs/97).
+ *
+ * Trois appelants faisaient la faute ; la garder au bord du module la rend
+ * impossible a refaire par un quatrieme.
+ */
+function vec3(v) {
+  if (!v) return null;
+  if (Array.isArray(v)) return v;
+  if (typeof v.x === "number") return [v.x, v.y, v.z];
+  return v;
+}
+
+/**
  * `Vector3.Angle(joueur.forward, point.forward) / _rotationRate`.
  *
  * Une duree, pas une vitesse : c'est ce qui fait qu'un demi-tour prend deux
@@ -209,13 +230,19 @@ export class AttachPoint {
     const f = this.frame(shift);
     this.attached = true;
     this.since = now;
-    this.localPosition = toLocal(f, joueur.position);
+    this.localPosition = toLocal(f, vec3(joueur.position));
     // La rotation du joueur DANS le repere du point : c'est d'elle que part le
     // slerp vers l'identite, c'est-a-dire vers « aligne sur le point ».
     this.initLocalRotation = qmul(qconj(f.rotation), joueur.rotation || IDENTITE);
-    this.turnDuration = turnDuration(joueur.forward || qrot(joueur.rotation || IDENTITE,
-                                                            [0, 0, 1]),
-                                     this.forward(), this.rotationRate);
+    // Gardee, et pas seulement consommee : c'est la seule trace de ce sur quoi
+    // la duree a ete calculee, et donc la seule chose qu'un controle en
+    // NAVIGATEUR peut interroger apres un vrai embarquement. Le defaut qui a
+    // dormi ici — un `Vector3` la ou le module attend un tableau — ne se voit
+    // pas dans `turnDuration`, qui vaut alors zero comme un joueur deja aligne.
+    this.initForward = vec3(joueur.forward)
+      || qrot(joueur.rotation || IDENTITE, [0, 0, 1]);
+    this.turnDuration = turnDuration(this.initForward, this.forward(),
+                                     this.rotationRate);
     return { centerCamera: this.centerCamera, rate: this.rotationRate,
              lock: this.lockPlayerTurning };
   }

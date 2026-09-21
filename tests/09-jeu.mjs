@@ -102,7 +102,7 @@ import { Settings } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
-import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS,
+import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION } from "../web/src/ship.js";
@@ -155,7 +155,7 @@ import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
 import { oxygenZones, inOxygenZone,
          Resources as Ressources } from "../web/src/resources.js";
 import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
-         Marshmallow } from "../web/src/consoles.js";
+         Marshmallow, MALLOW } from "../web/src/consoles.js";
 import { lodThresholds } from "../web/src/lod.js";
 import { segmentDepthInSphere, occludes, lookRotation, alignToObserver,
          CHECK_RADIUS, CHECK_DEPTH } from "../web/src/quantum.js";
@@ -410,6 +410,27 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
   // Une piece DEJA abimee peut toujours l'etre davantage.
   check("mais une deja touchee, si", trois.impact(20, [0, 0, 1]).part > 0, true);
+
+  // L'ORDRE DES VOYANTS DU CASQUE N'EST PAS CELUI DES DRAPEAUX.
+  //
+  // `HUDDamageDisplay.OnDamageShip` lit le masque a la main, et c'est cette
+  // lecture qui range les icones : 4, 1, 16, 8, 2. Le portage rangeait ses
+  // voyants dans l'ordre de l'enumeration, ce qui en deplacait trois sur cinq.
+  check("cinq voyants", ALERT_ORDER.length, 5);
+  check("et leur ordre est celui de l'IL",
+        ALERT_ORDER.join(","), "arriere,avant,droite,gauche,haut");
+  check("qui est celui des drapeaux 4, 1, 16, 8, 2",
+        ALERT_ORDER.map((k) => LOCATIONS[k]).join(","), "4,1,16,8,2");
+  {
+    // Un choc a l'arriere allume le PREMIER voyant, pas le troisieme.
+    const seul = new ShipDamage({ _shipTotalHealth: 1e9 });
+    seul.impact(20, [0, 0, -1]);
+    const allumes = ALERT_ORDER.map((k) => seul.alerted.includes(k));
+    check("l'arriere touche allume le voyant de tete",
+          allumes.join(","), "true,false,false,false,false");
+    check("et la piece n'a pas besoin d'etre morte pour cela",
+          seul.parts.arriere.dead, false);
+  }
 
   // LA PIECE EST LA PLUS PROCHE DU POINT, quand on a les reacteurs.
   const moteurs = engineComponents({ placed: { EngineComponent: [
@@ -1340,16 +1361,74 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a mi-rayon, la moitie", heatAt(heat, [52, 0, 0]), 50);
   check("hors du volume, rien", heatAt(heat, [60, 0, 0]), 0);
 
-  // _cookTime = 5 : a chaleur 100, cinq secondes pour arriver a 1. La guimauve
-  // cuit donc au feu, et non sur commande.
+  // _cookTime = 5 : a chaleur 100, le grillage monte de 0,2 par seconde. La
+  // guimauve cuit donc au feu, et non sur commande.
   const m = new Marshmallow();
   m.held = true;
-  for (let i = 0; i < 500; i++) m.update(0.01, heatAt(heat, [50, 0, 0]));
-  check("cinq secondes au feu : guimauve a point", round(m.toast, 2), 1);
+  for (let i = 0; i < 300; i++) m.update(0.01, heatAt(heat, [50, 0, 0]));
+  check("trois secondes au feu, et elle est mangeable", round(m.toast, 2), 0.6);
+  check("c'est le seuil du build", m.edible, true);
+  check("et elle n'a pas encore pris feu", m.aflame, false);
   const loin = new Marshmallow();
   loin.held = true;
   for (let i = 0; i < 500; i++) loin.update(0.01, heatAt(heat, [60, 0, 0]));
   check("loin du feu, elle ne cuit pas", loin.toast, 0);
+
+  // ON NE CUIT PAS UNE GUIMAUVE JUSQU'A UN. Le build ne regarde pas le niveau
+  // de grillage mais la composante ROUGE de sa couleur — `_initR - _toastLevel`
+  // — et il l'enflamme a 0,25, puis la DETRUIT a 0,08. Le portage attendait
+  // `toast >= 1`, qui n'arrive jamais : il n'avait donc ni la flamme, ni la
+  // perte, ni la fenetre etroite ou l'on peut encore manger.
+  {
+    const feu = new Marshmallow();
+    feu.held = true;
+    const pas = () => feu.update(0.01, 100);
+    let t = 0;
+    while (!feu.aflame && t < 1000) { pas(); t += 1; }
+    check("elle prend feu bien avant d'etre noire",
+          round(feu.toast, 2), round(1 - MALLOW.flame, 2));
+    check("et il reste de quoi la manger a cet instant", feu.edible, true);
+    let apres = 0;
+    while (!feu.gone && apres < 1000) { pas(); apres += 1; }
+    check("une fois en feu, elle est perdue en moins d'une seconde",
+          apres * 0.01 < 1, true);
+    check("il n'en reste rien", feu.gone, true);
+    check("et on ne la mange plus", feu.edible, false);
+    // `ResetMarshmallow` : huit dixiemes de seconde, puis une neuve.
+    feu.update(MALLOW.respawn / 2, 0);
+    check("a mi-delai, toujours rien", feu.gone, true);
+    feu.update(MALLOW.respawn / 2 + 1e-6, 0);
+    check("apres 0,8 s, il y en a une neuve", feu.gone, false);
+    check("et elle est crue", feu.toast, 0);
+  }
+
+  // LA FLAMME NE S'ETEINT PAS QUAND ON S'ELOIGNE. `_toastLevel += 0,001` par
+  // IMAGE, sans `deltaTime` et sans chaleur : une guimauve qui a pris feu finit
+  // de bruler toute seule.
+  {
+    const seule = new Marshmallow();
+    seule.held = true;
+    seule.toast = 1 - MALLOW.flame + 1e-6;  // juste passe l'allumage
+    check("elle est en feu", seule.aflame, true);
+    const avant = seule.toast;
+    seule.update(0.016, 0);                 // aucune chaleur
+    check("elle brule quand meme", seule.toast > avant, true);
+    check("d'un pas par image, pas par seconde",
+          round(seule.toast - avant, 6), MALLOW.burnStep);
+  }
+
+  // Manger la fait disparaitre aussi : `_eaten = true` PUIS `ResetMarshmallow`.
+  {
+    const mangee = new Marshmallow();
+    mangee.held = true;
+    mangee.toast = 0.7;
+    check("elle se mange", mangee.eat(), true);
+    check("et il n'y a plus rien sur le baton", mangee.gone, true);
+    check("on ne la mange pas deux fois", mangee.eat(), false);
+    mangee.update(MALLOW.respawn, 0);
+    check("la suivante arrive apres le meme delai", mangee.gone, false);
+    check("le compte des mangees tient", mangee.eaten, 1);
+  }
 }
 
 // --- consoles a camera deportee -----------------------------------------
@@ -5012,6 +5091,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   lunette.exitTelescope({ position: [0, 0, -1], rotation: [0, 1, 0, 0] }, 9);
   check("en sortir le restaure", lunette.matchRotation, true);
   check("et redemarre le demi-tour depuis maintenant", lunette.since, 9);
+
+  // L'AVANT DU JOUEUR VIENT DE BABYLON, ET C'EST UN `Vector3`.
+  //
+  // Le moteur passait cet objet tel quel a un module qui indexe `v[0]` : la
+  // longueur devenait NaN, l'angle zero, et la duree du demi-tour zero avec
+  // lui. On s'asseyait D'UN COUP a tous les points d'accrochage, pendant que
+  // ce fichier mesurait 1,8 s en appelant la loi avec un tableau. L'invariant
+  // porte donc sur les DEUX formes, et sur leur egalite.
+  {
+    const rate = 100;
+    const dos = { position: [0, 0, -1], rotation: [0, 1, 0, 0] };
+    const tab = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    tab.attach({ ...dos, forward: [0, 0, -1] }, 0);
+    check("dos tourne, le demi-tour dure 1,8 s", round(tab.turnDuration, 3),
+          round(180 / rate, 3));
+    const bab = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    bab.attach({ ...dos, forward: { x: 0, y: 0, z: -1 } }, 0);
+    check("un Vector3 de Babylon donne la meme duree",
+          round(bab.turnDuration, 3), round(tab.turnDuration, 3));
+    check("et ce n'est surtout pas zero", bab.turnDuration > 0, true);
+    const face = new AttachPoint({ position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    face.attach({ position: [0, 0, -1], rotation: [0, 0, 0, 1],
+                  forward: { x: 0, y: 0, z: 1 } }, 0);
+    check("arriver de face n'en demande aucune", face.turnDuration, 0);
+  }
 
   // Un seul point a la fois.
   const tous = new AttachPoints([

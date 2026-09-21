@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`97-assise-instantanee.md`](97-assise-instantanee.md) — **on s'asseyait d'un coup : un `Vector3` passé à un module qui attend un tableau, et un contrôle navigateur qui appelait la loi lui-même — plus la lunette qui fait taire le monde, la guimauve qui prend feu, et les voyants d'avarie rangés à l'envers**
 - [`96-groupes-de-rendu.md`](96-groupes-de-rendu.md) — **le soleil visible au travers des planètes : le groupe de rendu 1 efface la profondeur, et un commentaire promettait depuis toujours une technique absente**
 - [`95-lots-partages.md`](95-lots-partages.md) — **un lot pour plusieurs corps : la planète de départ s'effaçait une demi-minute sur deux, au rythme de sa lune**
 - [`94-manette.md`](94-manette.md) — **deux tables pour une manette, et un champ qui était un commentaire déguisé en donnée**

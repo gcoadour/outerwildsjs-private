@@ -40,6 +40,18 @@ export const TELESCOPE = {
   zoomRate: 50,          // degres par seconde, a la commande
 };
 
+/**
+ * La PREMIERE ligne d'`EnterTelescope`, et le portage n'en avait rien :
+ *
+ *   Locator.GetAudioMixer().IsolateTrack(TrackName.Signal, 0.2f, 1f);
+ *
+ * Viser a la lunette fait tomber toutes les pistes sauf celle des signaux a un
+ * cinquieme, en une seconde. C'est par la qu'on trouve un emetteur : le monde
+ * se tait, et il ne reste que lui. `ExitTelescope` les rend a un, en une
+ * seconde aussi — meme appel, autre cible.
+ */
+export const TELESCOPE_MIX = 0.2;
+
 export class Telescope {
   constructor(cfg = TELESCOPE) {
     this.cfg = { ...TELESCOPE, ...cfg };

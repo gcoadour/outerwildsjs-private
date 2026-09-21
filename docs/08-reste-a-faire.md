@@ -176,6 +176,13 @@ portage.
 | le bâton sort au feu | `BeginRoasting` / `StopRoasting` : une touche inventée en moins ([`80`](80-invites.md)) |
 | **invulnérable au premier tour** | tant qu'on n'a pas les codes et qu'on n'est pas monté dans le vaisseau ([`81`](81-invulnerable.md)) |
 | tutoriel de la sonde | **3 photos en vol** puis la sonde détruite, et non le premier tir ([`81`](81-invulnerable.md)) |
+| **la fin des temps** | le mixage à **90 s restantes** et non à l'explosion, `MixEndTimes(5)`, et le verrou qui tient le silence ([`97`](97-assise-instantanee.md)) |
+| toile du regard | la fraction de charge, et non les secondes : elle tournait 27 fois trop vite ([`97`](97-assise-instantanee.md)) |
+| **s'asseoir prend du temps** | 1,8 s dos tourné : un `Vector3` passé pour un tableau rendait l'assise instantanée ([`97`](97-assise-instantanee.md)) |
+| la lunette fait taire le monde | `IsolateTrack(Signal, 0,2, 1)` : on trouve un émetteur par le silence ([`97`](97-assise-instantanee.md)) |
+| la lunette pendant l'assise | le suivi se suspend, et en sortir **recommence** le demi-tour ([`97`](97-assise-instantanee.md)) |
+| **la guimauve prend feu** | flamme à `r < 0,25`, perdue à `r < 0,08`, une neuve 0,8 s plus tard ([`97`](97-assise-instantanee.md)) |
+| voyants d'avarie | le **masque**, pas les pièces mortes — et rangés `4, 1, 16, 8, 2` ([`97`](97-assise-instantanee.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

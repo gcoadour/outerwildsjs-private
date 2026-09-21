@@ -59,7 +59,7 @@ import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
-import { engineComponents } from "./shipdamage.js";
+import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
 import { elevators, Elevator, LaunchTerminal, launchTerminals,
@@ -72,7 +72,7 @@ import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
-import { Telescope, ProbeCamera, SoundWave, WAVE,
+import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
 // La sonde entiere vient du prefabrique `sharedassets1.assets:2295`, que le
 // recensement ne voyait pas : il ne lisait que `level0` (docs/60-sonde.md).
@@ -1388,8 +1388,28 @@ async function boot() {
     // tout seul, et l'effacer d'un coup couperait l'animation qu'on vient
     // d'ajouter. Le build n'eteint que le rendu de la guimauve et de sa flamme
     // (`Marshmallow.SetRenderer`), et c'est ce qu'on fait ici.
+    //
+    // Et les deux ne s'eteignent pas ensemble, ce que le portage melangeait :
+    // `_mallowRenderer.enabled = _isOut` suit le baton, tandis que
+    // `_pSys.renderer.enabled = (r < 0,25 && _isOut)` suit la COULEUR. La
+    // flamme n'est donc pas « le baton sorti », c'est « la guimauve a pris
+    // feu » — et rien ne la montrait.
+    const pose = etat.out && etat.flame && !marshmallow.gone;
+    const teinte = marshmallow.color();
     for (const m of objet.meshes) {
-      if (/marshmallowmodel|flame/i.test(m.name)) m.setEnabled(etat.out && etat.flame);
+      if (/flame/i.test(m.name)) m.setEnabled(pose && marshmallow.aflame);
+      else if (/marshmallowmodel/i.test(m.name)) {
+        m.setEnabled(pose);
+        // `_mallowRenderer.material.color = new Color(r, g, b, 1)` : elle
+        // FONCE a mesure qu'elle cuit, et c'est la seule chose qui previent
+        // avant qu'elle ne prenne feu. Le portage calculait la couleur et ne
+        // la posait nulle part.
+        if (m.material && m.material.diffuseColor) {
+          m.material.diffuseColor.set(teinte[0], teinte[1], teinte[2]);
+        } else if (m.material && m.material.albedoColor) {
+          m.material.albedoColor.set(teinte[0], teinte[1], teinte[2]);
+        }
+      }
     }
     const voulu = etat.clip;
     for (const [nom, g] of objet.parNom) {
@@ -2145,6 +2165,10 @@ async function boot() {
   // Les trois fronts de vol : viser, s'accorder, piloter. Ils sont poses par
   // `command()` et consommes par la boucle, comme `interactPressed`.
   let lockPressed = false, matchPressed = false, autoPressed = false;
+  // La bascule de lunette de cette image : +1 on entre, -1 on sort, 0 rien.
+  // `PlayerAttachPoint.OnExitTelescopeView` rejoue `InitAttachment`, qui veut
+  // la pose du joueur — donc la boucle, pas le gestionnaire de touche.
+  let lunetteBascule = 0;
   // La guimauve mangee dans cette image : le baton s'en sert pour se ranger.
   let mangeCetteImage = false;
   // Pour ne pas repeter l'annonce du mur a chaque image ou l'on s'y appuie.
@@ -2224,7 +2248,27 @@ async function boot() {
       if (code === "Enter" || code === "Space") computer.select();
       if (code === "Backspace" || est("Cancel")) computer.cancel();
     }
-    if (est("Telescope")) telescope.toggle();
+    // §Q LA LUNETTE FAIT TAIRE LE MONDE, et l'assise la laisse regarder.
+    //
+    // `Telescope.EnterTelescope` ne fait pas que changer le champ de vision :
+    // sa PREMIERE ligne est `GetAudioMixer().IsolateTrack(Signal, 0.2f, 1f)`.
+    // Toutes les pistes sauf celle des signaux tombent a un cinquieme en une
+    // seconde — c'est ainsi qu'on entend un emetteur : le reste se tait.
+    // `ExitTelescope` les rend, a un, en une seconde aussi.
+    //
+    // Et `AttachPlayer` s'abonne a `EnterTelescopeView` / `ExitTelescopeView`
+    // tant qu'on est accroche, `DetachPlayer` s'en desabonne : le point
+    // d'accrochage suspend son suivi de rotation le temps qu'on vise, puis
+    // rejoue `InitAttachment` — le demi-tour RECOMMENCE depuis l'angle ou l'on
+    // ressort, et non depuis celui ou l'on s'etait assis. Sans cela, ranger la
+    // lunette ramenait le regard d'un coup.
+    if (est("Telescope")) {
+      const ouverte = telescope.toggle();
+      mixer.isolate("Signal", ouverte ? TELESCOPE_MIX : 1, 1);
+      // La sortie de lunette a besoin de la pose du joueur, que seule la boucle
+      // connait : on note la transition, elle la joue.
+      lunetteBascule = ouverte ? 1 : -1;
+    }
     // Consoles a camera deportee : `Landing Camera`, la meme touche que la
     // photo arriere de la sonde — le build les separe par jeu de commandes,
     // pas par touche.
@@ -2964,7 +3008,7 @@ async function boot() {
             const demande = pointsAttache.attach(siegePilotage, {
               position: [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                          player.pos.z + anchorPos[2]],
-              forward: fwd,
+              forward: [fwd.x, fwd.y, fwd.z],
               rotation: lookRotation(fwd, up),
             }, now);
             // `_centerCamera` : le regard revient au centre du siege, a la
@@ -3076,6 +3120,30 @@ async function boot() {
     // rien, ne suit aucune rotation. On est PORTE, et on regarde ou l'on veut —
     // c'est ce que veut dire monter dans un ascenseur, et c'est exactement ce
     // que la scene dit de ce point-la.
+    // §Q L'ASSISE PENDANT LA LUNETTE. `AttachPlayer` s'abonne a
+    // `EnterTelescopeView` / `ExitTelescopeView` et `DetachPlayer` s'en
+    // desabonne : le point n'ecoute que tant qu'on y est assis. A l'entree il
+    // relache son suivi de rotation — on vise ou l'on veut ; a la sortie il
+    // rejoue `InitAttachment`, et le demi-tour REPART de l'angle ou l'on
+    // ressort. Le portage ramenait le regard d'un coup, ou pas du tout.
+    if (lunetteBascule) {
+      const assis = pointsAttache.current;
+      if (assis) {
+        if (lunetteBascule > 0) assis.enterTelescope();
+        else {
+          const r = assis.exitTelescope(
+            { position: playerW, forward: [fwd.x, fwd.y, fwd.z],
+              rotation: lookRotation(fwd, up) },
+            now, decalageDuCorps(assis.body, anchorPos));
+          if (r && r.centerCamera) {
+            recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
+                           duree: snapDuration(pitch * 180 / Math.PI, 0, 0, 0,
+                                               r.rate) };
+          }
+        }
+      }
+      lunetteBascule = 0;
+    }
     if (!ship || !ship.boarded) {
       const assis = pointsAttache.current;
       if (assis && assis !== siegePilotage) {
@@ -3099,7 +3167,8 @@ async function boot() {
         if (point && point !== siegePilotage) {
           lacetSiege = yaw;
           const demande = pointsAttache.attach(point, {
-            position: playerW, forward: fwd, rotation: lookRotation(fwd, up),
+            position: playerW, forward: [fwd.x, fwd.y, fwd.z],
+            rotation: lookRotation(fwd, up),
           }, now, decalageDuCorps(point.body, anchorPos));
           if (demande && demande.centerCamera) {
             recentrage = { debut: now, depart: [pitch * 180 / Math.PI, 0],
@@ -3422,7 +3491,11 @@ async function boot() {
         if (flashlightPromptVisible({
           on: flashlight.on, suit: equipment.suit,
           inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
-          attached: !!consoles.active, satelliteCam: false,
+          // `_satelliteCamMode` n'etait pas une valeur inconnue, elle etait a
+          // deux lignes de la : la console du satellite EST l'une des deux
+          // consoles deportees, et c'est celle qui n'est pas la console de vol.
+          attached: !!consoles.active,
+          satelliteCam: !!(consoles.active && !consoles.active.flight),
           inDarkZone: zonesSombres.sunless,
           onDaySide: !night,
         })) {
@@ -3497,8 +3570,10 @@ async function boot() {
         `dans ${player.fluid.volume.name} (${player.fluid.depth.toFixed(0)} u)`);
       if (zone) bits.push(`oxygene : ${zone.name}`);
       if (consoles.active) bits.push(`console : ${consoles.active.name} — R pour lacher`);
-      if (marshmallow.toast > 0) bits.push(
+      if (marshmallow.gone) bits.push("guimauve perdue");
+      else if (marshmallow.toast > 0) bits.push(
         `guimauve ${(marshmallow.toast * 100).toFixed(0)} %` +
+        (marshmallow.aflame ? " — elle brûle !" : "") +
         (marshmallow.edible ? " — B pour manger" : ""));
       if (pad.connected) bits.push("manette");
       // la geometrie arrive en cours de partie : le dire plutot que de laisser
@@ -4293,10 +4368,16 @@ async function boot() {
     if (death.dead && !fxMort) {
       fxMort = true;
       fx.playerDeath(deathTypeOf(death.cause), now);
+      // `PlayerState` ecoute `"PlayerDeath"` et pose `_isDead`. Le portage
+      // tenait les trois autres etats — dans le vaisseau, a proximite, au poste
+      // — et laissait celui-la a faux pour toujours. C'est le seul des quatre
+      // qui ne se defait pas seul, et le seul que rien ne posait.
+      etatJoueur.die();
     } else if (!death.dead && fxMort) {
       fxMort = false;
       // Le reveil : le glow blanc a 3 qui retombe au noir en trois secondes.
       fx.startOfTimeLoop();
+      etatJoueur.dead = false;
     }
     // L'immersion : `OnEnterWaterZone` / `OnExitWaterZone`. Le portage sait
     // deja quand le joueur est dans un fluide ; il ne s'en servait pas pour
@@ -4684,8 +4765,17 @@ async function boot() {
              playerWorld.x - ship.pos.x - anchorPos[0],
              playerWorld.y - ship.pos.y - anchorPos[1],
              playerWorld.z - ship.pos.z - anchorPos[2]) <= z.volume.radius);
+      // Les voyants suivent le MASQUE, pas les pieces mortes. `OnDamageShip`
+      // reçoit `_damageLocationMask` — la sortie qui s'accumule (docs/49) — et
+      // allume un voyant par position TOUCHEE. Le portage n'allumait rien tant
+      // qu'une piece n'etait pas detruite, c'est-a-dire presque jamais : un
+      // voyant d'avarie sert justement a prevenir AVANT.
+      //
+      // `ShipDamage.alerted` disait cette liste depuis le lot de docs/49, et
+      // personne ne la lui demandait.
+      const touchees = ship.damage.alerted;
       voyants.update(now, ship.damage.integrity < ship.damage.total,
-                     Object.values(ship.damage.parts).map((p) => p.dead),
+                     ALERT_ORDER.map((k) => touchees.includes(k)),
                      presDuVaisseau);
     }
     const avis = notifications.update(now);
