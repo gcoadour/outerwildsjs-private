@@ -83,7 +83,20 @@ export class BlackHole {
 
   /**
    * `BlackHoleVolume.VanishPlayer` / `VanishShip` / `VanishProbe`, puis
-   * `WhiteHoleVolume.ForceWarp` — le meme chemin pour les trois.
+   * `WhiteHoleVolume.ReceiveWarpedPlayer` / `ReceiveWarpedShip` /
+   * `ReceiveWarpedProbe`, qui menent tous trois a `ForceWarp` — le meme
+   * chemin, a deux details pres :
+   *
+   *   `ReceiveWarpedPlayer` fait d'abord PIVOTER le corps pour que l'avant de
+   *   la camera s'aligne sur l'avant du trou blanc
+   *   (`Quaternion.FromToRotation`). On sort en regardant la ou l'on part, et
+   *   c'est ce que `lookTowardExit` rend ici ;
+   *   `ReceiveWarpedShip` se garde d'un second appel dans la meme image
+   *   (`_lastShipWarpTime + Time.deltaTime`), ce qui n'a pas d'objet tant que
+   *   le portage n'a qu'un appelant par image.
+   *
+   * `ReceiveWarpedBody`, lui, est la porte des DEBRIS : il ne passe pas par
+   * `ForceWarp` du tout, il met en file (voir `DebrisField`).
    *
    * DETERMINISTE, et le portage le tirait au hasard : on ressort DROIT DEVANT
    * le trou blanc, a exactement son rayon, a vingt unites par seconde. Le cone
@@ -110,7 +123,37 @@ export class BlackHole {
     return {
       position: [exit[0] + dir[0] * r, exit[1] + dir[1] * r, exit[2] + dir[2] * r],
       velocity: [dir[0] * v, dir[1] * v, dir[2] * v],
+      // `ReceiveWarpedPlayer` : on ressort en REGARDANT la sortie.
+      forward: dir,
     };
+  }
+
+  /**
+   * Le lacet qui fait regarder dans la direction de sortie.
+   *
+   * `Quaternion.FromToRotation(camera.forward, whiteHole.forward)` tourne le
+   * corps entier ; ce portage tient le regard en lacet et tangage, et c'est
+   * donc le LACET qu'on mene — le meme choix qu'a l'assise (docs/69).
+   *
+   * @param up la verticale locale, celle dans laquelle le lacet se mesure
+   * @returns le lacet vise en radians, ou null si la direction est verticale
+   */
+  static lookTowardExit(forward, up) {
+    const u = norm(up);
+    const d = norm(forward);
+    // La composante horizontale de la sortie, dans le plan du sol.
+    const dv = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+    const plan = [d[0] - u[0] * dv, d[1] - u[1] * dv, d[2] - u[2] * dv];
+    if (len(plan) < 1e-6) return null;
+    // Une base d'horizon quelconque mais STABLE : l'axe le moins colineaire.
+    const ref = Math.abs(u[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
+    const est = norm([u[1] * ref[2] - u[2] * ref[1], u[2] * ref[0] - u[0] * ref[2],
+                      u[0] * ref[1] - u[1] * ref[0]]);
+    const nord = [u[1] * est[2] - u[2] * est[1], u[2] * est[0] - u[0] * est[2],
+                  u[0] * est[1] - u[1] * est[0]];
+    const p = norm(plan);
+    return Math.atan2(p[0] * est[0] + p[1] * est[1] + p[2] * est[2],
+                      p[0] * nord[0] + p[1] * nord[1] + p[2] * nord[2]);
   }
 
   // L'effondrement de la croute ne se devine plus ici.

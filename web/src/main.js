@@ -93,6 +93,9 @@ import { MODELE, ModelLandingSpot, RocketKid, crashes,
 import { SpinField, sunElevation, spinPeriod } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
          dominantField } from "./gravity.js";
+// @autrement Tonemapping : quatre methodes de courbe et de cible de rendu,
+// c'est-a-dire l'implementation d'un shader d'Unity 4. Babylon a la sienne, et
+// c'est elle qu'on regle (docs/103-refait.md).
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
 // Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
 // `_isTonemappingActive` faux par defaut du manager ; les decalcomanies passent
@@ -3969,6 +3972,11 @@ async function boot() {
         fx.enterBlackHole(now);
         player.pos.x = t.position[0]; player.pos.y = t.position[1]; player.pos.z = t.position[2];
         player.vel.x = t.velocity[0]; player.vel.y = t.velocity[1]; player.vel.z = t.velocity[2];
+        // `ReceiveWarpedPlayer` aligne l'avant de la camera sur celui du trou
+        // blanc AVANT de deplacer le corps : on ressort en regardant la ou
+        // l'on part, et non dans la direction ou l'on tombait.
+        const lacet = BlackHole.lookTowardExit(t.forward, [up.x, up.y, up.z]);
+        if (lacet !== null) yaw = lacet;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
     }

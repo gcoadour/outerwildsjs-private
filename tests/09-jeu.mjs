@@ -130,7 +130,7 @@ import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { Anglerfish, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
-         leashBrake, growSteps } from "../web/src/blackhole.js";
+         leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
 import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
          ambientColor, ambientTint, hsvToRgb, Sectors,
@@ -858,6 +858,27 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("a mi-chemin du reste, un quart", round(leashBrake(675, 750), 6), 0.25);
   check("au bout de la laisse, plein", leashBrake(750, 750), 1);
   check("et au-dela, pas davantage", leashBrake(2000, 750), 1);
+
+  // ON RESSORT EN REGARDANT LA SORTIE. `ReceiveWarpedPlayer` aligne l'avant de
+  // la camera sur celui du trou blanc avant meme de deplacer le corps.
+  {
+    const haut = [0, 1, 0];
+    const lacet = (d) => BlackHole.lookTowardExit(d, haut);
+    const est = lacet([1, 0, 0]), nord = lacet([0, 0, 1]);
+    check("deux directions donnent deux lacets", est !== nord, true);
+    // Par le plus court chemin : les lacets sont des angles, pas des nombres.
+    const ecart = (a, b) => {
+      let d = a - b;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return Math.abs(d);
+    };
+    check("un quart de tour les separe",
+          round(ecart(est, nord), 4), round(Math.PI / 2, 4));
+    check("la composante verticale ne compte pas",
+          round(lacet([1, 5, 0]), 6), round(est, 6));
+    check("une sortie verticale n'a pas de lacet", lacet([0, 1, 0]), null);
+  }
 
   // LA LAISSE EST TIREE DU NOM : reproductible, et entre 150 et 750.
   const a = new DebrisField(); a.swallow("Shard_01");

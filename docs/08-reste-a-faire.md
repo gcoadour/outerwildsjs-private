@@ -21,6 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **49 des 159** méthodes nommées, sur 73 classes ([`103`](103-refait.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -194,6 +195,7 @@ portage.
 | panne sèche | rien ne pousse à zéro, et il faut 5 % pour repartir ([`101`](101-sac-dorsal.md)) |
 | **sortie du trou blanc** | droit devant, à son rayon, à 20 u/s — le cône est pour les débris ([`102`](102-trou-blanc.md)) |
 | champ de débris | un par seconde, il grandit en 0,96 s, et une laisse le retient ([`102`](102-trou-blanc.md)) |
+| on ressort en regardant la sortie | `ReceiveWarpedPlayer` aligne le regard avant de déplacer le corps ([`103`](103-refait.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |

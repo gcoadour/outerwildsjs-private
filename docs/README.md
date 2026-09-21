@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`103-refait.md`](103-refait.md) — **le quatrième dénominateur : pour chaque classe qu'on déclare lire, ce que le build y fait et qu'on n'en refait pas — 49 méthodes sur 159**
 - [`102-trou-blanc.md`](102-trou-blanc.md) — **le trou blanc éjecte en ligne droite, pas dans un cône : trois champs sérialisés, trois noms pris pour des lois, et un champ de débris qui est une laisse**
 - [`101-sac-dorsal.md`](101-sac-dorsal.md) — **sauter ne décolle pas : la poussée horizontale est coupée à l'atterrissage et ne revient qu'à un geste délibéré, et la panne sèche a cinq pour cent d'hystérésis**
 - [`100-carte.md`](100-carte.md) — **la carte du système : cinq couleurs d'orbite au lieu d'un gris inventé, l'ellipse de la comète, et des cercles qui étaient centrés sur le joueur plutôt que sur le Soleil**
