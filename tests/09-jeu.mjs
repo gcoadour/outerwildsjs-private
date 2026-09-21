@@ -134,7 +134,7 @@ import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
-import { Anglerfish, FISH } from "../web/src/bramble.js";
+import { Anglerfish, fromToAngular, fishStep, FISH } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
          leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
@@ -687,6 +687,82 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   for (let i = 0; i < 200; i++) fish.update(0.1, player, true);
   check("le predateur poursuit le bruit", fish.state, "poursuit");
   check("il finit par attraper", fish.caught, true);
+
+  // --- COMMENT il attrape, et pourquoi on peut l'esquiver (docs/109) -------
+  //
+  // `UpdateMovement` n'envoie pas le predateur SUR sa proie : il oriente son
+  // avant d'un dixieme du chemin par pas de physique, et avance le long de cet
+  // avant. Le portage le deplacait droit vers la cible, ce qui en faisait un
+  // missile que rien ne pouvait semer.
+  {
+    // `FromToAngularVelocity` prend un ARCSINUS : l'angle plafonne a
+    // quatre-vingt-dix degres et redescend au-dela.
+    const d = (r) => Math.round(r * 180 / Math.PI);
+    check("de face, aucun angle",
+          d(fromToAngular([0, 0, 1], [0, 0, 1]).angle), 0);
+    check("a quarante-cinq degres, quarante-cinq",
+          d(fromToAngular([0, 0, 1], [1, 0, 1]).angle), 45);
+    check("a quatre-vingt-dix, quatre-vingt-dix",
+          d(fromToAngular([0, 0, 1], [1, 0, 0]).angle), 90);
+    // L'ANGLE MORT : a cent trente-cinq degres l'arcsinus rend quarante-cinq,
+    // et pile derriere il rend ZERO. Le predateur ne se retourne pas.
+    check("a cent trente-cinq, l'arcsinus rend quarante-cinq",
+          d(fromToAngular([0, 0, 1], [1, 0, -1]).angle), 45);
+    check("et pile derriere, il ne tourne pas du tout",
+          d(fromToAngular([0, 0, 1], [0, 0, -1]).angle), 0);
+
+    // Un dixieme du chemin par pas de physique : a cinquante hertz, il faut
+    // une poignee de pas pour se mettre dans l'axe.
+    const un = fishStep([0, 0, 1], [1, 0, 0], 0, FISH.chaseSpeed, 0.02);
+    check("il ne tourne qu'un dixieme du chemin par pas",
+          Number((un.tourne / un.angle).toFixed(6)), 0.1);
+    check("le dixieme est celui du build", FISH.turnPart, 0.1);
+
+    // IL ACCELERE EN UNE DEMI-SECONDE : `+ _acceleration` est par PAS, sans
+    // deltaTime. Vingt et un pas pour atteindre quarante-deux.
+    let v = 0, pas = 0;
+    while (v < FISH.chaseSpeed && pas < 1000) {
+      v = fishStep([0, 0, 1], [0, 0, 1], v, FISH.chaseSpeed, 0.02).speed;
+      pas += 1;
+    }
+    check("il atteint sa vitesse de poursuite en vingt et un pas", pas, 21);
+    check("... soit 0,42 seconde", Number((pas * 0.02).toFixed(2)), 0.42);
+    // La lecture `acceleration * dt` aurait mis vingt et une SECONDES.
+    check("et non vingt et une secondes",
+          Number((FISH.chaseSpeed / FISH.acceleration).toFixed(0)), 21);
+
+    // IL DEPASSE SA PROIE. Le poisson lance a pleine vitesse, la cible de cote :
+    // il la survole et repasse. C'est ce qui le rend esquivable, et c'est la
+    // difference qu'on mesure.
+    const p = new Anglerfish([0, 0, 0]);
+    const proie = { x: 30, y: 0, z: 0 };
+    let loin = 0;
+    for (let i = 0; i < 40; i++) {
+      p.update(0.1, proie, true);
+      loin = Math.max(loin, Math.hypot(p.position[0] - 30, p.position[1],
+                                       p.position[2]));
+    }
+    check("il s'eloigne de sa proie apres l'avoir depassee",
+          loin > FISH.catchRadius, true);
+    // ... et la prise, elle, ne se defait pas : il l'a traversee en chemin.
+    check("mais la prise, elle, tient", p.caught, true);
+
+    // A L'ARRET il ne rentre pas chez lui : il s'immobilise sur place, et sa
+    // rotation s'eteint de cinq pour cent par pas.
+    const calme2 = new Anglerfish([0, 0, 0]);
+    calme2.position = [100, 0, 0];
+    calme2.spin = 1;
+    calme2.update(0.02, { x: 9999, y: 0, z: 0 }, false);
+    check("au repos, il ne bouge plus", calme2.position.join(","), "100,0,0");
+    check("... et sa rotation s'eteint de cinq pour cent",
+          Number(calme2.spin.toFixed(6)), 0.95);
+    check("le facteur est celui du build", FISH.restSpin, 0.95);
+
+    // La remise a zero d'une boucle rend la proie a la vie.
+    p.reset();
+    check("une nouvelle boucle desengloutit", p.caught, false);
+    check("... et le predateur rentre chez lui", p.position.join(","), "0,0,0");
+  }
   const calme = new Anglerfish([0, 0, 0]);
   calme.update(0.1, { x: 10, y: 0, z: 0 }, false);
   check("immobile et silencieux, on ne risque rien", calme.caught, false);

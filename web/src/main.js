@@ -2009,6 +2009,9 @@ async function boot() {
     // du mort (docs/106-redressement.md).
     alignement.reset();
     redressement.reset();
+    // Les predateurs aussi : la prise ne se defait pas d'elle-meme, et une
+    // boucle qui recommence doit rendre la proie a la vie.
+    for (const f of fish) f.reset();
     // La pellicule aussi : `Flashback.Start` recree `_snapshotRenders` a chaque
     // chargement de scene, et la boucle EST un rechargement de scene. Le
     // flashback d'une boucle ne montre que cette boucle-la — sans quoi il

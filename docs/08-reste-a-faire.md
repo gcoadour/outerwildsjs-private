@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **90 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`108`](108-reveil.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **92 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`109`](109-anglerfish.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -105,6 +105,7 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| **anglerfish** | il DEPASSE sa proie, accelere en 0,42 s, et ne se retourne pas quand on est derriere ([`109`](109-anglerfish.md)) |
 | **le reveil** | 80 degres au ciel, 7 s, puis 1,6 s de descente — et le joueur garde la main ([`108`](108-reveil.md)) |
 | **pilote automatique** | l'asservissement du build, la gravite dans le freinage, et les quatre messages remis a l'endroit ([`107`](107-pilote.md)) |
 | accorder sa vitesse | par la POUSSEE, aux trois endroits qui la posaient : l'écart divisé par la poussée ([`107`](107-pilote.md)) |
