@@ -52,7 +52,7 @@ import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAccelerati
          BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
-import { ambienceZones, winnersByLayer, clipOf,
+import { ambienceZones, zonesActives, isDay,
          AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
          probePrompts, radiationEmitters,
@@ -3076,54 +3076,130 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         "Atmosphere,MusicVolume");
   check("a 101, la musique est sortie", ou(zones, [101, 0, 0]).length, 1);
 
-  const g = winnersByLayer(ou(zones, [0, 0, 0]));
-  check("trois couches gagnees", g.size, 3);
-  check("dans la couche 1, la grotte couvre l'atmosphere", g.get(1).name, "CaveVolume");
-  check("la couche 0 revient au sas", g.get(0).name, "Hatch");
-  check("hors de la grotte, l'atmosphere reprend la couche 1",
-        winnersByLayer(ou(zones, [50, 0, 0])).get(1).name, "Atmosphere");
+  // L'ARBITRAGE, tel que `AudioDetector.UpdateActivation` le fait — et non tel
+  // que ce test le croyait. Il gardait trois regles inventees, et les trois
+  // sont fausses (docs/104-arbitrage.md).
+  const noms = (l) => zonesActives(l).map((z) => z.name).sort().join(",");
 
-  // A priorite egale, la plus petite zone gagne : une piece est plus precise
-  // qu'une atmosphere, et c'est la seule regle qui donne un resultat stable.
+  // La couche 0 ne joue pas A COTE des autres : elle concourt contre le
+  // meilleur de toutes. Le sas est a 100, rien ne l'approche, tout se tait.
+  check("dans le sas, le sas seul", noms(ou(zones, [0, 0, 0])), "Hatch");
+  // Hors du sas, la couche 0 est vide : `GetHighestPriority(0)` vaut -1, elle
+  // perd contre n'importe quoi, et toutes les autres couches jouent.
+  check("hors du sas, l'atmosphere et la musique jouent ensemble",
+        noms(ou(zones, [50, 0, 0])), "Atmosphere,MusicVolume");
+
+  // A egalite, TOUTES jouent : `ActivateLayer` remonte la liste tant que la
+  // priorite egale la plus haute. « La plus petite gagne » etait une invention.
   const exaequo = [zone("grande", 1, 0, 250, "a.ogg"), zone("petite", 1, 0, 20, "b.ogg")];
-  check("a egalite, la plus petite l'emporte",
-        winnersByLayer(ou(exaequo, [0, 0, 0])).get(1).name, "petite");
+  check("a egalite, les deux sonnent ensemble",
+        noms(ou(exaequo, [0, 0, 0])), "grande,petite");
 
-  const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg", { nightFile: "nuit.ogg" });
-  check("de jour, le clip du jour", clipOf(nuit, false), "jour.ogg");
-  check("de nuit, celui de la nuit", clipOf(nuit, true), "nuit.ogg");
-  check("sans clip de nuit, on garde celui du jour",
-        clipOf(zone("x", 1, 0, 10, "jour.ogg"), true), "jour.ogg");
+  // Le musee (couche 0, priorite 2) eteint le village ; le fluide des
+  // profondeurs (couche 1, priorite 3) eteint le musee a son tour, et rend du
+  // meme coup la parole a toutes les couches non nulles.
+  const musee = [zone("MuseumVolume", 0, 2, 40, "musee.ogg"),
+                 zone("Atmosphere", 1, 0, 250, "atmo.ogg"),
+                 zone("VillageMusic", 2, 0, 200, "village.ogg")];
+  check("le musee couvre le village", noms(ou(musee, [0, 0, 0])), "MuseumVolume");
+  const profond = [...musee, zone("DeepFluid", 1, 3, 300, "fluide.ogg")];
+  check("mais le fluide des profondeurs couvre le musee",
+        noms(ou(profond, [0, 0, 0])), "DeepFluid,VillageMusic");
+  // La musique du village revient, elle, parce qu'elle est en tete de SA
+  // couche : quand la couche 0 perd, toutes les autres jouent — chacune sa
+  // tete, et l'atmosphere n'est pas celle de la sienne.
 
-  // Les fondus : deux secondes de montee, deux de descente.
+  // `IsDay` : `_dayWindow` est la largeur de l'arc de jour, pas un angle au
+  // soleil. Planete a l'origine, soleil tres loin sur +x, rayon 100.
+  const soleil = [-100000, 0, 0];
+  check("face au soleil, il fait jour",
+        isDay(200, [0, 0, 0], [-100, 0, 0], soleil), true);
+  check("a l'oppose, il fait nuit",
+        isDay(200, [0, 0, 0], [100, 0, 0], soleil), false);
+  // Le terminateur geometrique est a 90 degres du point subsolaire ; la
+  // fenetre de 200 porte le jour jusqu'a 100. Dix degres de rab.
+  const surLaSphere = (deg) => [-100 * Math.cos(deg * Math.PI / 180),
+                                100 * Math.sin(deg * Math.PI / 180), 0];
+  check("le jour deborde de dix degres sur la nuit",
+        isDay(200, [0, 0, 0], surLaSphere(99), soleil), true);
+  check("et s'arrete a cent", isDay(200, [0, 0, 0], surLaSphere(101), soleil), false);
+  check("une fenetre de 180 s'arreterait au terminateur",
+        isDay(180, [0, 0, 0], surLaSphere(91), soleil), false);
+
+  // LES FONDUS. La trame qui ACTIVE ne sonne pas encore : `Activate` pose
+  // l'instant de depart, et `UpdateLocalFade` n'a pas encore couru.
   const mix = new AmbienceMixer(zones);
   mix.update(1, [0, 0, 0]);
-  const c1 = mix.playing.find((l) => l.layer === 1);
-  check("a mi-fondu, la couche 1 est a la moitie", Number(c1.gain.toFixed(3)), 0.5);
+  check("la trame qui active ne sonne pas encore", mix.playing.length, 0);
   mix.update(1, [0, 0, 0]);
-  check("deux secondes plus tard, elle est pleine",
-        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 1);
-  check("et les trois couches sonnent ensemble", mix.playing.length, 3);
-
-  // Sortir de tout : chaque couche redescend a son rythme, puis se tait.
+  check("une seconde plus tard, le sas est a mi-fondu",
+        Number(mix.playing[0].gain.toFixed(3)), 0.5);
+  check("et il est seul a sonner", mix.playing.map((l) => l.name).join(","), "Hatch");
+  mix.update(1, [0, 0, 0]);
+  check("puis il est plein", Number(mix.playing[0].gain.toFixed(3)), 1);
   mix.update(1, [1000, 0, 0]);
-  check("en sortant, la couche 1 redescend",
-        Number(mix.playing.find((l) => l.layer === 1).gain.toFixed(3)), 0.5);
   mix.update(2, [1000, 0, 0]);
-  check("puis se tait tout a fait", mix.playing.length, 0);
+  check("en sortant de tout, plus rien ne sonne", mix.playing.length, 0);
 
-  // Changer de zone dans une couche : on libere la place avant de la prendre.
-  const m2 = new AmbienceMixer(zones);
-  m2.update(5, [50, 0, 0]);
-  check("l'atmosphere tient la couche 1",
-        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
-  m2.update(1, [0, 0, 0]);
-  check("entrer dans la grotte fait d'abord baisser l'atmosphere",
-        m2.playing.find((l) => l.layer === 1).name, "Atmosphere");
-  m2.update(1.1, [0, 0, 0]);
-  m2.update(0.1, [0, 0, 0]);
-  check("puis la grotte prend la couche",
-        m2.playing.find((l) => l.layer === 1).name, "CaveVolume");
+  // LE PIEGE DE `FadeTo` : la duree est remise a neuf depuis la valeur
+  // COURANTE. Une montee coupee a mi-chemin ne redescend pas en une seconde,
+  // elle se redonne les deux secondes entieres pour la moitie qui reste. Un
+  // gain avance a `dt / duree` — ce que ce portage faisait — donnerait 0 ici.
+  const m3 = new AmbienceMixer([zone("Atmosphere", 1, 0, 250, "atmo.ogg")]);
+  m3.update(0.01, [0, 0, 0]);
+  m3.update(1, [0, 0, 0]);
+  check("a mi-montee", Number(m3.playing[0].gain.toFixed(3)), 0.5);
+  m3.update(0.01, [1000, 0, 0]);
+  m3.update(1, [1000, 0, 0]);
+  check("la descente repart de la moitie et se redonne deux secondes",
+        Number(m3.playing[0].gain.toFixed(3)), 0.25);
+
+  // L'AUBE : `UpdatePlayState` monte l'une pendant que l'autre descend. Les
+  // deux clips se croisent, ils ne se relaient pas.
+  const nuit = zone("VillageAmbience", 1, 1, 90, "jour.ogg",
+                    { nightFile: "nuit.ogg", kind: "DayNightAudioVolume" });
+  const m4 = new AmbienceMixer([nuit]);
+  m4.update(0.01, [0, 0, 0], { night: true });
+  m4.update(2, [0, 0, 0], { night: true });
+  check("la nuit, c'est le clip de nuit",
+        m4.playing.map((l) => `${l.file}@${l.gain.toFixed(2)}`).join(","),
+        "nuit.ogg@1.00");
+  m4.update(0.01, [0, 0, 0], { night: false });
+  m4.update(1, [0, 0, 0], { night: false });
+  check("a l'aube les deux clips se croisent a mi-chemin",
+        m4.playing.map((l) => `${l.file}@${l.gain.toFixed(2)}`).sort().join(","),
+        "jour.ogg@0.50,nuit.ogg@0.50");
+
+  // `VillageMusic` : un volume jour/nuit SANS clip de nuit, et le seul du build
+  // a porter `_pauseOnFadeOut`. La nuit elle se tait ; au jour elle reprend a
+  // la note ou on l'avait laissee, et le moteur le sait par `rembobine`.
+  const musique = zone("VillageMusic", 2, 0, 200, "village.ogg",
+                       { kind: "DayNightAudioVolume", nightFile: null,
+                         fade: 5, pauseOnFadeOut: true });
+  const m5 = new AmbienceMixer([musique]);
+  m5.update(0.01, [0, 0, 0]);
+  m5.update(5, [0, 0, 0]);
+  check("la musique du village joue de jour",
+        Number(m5.playing[0].gain.toFixed(3)), 1);
+  check("et son fondu dure cinq secondes, pas deux", musique.fade, 5);
+  m5.update(0.01, [0, 0, 0], { night: true });
+  m5.update(5, [0, 0, 0], { night: true });
+  check("la nuit elle se tait, faute de clip de nuit", m5.playing.length, 0);
+  check("mise en PAUSE, donc sans rembobiner", m5.etats[0].jourF.rembobine, false);
+  m5.update(0.01, [0, 0, 0]);
+  m5.update(1, [0, 0, 0]);
+  check("au jour elle reprend ou elle en etait", m5.playing[0].rembobine, false);
+
+  // `_randomizePlayhead` : les deux ambiances qui le portent repartent d'un
+  // point tire au hasard, et seulement quand la source ne joue PAS.
+  const vent = zone("WindyAmbience", 1, 0, 300, "vent.ogg", { randomize: true });
+  const m6 = new AmbienceMixer([vent], { alea: () => 0.42 });
+  m6.update(0.01, [0, 0, 0]);
+  check("le vent repart d'un point tire au hasard", m6.playing.length, 0);
+  m6.update(1, [0, 0, 0]);
+  check("... et ce point est celui du tirage", m6.playing[0].offset, 0.42);
+  check("... la source est bien rembobinee, pas reprise",
+        m6.playing[0].rembobine, true);
 }
 
 // --- ce que docs/44-reste-a-migrer.md demandait -----------------------------

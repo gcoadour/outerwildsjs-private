@@ -383,20 +383,35 @@ export class AudioField {
    * Le volume rendu est le gain du fondu, multiplie par celui de la piste : la
    * supernova coupe donc les ambiances comme le reste.
    *
-   * @param playing sortie d'`AmbienceMixer.update` : { layer, file, gain }
+   * UNE SOURCE PAR FONDU, ET NON UNE PAR COUCHE. Le melangeur rangeait ce qui
+   * sonne par couche, parce qu'il croyait qu'une seule zone y jouait a la fois.
+   * `AudioDetector` dit le contraire — les ex aequo sonnent ensemble —, et un
+   * `DayNightAudioVolume` porte DEUX sources qui se croisent a l'aube. La cle
+   * est donc celle que le melangeur donne, et elle designe un fondu.
+   *
+   * `rembobine` et `offset` viennent de `_pauseOnFadeOut` et de
+   * `_randomizePlayhead` : ils disent ou la lecture doit repartir quand une
+   * source revient. Babylon ne les prend qu'au `play()`, donc on ne s'en sert
+   * qu'au (re)depart d'un son deja charge.
+   *
+   * @param playing sortie d'`AmbienceMixer.update` :
+   *   { key, layer, file, gain, rembobine, offset }
    */
   setLayers(playing, mixer = null) {
     if (!this.engine) return;
     if (!this.zoneSounds) { this.zoneSounds = new Map(); this.zonePending = new Set(); }
-    const veut = new Map(playing.map((l) => [l.layer, l]));
+    const veut = new Map(playing.map((l) => [l.key ?? `couche${l.layer}`, l]));
 
-    for (const [layer, z] of [...this.zoneSounds]) {
-      const l = veut.get(layer);
+    for (const [cle, z] of [...this.zoneSounds]) {
+      const l = veut.get(cle);
       if (l && l.file === z.file) continue;
-      // Changer de clip dans une couche : on arrete l'ancien. Le fondu a deja
-      // ramene son gain a zero, la coupure ne s'entend donc pas.
-      try { if (z.snd) z.snd.stop(); } catch (e) { /* deja arrete */ }
-      this.zoneSounds.delete(layer);
+      // Un fondu qui se tait : le gain est deja a zero, la coupure ne
+      // s'entend pas. C'est `Stop()` ou `Pause()`, selon ce que la zone dit —
+      // et une pause garde la tete de lecture pour la prochaine fois.
+      try {
+        if (z.snd) { if (l || z.rembobine !== false) z.snd.stop(); else z.snd.pause(); }
+      } catch (e) { /* deja arrete */ }
+      this.zoneSounds.delete(cle);
     }
 
     for (const l of playing) {
@@ -404,29 +419,54 @@ export class AudioField {
       // ambiances. C'est ce que disent les trois volumes qui s'y trouvent.
       const piste = l.layer === 2 ? "Music" : "Ambience";
       const gain = l.gain * (mixer ? mixer.volume(piste) : 1);
-      const z = this.zoneSounds.get(l.layer);
+      const cle = l.key ?? `couche${l.layer}`;
+      const z = this.zoneSounds.get(cle);
       if (z) {
+        z.rembobine = l.rembobine;
         if (z.snd) { try { z.snd.volume = gain; } catch (e) { /* pas de setter */ } }
         continue;
       }
-      const cle = `zone${l.layer}:${l.file}`;
-      if (this.zonePending.has(cle)) continue;
-      this.zonePending.add(cle);
-      this.zoneSounds.set(l.layer, { file: l.file, snd: null });
+      const attente = `${cle}:${l.file}`;
+      if (this.zonePending.has(attente)) continue;
+      this.zonePending.add(attente);
+      this.zoneSounds.set(cle, { file: l.file, snd: null, rembobine: l.rembobine });
       this.B.CreateSoundAsync(l.name || cle, `data/audio/${l.file}`,
                               { loop: true, volume: gain, spatialEnabled: false })
         .then((snd) => {
-          this.zonePending.delete(cle);
-          const cur = this.zoneSounds.get(l.layer);
+          this.zonePending.delete(attente);
+          const cur = this.zoneSounds.get(cle);
           if (!cur || cur.file !== l.file) {
             try { snd.stop(); } catch (e) { /* jamais lance */ }
             return;
           }
           cur.snd = snd;
-          if (this.unlocked) this._play(snd);
+          // Un clip fraichement charge part toujours du debut : seul `offset`
+          // peut l'en ecarter, et il est une FRACTION de sa duree.
+          cur.offset = l.offset;
+          if (this.unlocked) this._playZone(cur, l);
         })
-        .catch(() => { this.zonePending.delete(cle); this.zoneSounds.delete(l.layer); this.failed++; });
+        .catch(() => { this.zonePending.delete(attente); this.zoneSounds.delete(cle); this.failed++; });
     }
+  }
+
+  /**
+   * Lance une ambiance la ou elle doit repartir.
+   *
+   * Une source mise en pause reprend d'elle-meme ; une source rembobinee part
+   * de `offset`, que `_randomizePlayhead` a tire au hasard. Babylon expose ce
+   * point comme un temps en secondes, d'ou la multiplication par la duree du
+   * tampon — inconnue du melangeur, qui n'a jamais lu le fichier.
+   */
+  _playZone(z, l) {
+    try {
+      const d = l.rembobine && l.offset
+        ? l.offset * ((z.snd._audioBuffer && z.snd._audioBuffer.duration)
+                      || (z.snd.getAudioBuffer && z.snd.getAudioBuffer()
+                          && z.snd.getAudioBuffer().duration) || 0)
+        : 0;
+      if (d > 0) { z.snd.play(0, d); return; }
+    } catch (e) { /* pas de tampon lisible : on part du debut */ }
+    this._play(z.snd);
   }
 
   /**

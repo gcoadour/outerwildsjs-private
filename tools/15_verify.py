@@ -2202,6 +2202,15 @@ def _run(url, heavy, profil=None, zip_path=None):
             grotte: (z.find(x => x.name === "CaveVolume01") || {}).entryways
                       ? z.find(x => x.name === "CaveVolume01").entryways.length : -1,
             couches: a.playing.map(l => l.name).sort(),
+            // L'arbitrage du build : une seule tete par couche, et la couche 0
+            // couvre tout ce qui lui est inferieur (docs/104-arbitrage.md).
+            parCouche: a.playing.reduce((m, l) => (m[l.layer] = (m[l.layer] || 0) + 1, m), {}),
+            // Ce que le melangeur donne au moteur, source par source.
+            cles: a.playing.map(l => l.key).sort(),
+            jourNuit: a.etats.filter(e => e.jourNuit).map(e => e.zone.name).sort(),
+            // Le jour se lit sur les positions du monde, pas sur un drapeau :
+            // si `jourDe` jetait, tout ce qui suit serait fige.
+            jours: a.etats.filter(e => e.jourNuit).map(e => e.jour),
           };
         }""")
         if amb:
@@ -2215,6 +2224,24 @@ def _run(url, heavy, profil=None, zip_path=None):
                       all("Cave" not in (n or "") for n in amb["couches"]),
                       amb["couches"], "aucune Cave*")
             rep.at_least("et au moins une couche sonne", len(amb["couches"]), 1)
+            # `ActivateLayer` n'active que la tete de couche — mais un
+            # `DayNightAudioVolume` porte DEUX sources, qui se croisent a
+            # l'aube. Le compte par couche vaut donc 1, ou 2 pendant la
+            # bascule, jamais plus.
+            rep.check("au plus deux sources par couche, et seulement en bascule",
+                      all(n <= 2 for n in amb["parCouche"].values()),
+                      amb["parCouche"], "<= 2 par couche")
+            rep.eq("chaque source sonnante a sa propre cle",
+                   len(set(amb["cles"])), len(amb["cles"]))
+            rep.eq("les trois volumes jour/nuit sont montes comme tels",
+                   ",".join(amb["jourNuit"]),
+                   "VillageAmbience_Day,VillageMusic,WindyAmbience")
+            # `IsDay` a besoin du centre de la planete, du point et du soleil.
+            # Une seule position manquante et le booleen resterait a `true`
+            # pour les trois, quelle que soit l'heure.
+            rep.check("et leur jour se lit sans exception",
+                      all(isinstance(j, bool) for j in amb["jours"]),
+                      amb["jours"], "trois booleens")
 
         # --- ce que les seuils commandent encore (docs/85-chambre.md) ----------
         #

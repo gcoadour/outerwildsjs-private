@@ -75,6 +75,13 @@ portes.
 
 ## L'égalité de priorité, maintenant que des zones n'ont plus de rayon
 
+> **Ce paragraphe était faux, et [`104`](104-arbitrage.md) l'a défait.** Il est
+> gardé ici parce que l'erreur est instructive : on avait pris soin de nommer
+> l'invention, sans avoir vérifié ce qu'elle remplaçait. `AudioDetector` ne
+> départage pas les égalités parce qu'il n'a pas à le faire — **à égalité,
+> elles jouent toutes**. Et la couche 0 n'est pas une couche comme les autres :
+> elle concourt avec toutes les autres réunies, et les couvre quand elle gagne.
+
 Le portage départage deux priorités égales par la taille : « une pièce est plus
 précise qu'une atmosphère ». Une zone sans collider n'a pas de taille ; elle
 prend désormais celle de sa plus petite porte. C'est un choix du portage, dit

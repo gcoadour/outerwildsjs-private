@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **49 des 159** méthodes nommées, sur 73 classes ([`103`](103-refait.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **64 des 172** méthodes nommées, sur 75 classes ([`103`](103-refait.md), [`104`](104-arbitrage.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -105,7 +105,10 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
-| ambiance par couches | 17 zones arbitrées par priorité, fondus, clip de nuit ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |
+| ambiance par couches | 17 zones, arbitrées comme `AudioDetector` : **la couche 0 couvre les autres, les ex aequo jouent ensemble** ([`104`](104-arbitrage.md)) ; **5 zones sans soleil franchies par leurs portes** ([`83`](83-seuils.md)) |
+| fondu d'ambiance | linéaire, et d'une **durée** repartant de la valeur courante — pas d'un rythme ([`104`](104-arbitrage.md)) |
+| aube et crépuscule | `_dayWindow` = la **largeur de l'arc de jour**, 200° pour 180° de géométrie ; les deux clips se **croisent** ([`104`](104-arbitrage.md)) |
+| tête de lecture | la boucle du vent repart au hasard, la musique du village **reprend à la même note** ([`104`](104-arbitrage.md)) |
 | référentiels déclarés | 14 volumes : le build dit l'ancre, la gravité complète |
 | distances du pilote auto | 1 000 / 2 500 et l'alignement, lus dans le build |
 | décor vivant | 15 panneaux, 8 visages, 10 buses, 6 passages anciens |

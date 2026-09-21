@@ -17,7 +17,7 @@ import { referenceFrames, frameAt, autopilotDistances } from "../web/src/frames.
 import { majorSectors, activeMajorSector } from "../web/src/sectors.js";
 import { directionalFields } from "../web/src/gravity.js";
 import { sunlessZones, entrywayTriggers } from "../web/src/entryways.js";
-import { ambienceZones } from "../web/src/ambience.js";
+import { ambienceZones, zonesActives } from "../web/src/ambience.js";
 import { billboards, talkingFaces, thrusterNozzles, particleBursts,
          meteorLaunchers, teleporters, warps } from "../web/src/decor.js";
 import { eventAudio, FOOTSTEP } from "../web/src/reactaudio.js";
@@ -475,6 +475,40 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   check("et la musique de la cite enterree en a cinq",
         jointes.find((z) => z.name === "MusicVolume" && !z.volume)
           .entryways.length, 5);
+
+  // Les deux champs de `OWAudioSource` que rien ne lisait, et leurs porteurs.
+  // Ce ne sont pas des reglages de confort : ils decident de ce qu'on entend
+  // en revenant quelque part (docs/104-arbitrage.md).
+  check("deux zones repartent d'un point tire au hasard",
+        audio.volumes.filter((v) => v.randomize).map((v) => v.name).sort().join(","),
+        "VillageAmbience_Day,WindyAmbience");
+  check("et une seule se met en pause au lieu de s'arreter",
+        audio.volumes.filter((v) => v.pauseOnFadeOut).map((v) => v.name).join(","),
+        "VillageMusic");
+  // `VillageMusic` est un volume jour/nuit SANS clip de nuit : elle se tait la
+  // nuit, et c'est la pause qui lui fait reprendre la meme note au matin.
+  const jn = audio.volumes.filter((v) => v.kind === "DayNightAudioVolume");
+  check("trois volumes jour/nuit", jn.length, 3);
+  check("tous avec une fenetre de jour de 200 degres",
+        jn.every((v) => v.dayWindow === 200), true);
+  check("et un seul sans clip de nuit",
+        jn.filter((v) => !v.nightFile).map((v) => v.name).join(","), "VillageMusic");
+  check("seul le vent se lit a la position du joueur",
+        jn.filter((v) => v.usePlayerPosition).map((v) => v.name).join(","),
+        "WindyAmbience");
+
+  // L'ARBITRAGE sur les VRAIES zones : au village, on entend l'ambiance de
+  // jour (couche 1, priorite 1) et la musique (couche 2) ; entrer dans le
+  // musee (couche 0, priorite 2) eteint les deux.
+  const parNom = (n) => jointes.find((z) => z.name === n);
+  const village = [parNom("Atmosphere"), parNom("VillageAmbience_Day"),
+                   parNom("WindyAmbience"), parNom("VillageMusic")];
+  check("au village, l'ambiance de jour couvre l'atmosphere et le vent",
+        zonesActives(village).map((z) => z.name).sort().join(","),
+        "VillageAmbience_Day,VillageMusic");
+  check("entrer au musee eteint le village entier",
+        zonesActives([...village, parNom("MuseumVolume")])
+          .map((z) => z.name).join(","), "MuseumVolume");
 
   // Les sons d'evenement : qui les porte, et avec quelle loi.
   const ev = eventAudio(audio);

@@ -128,7 +128,7 @@ import { SandLevels, sandColumns, sandFunnels, markCrushing,
          funnelActive } from "./sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
-import { loadAmbience, ambienceZones, AmbienceMixer } from "./ambience.js";
+import { loadAmbience, ambienceZones, AmbienceMixer, isDay } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
 import { referenceFrames, DeclaredFrames, restingPoint,
          autopilotDistances, attachTarget,
@@ -350,6 +350,25 @@ async function boot() {
     return [b.position[0] + framePos[0] - b.position0[0],
             b.position[1] + framePos[1] - b.position0[1],
             b.position[2] + framePos[2] - b.position0[2]];
+  }
+
+  /**
+   * Le CENTRE d'un corps, dans la meme convention monde que les zones.
+   *
+   * Le decalage ci-dessus ramene une position au repos a l'instant present ;
+   * applique a `position0`, il rend simplement `position + framePos`. Le jour
+   * et la nuit se lisent sur cet axe-la (`DayNightAudioVolume.IsDay`), et sur
+   * lui seul : sans le centre de la planete, il n'y a pas de « dessous ».
+   */
+  function centreDuCorps(bodyName, framePos) {
+    if (!bodyName) return null;
+    if (!corpsParNom.size) {
+      for (const b of bodies) if (b.bodyName) corpsParNom.set(b.bodyName, b);
+    }
+    const b = corpsParNom.get(bodyName);
+    if (!b || !b.position) return null;
+    return [b.position[0] + framePos[0], b.position[1] + framePos[1],
+            b.position[2] + framePos[2]];
   }
 
   // Position du vaisseau dans la scene AU REPOS, pour ramener ce qu'il porte.
@@ -5464,10 +5483,31 @@ async function boot() {
     // convention que les sources placees : position dans le repere ancre, plus
     // la position monde de l'ancre.
     if (ambience.count) {
-      audio.setLayers(ambience.update(dt,
-        [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
-         player.pos.z + anchorPos[2]],
-        { night, shiftOf: (x) => decalageDuCorps(x.body, anchorPos) }), mixer);
+      const auditeur = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                        player.pos.z + anchorPos[2]];
+      // `IsDay` se lit sur trois positions, et le melangeur n'en connait
+      // aucune : c'est ici qu'on les resout. `_usePlayerPosition` decide de
+      // laquelle sert de point du jour — celle du joueur pour le vent, celle
+      // du volume pour les deux zones du village, qui basculent donc a l'heure
+      // DU VILLAGE et non a celle de l'auditeur.
+      const soleil = star0
+        ? [star0.position[0] + anchorPos[0], star0.position[1] + anchorPos[1],
+           star0.position[2] + anchorPos[2]]
+        : null;
+      const jourDe = soleil ? (z) => {
+        const centre = centreDuCorps(z.body, anchorPos);
+        if (!centre) return !night;
+        let point = auditeur;
+        if (!z.usePlayerPosition) {
+          const d = decalageDuCorps(z.body, anchorPos);
+          if (d) point = [z.position[0] + d[0], z.position[1] + d[1],
+                          z.position[2] + d[2]];
+        }
+        return isDay(z.dayWindow || 200, centre, point, soleil);
+      } : null;
+      audio.setLayers(ambience.update(dt, auditeur,
+        { night, jourDe,
+          shiftOf: (x) => decalageDuCorps(x.body, anchorPos) }), mixer);
     }
     // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
