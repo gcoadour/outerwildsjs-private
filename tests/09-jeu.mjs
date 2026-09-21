@@ -41,7 +41,7 @@ import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.j
 import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
 import { MarshmallowStick as Baton, thermTime, THERM_HEAT_SPAN,
          STICK_CLIPS, STICK_LIGHTS } from "../web/src/held.js";
-import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo, matchedVelocity,
+import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo,
          LOCK_NEAR, BRACKET_RATE } from "../web/src/tracker.js";
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
          ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
@@ -121,6 +121,10 @@ import { rolloffModel, curveGain, AudioField, AudioMixer,
 import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
 import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
 import { DialogueSystem } from "../web/src/dialogue.js";
+import { AUTOPILOT_MESSAGES } from "../web/src/hud.js";
+import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
+         brakingDistance, flyStep, autopilotRotation,
+         autopilotMessageKey } from "../web/src/autopilot.js";
 import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
@@ -5204,8 +5208,6 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("y etre deja, non", canFlyTo(500, 1000), false);
   check("et un referentiel qui l'interdit, non plus",
         canFlyTo(5000, 1000, false), false);
-  check("accorder sa vitesse la copie",
-        matchedVelocity([1, 2, 3]).join(","), "1,2,3");
 
   // --- ce qui boucle et ce qui ne boucle pas (docs/63) ---
   //
@@ -6809,6 +6811,172 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   r2.dead = true;
   check("un mort reste mort, protege ou non", r2.hurt(10), 0);
   check("et il l'est toujours", r2.dead, true);
+}
+
+
+// --- le pilote automatique, tel que ReadTranslationalInput le fait ---------
+//
+// Ce module n'avait AUCUN test, et ses quatre phases etaient une
+// reconstruction de bon sens (docs/107-pilote.md).
+{
+  const dt = 1 / 50;
+
+  // `GetRelativeVelocity(frame)` rend `frame.velocity - self.velocity` : le
+  // Δv qu'il reste a AJOUTER, et non notre vitesse vue du referentiel.
+  check("le delta de vitesse est celui qu'on doit ajouter",
+        relativeDelta([0, 0, 0], [10, 0, 0]).join(","), "-10,0,0");
+
+  // La composante signee : le build l'ecrit en trois lignes, c'est un produit
+  // scalaire avec l'axe unitaire.
+  check("la composante le long d'un axe est signee",
+        alongAxis([3, 0, 0], [2, 0, 0]), 3);
+  check("... et negative a contresens", alongAxis([-3, 0, 0], [2, 0, 0]), -3);
+  check("un axe nul ne divise par rien", alongAxis([1, 1, 1], [0, 0, 0]), 0);
+
+  // L'EGALISATION est un asservissement : a fond tant que l'ecart depasse ce
+  // qu'une image comble, juste ce qu'il faut en dessous.
+  {
+    const p1 = matchVelocityStep([100, 0, 0], 50, dt);
+    check("loin du but, on pousse a fond", p1.frac, 1);
+    check("... et il reste ce qu'on n'a pas comble",
+          Number(p1.reste.toFixed(6)), 99);
+    check("... ce n'est donc pas fini", p1.done, false);
+    // 50 x 1/50 = 1 : sous une unite, on ne pousse que la fraction utile.
+    const p2 = matchVelocityStep([0.4, 0, 0], 50, dt);
+    check("pres du but, on ne pousse que ce qu'il faut", Number(p2.frac.toFixed(6)), 0.4);
+    check("... et il ne reste rien", Number(p2.reste.toFixed(9)), 0);
+    check("... c'est fini", p2.done, true);
+    check("le seuil est le centieme d'unite par seconde", AUTOPILOT.matched, 0.01);
+  }
+
+  // LA DISTANCE DE FREINAGE compte la gravite et le referentiel.
+  check("sans gravite, c'est v carre sur deux fois la poussee",
+        brakingDistance(100, 50), 100);
+  // Tomber VERS la cible retranche de la deceleration : le freinage s'allonge.
+  check("tomber vers la cible allonge le freinage",
+        brakingDistance(100, 50, -10) > brakingDistance(100, 50), true);
+  check("... et exactement de combien",
+        Number(brakingDistance(100, 50, -10).toFixed(4)), 125);
+  check("une gravite qui aide le freinage le raccourcit",
+        Number(brakingDistance(100, 50, 10).toFixed(4)),
+        Number((10000 / 120).toFixed(4)));
+  // Une deceleration nulle ou negative ne rend pas un nombre negatif : on ne
+  // peut pas freiner, donc la distance est infinie.
+  check("sans deceleration, on ne freine jamais",
+        brakingDistance(100, 50, -50), Infinity);
+
+  // L'ORDRE DES DECISIONS EST LA LOI.
+  const vers = [1000, 0, 0];
+  // 1. on s'eloigne de plus d'une unite par seconde -> realignement
+  {
+    const r = flyStep({ vers, rel: [5, 0, 0], maxThrust: 50 });
+    check("s'eloigner fait realigner", r.phase, "alignement");
+    check("... et la vitesse d'approche est negative", r.vApproche, -5);
+    check("... on pousse dans le sens du delta", r.input.join(","), "1,0,0");
+  }
+  // 2. la distance de freinage depasse ce qui reste -> retro-fusees
+  {
+    const r = flyStep({ vers: [100, 0, 0], rel: [-200, 0, 0], maxThrust: 50 });
+    check("trop pres et trop vite : retro-fusees", r.retro, true);
+    check("... et l'on passe a l'egalisation", r.phase, "egalisation");
+    check("... sans direction de poussee", r.input, null);
+  }
+  // 3. la derive de travers depasse le dixieme de la poussee
+  {
+    const r = flyStep({ vers, rel: [-1, 20, 0], maxThrust: 50 });
+    check("une derive de travers fait realigner", r.phase, "alignement");
+    check("le seuil est le dixieme de la poussee", AUTOPILOT.lateralPart, 10);
+    // En fermant a plus de dix, la poussee axiale est coupee : tout va dans la
+    // correction de travers.
+    const vite = flyStep({ vers, rel: [-20, 20, 0], maxThrust: 50 });
+    check("en fermant vite, on ne pousse plus que de travers",
+          vite.input.map((v) => Number(v.toFixed(6))).join(","), "0,1,0");
+  }
+  // 4. l'approche : on pousse vers la cible, et la poussee axiale s'inverse
+  //    quand on ferme deja.
+  {
+    const immobile = flyStep({ vers, rel: [0, 0, 0], maxThrust: 50 });
+    check("a l'arret, on pousse droit vers la cible", immobile.phase, "approche");
+    check("... c'est-a-dire le long de l'axe", immobile.input.join(","), "1,0,0");
+    const ferme = flyStep({ vers, rel: [-1, 0, 0], maxThrust: 50 });
+    check("en fermant doucement, on approche encore", ferme.phase, "approche");
+    check("... et la poussee axiale s'inverse pour accelerer",
+          ferme.input.join(","), "1,0,0");
+  }
+
+  // `ReadRotationalInput` rend zero : le pilote ne tourne RIEN.
+  check("le pilote automatique ne tourne rien",
+        autopilotRotation().join(","), "0,0,0");
+
+  // LES QUATRE MESSAGES, ET LEURS DRAPEAUX. `AutopilotGUI.Update` les teste
+  // dans cet ordre, et ce portage les avait mal apparies : « approche »
+  // affichait « stage 3 », qui est l'egalisation PENDANT un vol, et « vol »
+  // affichait « stage 2 », qui est `_isApproachingDestination`.
+  check("egaliser pendant un vol, c'est stage 3",
+        autopilotMessageKey({ matching: true, flying: true }), "approche");
+  check("egaliser sans destination, c'est le message simple",
+        autopilotMessageKey({ matching: true, flying: false }), "egalisation");
+  check("s'aligner, c'est stage 1",
+        autopilotMessageKey({ liningUp: true }), "alignement");
+  check("approcher, c'est stage 2",
+        autopilotMessageKey({ approaching: true }), "vol");
+  // L'egalisation passe AVANT les deux autres : le build teste
+  // `IsMatchingVelocity()` en premier.
+  check("l'egalisation couvre l'alignement",
+        autopilotMessageKey({ matching: true, liningUp: true }), "egalisation");
+  check("et sans drapeau, aucun message", autopilotMessageKey({}), null);
+  // Les quatre cles existent bien au catalogue, avec les textes du build.
+  check("stage 1", AUTOPILOT_MESSAGES.alignement[0], "stage 1: aligning flight path");
+  check("stage 2", AUTOPILOT_MESSAGES.vol[0],
+        "stage 2: accelerating towards destination");
+  check("stage 3", AUTOPILOT_MESSAGES.approche[0], "stage 3: firing retro-rockets");
+  check("et le message simple", AUTOPILOT_MESSAGES.egalisation[0],
+        "matching target velocity");
+
+  // ACCORDER SA VITESSE SANS DESTINATION : l'autre geste, et son message.
+  {
+    const v = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, thrust: 50 };
+    const p = new Autopilot(v, []);
+    p.matchVelocity({ name: "c", position: [0, 0, 0], velocity: [50, 0, 0],
+                      gravity: { upperSurfaceRadius: 10 } });
+    check("le message est celui de l'egalisation simple", p.phase, "egalisation");
+    check("... et l'on ne vole vers rien", p.flying, false);
+    let n = 0;
+    while (p.engaged && n < 1000) { p.update(1 / 50); n += 1; }
+    check("cinquante unites par seconde prennent une seconde", n, 50);
+    check("... et rien n'est annonce comme une arrivee", p.arrived, false);
+  }
+
+  // BOUT A BOUT : accorder sa vitesse prend |Δv| / poussee, et non zero.
+  {
+    const vaisseau = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 },
+                       thrust: 50, speed: 0 };
+    const cible = { name: "Cible", position: [0, 0, 0], velocity: [100, 0, 0],
+                    gravity: { upperSurfaceRadius: 10 } };
+    const pilote = new Autopilot(vaisseau, []);
+    pilote.engage(cible);
+    pilote.matching = true;        // `InitMatchVelocity`
+    let pas = 0;
+    while (pilote.engaged && pas < 1000) { pilote.update(dt); pas += 1; }
+    // 100 u/s a 50 u/s^2 : deux secondes, soit cent pas de physique.
+    check("accorder cent unites par seconde prend deux secondes", pas, 100);
+    check("... et la vitesse est bien celle de la cible",
+          Number(vaisseau.vel.x.toFixed(6)), 100);
+    check("... le pilote s'est arrete tout seul", pilote.phase, "repos");
+    check("... en annoncant l'arrivee", pilote.arrived, true);
+  }
+
+  // `Abort` dit s'il y avait quelque chose a abandonner.
+  {
+    const p = new Autopilot({ pos: { x: 0, y: 0, z: 0 },
+                              vel: { x: 0, y: 0, z: 0 }, thrust: 50 }, []);
+    check("abandonner au repos n'annonce rien", p.abort(), false);
+    p.engage({ name: "x", position: [1000, 0, 0],
+               gravity: { upperSurfaceRadius: 10 } });
+    check("engage, l'abandon s'annonce", p.abort(), true);
+    check("... et les drapeaux tombent",
+          `${p.phase}/${p.matching}/${p.target}`, "repos/false/null");
+  }
 }
 
 report();

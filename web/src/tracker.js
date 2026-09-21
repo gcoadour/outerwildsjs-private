@@ -321,16 +321,12 @@ export class LockOn {
   }
 }
 
-/**
- * `Autopilot.InitMatchVelocity` : accorder sa vitesse a celle du referentiel.
- *
- * Le build laisse le pilote automatique y aller par la poussee ; le portage n'a
- * pas son asservissement, et pose la vitesse. La difference se voit sur une
- * seconde, pas sur le resultat — et elle est ecrite ici plutot que cachee.
- */
-export function matchedVelocity(targetVelocity) {
-  return [targetVelocity[0], targetVelocity[1], targetVelocity[2]];
-}
+// `Autopilot.InitMatchVelocity` vivait ici, et posait la vitesse d'un coup en
+// disant que « la difference se voit sur une seconde, pas sur le resultat ».
+// Une seconde de jeu est justement ce que ce portage cherche : la loi est
+// maintenant dans `autopilot.js`, ou `matchVelocityStep` refait
+// l'asservissement du build — au plus une image de poussee maximale, mise a
+// l'echelle pour ne pas depasser (docs/107-pilote.md).
 
 /**
  * `Autopilot.InitFlyToDestination` : il REFUSE si l'on y est deja.

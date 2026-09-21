@@ -58,7 +58,7 @@ import { BlackHole, DebrisField, WHITE_HOLE, leashBrake,
 import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
-import { Autopilot } from "./autopilot.js";
+import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
 import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
@@ -70,7 +70,7 @@ import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          roastPrompts, roastBroken, shipProximity,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
-         PlayerState } from "./player.js";
+         PlayerState, PLAYER_FALLBACK } from "./player.js";
 import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
@@ -106,7 +106,7 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
-import { LockOn, aimedFrame, canFlyTo, matchedVelocity,
+import { LockOn, aimedFrame, canFlyTo,
          ancientProbeAcceleration } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
 // existait, ses quarante verifications passaient, et aucun module du moteur ne
@@ -1334,6 +1334,8 @@ async function boot() {
   const readout = uiRoot ? new AutopilotReadout(uiRoot) : null;
   const minimap = new Minimap(document.getElementById("minimap"));
   let lastPhase = "repos";
+  // La cible de l'egalisation du sac dorsal, tant qu'elle dure.
+  let egalisationJoueur = null;
   let endTimesCued = false;
   let deathCued = null;
   // Face nuit du corps ancre : elle n'existe que depuis que les corps tournent.
@@ -2525,11 +2527,10 @@ async function boot() {
       if (t && t.centre) snapRegard = 0;
       // `Autopilot.InitMatchVelocity` : au-dela de vingt unites de vitesse
       // RELATIVE, le jeu ne vous laisse pas basculer en vue d'atterrissage sans
-      // rien faire. Le portage pose la vitesse la ou le build y va par la
-      // poussee, comme il le fait deja pour le sac dorsal.
-      if (t && t.match && lockOn.current) {
-        const vm = matchedVelocity(lockOn.current.body.velocity || [0, 0, 0]);
-        ship.vel.x = vm[0]; ship.vel.y = vm[1]; ship.vel.z = vm[2];
+      // rien faire. Il n'y POSE pas la vitesse : il engage l'asservissement,
+      // qui met |Δv| / poussee a la ramener (docs/107-pilote.md).
+      if (t && t.match && lockOn.current && autopilot) {
+        autopilot.matchVelocity(lockOn.current.body);
         console.log("vue d'atterrissage : egalisation automatique");
       }
     } else if (est("Landing Camera") && consoles.count) {
@@ -3176,7 +3177,17 @@ async function boot() {
       : null;
     let focus = null;
     if (ship) {
-      if (autopilot && autopilot.engaged) autopilot.update(dt);
+      if (autopilot && autopilot.engaged) {
+        // La distance de freinage du build compte la GRAVITE le long de l'axe
+        // d'approche : tomber vers la cible allonge le freinage. Seul le moteur
+        // connait le champ au vaisseau, d'ou ce passage (docs/107-pilote.md).
+        const c = ship.field;
+        autopilot.update(dt, {
+          gravite: c ? [c.dir.x * c.magnitude, c.dir.y * c.magnitude,
+                        c.dir.z * c.magnitude] : [0, 0, 0],
+          vitesseCible: (autopilot.target && autopilot.target.velocity) || [0, 0, 0],
+        });
+      }
       ship.update(dt, bodies, input, { fwd, right, up }, world);
       // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
       // seconde durant, et relacher annule (docs/66-allumage.md). Les trois
@@ -5240,15 +5251,38 @@ async function boot() {
         const t = lockOn.current.body;
         const v = frameVelocity(orbits, t);
         if (v) {
-          // `Autopilot.InitMatchVelocity`. Le build y va par la POUSSEE ; ce
-          // portage pose la vitesse, et la loi le dit a l'endroit ou elle est
-          // ecrite plutot qu'ici.
-          const vm = matchedVelocity(v);
-          player.vel.x = vm[0]; player.vel.y = vm[1]; player.vel.z = vm[2];
+          // `Autopilot.InitMatchVelocity`, par la POUSSEE : le meme
+          // asservissement que le vaisseau, avec la poussee du sac dorsal. Le
+          // portage posait la vitesse, ce qui escamotait la seconde ou l'on
+          // sent le sac travailler (docs/107-pilote.md).
+          egalisationJoueur = t;
           console.log(`vitesse accordee a ${t.name}`);
         }
       }
       matchPressed = false;
+      // L'ASSERVISSEMENT DU SAC DORSAL, image par image. Il s'arrete tout seul
+      // quand il reste moins d'un centieme d'unite par seconde, et le premier
+      // geste qui reprend la main l'annule — comme le build coupe
+      // `_isMatchingVelocity` des qu'on pousse.
+      if (egalisationJoueur) {
+        const v = frameVelocity(orbits, egalisationJoueur);
+        const stop = !v || player.grounded || !resources.canThrust
+          || player.jetpack || lockOn.current === null;
+        if (stop) { egalisationJoueur = null; }
+        else {
+          const rel = relativeDelta(v, [player.vel.x, player.vel.y, player.vel.z]);
+          const poussee = PLAYER_FALLBACK.maxTranslationalThrust;
+          const pas = matchVelocityStep(rel, poussee, dt);
+          const k = poussee * dt;
+          player.vel.x += pas.input[0] * k;
+          player.vel.y += pas.input[1] * k;
+          player.vel.z += pas.input[2] * k;
+          if (pas.done) {
+            egalisationJoueur = null;
+            console.log("vitesse accordee");
+          }
+        }
+      }
       // `Autopilot.InitFlyToDestination` REFUSE si l'on est deja arrive : le
       // portage engageait toujours, et le pilote partait pour zero unite.
       if (autoPressed && autopilot && lockOn.current) {

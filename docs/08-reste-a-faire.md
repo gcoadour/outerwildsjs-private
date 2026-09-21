@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **69 des 172** méthodes nommées, sur 75 classes ([`103`](103-refait.md), [`104`](104-arbitrage.md), [`105`](105-lire.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **89 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`107`](107-pilote.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -105,6 +105,8 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| **pilote automatique** | l'asservissement du build, la gravite dans le freinage, et les quatre messages remis a l'endroit ([`107`](107-pilote.md)) |
+| accorder sa vitesse | par la POUSSEE, aux trois endroits qui la posaient : l'écart divisé par la poussée ([`107`](107-pilote.md)) |
 | **se redresser** | 100 deg/s vers le bas du champ, et le tangage compense tant que ca dure ([`106`](106-redressement.md)) |
 | **objets lisibles** | les 34 textes s'affichent enfin, en pages de 70 x 5, `@` compris ([`105`](105-lire.md)) |
 | verrouillage de camera | cinq appelants, cinq vitesses : 2 pour un panneau, 5 pour le vaisseau modele ([`105`](105-lire.md)) |

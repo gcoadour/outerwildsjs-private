@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`107-pilote.md`](107-pilote.md) — **le pilote automatique n'a pas de phases, il a une méthode : un asservissement là où le portage posait la vitesse, une distance de freinage qui compte la gravité, et quatre messages mal aiguillés dont un que rien n'affichait**
 - [`106-redressement.md`](106-redressement.md) — **se redresser prend 1,8 seconde : un mode d'interpolation qui est une vitesse constante, un regard qui ne bouge pas pendant ce temps — et une transcription littérale qui tenait dans une représentation que ce portage n'a pas**
 - [`105-lire.md`](105-lire.md) — **trente-quatre textes extraits et affichés nulle part : la pagination qui compte des appuis, et les cinq verrous de caméra qui ont chacun leur vitesse**
 - [`104-arbitrage.md`](104-arbitrage.md) — **l'ambiance ne s'additionne pas, elle s'arbitre : la couche 0 couvre les autres, les ex aequo jouent ensemble, et trois règles que le portage avait inventées sous un test**
