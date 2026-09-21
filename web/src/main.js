@@ -44,8 +44,8 @@ import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
 import { TimeLoop, ResetTrigger } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
-import { PlayerDeathHandler, FlashbackOverlay, deathCamera,
-         DEATH_SOUNDS } from "./death.js";
+import { PlayerDeathHandler, FlashbackOverlay, deathCamera, SnapshotTimer,
+         FLASHBACK, DEATH_SOUNDS } from "./death.js";
 import { MeshLOD, Evictor, lodThresholds, colliderLODs, ColliderLODs } from "./lod.js";
 import { loadDialogue, DialogueSystem } from "./dialogue.js";
 import { QuantumMoon, quantumHosts, bodyOccluder,
@@ -116,8 +116,8 @@ import { MarshmallowStick as BatonGuimauve, thermTime,
          STICK_LIGHTS } from "./held.js";
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
-import { loadLighting, LightField, ambientTarget, ambientStep,
-         shiplightRange, SHIPLIGHT_RANGE } from "./lights.js";
+import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
+         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels, markCrushing,
@@ -1535,13 +1535,15 @@ async function boot() {
     // la position. Le conteneur remet deja la geometrie dans le repere du jeu
     // et se pose a -origin.offset, donc la position monde d'un noeud vaut sa
     // position absolue plus ce decalage.
+    // La cible, une fois, dans le repere de RENDU : `FloatingOrigin.toRender`
+    // dit exactement cela, et le calcul etait recopie a la main ici — la
+    // soustraction du decalage, ecrite a l'envers et par composante.
+    const vise = origin.toRender(worldPos);
     let best = null, bestD = Infinity;
     for (const n of same) {
       n.computeWorldMatrix(true);
       const t = n.getWorldMatrix().getTranslation();
-      const d = Math.hypot(t.x + origin.offset.x - worldPos[0],
-                           t.y + origin.offset.y - worldPos[1],
-                           t.z + origin.offset.z - worldPos[2]);
+      const d = Math.hypot(t.x - vise.x, t.y - vise.y, t.z - vise.z);
       if (d < bestD) { bestD = d; best = n; }
     }
     return best ? [best] : same;
@@ -1751,7 +1753,86 @@ async function boot() {
   // Mort et flashback : une seule porte d'entree pour toutes les causes.
   const death = new PlayerDeathHandler();
   const flashOverlay = uiRoot ? new FlashbackOverlay(uiRoot) : null;
+
+  // §R LA MEMOIRE DU FLASHBACK (docs/98-flashback.md).
+  //
+  // `Flashback.TakeSnapshot` photographie la camera du joueur dans une
+  // `RenderTexture` de 256 par 256, toutes les cinq secondes, et la mort rejoue
+  // ces photos A REBOURS. `death.js` a longtemps affirme le contraire — « le
+  // build ne porte pas de memoire a rejouer » — et c'est la plus visible des
+  // choses que le portage ne faisait pas.
+  //
+  // Une cible de rendu de 256 par 256 coute 256 Ko de lecture toutes les cinq
+  // secondes : a l'echelle de la boucle, deux cent seize photos et cinquante
+  // megaoctets. Le build en garde autant, et sans plafond : mourir tard donne
+  // un long flashback, c'est le principe.
+  const pellicule = { timer: new SnapshotTimer(), cible: null, photos: [],
+                      enCours: false, t0: performance.now() / 1000 };
+  // `_finalImage` — `FinalFlashbackImage` —, posee sur le plan pendant que le
+  // blanc monte. Sans le build, elle manque et le fondu reste nu : c'est un
+  // repli, pas une panne.
+  if (flashOverlay) {
+    const finale = new Image();
+    finale.onload = () => flashOverlay.setFinalImage(finale);
+    finale.src = "data/interface/FinalFlashbackImage.png";
+  }
+  death.snapshotCount = () => pellicule.photos.length;
   window.__death = death;
+  window.__pellicule = pellicule;
+
+  /** La cible de rendu, creee a la premiere photo et jamais avant. */
+  function cibleFlashback() {
+    if (pellicule.cible) return pellicule.cible;
+    try {
+      const n = FLASHBACK.snapshotSize;
+      const rtt = new BABYLON.RenderTargetTexture("flashback", n, scene, false);
+      // `refreshRate = 0` : Babylon ne la dessine jamais tout seul, on appelle
+      // `render()` a la main — une fois toutes les cinq secondes, et pas une
+      // image de plus.
+      rtt.refreshRate = 0;
+      rtt.renderList = null;           // toute la scene, comme la camera
+      rtt.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+      pellicule.cible = rtt;
+    } catch (e) {
+      console.warn("flashback : pas de cible de rendu —", e.message);
+      pellicule.cible = null;
+      pellicule.timer.due = () => false;   // on n'essaiera plus
+    }
+    return pellicule.cible;
+  }
+
+  /**
+   * Une photo. La lecture des pixels est asynchrone : on ne bloque pas l'image
+   * pour elle, et une photo qui n'arrive pas est une photo de moins, rien de
+   * plus.
+   *
+   * WebGL rend ses lignes de bas en haut ; `ImageData` les attend de haut en
+   * bas. D'ou le retournement, sans quoi tout le flashback serait a l'envers.
+   */
+  async function photographier() {
+    const rtt = cibleFlashback();
+    if (!rtt || pellicule.enCours) return;
+    pellicule.enCours = true;
+    try {
+      rtt.activeCamera = scene.activeCamera;
+      rtt.render();
+      const n = FLASHBACK.snapshotSize;
+      const brut = await rtt.readPixels();
+      if (!brut) return;
+      const px = new Uint8ClampedArray(n * n * 4);
+      for (let y = 0; y < n; y++) {
+        const src = (n - 1 - y) * n * 4;
+        px.set(brut.subarray(src, src + n * 4), y * n * 4);
+      }
+      const toile = new OffscreenCanvas(n, n);
+      toile.getContext("2d").putImageData(new ImageData(px, n, n), 0, 0);
+      pellicule.photos.push(toile.transferToImageBitmap());
+    } catch (e) {
+      // Un contexte perdu, un `readPixels` refuse : la partie continue.
+    } finally {
+      pellicule.enCours = false;
+    }
+  }
 
   function respawn() {
     // `TimeLoop.Start` recalcule `_preventSupernova` : tant qu'on ne connait
@@ -1814,6 +1895,14 @@ async function boot() {
     endMusic.reset();
     for (const r of repairs) r.reset();
     training.reset();
+    // La pellicule aussi : `Flashback.Start` recree `_snapshotRenders` a chaque
+    // chargement de scene, et la boucle EST un rechargement de scene. Le
+    // flashback d'une boucle ne montre que cette boucle-la — sans quoi il
+    // grandirait sans fin, et montrerait une vie qu'on a deja oubliee.
+    for (const b of pellicule.photos) { try { b.close(); } catch (e) { /* deja fermee */ } }
+    pellicule.photos.length = 0;
+    pellicule.timer.reset();
+    pellicule.t0 = performance.now() / 1000;
     // L'equipement suit le MONDE, pas la connaissance : ce qu'on sait survit a
     // la boucle (`PlayerData`), ce qu'on porte non. Le paquetage est a nouveau
     // dans la cabine au debut de chaque boucle, et se ramasse a nouveau.
@@ -2002,7 +2091,36 @@ async function boot() {
   // regarder par le satellite — reutilisent cette meme vue : c'est le moyen qui
   // leur manquait, et il existe depuis que la sonde a un oeil.
   const consoles = new RemoteConsoles(remoteConsoles(gameplay));
-  window.__tools = { telescope, probes, probeCam, consoles };
+  // §S LA SALLE S'ETEINT QUAND ON PREND LE PROJECTEUR.
+  //
+  // `SatelliteSnapshotController.OnPressInteract` fait fondre une lumiere a
+  // ZERO en deux secondes (`_fadeLight.FadeIntensity(0f, 2f)`), et sa sortie la
+  // ramene a son intensite d'origine, en deux secondes aussi. C'est ce qui rend
+  // l'ecran lisible : on eteint la piece pour regarder la projection.
+  //
+  // `FadeLight` est pose sur une « Point light » et n'a aucun champ : c'est
+  // donc par sa POSITION qu'on retrouve la lumiere qu'il commande, comme les
+  // nuages du ciel (docs/48) et pour la meme raison — le nom ne designe rien.
+  const fadeData = ((gameplay.placed || {}).FadeLight || [])[0] || null;
+  let fadeLight = null, fadeCible = null;
+  if (fadeData && fadeData.position) {
+    let best = null, bestD = 4;
+    for (const l of (lighting.lights || [])) {
+      if (!l.position) continue;
+      const d = Math.hypot(l.position[0] - fadeData.position[0],
+                           l.position[1] - fadeData.position[1],
+                           l.position[2] - fadeData.position[2]);
+      if (d < bestD) { bestD = d; best = l; }
+    }
+    if (best) {
+      fadeCible = best;
+      fadeLight = new FadeLight(best.intensity ?? 1);
+      console.log(`lumiere du projecteur : ${best.name} a ${bestD.toFixed(2)} u`);
+    } else {
+      console.warn("FadeLight : aucune lumiere a sa position");
+    }
+  }
+  window.__tools = { telescope, probes, probeCam, consoles, fadeLight };
   // Les options de dialogue sont touchables : au clavier on les choisit au
   // chiffre ou au curseur, au doigt on les vise directement.
   const dlgUI = new DialogueUI(document.getElementById("dialogue"), {
@@ -2060,6 +2178,16 @@ async function boot() {
   const marqueurs = mapMarkers(gameplay);
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF, marqueurs);
+  // §V LES ORBITES ONT UNE COULEUR CHACUNE (docs/100-carte.md). `MapOpenGL`
+  // porte cinq pointeurs de corps et cinq couleurs, plus celle de la comete ;
+  // le portage tracait tout d'un meme gris invente, au centre de l'ECRAN et
+  // non du Soleil.
+  {
+    const mog = (gameplay.singletons || {}).MapOpenGL || null;
+    const lues = solarMap.readOrbitColors(mog);
+    console.log(`carte : ${lues.length} orbites colorees`
+      + (mog ? " (lues dans le build)" : " (repli)"));
+  }
   // La liste des corps visables : construite UNE fois, rafraichie en place.
   // Elle se declare ICI, avec les corps, et non pres de son lecteur — c'est la
   // deuxieme zone morte de ce fichier en deux lots (voir `impostures`), et le
@@ -2298,6 +2426,13 @@ async function boot() {
       const c = consoles.toggle([player.pos.x + framePos[0],
                                  player.pos.y + framePos[1],
                                  player.pos.z + framePos[2]]);
+      // §S La salle s'eteint pendant qu'on regarde la projection, et se
+      // rallume quand on lache. Deux secondes dans les deux sens.
+      if (fadeLight && fadeCible) {
+        const t = performance.now() / 1000;
+        const vise = (c && !c.flight) ? 0 : (fadeCible.intensity ?? 1);
+        fadeLight.fadeIntensity(vise, SATELLITE_FADE, t);
+      }
       console.log(c ? `console prise : ${c.name}` : "console lachee");
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
@@ -2331,7 +2466,20 @@ async function boot() {
       if (code === "ArrowDown") settings.move(1);
       if (code === "ArrowLeft") settings.toggle(-1);
       if (code === "ArrowRight") settings.toggle(1);
-      if (code === "Enter" || code === "Space") settings.toggle(0);
+      if (code === "Enter" || code === "Space") {
+        // `TriggerLoad(true, ...)` : une nouvelle partie EFFACE la sauvegarde,
+        // puis recharge la scene. Ici la scene ne se recharge pas — on la
+        // remet a son etat de depart, ce que la boucle sait deja faire — mais
+        // `PlayerData` repart bien de zero, savoirs et exploration compris.
+        if (settings.toggle(0) === "newGame") {
+          pdata.wipe();
+          respawn();
+          // `ResetSimulation` en DERNIER : `respawn` fait un `restart`, qui
+          // incremente le compte de boucles. Une partie neuve est au tour zero.
+          loop.resetSimulation();
+          console.log("nouvelle partie : la sauvegarde est effacee");
+        }
+      }
       applySettings();
       settingsUI.render();
     }
@@ -2794,6 +2942,18 @@ async function boot() {
       }
       console.log(`repere : ${anchorBody.name} -> ${fb.name}, ` +
         `ecart de vitesse ${Math.hypot(...dv).toFixed(1)} u/s`);
+      // §T LE CORPS ANCRE NE SE LIBERE PAS. `Evictor` a un ensemble de
+      // fichiers proteges depuis sa premiere ligne — « corps ancre, corps de
+      // depart » dit son constructeur — et on ne lui donnait que le second :
+      // `keep()` et `release()` n'etaient appeles nulle part. Le corps ancre
+      // etait donc compte comme absent, propose a la liberation toutes les
+      // quarante-cinq secondes, et sauve a chaque fois par le garde-fou de
+      // `evictFile` — qui remettait le compteur a zero pour recommencer.
+      // Le protege, c'est le dire une fois au lieu de le refuser sans fin.
+      const ancien = BODY_TO_FILE[anchorBody.name];
+      const nouveau = BODY_TO_FILE[fb.name];
+      if (ancien && ancien !== nouveau) evictor.release(ancien);
+      if (nouveau) evictor.keep(nouveau);
       anchorBody = fb;
       reframe(anchorBody);
       origin.offset.x = fb.position0[0];
@@ -4471,7 +4631,16 @@ async function boot() {
     } else if (deathCued) {
       deathCued = null;
     }
-    if (flashOverlay) flashOverlay.update(death.state);
+    // §R LA PHOTO DES CINQ SECONDES. `Flashback.Update` la prend tant qu'on
+    // n'est pas mort et que la partie a plus de trois secondes ; c'est
+    // `PlayerState.IsDead()` qui l'arrete, l'etat qu'on vient de brancher.
+    // Elle est prise APRES le rendu de l'image, pour photographier ce que le
+    // joueur vient de voir et non l'image d'avant.
+    if (pellicule.timer.due(performance.now() / 1000 - pellicule.t0,
+                            etatJoueur.dead)) {
+      photographier();
+    }
+    if (flashOverlay) flashOverlay.update(death.state, pellicule.photos);
     // La camera bascule et descend pendant la sequence : on mourait jusqu'ici
     // sans que l'image bouge d'un pixel.
     if (death.dead) {
@@ -4744,6 +4913,13 @@ async function boot() {
     // est bride.
     if (equipment.suit && !casque.worn && casque.state !== 0) casque.suitUp();
     if (!equipment.suit && casque.worn) casque.removeSuit();
+    // §U LES JAUGES SONT SUR LA VISIERE. `HUDCameraScript` les eteint a
+    // `RemoveSuit` et les rallume a `HelmetHUDActivated` — l'annonce que
+    // `HUDHelmet.Update` fait partir quand le casque a fini de se poser. Le
+    // portage affichait l'oxygene et le carburant en permanence, casque ote,
+    // au village, ou il n'y a rien a afficher. Et le mode d'affichage les
+    // efface sans effacer l'etat : en sortir les rend a ce qu'elles etaient.
+    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden);
     {
       const euler = ((-pitch * 180 / Math.PI) % 360 + 360) % 360;
       casque.update(dt, input.right || 0, 0, euler);
@@ -5087,8 +5263,17 @@ async function boot() {
         player.vel.y = saut.velocity[1];
         player.vel.z = saut.velocity[2];
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
-        fx.teleport(now);
         console.log(`epave : ${saut.warp.name} -> ${saut.receiver.name}`);
+      }
+      // L'ECLAIR DE BROUILLARD, et pas l'eclair bleu. Le portage jouait ici
+      // `fx.teleport` — l'effet d'`AncientTeleporter.FireTeleporter`, une tout
+      // autre mecanique. `DerelictWarp` appelle `FogDetector.StartFogFlash`, et
+      // l'appelle A L'ENTREE : le brouillard monte trois secondes, le
+      // deplacement tombe au sommet, et il redescend de l'autre cote. C'est ce
+      // que le commentaire du portage decrivait — « on s'enfonce, le brouillard
+      // monte, et on est ailleurs » — sans que rien ne le fasse.
+      for (const f of epaves.drainFlashes()) {
+        fog.startFlash(f.peak, f.fadeIn, f.fadeOut, now);
       }
       for (const e of epaves.drain()) console.log(`annonce : ${e}`);
     }
@@ -5194,6 +5379,13 @@ async function boot() {
     // Lumieres posees dans la scene : instanciees a la volee dans leur budget,
     // comme l'audio et les particules. Deux lumieres inventees ne tenaient pas
     // lieu d'eclairage pour un systeme solaire entier.
+    // §S Le fondu de la lumiere du projecteur, avant que le champ de lumieres
+    // ne repose les intensites : `FadeLight.Update` interpole entre l'intensite
+    // COURANTE au moment de l'appel et la cible, jamais depuis l'origine — deux
+    // fondus qui se chevauchent partent donc de la ou l'on en etait.
+    if (fadeLight && fadeCible) {
+      fadeCible.intensity = fadeLight.update(performance.now() / 1000);
+    }
     placedLights.update(player.pos, anchorPos);
     // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
     // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne

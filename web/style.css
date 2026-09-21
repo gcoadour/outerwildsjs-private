@@ -140,6 +140,19 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   position: absolute; inset: 0; background: #fff; pointer-events: none;
   opacity: 0;
 }
+/* Les photos du flashback : le jeu en prend une toutes les cinq secondes et
+   les rejoue à rebours sur un quad qui avance vers la caméra. Ici c'est un
+   canevas plein écran mis à l'échelle — le quad qui se rapproche et l'image
+   qui grandit sont la même chose vue de l'œil (docs/98).
+   `--zoom` vient de la position du plan, `--twirl` de `TwirlEffect.angle`,
+   `--flou` de `GlowEffect.blurIterations`. */
+.ow-flashback-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; pointer-events: none; background: #000;
+  image-rendering: auto;
+  transform: scale(var(--zoom, 1)) rotate(var(--twirl, 0deg));
+  filter: blur(var(--flou, 0px)) saturate(0.7) contrast(1.1);
+}
 /* « low fuel / low health / low oxygen », a droite du centre de l'ecran :
    PlayerResourceGUI.OnGUI les pose a x = largeur/2 + 50, en corps 20, rouge */
 .ow-warn {
@@ -555,7 +568,15 @@ body.touch #dialogue {
    tactiles, et le dialogue ne l'avait jamais suivie — ses options faisaient
    20 px de haut, et son « Next » 29 x 16. */
 body.touch .dlg-options { gap: 4px; }
-body.touch .dlg-option { padding: 9px 10px; }
+/* La hauteur ETAIT une somme : 9 px de marge en haut, 9 en bas, et la hauteur
+   de ligne de la police au milieu. Elle dépassait 36 px quand « Gill Sans MT »
+   était chargée, et retombait dessous quand le navigateur lui substituait autre
+   chose — une mesure qui dépend d'un fichier de police téléchargé n'est pas une
+   règle, c'est une coïncidence. On la pose donc. */
+body.touch .dlg-option {
+  padding: 9px 10px; min-height: 44px;
+  display: flex; align-items: center;
+}
 body.touch .dlg-next {
   display: flex; align-items: center; justify-content: center;
   min-width: 78px; min-height: 40px; margin-top: 4px;

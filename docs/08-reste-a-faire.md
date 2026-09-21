@@ -20,7 +20,7 @@ lisait**.
 > |---|---|
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
-> | `lois.mjs` — ce que le portage **appelle** | **20** methodes sans appelant ([`90`](90-methodes.md)) |
+> | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -74,7 +74,7 @@ portage.
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
-| mort et flashback | 5 causes, 22 images, 8,21 s, commandes coupées |
+| mort et flashback | 5 causes, commandes coupées, et les **photos de la partie** rejouées à rebours — autant qu'on a survécu de fois cinq secondes ([`98`](98-flashback.md)) |
 | supernova | progression, contraction, explosion, onde de choc |
 | dégâts du vaisseau | pièces, propulseurs coupés, destruction |
 | LOD par maillage | hauteur relative à l'écran, parcours tournant |
@@ -183,6 +183,13 @@ portage.
 | la lunette pendant l'assise | le suivi se suspend, et en sortir **recommence** le demi-tour ([`97`](97-assise-instantanee.md)) |
 | **la guimauve prend feu** | flamme à `r < 0,25`, perdue à `r < 0,08`, une neuve 0,8 s plus tard ([`97`](97-assise-instantanee.md)) |
 | voyants d'avarie | le **masque**, pas les pièces mortes — et rangés `4, 1, 16, 8, 2` ([`97`](97-assise-instantanee.md)) |
+| **le flashback** | les photos de la partie, à rebours, le plan qui avance, le flou qui efface ([`98`](98-flashback.md)) |
+| état de mort du joueur | `PlayerState._isDead`, et c'est lui qui arrête les photos ([`98`](98-flashback.md)) |
+| passages de Dark Bramble | l'**éclair de brouillard** du build, monté à l'entrée, et non l'éclair bleu du téléporteur ([`99`](99-lois-branchees.md)) |
+| projecteur du satellite | la salle s'éteint en 2 s pendant qu'on regarde ([`99`](99-lois-branchees.md)) |
+| nouvelle partie | `CreateNewPlayerSave`, au menu des réglages faute de menu-titre ([`99`](99-lois-branchees.md)) |
+| jauges du casque | elles sont **sur la visière** : sans combinaison, il n'y en a pas ([`99`](99-lois-branchees.md)) |
+| orbites de la carte | cinq couleurs du build, centrées sur le **Soleil**, et l'ellipse de la comète ([`100`](100-carte.md)) |
 | réglages de projet | pas de physique fixe, gravité par défaut, balises et calques |
 | les préfabriqués | ce que le build pose **hors de `level0`** : 37 classes, 61 instances |
 | champ de vision | **70°**, et le télescope relu : entrée à 33,33°, zoom à la main |
@@ -226,7 +233,7 @@ dans l'alpha.
 | ~~les dégâts localisés du vaisseau~~ | **faux, relu** ([`49`](49-queue.md)) : `_damageLocationMask` est une **sortie** qui s'accumule, pas un filtre. Zéro est l'état d'un vaisseau intact. Seuls les deux modificateurs sont vraiment morts — aucune méthode ne les emploie |
 | les éclats de fracture | `if (_debrisShardPrefab != null) { }` est un bloc vide |
 | ~~le modèle de sonde~~ | **faux, mesuré** ([`60`](60-sonde.md)) : `_probePrefab` vise `sharedassets1.assets:2295` et s'y résout du premier coup. Le recensement ne lisait que `level0`, et l'alpha range les préfabriqués ailleurs. Dix nœuds, huit classes, deux caméras |
-| les images du flashback | rien à rejouer : le jeu ne stocke pas de mémoire visuelle |
+| ~~les images du flashback~~ | **faux, lu** ([`98`](98-flashback.md)) : `Flashback.TakeSnapshot` rend la caméra du joueur dans une `RenderTexture` de 256 × 256 **toutes les cinq secondes**, et la mort les rejoue à rebours. La mémoire visuelle n'est pas un objet de scène — elle se remplit à l'exécution, et c'est pour cela qu'un recensement ne la voyait pas |
 | la courbe de dégâts d'impact | les seuils sont là, la fonction qui les relie n'y est pas |
 | ~~l'entraînement et le ciblage~~ | **faux, mesuré** : `PlayerLockOnTargeting` ×2 (dont une sur `Player_Body`) et `ZeroGTrainingManager` sont dans le build ([`45`](45-recensement-mesure.md)) |
 

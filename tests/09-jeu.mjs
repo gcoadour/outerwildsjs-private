@@ -16,7 +16,8 @@ import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          reglagesDe } from "../web/src/cameraeffects.js";
 import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
-import { mapMarkers, markerVisible } from "../web/src/map.js";
+import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
+         COMET_ELLIPSE, fociDistance, orbitStyle } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
@@ -33,7 +34,7 @@ import { sandScale, sandProgress, funnelScale, funnelActive,
 import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
          COMPRESSION_GRACE, PlayerState } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
-         FadeLight, DayNightTracker } from "../web/src/lights.js";
+         FadeLight, SATELLITE_FADE, DayNightTracker } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
@@ -61,7 +62,7 @@ import { referenceFrames, frameAt, autopilotDistances, matchInitialVelocity,
          ARRIVAL_FALLBACK } from "../web/src/frames.js";
 import { tornadoPivots, TornadoPivots, matchTransforms,
          disposableContainers, MeteorLaunchers, METEOR, warps, WARP,
-         DerelictWarps } from "../web/src/decor.js";
+         DerelictWarps, fogFlashOf } from "../web/src/decor.js";
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
@@ -97,7 +98,8 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
          snapshotSize, probeIcon, probeReadout, probeLabelPos,
          selfDestructed, angleEntre } from "../web/src/probe.js";
 
-import { Flashback, PlayerDeathHandler, FLASHBACK } from "../web/src/death.js";
+import { Flashback, PlayerDeathHandler, FLASHBACK, SnapshotTimer,
+         frameLengths, displayTimes } from "../web/src/death.js";
 import { Settings } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
@@ -172,28 +174,106 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 
 // --- flashback ---------------------------------------------------------
 //
-// Les quatre constantes du build donnent le reste : 0,6 x 0,9^n reste au-dessus
-// de 0,06 pour n de 0 a 21.
+// LE FLASHBACK REJOUE DES PHOTOS DE LA PARTIE (docs/98-flashback.md).
+//
+// `Flashback.TakeSnapshot` rend la camera du joueur dans une `RenderTexture` de
+// 256 par 256 toutes les cinq secondes, et la mort les repasse A REBOURS. Ce
+// fichier comptait « vingt-deux images » comme une constante : vingt-deux est
+// le rang ou la DUREE d'image touche son plancher de 0,06, pas le nombre de
+// photos — celui-la, c'est le temps qu'on a survecu divise par cinq.
 {
-  const fb = new Flashback();
-  check("images du flashback", fb.frames.length, 22);
-  check("premiere image", round(fb.frames[0]), FLASHBACK.firstFrame);
-  check("derniere image au-dessus du plancher", fb.frames[21] >= FLASHBACK.minFrame, true);
-  check("image suivante sous le plancher",
-        round(fb.frames[21] * FLASHBACK.decay, 4) < FLASHBACK.minFrame, true);
-  check("duree totale de la sequence", round(fb.duration, 2), 8.21);
+  check("la premiere image dure 0,6 s", frameLengths(1)[0], FLASHBACK.firstFrame);
+  check("chacune dure 0,9 fois la precedente",
+        round(frameLengths(2)[1] / frameLengths(2)[0], 4), FLASHBACK.decay);
+  const cent = frameLengths(100);
+  check("la vingt-deuxieme est encore au-dessus du plancher",
+        cent[21] >= FLASHBACK.minFrame, true);
+  check("la vingt-troisieme est le plancher", cent[22], FLASHBACK.minFrame);
+  check("et toutes les suivantes aussi", cent[99], FLASHBACK.minFrame);
 
-  fb.start();
+  // `_imageDisplayTimes[count - 1 - i]` : la borne du RANG i est rangee a
+  // l'index de la PHOTO. Le defilement part du dernier index et descend.
+  const t22 = displayTimes(22);
+  check("vingt-deux bornes", t22.length, 22);
+  check("la derniere photo sort au bout de sa propre duree",
+        round(t22[21], 4), round(FLASHBACK.firstFrame, 4));
+  check("et la premiere porte la duree totale",
+        round(t22[0], 3), round(frameLengths(22).reduce((a, b) => a + b, 0), 3));
+
+  // Vingt-deux photos, c'est 5,409 s de defilement et 6,209 avec le blanc.
+  const fb = new Flashback();
+  fb.start(22);
+  check("defilement plus fondu", round(fb.total, 3), 6.209);
+  // Deux secondes d'attente, une d'amorce, la sequence, une de plus avant que
+  // la boucle ne reparte.
+  check("de la mort au redemarrage", round(fb.duration, 3), 10.209);
+
+  // LA LONGUEUR DEPEND DE QUAND ON MEURT. C'est tout l'enjeu.
+  const court = new Flashback(); court.start(3);
+  const long = new Flashback(); long.start(120);
+  check("trois photos font une sequence courte", round(court.total, 3), 2.426);
+  check("cent vingt en font une longue", long.total > 10, true);
+  check("et zero photo ne laisse que le blanc",
+        (() => { const v = new Flashback(); v.start(0); return v.total; })(),
+        FLASHBACK.fade);
+
+  // On part de la PLUS RECENTE, et on remonte.
+  fb.start(22);
+  check("le defilement part de la derniere photo", fb.index, 21);
+  let vus = [];
+  let s = null;
+  for (let i = 0; i < 2000; i++) {
+    s = fb.update(0.02);
+    if (s.index >= 0 && vus[vus.length - 1] !== s.index) vus.push(s.index);
+    if (s.fini) break;
+  }
+  check("on a vu les vingt-deux", vus.length, 22);
+  check("de la plus recente a la plus ancienne",
+        vus[0] === 21 && vus[21] === 0, true);
+  check("et jamais en avant", vus.every((v, i) => i === 0 || v < vus[i - 1]), true);
+
+  // Les phases, dans l'ordre du build.
+  fb.start(22);
   const seen = [];
   let guard = 0;
   for (;;) {
-    const s = fb.update(0.02);
-    if (!seen.includes(s.phase)) seen.push(s.phase);
-    if (s.fini || ++guard > 1000) break;
+    const st = fb.update(0.02);
+    if (!seen.includes(st.phase)) seen.push(st.phase);
+    if (st.fini || ++guard > 2000) break;
   }
   check("phases traversees dans l'ordre", seen.join(">"),
-        "attente>images>fondu>fini");
-  check("le voile est plein a la fin", fb.update(0).alpha, 0);
+        "attente>images>fondu>fin>fini");
+
+  // Le plan avance de douze a une demie, le flou monte de 2 a 32.
+  fb.start(22);
+  fb.update(FLASHBACK.delay + FLASHBACK.prime + 0.001);
+  const debut = fb.update(0);
+  check("le plan part de douze", round(debut.plane, 1), FLASHBACK.planeFrom);
+  check("et le flou est au minimum", debut.glow, FLASHBACK.glowMin);
+  fb.update(fb.total - 0.001);
+  const finale = fb.update(0);
+  check("il finit a une demie", round(finale.plane, 1), FLASHBACK.planeTo);
+  check("et le flou au maximum", finale.glow, FLASHBACK.glowMax);
+  check("le voile est plein a la fin", round(finale.alpha, 2), 1);
+
+  // LE TOURBILLON NE SE CALE SUR RIEN : `7 * sin(t * 0.5)`.
+  const tb = new Flashback();
+  tb.start(4);
+  const a = tb.update(Math.PI).twirl;       // sin(pi/2) = 1
+  check("le tourbillon atteint sept degres", round(a, 3), FLASHBACK.twirl);
+
+  // LA PHOTO DES CINQ SECONDES, et ses trois conditions.
+  const chrono = new SnapshotTimer();
+  check("rien avant la troisieme seconde", chrono.due(2), false);
+  check("ni a la quatrieme : il faut cinq secondes d'ecart", chrono.due(4), false);
+  check("la premiere photo part a cinq secondes", chrono.due(5.01), true);
+  check("et pas deux fois", chrono.due(5.02), false);
+  check("la suivante cinq secondes plus tard", chrono.due(10.02), true);
+  check("un mort ne photographie plus", chrono.due(20, true), false);
+  check("et son chronometre ne bouge pas non plus", chrono.due(20.01), true);
+  check("deux photos sur une minute et demie de vie", chrono.taken, 3);
+  check("une boucle de dix-huit minutes en laisse deux cent seize",
+        Math.floor(18 * 60 / FLASHBACK.snapshotEvery), 216);
 }
 
 // --- causes de mort ----------------------------------------------------
@@ -205,10 +285,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("cause retenue", d.cause, "digestion");
   check("une seule mort comptee", d.deaths, 1);
 
-  // la sequence entiere doit s'ecouler avant que la boucle ne reparte
+  // La sequence entiere doit s'ecouler avant que la boucle ne reparte, et sa
+  // longueur depend de la pellicule : sans photo, il ne reste que l'attente,
+  // l'amorce, le fondu au blanc et la seconde d'avant le redemarrage.
   let t = 0, done = false;
-  while (t < 20 && !done) { done = d.update(0.05); t += 0.05; }
-  check("redemarrage apres la sequence", round(t, 2), 8.25);
+  while (t < 30 && !done) { done = d.update(0.05); t += 0.05; }
+  // 2 + 1 + 0,8 + 1 = 4,8, plus le pas de temps qui la depasse.
+  check("mort sans photo : la sequence la plus courte du jeu",
+        round(d.flashback.duration, 2), 4.8);
+  check("et la boucle repart juste apres", t - d.flashback.duration < 0.15, true);
+  d.revive();
+  // Avec les photos d'une partie de deux minutes, c'est autre chose.
+  d.snapshotCount = () => 24;
+  d.kill("impact");
+  check("la sequence connait ses photos", d.flashback.count, 24);
+  t = 0; done = false;
+  while (t < 30 && !done) { done = d.update(0.05); t += 0.05; }
+  check("et elle dure plus longtemps", t > 10, true);
   d.revive();
   check("vivant apres revive", d.dead, false);
 }
@@ -318,6 +411,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // L'anneau : depasser dix ramene a un, pas a dix.
   check("dix puis un", reg.step(10, 1), 1);
   check("un puis dix", reg.step(1, -1), 10);
+
+  // LA NOUVELLE PARTIE. `TitleScreenMenu.ToggleOption` appelle
+  // `TriggerLoad(true, ...)` sur deux de ses cinq options, et `TriggerLoad`
+  // appelle `CreateNewPlayerSave` : une partie neuve EFFACE la sauvegarde. Le
+  // portage n'a pas de menu-titre et `PlayerData.wipe` n'etait donc appelee de
+  // nulle part. C'est un AJOUT au menu des reglages, et il demande DEUX
+  // validations la ou le build n'en demande aucune : une nouvelle partie est
+  // ici a une touche d'une partie en cours.
+  {
+    const m = new Settings(null);
+    const i = m.options.findIndex((o) => o.key === "newGame");
+    check("la nouvelle partie est au menu", i >= 0, true);
+    m.index = i;
+    check("le premier appui ne fait rien", m.toggle(0), null);
+    check("mais il arme", m.confirmNewGame, true);
+    check("et le libelle le dit", m.label(m.options[i]).includes("confirmer"), true);
+    check("le second appui la declenche", m.toggle(0), "newGame");
+    check("et ferme le menu", m.open, false);
+    check("l'armement retombe", m.confirmNewGame, false);
+    // Quitter la ligne desarme : on ne laisse pas un effacement arme derriere.
+    m.index = i;
+    m.toggle(0);
+    m.move(1);
+    check("changer de ligne desarme", m.confirmNewGame, false);
+  }
 
   // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------
   //
@@ -958,13 +1076,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // avec lui, le monde lui parait tourner en sens inverse.
   const sky = field.toFrame(anchor, [1000, 0, 0]);
   check("le ciel a tourne d'un quart de tour", round(sky[2], 3), 1000);
-  check("... dans le sens inverse du corps",
-        round(field.toWorld(anchor, [1000, 0, 0])[2], 3), -1000);
+  check("... et l'axe X n'y est plus", round(sky[0], 3), 0);
+  check("c'est une rotation : la norme ne bouge pas",
+        round(Math.hypot(...sky), 3), 1000);
   const ground = field.toFrame(anchor, [0, 0, 0]);
   check("le centre du corps ancre reste immobile",
         round(Math.hypot(...ground), 6), 0);
-  const back = field.toWorld(anchor, sky);
-  check("aller-retour monde/repere sans perte", round(back[0], 3), 1000);
+  // Un demi-tour envoie X sur -X : c'est ce qui fixe le SENS, et l'inverse
+  // `toWorld` n'a plus a l'attester (docs/99).
+  field.advance(1);
+  check("... et le sens : un demi-tour retourne l'axe",
+        round(field.toFrame(anchor, [1000, 0, 0])[0], 3), -1000);
+  field.advance(2);   // on revient ou l'on etait
 
   // Cycle jour/nuit : le soleil passe sous l'horizon local a mi-tour.
   const up = [1, 0, 0];
@@ -1588,7 +1711,10 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         deathCamera({ phase: "fini", fini: true }).drop, 0);
   const debut = deathCamera({ phase: "attente", fini: false, t: 0 });
   check("la chute commence en douceur", debut.drop, 0);
-  const fin = deathCamera({ phase: "attente", fini: false, t: 2 });
+  // L'attente dure trois secondes : deux avant `StartFlashback`, une de plus
+  // avant que le plan n'apparaisse (docs/98).
+  const fin = deathCamera({ phase: "attente", fini: false,
+                            t: FLASHBACK.delay + FLASHBACK.prime });
   check("elle est complete au bout du delai", round(fin.drop, 3), DEATH_FALL.drop);
   check("pendant les images, la camera reste basse",
         deathCamera({ phase: "images", fini: false, t: 3 }).roll, DEATH_FALL.roll);
@@ -3725,6 +3851,39 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // par gravite ne pouvait pas la trouver.
   check("un marqueur peut n'etre porte par aucun corps", marq[4].body, null);
 
+  // LES ORBITES DE LA CARTE (docs/100-carte.md). `MapOpenGL.Start` range cinq
+  // corps et cinq couleurs dans le meme ordre, `OnPostRender` trace un cercle
+  // par corps dans la sienne. Le portage les tracait toutes d'un meme gris.
+  check("cinq orbites colorees", ORBIT_COLORS.length, 5);
+  check("dans l'ordre de `_planetRadiusArray`",
+        ORBIT_COLORS.map((o) => o.body).join(","),
+        "TimberHearth_Body,FocalBody,BrittleHollow_Body,GiantsDeep_Body,DarkBramble_Body");
+  check("l'alpha commune du build", Math.round(ORBIT_ALPHA * 255), 130);
+  check("le bleu de Timber Hearth",
+        orbitStyle(ORBIT_COLORS[0].rgb), "rgba(139,194,255,0.510)");
+  check("et le vert de Dark Bramble",
+        orbitStyle(ORBIT_COLORS[4].rgb), "rgba(128,203,134,0.510)");
+  check("la comete a sa propre couleur, hors du tableau",
+        orbitStyle(COMET_COLOR), "rgba(194,255,251,0.510)");
+
+  // L'ELLIPSE DE LA COMETE. Les demi-axes viennent du constructeur de
+  // `MapOpenGL`, et `_fociDistance` s'en deduit : c = sqrt(a^2 - b^2).
+  check("un demi-grand axe de treize mille deux cents",
+        Math.round(COMET_ELLIPSE.a), 13198);
+  check("un demi-petit axe de sept mille six cents",
+        Math.round(COMET_ELLIPSE.b), 7582);
+  check("le foyer est a dix mille huit cents du centre",
+        Math.round(fociDistance()), 10802);
+  // ET LE SOLEIL EST BIEN A UN FOYER. La verification tient en une addition :
+  // `a + c` doit rendre l'aphelie, c'est-a-dire l'endroit exact ou la scene
+  // pose la comete — 24 000 du Soleil. C'est ce qui prouve que les deux
+  // nombres du constructeur sont bien CETTE ellipse-ci, et non des valeurs
+  // laissees d'un autre corps.
+  check("son aphelie tombe ou la scene la pose",
+        Math.round(COMET_ELLIPSE.a + fociDistance()), 24000);
+  check("et son perihelie la fait passer dans le systeme interieur",
+        Math.round(COMET_ELLIPSE.a - fociDistance()), 2395);
+
   // La visibilite, dans l'ordre ou `LateUpdate` decide.
   const planete = marq[0], lune = marq[1], joueur = marq[3];
   check("trop loin, une lune disparait",
@@ -4202,6 +4361,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   lampe.update(3);
   check("et atteint sa cible", lampe.intensity, 1);
   check("puis s'arrete", lampe.fading, false);
+
+  // SON SEUL APPELANT DANS TOUT LE BUILD : le projecteur du satellite. Prendre
+  // la console eteint la salle en deux secondes, la lacher la rallume en deux
+  // secondes — et le portage n'appelait `FadeIntensity` de nulle part.
+  check("deux secondes dans les deux sens", SATELLITE_FADE, 2);
+  const salle = new FadeLight(1.4);
+  salle.fadeIntensity(0, SATELLITE_FADE, 0);
+  salle.update(SATELLITE_FADE);
+  check("la salle s'eteint", salle.intensity, 0);
+  salle.fadeIntensity(1.4, SATELLITE_FADE, SATELLITE_FADE);
+  salle.update(SATELLITE_FADE * 2);
+  check("et se rallume a son intensite d'origine", round(salle.intensity, 3), 1.4);
 
   // Le jour et la nuit : ce sont les TRANSITIONS qui manquaient.
   const cycle = new DayNightTracker(false);
@@ -5642,6 +5813,34 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la garde empeche le renvoi immediat",
         res.update(0.1, 3.5, [1000, 0, 0]), null);
 
+  // L'ECLAIR DE BROUILLARD, ET QUAND IL PART.
+  //
+  // `OnTriggerEnter` appelle `StartFogFlash(0.5, _warpDuration * 0.5,
+  // _warpDuration * 0.5)` a l'ENTREE, pas au depart : le brouillard monte
+  // pendant les trois secondes d'enfoncement, et le deplacement tombe au
+  // sommet. Le portage jouait a la place l'eclair bleu du teleporteur ancien.
+  {
+    const e = fogFlashOf(WARP, false);
+    check("l'eclair d'entree monte trois secondes", e.fadeIn, WARP.duration / 2);
+    check("et redescend en trois", e.fadeOut, WARP.duration / 2);
+    check("a une demi-densite", e.peak, 0.5);
+    const x = fogFlashOf(WARP, true);
+    check("celui d'une sortie ne monte pas", x.fadeIn, 0);
+    check("il est deja la, et se dissipe", x.fadeOut, WARP.duration / 2);
+
+    const f = new DerelictWarps(warps(gpW));
+    check("rien a l'ouverture", f.drainFlashes().length, 0);
+    f.update(0.1, 0, [0, 0, 0]);
+    const lot = f.drainFlashes();
+    check("entrer allume l'eclair tout de suite", lot.length, 1);
+    check("et c'est celui qui monte", lot[0].fadeIn, WARP.duration / 2);
+    f.update(0.1, 1.5, [0, 0, 0]);
+    check("rester dedans ne le rallume pas", f.drainFlashes().length, 0);
+    const part = f.update(0.1, 3, [0, 0, 0]);
+    check("le depart, lui, vient trois secondes plus tard", part !== null, true);
+    check("sans second eclair", f.drainFlashes().length, 0);
+  }
+
   // Sortir d'un volume `_warpOnExit` part TOUT DE SUITE.
   const gpX = { placed: { DerelictWarp: [
     { name: "WarpVolume", body: "DerelictDimension_Body", position: [0, 0, 0],
@@ -5656,8 +5855,11 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const bord = new DerelictWarps(warps(gpX));
   bord.update(0.1, 0, [0, 0, 0]);                 // dedans
   check("rester dedans ne fait rien", bord.update(0.1, 1, [0, 0, 0]), null);
+  bord.drainFlashes();
   const sortie = bord.update(0.1, 2, [10000, 0, 0]);
   check("en sortir part tout de suite", sortie !== null, true);
+  const eclairSortie = bord.drainFlashes();
+  check("avec son eclair, sans montee", eclairSortie.length && eclairSortie[0].fadeIn, 0);
   check("et cela s'annonce", bord.drain().includes("ExitDerelictZone"), true);
   check("le drainage vide", bord.drain().length, 0);
 

@@ -437,7 +437,16 @@ export class Probe {
     return this;
   }
 
-  /** `ProbeScanner` : ce qui entre dans la sphere de trente, et le plus proche. */
+  /**
+   * `ProbeScanner` : ce qui entre dans la sphere de trente, et le plus proche.
+   *
+   * @vide aucun `PointOfInterest` dans le build — les cinq fichiers serialises
+   * en comptent ZERO, `ProbeScanner.GetClosestPOI` n'est appele par personne, et
+   * `PointOfInterest.CaughtOnCamera` a un corps vide. Le volume de scan est bien
+   * pose sur le prefabrique de la sonde (`ScanVolume`, sharedassets1), mais il
+   * n'a rien a detecter : c'est un chantier de l'alpha, pas une mecanique.
+   */
+  // @vide aucun PointOfInterest n'est pose dans ce build
   scan(points) {
     this.poi = points.filter((p) => len(sub(p.pos, this.pos)) <= this.cfg.scanRadius);
     let best = null, d = Infinity;

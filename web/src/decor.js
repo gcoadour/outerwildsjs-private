@@ -396,11 +396,37 @@ export function warps(gameplay) {
  */
 export const WARP = { duration: 6, arrivalGuard: 1, exitSpeed: 10 };
 
+/**
+ * L'ECLAIR DE BROUILLARD, et ses deux formes.
+ *
+ * `DerelictWarp` ne fait pas clignoter l'ecran : il epaissit le BROUILLARD.
+ * Les deux appels sont ecrits a cote du deplacement, et le portage n'avait ni
+ * l'un ni l'autre — il jouait a la place l'eclair bleu du teleporteur ancien,
+ * qui appartient a une tout autre mecanique.
+ *
+ *   OnTriggerEnter : StartFogFlash(0.5f, _warpDuration * 0.5f, _warpDuration * 0.5f)
+ *   OnTriggerExit  : StartFogFlash(0.5f, 0f, _warpDuration * 0.5f)
+ *
+ * Soit, avec `_warpDuration` a 6 : trois secondes pour monter, trois pour
+ * redescendre — et le deplacement tombe EXACTEMENT au sommet. Sur une sortie,
+ * la montee est nulle : le brouillard est deja dense a l'instant ou l'on
+ * bascule, et il se dissipe en trois secondes de l'autre cote.
+ */
+export function fogFlashOf(cfg = WARP, onExit = false) {
+  const moitie = cfg.duration * 0.5;
+  return { peak: 0.5, fadeIn: onExit ? 0 : moitie, fadeOut: moitie };
+}
+
 export class DerelictWarps {
   constructor(list = [], cfg = WARP) {
     this.warps = list.map((w) => ({ data: w, arrivedAt: -Infinity, since: null }));
     this.cfg = cfg;
     this.events = [];
+    // Les eclairs de brouillard demandes depuis le dernier drainage. Ils ne
+    // partent pas au meme instant que le deplacement — celui d'une ENTREE part
+    // trois secondes avant — et ils ne peuvent donc pas etre la valeur de
+    // retour d'`update`.
+    this.flashes = [];
     // Le jumeau, par nom ET par corps : deux `WarpVolume` portent le meme nom.
     for (const w of this.warps) {
       const s = w.data.sister;
@@ -435,12 +461,22 @@ export class DerelictWarps {
       const garde = now <= w.arrivedAt + this.cfg.arrivalGuard;
       if (w.data.onExit) {
         // Sur la SORTIE : c'est le passage de dedans a dehors qui compte.
-        if (w.etait && !ici && !garde) { w.etait = ici; return this.partir(w, now, shiftOf); }
+        if (w.etait && !ici && !garde) {
+          w.etait = ici;
+          // `OnTriggerExit` : pas de montee, le brouillard est deja la.
+          this.flashes.push(fogFlashOf(this.cfg, true));
+          return this.partir(w, now, shiftOf);
+        }
         w.etait = ici;
         continue;
       }
       w.etait = ici;
-      if (ici && w.since === null && !garde) w.since = now;
+      if (ici && w.since === null && !garde) {
+        w.since = now;
+        // `OnTriggerEnter` allume l'eclair A L'ENTREE, pas au depart : c'est
+        // lui qui fait les trois secondes d'enfoncement.
+        this.flashes.push(fogFlashOf(this.cfg, false));
+      }
       if (!ici) w.since = null;
       if (w.since !== null && now - w.since >= this.cfg.duration / 2) {
         w.since = null;
@@ -475,6 +511,9 @@ export class DerelictWarps {
   }
 
   drain() { const e = this.events; this.events = []; return e; }
+
+  /** Les eclairs de brouillard demandes depuis le dernier appel. */
+  drainFlashes() { const f = this.flashes; this.flashes = []; return f; }
 }
 
 // --- le rattachement a la geometrie chargee --------------------------------

@@ -49,6 +49,27 @@ export class Settings {
     this.layoutConf = c.layout || null;
     this.index = 0;
     this.open = false;
+    // LA NOUVELLE PARTIE, ET POURQUOI ELLE EST ICI.
+    //
+    // `PlayerData.CreateNewPlayerSave` efface la sauvegarde. Dans le build, on
+    // ne l'atteint que par le menu-titre : `TitleScreenMenu.ToggleOption`
+    // appelle `TriggerLoad(true, false)` sur sa premiere option et
+    // `TriggerLoad(true, true)` sur sa troisieme, qui accorde en plus les cinq
+    // savoirs. Le portage n'a pas de menu-titre — `SettingsMenu` verrouille sa
+    // propre « Exit to Main Menu » pour cette raison — et le seul menu qu'il
+    // ait est celui-ci.
+    //
+    // C'est donc un AJOUT, et il est nomme comme tel. Il demande DEUX
+    // validations, ce que le build ne fait pas : la ou une nouvelle partie se
+    // choisit depuis un ecran-titre, elle est ici a une touche d'une partie en
+    // cours, et effacer sa progression ne se defait pas.
+    if (!this.options.some((o) => o.key === "newGame")) {
+      this.options = [...this.options, { key: "newGame", label: "%s",
+                                         states: ["Nouvelle partie",
+                                                  "Nouvelle partie : confirmer"],
+                                         ajout: true }];
+    }
+    this.confirmNewGame = false;
     this.load();
   }
 
@@ -94,6 +115,9 @@ export class Settings {
   }
 
   move(delta) {
+    // Quitter la ligne desarme la confirmation : on ne laisse pas une
+    // « Nouvelle partie » armee derriere soi.
+    this.confirmNewGame = false;
     const n = this.options.length;
     if (!n) return;
     let i = this.index;
@@ -109,6 +133,11 @@ export class Settings {
     if (!o || o.locked) return null;
     switch (o.key) {
       case "back": this.open = false; return "back";
+      case "newGame":
+        if (!this.confirmNewGame) { this.confirmNewGame = true; return null; }
+        this.confirmNewGame = false;
+        this.open = false;
+        return "newGame";
       case "invertY": this.values.invertY = !this.values.invertY; break;
       case "lookSensitivity":
       case "flightSensitivity":
@@ -128,7 +157,8 @@ export class Settings {
     if (o.states) {
       const on = o.key === "invertY" ? this.values.invertY
         : o.key === "brightness" ? this.values.brightness
-          : this.values.shadows;
+          : o.key === "newGame" ? this.confirmNewGame
+            : this.values.shadows;
       return o.label.replace("%s", o.states[on ? 1 : 0]);
     }
     return o.label.replace("%d", String(this.values[o.key]));

@@ -16,7 +16,6 @@
 
 export const CAPTURE_RADIUS = 40;
 export const EXIT_CONE_DEG = 60;
-export const DETACHABLE_FRACTION = 0.25;
 /** `_debrisRadius` du WhiteHoleVolume : l'etendue ou ressort ce qui est tombe. */
 export const DEBRIS_RADIUS = 750;
 
@@ -79,16 +78,17 @@ export class BlackHole {
     };
   }
 
-  /**
-   * Effondrement progressif de la croute, indexe sur la fraction de boucle
-   * comme le fait le jeu pour Dark Bramble.
-   * @param total nombre de fragments candidats
-   */
-  crustProgress(loopFraction, total) {
-    const detachable = Math.floor(total * DETACHABLE_FRACTION);
-    this.fragmentsDetached = Math.floor(detachable * Math.min(1, loopFraction));
-    return this.fragmentsDetached;
-  }
+  // L'effondrement de la croute ne se devine plus ici.
+  //
+  // Ce fichier portait un `crustProgress(loopFraction, total)` qui estimait le
+  // nombre de fragments tombes : un quart des maillages, au prorata de la
+  // boucle. `crust.js` fait le vrai travail depuis docs/15 — il lit les 122
+  // fragments, en detache 72 et en brise 50 — et les deux modeles se
+  // CONTREDISAIENT : un quart contre 59 pour cent. La boucle lisait le bon, et
+  // l'estimation dormait a cote, fausse et jamais appelee.
+  //
+  // `fragmentsDetached` reste, parce que le trou noir en a besoin pour savoir
+  // ce qu'il a avale — mais c'est `Crust` qui l'ecrit desormais.
 }
 
 /**

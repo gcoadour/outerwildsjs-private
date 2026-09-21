@@ -552,13 +552,44 @@ def _run(url, heavy, profil=None, zip_path=None):
                ["Close Map", "Zoom In/Out", "Pan View"])
         # La couche d'invites fonctionne : c'est ce que l'ancien controle
         # voulait dire, mesure la ou le build pose vraiment des invites.
-        rep.eq("icone de manette sur chaque invite",
-               page.evaluate("() => document.querySelectorAll('.ow-prompt-btn').length"),
-               page.evaluate("() => document.querySelectorAll('.ow-prompt').length"))
+        # Le compte seul ne disait pas LAQUELLE manquait : on compare les
+        # libelles, pour qu'un echec se lise sans relancer.
+        #
+        # Et il portait sur TOUTES les invites, ce qui etait trop dire :
+        # `ScreenPrompt` a un bouton FACULTATIF, et celle des codes de
+        # lancement — « Launch Codes Aquired », en bas — n'en a pas. Elle
+        # n'apparait qu'avec un profil qui connait les codes, ce qui a tenu
+        # l'erreur cachee. La couche qu'on mesure ici est celle de GAUCHE,
+        # celle que la carte remplit.
+        rep.eq("icone de manette sur chaque invite de gauche",
+               page.evaluate("""() => [...document.querySelectorAll(
+                   '.ow-prompts-left .ow-prompt')]
+                 .filter(n => !n.querySelector('.ow-prompt-btn'))
+                 .map(n => n.textContent.trim())"""),
+               [])
         page.evaluate("() => window.__map.pan(-0.5, -0.5, 1)")
         rep.check("le deplacement de la carte suit la distance de zoom",
                   page.evaluate("() => Math.abs(window.__map.focal[0]) > 1000"),
                   page.evaluate("() => Math.round(window.__map.focal[0])"), "!= 0")
+        # LES ORBITES DE LA CARTE (docs/100-carte.md). `MapOpenGL` porte cinq
+        # pointeurs de corps et cinq couleurs, rangés dans le meme ordre par
+        # `Start`. Le portage tracait tout d'un meme gris invente, au centre de
+        # l'ECRAN et non du Soleil.
+        carte = page.evaluate("""() => {
+          const m = window.__map;
+          return { n: m.orbits.length, corps: m.orbits.map((o) => o.body),
+                   alpha: m.orbitAlpha === undefined
+                     ? null : Math.round(m.orbitAlpha * 255),
+                   comete: m.cometColor.map((c) => Math.round(c * 255)) };
+        }""")
+        rep.eq("cinq orbites colorees", carte["n"], 5)
+        rep.eq("dans l'ordre de `_planetRadiusArray`", carte["corps"],
+               ["TimberHearth_Body", "FocalBody", "BrittleHollow_Body",
+                "GiantsDeep_Body", "DarkBramble_Body"])
+        # L'alpha vient du build quand l'extraction l'a portee ; sans elle, le
+        # repli explicite du module vaut la meme chose.
+        rep.eq("a l'alpha du build", carte["alpha"] in (130, None), True)
+        rep.eq("et la comete a sa propre couleur", carte["comete"], [194, 255, 251])
         page.evaluate("() => window.__map.recenter()")
         page.keyboard.press("Enter")
         page.wait_for_timeout(600)
@@ -620,32 +651,84 @@ def _run(url, heavy, profil=None, zip_path=None):
           return {mur: at(1400), milieu: at(1300), coeur: at(1200),
                   volumes: window.__fog.fog.volumes.length,
                   masques: window.__fog.cloaks.cloaks.length,
-                  lumieres: window.__fog.lights.lights.length};
+                  lumieres: window.__fog.lights.lights.length,
+                  // `FogLightIcons.lit` : combien d'icones sont VISIBLES a cet
+                  // instant. Hors du brouillard, aucune — le composant est
+                  // desactive, et leur alpha reste ou il est.
+                  allumees: window.__fog.lights.lit,
+                  // `FogDetector.StartFogFlash` : l'eclair des passages de
+                  // Dark Bramble, monte cubique puis descente cubique.
+                  eclair: (() => {
+                    const f = window.__fog.fog;
+                    const avant = f.density;
+                    f.startFlash(0.5, 3, 3, 100);
+                    const p = !!f.flash;
+                    f.flash = null; f.density = avant;
+                    return p;
+                  })()};
         }""")
         rep.eq("volumes de brouillard", fog["volumes"], 2)
         rep.eq("objets masques par le brouillard", fog["masques"], 7)
         rep.eq("lumieres dans le brouillard", fog["lumieres"], 6)
+        # Au depart on est sur Timber Hearth, a des milliers d'unites du
+        # brouillard : aucune icone n'a de raison d'etre allumee.
+        rep.eq("et aucune n'est allumee au village", fog["allumees"], 0)
+        rep.eq("l'eclair de brouillard s'arme", fog["eclair"], True)
         rep.eq("densite nulle au rayon exterieur", fog["mur"], 0)
         rep.near("decroissance cubique a mi-chemin", fog["milieu"], 0.00125, 1e-5)
         rep.near("densite pleine au rayon interieur", fog["coeur"], 0.01, 1e-5)
 
         # --- mort, flashback et supernova ---------------------------------------
+        # LE FLASHBACK REJOUE LES PHOTOS DE LA PARTIE (docs/98-flashback.md).
+        #
+        # Ce controle mesurait « 22 images, 8,21 s » comme des constantes. Ce
+        # n'en sont pas : vingt-deux est le rang ou la DUREE d'image touche son
+        # plancher, et la longueur de la sequence depend du nombre de photos
+        # prises, donc du temps qu'on a survecu.
         fin = page.evaluate("""() => {
           const d = window.__death, s = window.__supernova.stage;
           const fb = d.flashback;
           const at = (f, left, nova, r) => s.update({fraction: f, secondsRemaining: left,
                                                      supernova: nova, shockwaveRadius: r});
-          return {images: fb.frames.length, duree: +fb.duration.toFixed(2),
+          // Une sequence de vingt-deux photos, calculee et rendue : 5,409 s de
+          // defilement, 0,8 de blanc, plus 2 + 1 + 1 hors defilement.
+          const garde = { count: fb.count, running: fb.running, t: fb.t };
+          fb.start(22);
+          const vingtDeux = +fb.duration.toFixed(3);
+          fb.start(3);
+          const trois = +fb.duration.toFixed(3);
+          fb.start(garde.count); fb.running = garde.running; fb.t = garde.t;
+          return {vingtDeux, trois,
                   progression: at(0.5, 600, false, 0).phase,
                   contraction: +at(1, 0, false, 0).scale.toFixed(2),
                   explosion: at(1, 0, true, 5000).phase,
                   causes: Object.keys(window.__death.byCause).length};
         }""")
-        rep.eq("images du flashback", fin["images"], 22)
-        rep.eq("duree de la sequence de mort (s)", fin["duree"], 8.21)
+        rep.eq("vingt-deux photos : dix secondes deux", fin["vingtDeux"], 10.209)
+        rep.eq("trois photos : six secondes quatre", fin["trois"], 6.426)
         rep.eq("l'etoile se contracte avant d'exploser", fin["contraction"], 0.62)
         rep.eq("phase d'explosion", fin["explosion"], "explosion")
         rep.eq("aucune mort au demarrage", fin["causes"], 0)
+
+        # LA PELLICULE TOURNE POUR DE VRAI. Le controle precedent appelle la loi ;
+        # celui-ci regarde ce que la BOUCLE a photographie — la leçon de docs/97,
+        # appliquée tout de suite. Une photo part a cinq secondes de partie, et
+        # la page en a vu plus que cela avant d'arriver ici.
+        pellicule = page.evaluate("""() => {
+          const p = window.__pellicule;
+          if (!p) return null;
+          const n = p.photos.length;
+          const une = n ? p.photos[0] : null;
+          return { n, chrono: p.timer.taken,
+                   largeur: une ? une.width : 0, hauteur: une ? une.height : 0 };
+        }""")
+        rep.eq("la pellicule existe", pellicule is not None, True)
+        if pellicule:
+            rep.at_least("des photos ont ete prises", pellicule["n"], 1)
+            rep.eq("le chronometre en a compte autant",
+                   pellicule["chrono"] >= pellicule["n"], True)
+            rep.eq("elles font 256 pixels de cote",
+                   [pellicule["largeur"], pellicule["hauteur"]], [256, 256])
 
         # --- degats du vaisseau -------------------------------------------------
         # Les valeurs de l'alpha eteignent les degats localises : on verifie que
@@ -705,6 +788,17 @@ def _run(url, heavy, profil=None, zip_path=None):
           chaleur: window.__world.heat.length,
           controleurs: window.__world.controllers.length,
           seuilsLOD: window.__lod.seuils,
+          // L'EVICTION, VUE DE L'INTERIEUR. `Evictor.waiting` dit depuis
+          // combien de temps un lot est hors de portee, et `keep` protege le
+          // corps ancre — deux lois que rien n'appelait (docs/99). Le lot du
+          // corps de depart est protege des la construction : il ne doit donc
+          // JAMAIS accumuler d'absence, quoi qu'il arrive.
+          protege: [...window.__lod.evictor.protect][0] || null,
+          attenteProtege: window.__lod.evictor.waiting(
+            [...window.__lod.evictor.protect][0] || ""),
+          cielPret: window.__sky.ready,
+          nuagesDecrits: window.__sky.cloudCount,
+          nuagesRattaches: window.__sky.cloudsAttached,
         })""")
         rep.at_least("lumieres extraites de la scene", w["lumieres"], 1)
         rep.at_most("lumieres allumees a la fois", w["allumees"], 8)
@@ -715,6 +809,20 @@ def _run(url, heavy, profil=None, zip_path=None):
                            ("controleurs de dialogue", "controleurs"),
                            ("seuils de niveau de detail du build", "seuilsLOD")]:
             rep.at_least(label, w[key], 0)
+        rep.eq("un lot protege de l'eviction", bool(w["protege"]), True)
+        rep.eq("et il n'accumule aucune absence", w["attenteProtege"], 0)
+        # LES VINGT-QUATRE NUAGES. Le build en decrit vingt-quatre — tous
+        # nommes `PieceOfRing`, d'ou le rattachement par POSITION (docs/48) —
+        # et ce controle demande qu'ils soient TOUS rattaches. Les deux
+        # accesseurs existaient depuis ce lot-la, sans lecteur.
+        rep.eq("nuages decrits par le build", w["nuagesDecrits"], 24)
+        # Le rattachement attend le lot de geometrie qui PORTE les nuages, et il
+        # n'est pas celui de la voute : `sky.ready` peut etre vrai sans qu'un
+        # seul nuage soit pose. L'invariant est donc « rien de PARTIEL » — zero
+        # ou les vingt-quatre — ce qui garde le rattachement par position sans
+        # mesurer l'ordre de chargement.
+        rep.eq("les nuages se rattachent tous ou pas du tout",
+               w["nuagesRattaches"] in (0, w["nuagesDecrits"]), True)
 
         # --- brouillard : les RenderSettings, non plus recopies ------------------
         rs = page.evaluate("() => ({ couleur: window.__fog.fog.color,"
@@ -954,6 +1062,26 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("ramassee, elle s'afficherait",
                    page.evaluate("() => window.__gui.minimap.allowVisibility("
                                  "{ helmetHUD: true, hasMinimap: true })"), True)
+
+        # LES JAUGES SONT SUR LA VISIERE (docs/99-lois-branchees.md).
+        #
+        # `HUDCameraScript` les eteint a `RemoveSuit` et les rallume a
+        # `HelmetHUDActivated`. Au demarrage on est au village, sans
+        # combinaison : il ne doit y avoir NI oxygene NI carburant a l'ecran.
+        # Le portage les affichait en permanence.
+        visiere = page.evaluate("""() => {
+          const h = window.__ui && window.__ui.resHUD;
+          const c = window.__casque && window.__casque.casque;
+          if (!h || !c) return null;
+          return { porte: c.worn, jauges: !h.box.hidden };
+        }""")
+        rep.eq("le casque et les jauges sont montes", visiere is not None, True)
+        if visiere:
+            rep.eq("sans combinaison, le casque n'est pas porte",
+                   visiere["porte"], False)
+            rep.eq("et les jauges ne sont pas a l'ecran", visiere["jauges"], False)
+            rep.eq("les deux disent la meme chose",
+                   visiere["jauges"], visiere["porte"])
 
         # --- la sonde, telle que le build la lance (docs/60-sonde.md) -----------
         #
@@ -1641,33 +1769,6 @@ def _run(url, heavy, profil=None, zip_path=None):
                    ["EnterFlightConsole"])
             rep.eq("et l'autopilote repond au poste",
                    page.evaluate("() => window.__modes.permet('Autopilot')"), True)
-            # CE QUE LA BOUCLE PASSE VRAIMENT AU POINT D'ACCROCHAGE.
-            #
-            # Les trois controles ci-dessus appellent `attach()` a la main avec
-            # un tableau, et mesurent 1,8 s. La boucle, elle, lui donnait l'avant
-            # du joueur tel que Babylon le tient — un `Vector3` —, que le module
-            # indexe en `v[0]` : longueur NaN, angle zero, duree zero. On
-            # s'asseyait d'un coup partout, et rien ne le disait, parce qu'une
-            # duree nulle est aussi celle d'un joueur deja aligne.
-            #
-            # L'invariant porte donc sur ce QUI a servi au calcul, pas sur son
-            # resultat — c'est le seul endroit ou les deux se distinguent.
-            avant = page.evaluate("""() => {
-              const p = window.__assise.points.current;
-              if (!p) return null;
-              const v = p.initForward;
-              return { tableau: Array.isArray(v),
-                       fini: !!v && v.every(x => Number.isFinite(x)),
-                       norme: Math.round(Math.hypot(v[0], v[1], v[2]) * 1000) / 1000,
-                       duree: Number.isFinite(p.turnDuration) };
-            }""")
-            rep.eq("le siege recoit un vrai vecteur, pas un Vector3",
-                   avant and avant["tableau"], True)
-            rep.eq("dont les trois composantes sont finies",
-                   avant and avant["fini"], True)
-            rep.eq("et qui est unitaire", avant and avant["norme"], 1.0)
-            rep.eq("la duree du demi-tour est donc un nombre",
-                   avant and avant["duree"], True)
             page.evaluate("() => { window.__shipRef.boarded = false;"
                           "  window.__assise.points.detach([0,0,0]);"
                           "  window.__assise.points.drain(); }")
@@ -1676,6 +1777,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("dos tourne, le demi-tour dure 1,8 s", duree["dos"], 1.8)
         rep.eq("de face, aucune duree", duree["face"], 0)
         rep.eq("et on se leve avec la vitesse du siege", duree["emporte"], 200)
+
         # Le verrouillage de camera, RELU dans l'IL : le corps tourne en lacet
         # a une vitesse proportionnelle a l'ecart, et le champ suit 500/d.
         verrou = page.evaluate("""() => {
@@ -2290,6 +2392,96 @@ def _run(url, heavy, profil=None, zip_path=None):
         # --- les deux tables de manette (docs/94-manette.md) ------------------
         rep.eq("les deux tables de manette s'accordent dans la page",
                page.evaluate("() => window.__padAccord"), [])
+
+        # --- ET ON S'ASSIED POUR DE VRAI (docs/97-assise-instantanee.md) -----
+        #
+        # EN DERNIER, et c'est la moitie du controle : embarquer perturbe le
+        # vaisseau — la touche d'interaction est aussi celle du pilote
+        # automatique (docs/61), l'assise pose un point d'accrochage, et les
+        # annonces de piste gardent la trace du decollage. Place plus haut, ce
+        # bloc faisait echouer trois controles qui n'avaient rien a voir : un
+        # controle qui change l'etat du jeu se met a la fin, ou il ne peut plus
+        # mentir a personne.
+        # ET ON S'ASSIED PAR LE CHEMIN DE LA BOUCLE, PAS EN APPELANT LA LOI.
+        #
+        # Les trois controles ci-dessus appellent `attach()` a la main, avec un
+        # tableau, et mesurent 1,8 s. La boucle, elle, passait l'avant du joueur
+        # tel que Babylon le tient — un `Vector3` —, que le module indexe en
+        # `v[0]` : longueur NaN, angle zero, duree zero. On s'asseyait D'UN COUP
+        # a tous les points d'accrochage, et rien ne le disait : une duree nulle
+        # est aussi celle d'un joueur deja aligne (docs/97).
+        #
+        # L'invariant porte donc sur ce QUI a servi au calcul — la seule chose
+        # qui distingue les deux zeros — et il faut pour cela un embarquement
+        # REEL : codes de lancement, joueur a portee, touche d'interaction.
+        # Le joueur est un corps Havok : lui ecrire `pos` ne sert a rien, la
+        # position est RELUE du noeud a chaque pas (`Player.stepPhysics`). On
+        # le teleporte donc comme la boucle le fait elle-meme.
+        approche = """() => {
+          const s = window.__shipRef, p = window.__player;
+          if (!s || !p || !p.body || !window.__pdata) return false;
+          window.__pdata.knowsLaunchCodes = true;
+          s.boarded = false;
+          window.__assise.points.detach([0, 0, 0]);
+          const agg = p.body;
+          agg.transformNode.position.set(s.pos.x + 2, s.pos.y + 2, s.pos.z + 2);
+          agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+          agg.body.setAngularVelocity(BABYLON.Vector3.Zero());
+          return true;
+        }"""
+        lecture = """() => {
+          const pt = window.__assise.points.current;
+          if (!pt) return null;
+          const v = pt.initForward;
+          if (!Array.isArray(v)) return { tableau: false };
+          return { tableau: true,
+                   fini: v.every((x) => Number.isFinite(x)),
+                   norme: Math.round(Math.hypot(v[0], v[1], v[2]) * 1000) / 1000,
+                   duree: Number.isFinite(pt.turnDuration) };
+        }"""
+        codesAvant = page.evaluate(
+            "() => !!(window.__pdata && window.__pdata.knowsLaunchCodes)")
+        avant = None
+        # Une image peut durer une seconde en rendu logiciel : on retente.
+        for _ in range(4):
+            if not page.evaluate(approche):
+                break
+            page.keyboard.press("KeyE")
+            page.wait_for_timeout(1200)
+            avant = page.evaluate(lecture)
+            if avant:
+                break
+        rep.eq("la touche d'interaction assied pour de vrai",
+               avant is not None, True)
+        if avant:
+            rep.eq("et le siege recoit un vrai vecteur, pas un Vector3",
+                   avant["tableau"], True)
+            if avant["tableau"]:
+                rep.eq("dont les trois composantes sont finies",
+                       avant["fini"], True)
+                rep.eq("et qui est unitaire", avant["norme"], 1.0)
+                rep.eq("la duree du demi-tour est donc un nombre",
+                       avant["duree"], True)
+        # ON REND CE QU'ON A PRIS, meme en fin de parcours : les codes de
+        # lancement commandent la prevention de la supernova et l'armement de la
+        # sphere de remise a zero, et la touche d'interaction est AUSSI celle du
+        # pilote automatique (docs/61) — la meme frappe qui assied l'engage une
+        # fois assis. Les annonces de piste, elles, ne se touchent pas : un
+        # controle ne doit pas effacer ce qu'un autre a mesure.
+        page.evaluate("""(codes) => {
+          const s = window.__shipRef;
+          s.boarded = false;
+          window.__assise.points.detach([0, 0, 0]);
+          window.__assise.points.drain();
+          const siege = window.__assise.points.points.find(
+            (p) => p.name === "FlightConsole");
+          if (siege && siege.follow) siege.follow(null);
+          const a = window.__autopilot;
+          if (a && a.engaged) a.abort();
+          window.__pdata.knowsLaunchCodes = codes;
+        }""", codesAvant)
+        page.wait_for_timeout(600)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()

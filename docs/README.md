@@ -58,6 +58,9 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`100-carte.md`](100-carte.md) — **la carte du système : cinq couleurs d'orbite au lieu d'un gris inventé, l'ellipse de la comète, et des cercles qui étaient centrés sur le joueur plutôt que sur le Soleil**
+- [`99-lois-branchees.md`](99-lois-branchees.md) — **les vingt lois que rien n'appelait, fermées par quatre issues différentes : le mauvais éclair aux passages de Dark Bramble, une estimation qui contredisait le vrai modèle, les jauges qui sont sur la visière, et un compte dont les échappatoires ne voyaient pas ce qu'il comptait**
+- [`98-flashback.md`](98-flashback.md) — **le flashback rejoue votre partie : une photo toutes les cinq secondes, 256 × 256, repassée à rebours — et le portage avait écrit que le build n'en gardait aucune**
 - [`97-assise-instantanee.md`](97-assise-instantanee.md) — **on s'asseyait d'un coup : un `Vector3` passé à un module qui attend un tableau, et un contrôle navigateur qui appelait la loi lui-même — plus la lunette qui fait taire le monde, la guimauve qui prend feu, et les voyants d'avarie rangés à l'envers**
 - [`96-groupes-de-rendu.md`](96-groupes-de-rendu.md) — **le soleil visible au travers des planètes : le groupe de rendu 1 efface la profondeur, et un commentaire promettait depuis toujours une technique absente**
 - [`95-lots-partages.md`](95-lots-partages.md) — **un lot pour plusieurs corps : la planète de départ s'effaçait une demi-minute sur deux, au rythme de sa lune**

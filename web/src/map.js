@@ -26,6 +26,67 @@ const COLORS = {
   Player: "#00ff00", Ship: "#00ff00", Probe: "#00ff00",
 };
 
+/**
+ * LES ORBITES DE LA CARTE ONT UNE COULEUR CHACUNE (`MapOpenGL`).
+ *
+ * `MapOpenGL.Start` range cinq corps et cinq couleurs dans le meme ordre —
+ * `_planetRadiusArray` et `_lineColors` — et `OnPostRender` trace un cercle par
+ * corps, de cinq degres en cinq degres, dans la couleur correspondante. Le
+ * portage tracait tout d'un meme gris invente.
+ *
+ * L'ordre du build, qui est aussi celui de la page :
+ *
+ *   0 TimberHearth   1 FocalBody (les jumelles)   2 BrittleHollow
+ *   3 GiantsDeep     4 DarkBramble
+ *
+ * L'alpha commune vaut 0,50980 — 130 sur 255 — et c'est elle qui rend la
+ * carte lisible sous les marqueurs.
+ */
+export const ORBIT_COLORS = [
+  { body: "TimberHearth_Body", rgb: [0.545098, 0.760511, 1] },
+  { body: "FocalBody", rgb: [1, 0.973871, 0.592157] },
+  { body: "BrittleHollow_Body", rgb: [0.815686, 0.508604, 0.508604] },
+  { body: "GiantsDeep_Body", rgb: [0.6, 1, 0.916434] },
+  { body: "DarkBramble_Body", rgb: [0.502622, 0.796078, 0.523875] },
+];
+export const ORBIT_ALPHA = 0.509804;
+/** `_cometColor` : la comete n'est pas dans le tableau, elle a son trace a part. */
+export const COMET_COLOR = [0.760784, 1, 0.986007];
+
+/**
+ * L'ELLIPSE DE LA COMETE, et pourquoi ce sont deux nombres et non une formule.
+ *
+ * `MapOpenGL.Start` demande ses demi-axes a
+ * `InitialMotion.GetOrbitEllipseSemiAxes`, qui applique la formule de
+ * vis-viva — donc une gravite KEPLERIENNE, alors que le champ de ce jeu a un
+ * falloff lineaire (docs/04-gravite.md). C'est une approximation que le build
+ * fait pour DESSINER, pas le modele qu'il simule.
+ *
+ *   mu = masse x 0,001               le Soleil pese 20 000 000, donc mu = 20 000
+ *   a  = 1 / (2/r - v^2/mu)
+ *   e  = (r - a) / a                 le corps part de son apside
+ *   b  = a x sqrt(1 - e^2)
+ *   c  = sqrt(a^2 - b^2)             `_fociDistance`
+ *
+ * Refaite ici sur la scene — comete a 24 000 du Soleil, `_orbitImpulseScalar`
+ * a -0,425 — elle rend a = 13 191 et b = 7 562, soit un demi-pour-cent des
+ * valeurs que le CONSTRUCTEUR de `MapOpenGL` porte en dur. Ces deux-la sont
+ * donc le meme calcul, fait par le studio sur cette comete-ci, et c'est elles
+ * qu'on garde : une valeur du build vaut mieux qu'une formule qui l'approche.
+ */
+export const COMET_ELLIPSE = { a: 13197.6904296875, b: 7582.1591796875 };
+
+/** `_fociDistance` : le decalage du foyer, ou le Soleil se tient. */
+export function fociDistance(e = COMET_ELLIPSE) {
+  return Math.sqrt(Math.max(0, e.a * e.a - e.b * e.b));
+}
+
+/** `GL.Color` sur un `Color` d'Unity, rendu en CSS. */
+export function orbitStyle(rgb, alpha = ORBIT_ALPHA) {
+  const q = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+  return `rgba(${q(rgb[0])},${q(rgb[1])},${q(rgb[2])},${alpha.toFixed(3)})`;
+}
+
 // `MarkerType`, lu dans la table Constant de l'assembly.
 export const MARKER_TYPES = ["Default", "Planet", "Moon", "Sun", "Player", "Probe", "Ship"];
 
@@ -126,6 +187,41 @@ export class SolarMap {
     this.open = false;
     this.selected = null;
     this.hits = [];      // zones cliquables, recalculees a chaque rendu
+    // Les couleurs d'orbite, telles que `MapOpenGL` les porte. Les constantes
+    // ci-dessus restent le repli explicite quand l'extraction manque.
+    this.orbits = ORBIT_COLORS;
+    this.cometColor = COMET_COLOR;
+  }
+
+  /**
+   * `MapOpenGL` : cinq pointeurs de corps et cinq couleurs, plus celle de la
+   * comete. Le tableau est range par `Start` dans un ordre ecrit a la main —
+   * home, jumelles, Brittle Hollow, Giant's Deep, Dark Bramble — et c'est cet
+   * ordre-la qui apparie les deux.
+   */
+  readOrbitColors(mog) {
+    if (!mog || !mog.fields) return this.orbits;
+    const f = mog.fields;
+    const nom = (k) => (f[k] && f[k].name) || null;
+    const rgb = (k) => (f[k] && typeof f[k].r === "number"
+      ? [f[k].r, f[k].g, f[k].b] : null);
+    const paires = [["_homePlanet", "_homeColor"], ["_hourglassPlanet", "_hourglassColor"],
+                    ["_brittlePlanet", "_brittleColor"], ["_gasPlanet", "_giantColor"],
+                    ["_bramblePlanet", "_brambleColor"]];
+    const out = [];
+    for (const [corps, couleur] of paires) {
+      const b = nom(corps), c = rgb(couleur);
+      if (b && c) out.push({ body: b, rgb: c });
+    }
+    if (out.length) this.orbits = out;
+    const cc = rgb("_cometColor");
+    if (cc) this.cometColor = cc;
+    // L'alpha est la MEME sur les six : on la lit une fois, et le repli tient
+    // si elle manque.
+    const a = f._homeColor && typeof f._homeColor.a === "number"
+      ? f._homeColor.a : null;
+    if (a !== null) this.orbitAlpha = a;
+    return this.orbits;
   }
 
   toggle() { this.open = !this.open; this.canvas.hidden = !this.open; }
@@ -195,12 +291,44 @@ export class SolarMap {
     ctx.fillStyle = "rgba(6,9,16,.92)";
     ctx.fillRect(0, 0, w, h);
 
-    // orbites : un cercle par corps, centre sur l'origine du repere
-    ctx.strokeStyle = "rgba(120,140,170,.22)";
-    for (const b of this.bodies) {
-      const r = Math.hypot(b.position[0], b.position[2]) * scale;
-      if (r < 4 || r > Math.max(w, h)) continue;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    // LES ORBITES, AUX COULEURS DU BUILD. `MapOpenGL.OnPostRender` trace un
+    // cercle par corps, de cinq degres en cinq degres, dans la couleur que
+    // `_lineColors` lui donne — cinq corps, cinq couleurs. Le portage les
+    // tracait TOUTES d'un meme gris invente, et en tracait une par corps du
+    // systeme plutot que les cinq du build (docs/100-carte.md).
+    // ET ELLES SONT CENTREES SUR LE SOLEIL, ce que le portage ne faisait pas
+    // non plus : il tracait ses cercles au centre de l'ECRAN, avec pour rayon
+    // la distance du corps a l'origine du repere ancre — qui est le corps sous
+    // les pieds du joueur, pas l'etoile. `OnPostRender` part de
+    // `WorldToScreenPoint(_sun.transform.position)` et mesure le rayon en
+    // PIXELS depuis ce point.
+    const soleil = this.bodies.find((b) => /sun/i.test(b.bodyName || b.name || ""));
+    if (soleil) {
+      const [sx, sy] = px(soleil.position);
+      const alpha = this.orbitAlpha ?? ORBIT_ALPHA;
+      const couleurDe = new Map();
+      for (const o of this.orbits) couleurDe.set(o.body, orbitStyle(o.rgb, alpha));
+      for (const b of this.bodies) {
+        const style = couleurDe.get(b.bodyName) || couleurDe.get(b.name);
+        if (!style) continue;
+        const r = Math.hypot(b.position[0] - soleil.position[0],
+                             b.position[2] - soleil.position[2]) * scale;
+        if (r < 4 || r > Math.max(w, h) * 8) continue;
+        ctx.strokeStyle = style;
+        ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      // LA COMETE N'A PAS UN CERCLE, ELLE A UNE ELLIPSE. `CometPath` la
+      // dessine a part, un FOYER sur le Soleil : le centre est decale de
+      // `_fociDistance` le long de l'axe des x, du cote oppose au perihelie.
+      const ra = COMET_ELLIPSE.a * scale, rb = COMET_ELLIPSE.b * scale;
+      if (ra > 4 && ra < Math.max(w, h) * 16) {
+        const [ex, ey] = px([soleil.position[0] - fociDistance(),
+                             soleil.position[1], soleil.position[2]]);
+        ctx.strokeStyle = orbitStyle(this.cometColor, alpha);
+        ctx.beginPath();
+        ctx.ellipse(ex, ey, ra, rb, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     this.hits = [];

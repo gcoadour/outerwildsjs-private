@@ -5,7 +5,12 @@ const SINGLETONS = ["PlayerResources", "JetpackThrusterModel", "ShipThrusterMode
                     "ThrusterModel", "ShipDamageController", "PlayerCharacterController",
                     // `_loopDurationInMinutes` vaut 18 dans la scene, et le
                     // portage avait ecrit 20 de memoire (docs/88-boucle.md).
-                    "Autopilot", "ShipBody", "PlayerBody", "TimeLoop"];
+                    "Autopilot", "ShipBody", "PlayerBody", "TimeLoop",
+                    // `MapOpenGL` dessine les orbites de la carte : cinq
+                    // cercles, une couleur par corps, et l'ELLIPSE de la
+                    // comete. Le portage tracait tout d'un meme gris invente
+                    // (docs/100-carte.md).
+                    "MapOpenGL"];
 const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "OWAudioSource", "Conversation", "AudioTransmitter", "SpawnPoint",
                 "QuantumMoon", "QuantumOrbit", "QuantumFogBoundary", "FogVolume",
