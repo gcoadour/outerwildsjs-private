@@ -1118,15 +1118,34 @@ def _run(url, heavy, profil=None, zip_path=None):
         # frappe entiere tombe entre deux images, comme dans Unity qui latche
         # `GetButtonDown` — et il faut LAISSER PASSER une image apres chaque
         # geste avant de mesurer.
-        # ... et il tient aussi a CE QUI PRECEDE. Six controles de plus inseres
-        # avant lui — six `page.evaluate`, aucune attente ajoutee — ont suffi a
-        # faire refuser le tir, et a les remettre en fin de parcours il repasse.
-        # On ne sait donc pas ce que ce controle mesure au juste : la fenetre de
-        # cinq metres, ou l'orientation ou le joueur se trouve a cet instant-la.
-        # Tant qu'il n'aura pas ete rendu independant du regard — en visant
-        # explicitement avant de tirer — rien ne doit s'inserer avant lui. Le
-        # lot des seuils est alle en fin de parcours pour cette raison, et c'est
-        # une dette, pas une solution.
+        # ... et il TENAIT aussi a ce qui le precede : six `page.evaluate` de
+        # plus inseres avant lui suffisaient a faire refuser le tir. La dette
+        # etait nommee — « tant qu'il n'aura pas ete rendu independant du
+        # regard, en visant explicitement avant de tirer » — et c'est ce que
+        # `vise()` fait maintenant.
+        #
+        # LA DETTE, ET CE QU'ELLE CACHAIT. Le controle ne mesurait pas la
+        # fenetre de tir : il mesurait ou le joueur avait derive pendant que
+        # les controles d'avant tournaient. Deux executions du MEME code
+        # donnaient deux resultats, selon la charge de la machine. Un invariant
+        # qui depend du temps qu'a pris le controle precedent ne garde rien.
+        #
+        # Ce qu'il garde maintenant est la LOI : `launchWindowLength` rend 200
+        # tant qu'on ignore comment marchent les sondes, et 5 ensuite. On vise
+        # donc le SOL pour le premier — bloque a cinq metres comme a deux
+        # cents — et le CIEL pour le second, degage dans les deux cas. Seule la
+        # longueur de la fenetre peut alors expliquer la difference.
+        def vise(tangage):
+            # Tangage POSITIF = vers le bas : `fwd` porte `up * (-sin p)`.
+            #
+            # On ne touche QUE le regard. Un premier jet mettait aussi la
+            # vitesse a zero pour « stabiliser » — ce qui arrache le joueur au
+            # sol qui l'emporte, et un controle plus loin mesure justement
+            # cette vitesse-la. Stabiliser un controle en cassant ce qu'un
+            # autre mesure n'est pas stabiliser.
+            page.evaluate("(p) => window.__look(0, p)", tangage)
+            page.wait_for_timeout(1200)
+
         def sonde_geste(duree_ms, attente_ms=9000):
             # Le bouton DROIT : `InputChannels.probe` est `mouse 1`, et les
             # trois statiques d'`OWInput` qui lancent, photographient et
@@ -1139,12 +1158,30 @@ def _run(url, heavy, profil=None, zip_path=None):
         def etat_sonde():
             return page.evaluate("""() => {
               const t = window.__tools.probes, p = t.last;
+              const pl = window.__player;
               return { active: t.active, launched: t.launched,
                        ancree: !!(p && p.anchored),
                        lanterne: p ? Math.round(p.lantern) : 0,
                        vitesse: p ? Math.round(Math.hypot(...p.vel)) : 0,
                        cams: (window.__scene || BABYLON.Engine.LastCreatedScene)
-                               .activeCameras.map(c => c.name) };
+                               .activeCameras.map(c => c.name),
+                       // POURQUOI, quand elle ne part pas. Ce controle tient a
+                       // ce qui le precede, et jusqu'ici il ne disait que
+                       // « zero » — ce qui ne se diagnostique pas.
+                       charge: !!t.charging,
+                       aLaSonde: !!window.__lots.equipment.probe,
+                       sait: !!window.__pdata.knows('knowsHowProbesWork'),
+                       enDialogue: !!window.__dialogue.active,
+                       auSol: !!(pl && pl.grounded),
+                       vitesseJoueur: pl ? Math.round(
+                         Math.hypot(pl.vel.x, pl.vel.y, pl.vel.z) * 10) / 10 : null,
+                       // Le redressement est le suspect : s'il balance encore,
+                       // le sondage de sol cherche le sol dans la mauvaise
+                       // direction, et le joueur n'est au sol nulle part.
+                       ecartHaut: window.__redressement
+                         ? Math.round(window.__redressement.degres * 1000) / 1000 : null,
+                       compense: window.__redressement
+                         ? window.__redressement.steady : null };
             }""")
 
         sonde_geste(120)
@@ -1167,13 +1204,23 @@ def _run(url, heavy, profil=None, zip_path=None):
                  d.knowsHowProbesWork = false; d.save();
                  return d.knows('knowsHowProbesWork'); }"""),
                False)
+        # Le sol : bloque a cinq metres comme a deux cents.
+        vise(1.4)
         sonde_geste(120)
         rep.eq("et la fenetre de deux cents metres refuse le tir",
                etat_sonde()["launched"], 0)
-        # Une fois le geste appris, cinq metres suffisent.
+        # Une fois le geste appris, cinq metres suffisent — et le ciel les
+        # donne. C'est la SEULE difference entre les deux mesures.
         page.evaluate("() => window.__pdata.learn('knowsHowProbesWork')")
+        vise(-1.4)
         sonde_geste(120)
         etat = etat_sonde()
+        # Le refus se diagnostique, il ne se devine pas : ce controle tient a
+        # tout ce qui le precede, et jusqu'ici il ne disait que « zero ».
+        print("    etat du joueur au tir :",
+              {k: etat[k] for k in ("charge", "aLaSonde", "sait", "enDialogue",
+                                    "auSol", "vitesseJoueur", "ecartHaut",
+                                    "compense")})
         rep.eq("une fois le geste appris, elle part", etat["launched"], 1)
         rep.eq("et il n'y en a qu'UNE", etat["active"], 1)
         rep.eq("la sonde allume sa camera", etat["cams"], ["cam", "probeCam"])

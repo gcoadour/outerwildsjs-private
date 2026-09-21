@@ -101,10 +101,7 @@ autour de l'axe droit de la caméra l'est, et c'est ce que dit la projection.
 ### Pourquoi la transcription littérale ne suffisait pas ici
 
 Le premier jet portait la ligne du build telle quelle : `pitch -= steadyPitch(…)`.
-Le contrôle navigateur a dit ce que le calcul seul ne disait pas — **six
-contrôles de la sonde sont tombés**. Son tir dépend de l'orientation du joueur à
-cet instant-là, et le vérificateur le signale depuis longtemps
-([`46`](46-migration-lots.md)) : *« rien ne doit s'insérer avant lui »*.
+Elle laisse une dérive, et la dérive se mesure.
 
 La cause est une différence de **représentation**, pas de loi. Le build n'écrit
 qu'un `AddDegreesY` parce que son **cap vit sur le `Rigidbody`** : redresser le
@@ -133,6 +130,36 @@ deux lois coïncident, et c'est ce que le test garde — c'est le rattachement d
 > effet transcrit la lettre et perd la loi. Ici, la lettre tenait dans une
 > représentation que ce portage n'a pas.
 
+### Ce que ce lot a cru avoir cassé, et qui ne l'était pas
+
+Six contrôles de la sonde sont tombés en même temps que ce lot, et il était
+tentant d'y voir la dérive. Le diagnostic dit autre chose, et il a fallu le
+**mesurer** pour le savoir : au moment du tir, l'écart du haut valait 0,005° et
+la compensation était éteinte. Rien ne dérivait.
+
+La bissection l'a confirmé à l'envers — le code d'avant ce lot **échoue aussi**,
+dès qu'on alourdit un peu la charge de la page. Ces six contrôles ne mesuraient
+pas la fenêtre de tir : ils mesuraient où le joueur avait dérivé pendant que les
+contrôles précédents tournaient. Le vérificateur le disait de lui-même depuis
+longtemps, et nommait la dette :
+
+> *« On ne sait donc pas ce que ce contrôle mesure au juste : la fenêtre de cinq
+> mètres, ou l'orientation où le joueur se trouve à cet instant-là. Tant qu'il
+> n'aura pas été rendu indépendant du regard — en visant explicitement avant de
+> tirer — rien ne doit s'insérer avant lui. […] c'est une dette, pas une
+> solution. »*
+
+Elle est payée. Le contrôle **vise** maintenant : le **sol** pour la fenêtre de
+deux cents mètres — bloquée à cinq mètres comme à deux cents — et le **ciel**
+pour celle de cinq, dégagée dans les deux cas. Seule la longueur de la fenêtre
+peut alors expliquer la différence, ce qui est précisément la loi
+(`launchWindowLength`).
+
+> Un invariant qui dépend du temps qu'a pris le contrôle précédent ne garde
+> rien. Deux exécutions du même code en donnaient deux résultats — et le premier
+> réflexe a été d'accuser le lot en cours, ce qui est la façon la plus sûre de
+> corriger la mauvaise chose.
+
 ## 3. Ce que le portage en garde, et ce qu'il ne peut pas
 
 Ce portage n'a qu'une orientation : le regard **est** l'orientation du joueur,
@@ -160,3 +187,6 @@ nulle part, et il n'a pas d'équivalent dans un modèle qui ne tient pas de
   état : quatre-vingt-dix pas, 1,8 s, l'arrivée exacte, et **rien ne bouge sans
   champ**. Plus une mesure du monde réel : debout au village, l'écart est nul —
   un écart durable dirait qu'on interpole vers une cible qui fuit.
+- `tools/15_verify.py --profil`, encore — la sonde vise désormais avant de tirer,
+  et son refus se **diagnostique** : l'état du joueur au moment du tir est
+  imprimé, qu'il parte ou non.
