@@ -5516,7 +5516,13 @@ async function boot() {
         const up = t.rotation ? qrotDecor(t.rotation, [0, 1, 0]) : [0, 1, 0];
         return { self: aujourdhui(t), up,
                  target: aujourdhui(t.viewTarget || t.receiver),
-                 receiver: aujourdhui(t.receiver) };
+                 receiver: aujourdhui(t.receiver),
+                 // `RelocateBody` pose la rotation du recepteur : on arrive
+                 // tourne vers ce qu'il regarde (docs/111-passages.md).
+                 receiverForward: t.receiverRotation
+                   ? qrotDecor(t.receiverRotation, [0, 0, 1]) : null,
+                 receiverUp: t.receiverRotation
+                   ? qrotDecor(t.receiverRotation, [0, 1, 0]) : null };
       });
       if (parti) {
         const son = (events.of("AncientTeleporter") || { clips: {} }).clips._teleportSound;
@@ -5526,6 +5532,27 @@ async function boot() {
           player.pos.x = parti.arrival[0] - anchorPos[0];
           player.pos.y = parti.arrival[1] - anchorPos[1];
           player.pos.z = parti.arrival[2] - anchorPos[2];
+          // §P `RelocateBody` FAIT TROIS CHOSES, et le portage n'en faisait
+          // qu'une. La position, oui — mais aussi :
+          //
+          //   body.SetVelocity(_attachedBody.GetPointVelocity(transform.position));
+          //   body.SetRotation(transform.rotation);
+          //
+          // La VITESSE est celle du point d'arrivee sur SON corps. Sans elle on
+          // debarque sur une autre planete avec la vitesse de celle qu'on
+          // quitte, et on part a la derive (docs/111-passages.md).
+          const vArrivee = vitesseDeDepart([player.pos.x, player.pos.y, player.pos.z]);
+          player.vel.x = vArrivee[0];
+          player.vel.y = vArrivee[1];
+          player.vel.z = vArrivee[2];
+          // Et le REGARD est celui du recepteur : on arrive tourne vers ce
+          // qu'il regarde, pas dans la direction ou l'on marchait.
+          if (parti.forward) {
+            const hautArrivee = parti.up || [0, 1, 0];
+            const l = yawFor(parti.forward, hautArrivee);
+            if (l !== null) yaw = l;
+            pitch = 0;
+          }
           if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos);
           // `OnTeleportPlayer` : eclair BLEU, une demi-seconde pour venir et
           // deux pour repartir. Le passage etait instantane et muet a l'image.

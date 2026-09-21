@@ -269,8 +269,29 @@ export function meteorLaunchers(gameplay) {
 /** Le delai minimal entre deux departs, lu dans l'IL. */
 export const TELEPORT_COOLDOWN = 5;
 
-/** Les six passages, avec leur arrivee resolue. */
+/**
+ * Les six passages, avec leur arrivee resolue.
+ *
+ * `_receiver` est resolu par `ownerInfo`, qui rend un nom, une position et un
+ * corps — mais PAS de rotation. Or `RelocateBody` pose la rotation du
+ * recepteur sur ce qui arrive. On rejoint donc le recepteur POSE, qui la porte
+ * depuis que `WANT_ROTATION` le compte (docs/111-passages.md).
+ */
 export function teleporters(gameplay) {
+  const recepteurs = (gameplay.placed || {}).AncientTeleportReceiver || [];
+  const poseDe = (info) => {
+    if (!info) return null;
+    // Par le nom quand il suffit, par la position sinon : deux recepteurs
+    // peuvent porter le meme nom, aucun ne partage un point de l'espace.
+    let best = null, bestD = 1;
+    for (const r of recepteurs) {
+      const d = Math.hypot(r.position[0] - info.position[0],
+                           r.position[1] - info.position[1],
+                           r.position[2] - info.position[2]);
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best && best.rotation ? best.rotation : null;
+  };
   return ((gameplay.placed || {}).AncientTeleporter || []).map((c) => {
     const f = c.fields || {};
     const t = c.targets || {};
@@ -278,6 +299,8 @@ export function teleporters(gameplay) {
       name: c.name, body: c.body || null,
       position: c.position, rotation: c.rotation || null, volume: c.volume || null,
       receiver: t._receiver || null,
+      // La pose du recepteur : c'est elle qu'on prend en arrivant.
+      receiverRotation: poseDe(t._receiver),
       // La cible de VUE n'est pas toujours l'arrivee : deux passages visent un
       // troisieme objet, et c'est sur lui que l'alignement se mesure.
       viewTarget: t._alternateViewTarget || t._receiver || null,
@@ -337,7 +360,11 @@ export class Teleporters {
       // la geometrie du systeme, pas sur la presence. Ce qui change, c'est
       // qu'il emporte ou non le joueur.
       const carries = !!(at && t.volume && insideVolume(t, at));
-      this.lastFired = { teleporter: t, carries, arrival: w.receiver || w.target };
+      this.lastFired = { teleporter: t, carries, arrival: w.receiver || w.target,
+                         // `SetRotation(transform.rotation)` : l'avant et le
+                         // haut du recepteur, si la scene les donne.
+                         forward: w.receiverForward || null,
+                         up: w.receiverUp || null };
       return this.lastFired;
     }
     return null;

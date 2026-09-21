@@ -673,6 +673,23 @@ console.log("     sources avec courbe echantillonnee:", courbes,
         passages.filter((t) => t.viewTarget !== t.receiver).length, 2);
   check("et leurs arrivees se repartissent sur quatre corps",
         new Set(passages.map((t) => t.receiver.body)).size, 4);
+  // `RelocateBody` pose la ROTATION du recepteur sur ce qui arrive : on
+  // debarque tourne vers ce qu'il regarde (docs/111-passages.md). Trois
+  // `AncientTeleportReceiver` sont poses, et tous les trois la portent.
+  const recepteurs = gp.placed.AncientTeleportReceiver || [];
+  check("trois recepteurs anciens poses", recepteurs.length, 3);
+  check("et tous portent leur orientation",
+        recepteurs.filter((r) => r.rotation).length, 3);
+  // Quatre passages sur six y aboutissent. Les deux autres visent
+  // `TeleportReceiver_TimeLoop`, qui n'est PAS un recepteur ancien mais le
+  // recepteur de la boucle — une autre classe, un autre mecanisme.
+  check("quatre passages arrivent avec une orientation",
+        passages.filter((t) => t.receiverRotation).length, 4);
+  check("et les deux autres visent le recepteur de la BOUCLE",
+        passages.filter((t) => !t.receiverRotation)
+          .every((t) => t.receiver.name === "TeleportReceiver_TimeLoop"), true);
+  check("une orientation d'arrivee est un quaternion",
+        passages.find((t) => t.receiverRotation).receiverRotation.length, 4);
   check("passages de la dimension abandonnee", warps(gp).length, 3);
 }
 

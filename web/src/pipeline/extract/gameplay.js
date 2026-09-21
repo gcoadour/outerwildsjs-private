@@ -202,7 +202,12 @@ const WANT_VOLUME = new RegExp([
 // `WhiteHoleVolume` aussi : `ForceWarp` sort DROIT DEVANT lui, et
 // `GetRandomExitTrajectory` incline autour de son avant et de son haut. Sans
 // son orientation, il n'y a pas de « devant » a suivre (docs/102-trou-blanc.md).
-const WANT_ROTATION = /^(spawnpoint|shipbody|whiteholevolume)$/i;
+// `AncientTeleportReceiver` enfin : `RelocateBody` pose la ROTATION du
+// recepteur sur le corps qui arrive. On ne debarque pas dans la direction ou
+// l'on marchait, on debarque tourne vers ce que le recepteur regarde
+// (docs/111-passages.md).
+const WANT_ROTATION =
+  /^(spawnpoint|shipbody|whiteholevolume|ancientteleportreceiver)$/i;
 
 /** Composants dont le PARENT designe ce qu'ils commandent. */
 const WANT_PARENTS = /^EntrywayTrigger$/i;
