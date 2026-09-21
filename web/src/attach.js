@@ -618,6 +618,10 @@ export class UpAligner {
    *   degres il a tourne cette image
    */
   update(cible, dt) {
+    // Pas de champ : `_doAlignment` est faux, le corps garde son orientation.
+    // Et tant qu'on n'a JAMAIS eu de champ, on ne se donne pas de haut : semer
+    // une verticale du monde ferait converger le premier champ trouve depuis
+    // elle, au lieu d'y etre deja.
     if (!cible) return { up: this.up, tourne: 0 };
     // La toute premiere image ne s'interpole pas : `_isFirstFrame` aligne le
     // joueur d'office, sans quoi une partie commencerait couche.

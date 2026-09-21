@@ -6590,8 +6590,13 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Cent degres par seconde : un demi-tour en 1,8 s.
   {
     const a = new UpAligner();
+    // Sans champ, on ne se donne AUCUN haut : semer la verticale du monde en
+    // attendant ferait converger le premier champ trouve depuis elle, et le
+    // regard pose au point d'apparition ne designerait pas ce qu'il designe.
+    check("sans champ, aucun haut", a.update(null, dtPhys).up, null);
+    check("... et rien n'a tourne", a.update(null, dtPhys).tourne, 0);
     a.update([0, 1, 0], dtPhys);
-    check("la premiere image ne s'interpole pas", a.up.join(","), "0,1,0");
+    check("le premier champ trouve ne s'interpole pas", a.up.join(","), "0,1,0");
     let pas = 0;
     while (Math.abs(a.up[1] + 1) > 1e-9 && pas < 1000) {
       a.update([0, -1, 0], dtPhys); pas += 1;

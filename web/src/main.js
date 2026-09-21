@@ -2799,10 +2799,17 @@ async function boot() {
     // chaque image, et changer de champ faisait basculer le monde d'un coup. Le
     // build y met cent degres par seconde, et retire du TANGAGE tout ce que le
     // corps prend tant que l'ecart depasse un degre (docs/106-redressement.md).
-    const upVoulu = ad ? [-ad.x, -ad.y, -ad.z] : (redressement.up || [0, 1, 0]);
+    // SANS CHAMP, ON NE SEME RIEN. `_doAlignment` est faux tant qu'aucun champ
+    // n'est detecte, et le corps garde alors son orientation. Semer la
+    // verticale du monde en attendant ferait converger le premier champ trouve
+    // depuis `(0, 1, 0)` — 1,8 s pendant lesquelles le regard pose au point
+    // d'apparition ne designe pas ce qu'il designait. Six controles de la sonde
+    // l'ont dit, et son tir depend justement du regard (docs/106).
+    const upVoulu = ad ? [-ad.x, -ad.y, -ad.z] : null;
     const upAvant = redressement.up;
     const pas = redressement.update(upVoulu, dt);
-    const up = new BABYLON.Vector3(pas.up[0], pas.up[1], pas.up[2]);
+    const u0 = pas.up || [0, 1, 0];
+    const up = new BABYLON.Vector3(u0[0], u0[1], u0[2]);
     if (redressement.steady && upAvant && pas.tourne > 0) {
       // Le regard reste ou il etait : on reconstruit l'avant MONDE dans le
       // repere d'avant le pas, et on redit les deux angles dans celui d'apres.
