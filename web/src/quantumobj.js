@@ -28,6 +28,27 @@
 // est rejete s'il est visible depuis la camera active — un objet quantique ne
 // se materialise jamais sous vos yeux.
 //
+// « VISIBLE » VEUT DIRE MOINS QUE CA, et c'est la mesure qui le dit :
+//
+//     CheckVisibility()  UpdateBounds();
+//                        return GeometryUtility.TestPlanesAABB(
+//                            GeometryUtility.CalculateFrustumPlanes(_activeCam),
+//                            _worldBounds);
+//     UpdateBounds()     _worldBounds.size = Vector3.zero;
+//                        foreach (r in _childRenderers)
+//                            _worldBounds.Encapsulate(r.bounds);
+//
+// Un test de TRONC sur une boite englobante alignee sur les axes du monde, et
+// rien d'autre. Pas de rayon, pas d'occlusion : un objet quantique cache
+// derriere une planete, un mur ou votre propre vaisseau compte comme REGARDE
+// tant qu'il tombe dans le tronc de la camera. Se cacher les yeux ne suffit
+// pas ; il faut tourner la tete.
+//
+// Et la boite est l'UNION des rendus enfants, repartie de zero a chaque image :
+// elle suit donc l'objet, et elle est d'autant plus large que ses morceaux sont
+// ecartes — une statue en pieces est « vue » bien avant que ses pieces le
+// soient. Ce portage teste le meme tronc sur la meme union.
+//
 // TROIS FACONS DE NE PLUS ETRE LA :
 //
 //   PlanarQuantumObject   un point tire dans un disque, pose sur le terrain

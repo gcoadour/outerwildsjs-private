@@ -21,6 +21,12 @@
 // de bloom d'Unity 4. Le portage en vise le RESULTAT avec la chaine d'effets de
 // Babylon, ce que docs/08 dit depuis toujours : une implementation originale, et
 // non une transposition (docs/103-refait.md).
+// @autrement NoiseEffect : `get_material` est l'accesseur paresseux du
+// `Material` du shader, et `SanitizeParameters` borne ses champs avant le
+// `Blit`. Ni l'un ni l'autre n'a de sens hors d'Unity — le portage rend le
+// grain par un shader a lui, regle sur les memes grandeurs.
+// @autrement NoiseAndGrain : meme cas, `CheckResources` et `Main` etant la
+// verification du materiau et la passe elle-meme.
 // @lit BloomAndLensFlares, NoiseEffect, NoiseAndGrain
 // Le rendu de ces effets — refait, pas transpose (docs/47).
 

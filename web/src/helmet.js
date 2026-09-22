@@ -125,6 +125,28 @@ export class Helmet {
  * `MasterAlarm.Update` la declenche des que la coque passe sous trente pour
  * cent, et la coupe quand elle repasse au-dessus. Une seule valeur, et le
  * portage ne l'avait pas : il affichait un chiffre, et rien ne criait.
+ *
+ * `TurnOnAlarm` et `TurnOffAlarm` ne sont pas que du son :
+ *
+ *     TurnOnAlarm()    _isAlarmOn = true;
+ *                      audio.enabled = true; audio.Play();
+ *                      GetComponent<PulsingLight>().Enable();
+ *     TurnOffAlarm()   _isAlarmOn = false;
+ *                      audio.Stop(); audio.enabled = false;
+ *                      GetComponent<PulsingLight>().Disable();
+ *
+ * DEUX CHOSES A RETENIR.
+ *
+ * La source est ETEINTE, pas seulement arretee : `audio.enabled = false` apres
+ * le `Stop`, et rallumee avant le `Play`. C'est une boucle, et on la
+ * debranche — le portage joue un coup et se tait, ce qui n'est pas la meme
+ * chose qu'une sirene qui tient tant que la coque est basse.
+ *
+ * Et l'alarme allume une LUMIERE. Le `PulsingLight` de l'objet « MasterAlarm »
+ * porte `_pulseRate = 8`, le plus rapide des quinze du build — deux fois plus
+ * vif que la balise la plus nerveuse. La cabine bat au rouge, et elle ne bat
+ * QUE sous trente pour cent : `lights.js` fait deja la sinusoide, il lui
+ * manquait de savoir quand s'allumer.
  */
 export class MasterAlarm {
   constructor(threshold = ALARM_THRESHOLD) {

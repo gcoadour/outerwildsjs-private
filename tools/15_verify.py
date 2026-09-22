@@ -2712,6 +2712,52 @@ def _run(url, heavy, profil=None, zip_path=None):
                  return [double, Math.round(petit * 100) / 100];
                }"""), [2, 0.2])
 
+        # --- la cadence du menu (docs/115-menu.md) ----------------------------
+        #
+        # `Menu.SELECT_DELAY` vaut 0,2 s. La repetition automatique d'un
+        # navigateur tourne a trente millisecondes : sans la cadence, garder
+        # une fleche enfoncee parcourt les sept options en un clin d'oeil.
+        # Les evenements sont envoyes en RAFALE depuis la page, ce que
+        # `page.keyboard.press` ne sait pas faire assez vite.
+        menu = page.evaluate("""() => {
+          const s = window.__gui.settings;
+          const tape = (code) => dispatchEvent(new KeyboardEvent("keydown", { code }));
+          tape("Escape");
+          s.index = 0;
+          for (let i = 0; i < 10; i++) tape("ArrowDown");
+          return { ouvert: s.open, rafale: s.index };
+        }""")
+        rep.eq("le canal Pause ouvre le menu", menu["ouvert"], True)
+        rep.eq("dix fleches en rafale n'avancent que d'une ligne",
+               menu["rafale"], 1)
+        # L'annonce ne part qu'a l'image suivante : le bloc des modes lit
+        # l'ETAT, il ne rejoue pas l'appel.
+        page.wait_for_timeout(150)
+        rep.eq("et le jeu de commandes devient celui du menu",
+               page.evaluate("() => window.__modes.mode"), "menu")
+        rep.eq("avec l'annonce du build",
+               page.evaluate("() => window.__modes.events.at(-1)"),
+               "EnterMenuMode")
+        page.wait_for_timeout(250)
+        menu2 = page.evaluate("""() => {
+          const s = window.__gui.settings;
+          const tape = (code) => dispatchEvent(new KeyboardEvent("keydown", { code }));
+          tape("ArrowDown");
+          const apres = s.index;
+          // L'autre sens a sa propre horloge : l'aller-retour est immediat.
+          tape("ArrowUp");
+          const retour = s.index;
+          tape("Escape");
+          return { apres, retour, ouvert: s.open };
+        }""")
+        rep.eq("passe le delai, la fleche repasse", menu2["apres"], 2)
+        rep.eq("et l'autre sens ne l'attend pas", menu2["retour"], 1)
+        rep.eq("le canal Pause referme le menu", menu2["ouvert"], False)
+        page.wait_for_timeout(150)
+        rep.eq("avec l'annonce de sortie",
+               page.evaluate("() => window.__modes.events.at(-1)"),
+               "ExitMenuMode")
+
         # --- les deux tables de manette (docs/94-manette.md) ------------------
         rep.eq("les deux tables de manette s'accordent dans la page",
                page.evaluate("() => window.__padAccord"), [])

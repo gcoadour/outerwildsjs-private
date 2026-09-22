@@ -15,12 +15,13 @@ const CONSTANT_CLASSES = ["ThrusterModel", "PlayerCharacterController"];
 export function extractSolarSystem(ctx) {
   const comps = new Map();          // gid -> { classe -> champs }
   const rbOwner = new Map();        // path_id d'un OWRigidbody -> nom du GameObject
+  const rbNames = new Set();        // et les noms seuls, pour remonter la hierarchie
 
   for (const { obj, cls } of ctx.behaviours(BODY_CLASSES)) {
     const gid = ctx.ownerId(obj);
     if (cls === "OWRigidbody") {
       const nm = ctx.name(gid);
-      if (nm) rbOwner.set(ctx.refKey(obj), nm);
+      if (nm) { rbOwner.set(ctx.refKey(obj), nm); rbNames.add(nm); }
     }
     const fields = ctx.scriptFields(obj);
     if (!fields) continue;
@@ -85,6 +86,25 @@ export function extractSolarSystem(ctx) {
       bodyName: owner ? owner.m_Name : null,
       bodyPosition: ctx.transformOf.has(ownerGid)
         ? ctx.world(ownerGid)[0].map((v) => round(v, 3)) : null,
+      // L'orientation du CORPS, et non celle de l'enfant qui porte le puits :
+      // c'est elle qui tourne `_initLinearDirection`, exprime dans le repere du
+      // corps (docs/120-jumelles.md).
+      bodyRotation: ctx.transformOf.has(ownerGid)
+        ? ctx.world(ownerGid)[1].map((v) => round(v, 6)) : null,
+      // LE PARENT DE HIERARCHIE, qui n'est PAS le primaire d'orbite.
+      //
+      // Trois corps n'ont aucun primaire et une vitesse lineaire seule — les
+      // deux jumelles et l'entonnoir de sable. Leur mouvement se lit dans le
+      // repere de leur PARENT, `FocalBody`, qui porte l'orbite autour du
+      // Soleil. Sans ce lien, un corps sans primaire est soit immobile, soit
+      // tombe dans le Soleil (docs/120-jumelles.md).
+      parentBody: (() => {
+        for (const a of (ctx.ancestors(ownerGid) || [])) {
+          if (!a || a === (owner && owner.m_Name)) continue;
+          if (rbNames.has(a)) return a;
+        }
+        return null;
+      })(),
       // Orbite : InitialMotion donne une vitesse initiale, il n'y a pas de
       // rotation de pivot. Voir docs/04-gravite.md.
       orbit: im ? {
@@ -96,6 +116,59 @@ export function extractSolarSystem(ctx) {
         spinAxis: ctx.plain(im._rotationAxis),
         spinSpeed: im._initAngularSpeed,
       } : null,
+    });
+  }
+
+  // LES CORPS QUI N'ONT PAS DE GRAVITE. La boucle ci-dessus n'ecrit un corps
+  // que s'il porte un `GravityWell` ou un `PlanetoidSector`. Deux corps
+  // mobiles n'ont ni l'un ni l'autre :
+  //
+  //   FocalBody        le barycentre des jumelles, qui porte LEUR orbite
+  //                    autour du Soleil ;
+  //   SandFunnel_Body  la colonne de sable, qui suit la jumelle 02.
+  //
+  // Sans eux, les deux jumelles n'avaient pas de repere ou tourner, et le
+  // portage les rendait immobiles : le sablier ne coulait pas
+  // (docs/120-jumelles.md). C'est le meme trou que les volumes de fluide
+  // ci-dessous, et il se bouche de la meme facon — a part, apres coup, pour ne
+  // pas dupliquer ceux que la premiere boucle a deja ecrits.
+  const dejaLa = new Set(bodies.map((b) => b.bodyName).filter(Boolean));
+  for (const [gid, cs] of comps) {
+    if (!cs.InitialMotion || !cs.OWRigidbody) continue;
+    const go = ctx.gameObjects.get(gid);
+    if (!go || dejaLa.has(go.m_Name) || !ctx.transformOf.has(gid)) continue;
+    const [pos, rot, scl] = ctx.world(gid);
+    const im = cs.InitialMotion;
+    const rt = cs.RotateTransform || null;
+    bodies.push({
+      name: go.m_Name,
+      position: pos.map((v) => round(v, 3)),
+      rotation: rot.map((v) => round(v, 6)),
+      scale: scl.map((v) => round(v, 4)),
+      gravity: null,
+      horizonRadius: null,
+      spin: rt ? { axis: ctx.plain(rt._localAxis),
+                   degreesPerSecond: rt._degreesPerSecond } : null,
+      hasRigidbody: true,
+      bodyName: go.m_Name,
+      bodyPosition: pos.map((v) => round(v, 3)),
+      bodyRotation: rot.map((v) => round(v, 6)),
+      parentBody: (() => {
+        for (const a of (ctx.ancestors(gid) || [])) {
+          if (!a || a === go.m_Name) continue;
+          if (rbNames.has(a)) return a;
+        }
+        return null;
+      })(),
+      orbit: {
+        primary: im._primaryBody ? (rbOwner.get(ctx.refOf(im._primaryBody)) || null) : null,
+        orbitAngle: im._orbitAngle,
+        impulseScalar: im._orbitImpulseScalar,
+        initLinearDirection: ctx.plain(im._initLinearDirection),
+        initLinearSpeed: im._initLinearSpeed,
+        spinAxis: ctx.plain(im._rotationAxis),
+        spinSpeed: im._initAngularSpeed,
+      },
     });
   }
 

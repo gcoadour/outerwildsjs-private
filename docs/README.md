@@ -58,6 +58,12 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`120-jumelles.md`](120-jumelles.md) — **le sablier ne coulait pas : les jumelles n'ont aucun primaire et tournent l'une autour de l'autre à 31,65 — exactement la vitesse d'une orbite mutuelle circulaire —, et trois mesures indépendantes le disent**
+- [`119-bruit.md`](119-bruit.md) — **le prédateur n'écoute pas ce qu'on croyait : sous deux cents unités le moindre bruit fait de vous une cible, au-delà il faut passer dix — et dix est exactement le plafond du joueur, sauf en diagonale**
+- [`118-messages.md`](118-messages.md) — **six façons de s'arrêter, trois messages : le bandeau du pilote ne s'éteint que par une issue, le dépassement n'a pas de mot, et un objet quantique caché derrière une planète compte comme regardé**
+- [`117-carte.md`](117-carte.md) — **ouvrir la carte avec une cible visée vous cadre tous les deux — le facteur 0,7 et le champ de 70 degrés s'annulent — et le son d'ouverture a dix secondes de garde**
+- [`116-trappe.md`](116-trappe.md) — **la trappe n'a pas de charnière — elle désactive un collider et se referme quand on est entré —, le saut était muet, et l'alarme faisait battre sa lumière en permanence**
+- [`115-menu.md`](115-menu.md) — **un menu a sa propre cadence et sa propre horloge : 0,2 s et quatre horloges, deux seuils, trois façons de valider dont une qui recule, et un curseur qui n'arrive qu'au premier geste**
 - [`114-poste.md`](114-poste.md) — **se lever ne range rien : la vue d'atterrissage qui restait ouverte, le roulis inversé qu'aucune sortie ne répare, et une poussée que l'écrêtage redresse sur le sol**
 - [`113-seuil.md`](113-seuil.md) — **le seuil d'impact ne vient pas de la scène mais du réveil, et il n'y a pas d'intégrité de coque : deux erreurs qui se tenaient l'une l'autre, et un mécanisme porté, testé, et mort**
 - [`112-invites.md`](112-invites.md) — **la zone du bas n'arbitre rien : le portage appliquait une règle de plus que le build, et n'importe quelle invite pouvait chasser les codes de lancement**

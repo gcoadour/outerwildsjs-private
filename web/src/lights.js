@@ -128,6 +128,17 @@ export class LightField {
     this.anim = new Map();     // lumiere -> etat d'animation
     this.night = true;         // vrai tant qu'on n'a pas dit le contraire
     this.nightSince = 0;       // horodatage du dernier basculement
+    // `PulsingLight.Enable` / `Disable` coupent DEUX choses : le composant et
+    // la lumiere elle-meme (`light.enabled`). Une lumiere pulsante n'est donc
+    // pas forcement allumee — celle de l'alarme generale ne l'est qu'en
+    // dessous de trente pour cent de coque, et le portage la faisait battre en
+    // permanence (docs/116-trappe.md).
+    this.eteintes = new Set();
+  }
+
+  /** `PulsingLight.Enable` / `Disable`, par NOM de lumiere. */
+  allume(nom, on) {
+    if (on) this.eteintes.delete(nom); else this.eteintes.add(nom);
   }
 
   /** Le jour se leve, ou tombe : `NightLight` s'en sert, et rien d'autre. */
@@ -145,6 +156,8 @@ export class LightField {
   animate(t) {
     let touchees = 0;
     for (const [light, node] of this.live) {
+      // Eteinte par un `Disable` : ni animee, ni eclairante.
+      if (this.eteintes.has(light.name)) { node.intensity = 0; continue; }
       const bs = light.behaviours;
       if (!bs || !bs.length) continue;
       let intensite = light.intensity ?? 1;

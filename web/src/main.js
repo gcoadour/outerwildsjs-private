@@ -27,7 +27,7 @@ import { loadInterface, ResourceHUD, Prompts, GuiMode,
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
-import { Settings, SettingsUI } from "./settings.js";
+import { Settings, SettingsUI, MenuInput } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatSources, heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
@@ -113,7 +113,8 @@ import { LockOn, aimedFrame, canFlyTo,
 // existait, ses quarante verifications passaient, et aucun module du moteur ne
 // l'importait (docs/68-lois.md).
 import { alignedBodies, alignmentDirection, fieldInheritors, blinkingRenderers,
-         Blinker, brokenNodes, waterEffects } from "./attachments.js";
+         Blinker, brokenNodes, waterEffects, hatchControllers,
+         Hatch } from "./attachments.js";
 // Ce que le joueur TIENT : le baton a guimauve et la lunette pendent sous
 // `PlayerCamera` dans le build, et l'export ne partait que des corps celestes
 // (docs/64-mains.md).
@@ -152,7 +153,7 @@ import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          UpAligner, steadyPitch, steadyLook } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
-         UISounds } from "./reactaudio.js";
+         UISounds, jumpSound } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
@@ -790,10 +791,17 @@ async function boot() {
   }));
   const noeudsCasses = brokenNodes(gameplay);
   const remous = waterEffects(gameplay);
+  // La trappe : une seule dans le build, sur « HatchControls ». Elle s'ouvre a
+  // l'appui et se referme toute seule QUAND ON EST ENTRE (docs/116-trappe.md).
+  const trappeData = hatchControllers(gameplay);
+  const trappe = new Hatch(trappeData[0] || {});
+  let noeudTrappeOn = true;     // etat pose sur le collider, pour n'y toucher
+  let trappeSansNoeud = false;  // qu'aux transitions
   console.log(`attaches : ${alignes.length} alignements, ${heritiers.length} heritiers,`
     + ` ${clignotants.length} clignotants, ${noeudsCasses.length} noeuds casses,`
     + ` ${remous.length} volumes d'eclaboussure`);
-  window.__attaches = { alignes, heritiers, clignotants, noeudsCasses, remous };
+  window.__attaches = { alignes, heritiers, clignotants, noeudsCasses, remous,
+                        trappe };
 
   // Les meteores de Brittle Hollow : quatre lanceurs, un tir toutes les cinq a
   // vingt secondes, cinquante de degats au contact (docs/68-lois.md).
@@ -830,6 +838,10 @@ async function boot() {
     `${events.count} emetteurs de son d'evenement`);
 
   const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
+  // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
+  // .Enable` que sous trente pour cent de coque, et une lumiere que rien n'a
+  // allumee ne bat pas (docs/116-trappe.md).
+  placedLights.allume("MasterAlarm", false);
   // 34 DirectionalForceField contre 10 GravityWell : ce sont les gravites
   // locales, et elles ne s'ajoutent pas au champ radial — elles le remplacent
   // dans leur volume, comme SingleFieldDetector le veut.
@@ -1345,6 +1357,9 @@ async function boot() {
   // Reglages : leur sauvegarde est distincte de celle de la partie, comme
   // SettingsSave l'est de PlayerData dans le jeu.
   const settings = new Settings(iface || {});
+  // `Menu.SELECT_DELAY` : le menu a sa propre cadence, et elle compte en temps
+  // REEL — `Open` vient de figer l'horloge du jeu (docs/115-menu.md).
+  const menuInput = new MenuInput();
   const settingsUI = uiRoot
     ? new SettingsUI(uiRoot, settings, "data/interface/",
                      { onPick: () => applySettings() }) : null;
@@ -1493,8 +1508,22 @@ async function boot() {
   let shadowGen = null;
   function applySettings() {
     const v = settings.values;
-    // TonemappingManager : _isTonemappingActive vaut FAUX par defaut, donc
-    // « Normal » est l'etat de depart et « Bright » active le tonemapping.
+    // `TonemappingManager.ToggleTonemapping` et `UpdateTonemapping` :
+    //
+    //     ToggleTonemapping()   _isTonemappingActive = !_isTonemappingActive;
+    //                           UpdateTonemapping();
+    //     UpdateTonemapping()   foreach (t in _childTonemappers)
+    //                               t.enabled = _isTonemappingActive;
+    //
+    // `_isTonemappingActive` est STATIQUE : un seul booleen pour tout le jeu,
+    // et `UpdateTonemapping` le repousse sur TOUS les tonemappers enfants d'un
+    // coup — c'est-a-dire sur chaque camera. C'est exactement la portee de
+    // `scene.imageProcessingConfiguration`, qui vaut pour la scene entiere :
+    // le portage fait la meme chose par un seul objet la ou le build en
+    // parcourt une liste.
+    //
+    // Il vaut FAUX par defaut, donc « Normal » est l'etat de depart et
+    // « Bright » allume le tonemapping.
     const ip = scene.imageProcessingConfiguration;
     ip.toneMappingEnabled = v.brightness;
     ip.exposure = v.brightness ? 1.3 : 1.0;
@@ -2489,7 +2518,26 @@ async function boot() {
     if (est("Autopilot")) autoPressed = true;
     const m = /^Digit([1-9])$/.exec(code);
     if (m) optionPressed = parseInt(m[1], 10);
-    if (est("Map")) solarMap.toggle();
+    // `EnterMapView` / `ExitMapView` : ouvrir avec une cible visee vous CADRE
+    // tous les deux, et le son d'ouverture a dix secondes de garde
+    // (docs/117-carte.md).
+    if (est("Map")) {
+      if (solarMap.open) solarMap.exitMapView();
+      else {
+        const cible = solarMap.selected;
+        const moi = [player.pos.x + framePos[0], player.pos.y + framePos[1],
+                     player.pos.z + framePos[2]];
+        const r = solarMap.enterMapView(moi, cible ? cible.position : null,
+                                        performance.now() / 1000);
+        // Le son d'ouverture est celui de la source du `MapController`, pas un
+        // clip d'interface : s'il n'est pas extrait, la garde de dix secondes
+        // reste vraie et rien ne joue.
+        if (r.sonne) {
+          const clip = (events.of("MapController") || { clips: {} }).clips._mapClip;
+          if (clip) audio.playOneShot(clip);
+        }
+      }
+    }
     if (est("Recenter Map") && solarMap.open) solarMap.recenter();
     // La lampe : `Flashlight`, la touche F du build — et la croix
     // directionnelle a la manette (axe 6).
@@ -2590,17 +2638,45 @@ async function boot() {
     }
     // GUIMode fait tourner ses quatre modes sur une touche de debogage
     if (est("Display Mode")) console.log("mode d'affichage :", guiMode.cycle());
-    // Le menu des reglages, comme dans le jeu, met le temps en pause
+    // Le menu des reglages, comme dans le jeu, met le temps en pause.
+    // `Menu.Update` : `cancel` FERME, et c'est la meme sortie que l'option
+    // « Back ». Ouvrir releve `EnterMenuMode`, fermer `ExitMenuMode`, et
+    // fermer REPREND LA SOURIS — `Screen.lockCursor = true` (docs/115-menu.md).
     if (est("Pause") && settingsUI) {
-      settings.open = !settings.open;
+      // Les annonces que rendent `ouvre` et `ferme` ne sont PAS rejouees ici :
+      // le bloc des modes les leve deja en lisant l'etat (§K), et les dire
+      // deux fois en ferait deux transitions. Ce qui compte ici est l'autre
+      // moitie de `SettingsMenu.Close`, celle que le bloc des modes ne peut
+      // pas faire : la souris.
+      if (settings.open) settings.ferme(); else settings.ouvre();
+      if (settings.open) {
+        // `Menu.Open` : `_mouseActive = Screen.showCursor`. Dans un navigateur,
+        // le curseur est visible precisement quand il n'est pas verrouille.
+        menuInput.reouvre(!document.pointerLockElement);
+      } else reprendSouris();
       settingsUI.render();
     }
     if (settings.open && settingsUI) {
-      if (code === "ArrowUp") settings.move(-1);
-      if (code === "ArrowDown") settings.move(1);
-      if (code === "ArrowLeft") settings.toggle(-1);
-      if (code === "ArrowRight") settings.toggle(1);
-      if (code === "Enter" || code === "Space") {
+      // Les fleches sont la lecture clavier de `moveZ` et `moveX` : elles
+      // passent par la MEME cadence que le manche, sans quoi la repetition
+      // automatique du navigateur parcourt les sept options en deux dixiemes
+      // de seconde.
+      const tReel = performance.now() / 1000;
+      const verrou = !!(settings.options[settings.index] || {}).locked;
+      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1 : 0;
+      const x = code === "ArrowRight" ? 1 : code === "ArrowLeft" ? -1 : 0;
+      const g = menuInput.axes(tReel, z, x, verrou);
+      if (g.move) settings.move(g.move);
+      if (g.toggle) settings.toggle(g.toggle);
+      // `interact`, `jump` ou le bouton gauche : trois entrees pour la meme
+      // validation. Le portage n'avait que la barre d'espace et Entree, qui
+      // n'est nulle part dans le build.
+      //
+      // Le menu MANGE l'interaction : le build y arrive par les modes, dont
+      // l'ensemble « menu » ne contient pas `Interact`. Sans cette ligne,
+      // valider une option ferait en plus s'asseoir ou se lever.
+      interactPressed = false;
+      if (code === "Enter" || code === "Space" || code === "KeyE") {
         // `TriggerLoad(true, ...)` : une nouvelle partie EFFACE la sauvegarde,
         // puis recharge la scene. Ici la scene ne se recharge pas — on la
         // remet a son etat de depart, ce que la boucle sait deja faire — mais
@@ -2747,7 +2823,9 @@ async function boot() {
     // La promesse peut echouer — un navigateur sans verrou de souris, une
     // page qui n'a pas le focus, un Chromium sans tete. Sans ce `catch`, elle
     // remonte en erreur non attrapee, et `15_verify.py` la compte comme telle.
-    if (!touch.enabled) {
+    // Menu ouvert, on ne reprend PAS la souris : le build la relache justement
+    // pour qu'on puisse viser une option, et `Close` la reprendra.
+    if (!touch.enabled && !(settings && settings.open)) {
       const p = canvas.requestPointerLock();
       if (p && p.catch) p.catch(() => {});
     }
@@ -2756,7 +2834,31 @@ async function boot() {
   // au doigt, ce geste n'atteint jamais le canvas, qui est sous la couche
   // tactile — on l'ecoute donc au niveau de la fenetre
   addEventListener("pointerdown", () => { if (!audio.unlocked) audio.unlock(); });
+  /**
+   * `SettingsMenu.Close` : `Screen.showCursor = false; Screen.lockCursor = true`.
+   *
+   * Fermer le menu REPREND la souris. Le portage la laissait ou elle etait :
+   * une fois le curseur sorti pour cliquer une option, on retournait au jeu
+   * sans regard a la souris, et il fallait recliquer sur la page.
+   */
+  function reprendSouris() {
+    if (touch.enabled) return;
+    if (document.pointerLockElement === canvas) return;
+    const p = canvas.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  }
+
   addEventListener("mousemove", (e) => {
+    // `Menu.Update` : au-dela d'un dixieme de pixel, le menu passe a la souris
+    // — le verrou tombe et le curseur reparait. Le curseur n'apparait donc PAS
+    // a l'ouverture : il apparait au premier geste (docs/115-menu.md).
+    if (settings && settings.open) {
+      const d = Math.hypot(e.movementX || 0, e.movementY || 0);
+      if (menuInput.souris(d) && document.pointerLockElement === canvas) {
+        document.exitPointerLock();
+      }
+      return;
+    }
     if (document.pointerLockElement !== canvas) return;
     look(e.movementX, e.movementY);
   });
@@ -3539,6 +3641,17 @@ async function boot() {
         }
       } else if (interactPressed && !dialogue.active && focus
                  && focus.kind === "zone") {
+        // `HatchController.OnPressInteract` : la zone « Open Hatch » ne pose
+        // pas de point d'accrochage, elle RETIRE un collider. C'est la seule
+        // des sept zones qui fasse autre chose que s'asseoir.
+        if (/hatch/i.test(focus.prompt || "") && trappe.pressInteract()) {
+          for (const c of trappe.drain()) {
+            const clip = (events.of("HatchController") || { clips: {} })
+              .clips._openHatchClip;
+            if (clip) audio.playOneShot(clip);
+            console.log(`trappe ouverte (${c})`);
+          }
+        }
         const point = pointsAttache.at(focus.world);
         if (point && point !== siegePilotage) {
           lacetSiege = yaw;
@@ -3770,15 +3883,18 @@ async function boot() {
     }
     // --- messages du pilote automatique ---
     if (readout && autopilot) {
-      if (autopilot.phase !== lastPhase) {
-        if (autopilot.phase === "repos" && lastPhase !== "repos") {
-          // le jeu distingue l'abandon de l'arrivee ; ici la cible atteinte
-          // remet la phase au repos, l'abandon aussi
-          readout.show(!autopilot.arrived ? "abandon"
-            : (autopilot.arrivalError > 50 ? "arriveCourt" : "arrive"), now);
-        } else if (AUTOPILOT_KEYS.has(autopilot.phase)) {
-          readout.show(autopilot.phase, now);
-        }
+      // SIX ISSUES, ET LE PORTAGE N'EN DISAIT QUE TROIS. `AutopilotGUI` a un
+      // message par facon de s'arreter — abandon en vol, abandon d'egalisation,
+      // cible trop proche, egalisation reussie, arrivee juste, arrivee courte —
+      // et le portage rendait « autopilot ABORTED » pour toutes celles qui ne
+      // venaient pas d'un vol abouti. Le pilote dit maintenant lui-meme
+      // laquelle (docs/118-messages.md).
+      if (autopilot.fin) {
+        readout.show(autopilot.fin, now);
+        autopilot.fin = null;
+        lastPhase = autopilot.phase;
+      } else if (autopilot.phase !== lastPhase) {
+        if (AUTOPILOT_KEYS.has(autopilot.phase)) readout.show(autopilot.phase, now);
         lastPhase = autopilot.phase;
       }
       readout.update(now, !guiMode.hidden && !guiMode.capture);
@@ -4122,19 +4238,23 @@ async function boot() {
     // lancer une sonde fait un COUP de cinq qui retombe en une seconde. Le
     // portage rendait un booleen a 1 ou 0,7 et ignorait la sonde — on pouvait
     // en lancer une au nez d'un predateur sans qu'il l'entende.
-    const fractionPoussee = player.jetpack
-      ? (input.loud ? 1 : 0.7) * (input.forward || input.right || input.up ? 1 : 0)
-      : (input.forward || input.right ? 0.3 : 0);
+    // `ThrusterModel.GetThrustFraction`, et non plus trois paliers inventes :
+    // c'est la NORME de l'entree bornee axe par axe, que `player.js` pose a
+    // chaque image. Elle monte a racine(3) sur une poussee en diagonale, ce
+    // que le seuil de dix du `NoiseSensor` attend (docs/119-bruit.md).
+    const fractionPoussee = player.thrustFraction || 0;
     const playerWorld = { x: player.pos.x + anchorPos[0],
                           y: player.pos.y + anchorPos[1],
                           z: player.pos.z + anchorPos[2] };
     noise.clear();
     const bruit = playerNoise(fractionPoussee, now, dernierLancement);
     if (bruit > 0) {
-      // Les volumes du build vont jusqu'a 10 ; le champ du portage travaille
-      // sur 0 a 1. On rapporte, plutot que de changer l'echelle du champ.
+      // Deux echelles, et les deux servent : `level` (0 a 1) pour comparer les
+      // sources entre elles, `volume` — celle du build — pour le seuil de dix.
+      // Le rayon est infini : `ListenForNoises` ne connait pas de portee, il
+      // ne connait qu'un rayon de CIBLE. Au-dela, c'est le volume qui decide.
       noise.add([playerWorld.x, playerWorld.y, playerWorld.z],
-                Math.min(1, bruit / NOISE.thrust));
+                Math.min(1, bruit / NOISE.thrust), Infinity, bruit);
     }
     if (audioMap.length) {
       for (const e of audio.emitters()) noise.add(e.position, e.level, e.radius);
@@ -5215,6 +5335,13 @@ async function boot() {
         ? ship.damage.integrity / ship.damage.shipTotalHealth : 1;
       const crie = alarme.update(frac);
       if (resHUD) resHUD.setAlarm(crie);
+      // `TurnOnAlarm` appelle `PulsingLight.Enable` sur son propre objet : la
+      // cabine BAT au rouge, a huit — le `_pulseRate` le plus rapide du build.
+      // Et `TurnOffAlarm` l'eteint : le portage la faisait battre en
+      // permanence, faute de savoir qu'une lumiere pulsante peut etre coupee.
+      if (alarme.turnedOn || alarme.turnedOff) {
+        placedLights.allume("MasterAlarm", alarme.on);
+      }
       // `PlaySuitWarningSound` vient de `PlayerResourceGUI.Update` : c'est
       // l'avertissement du SAC DORSAL, pas celui de la coque. Il ne se joue
       // qu'au passage sous le seuil.
@@ -5237,6 +5364,44 @@ async function boot() {
              playerWorld.x - ship.pos.x - anchorPos[0],
              playerWorld.y - ship.pos.y - anchorPos[1],
              playerWorld.z - ship.pos.z - anchorPos[2]) <= z.volume.radius);
+      // `HatchController.OnEntry` / `OnExit` : le declencheur de la trappe est
+      // BIEN PLUS PETIT que la zone de proximite — c'est l'interieur du
+      // vaisseau, pas ses treize unites alentour. Entrer referme la trappe et
+      // annonce `EnterShip` ; sortir n'annonce que `ExitShip`, et la laisse
+      // ouverte (docs/116-trappe.md).
+      if (trappe.data.volume) {
+        const dec = decalageDuCorps(trappe.data.body, anchorPos) || [0, 0, 0];
+        const d = Math.hypot(
+          playerWorld.x - trappe.data.position[0] - dec[0],
+          playerWorld.y - trappe.data.position[1] - dec[1],
+          playerWorld.z - trappe.data.position[2] - dec[2]);
+        const franchi = trappe.setInside(d <= trappe.data.volume.radius);
+        // `_hatchObject.SetActive` : ouvrir RETIRE le collider, il n'y a pas
+        // d'animation. On le cherche dans le modele du vaisseau sous le nom
+        // que la scene donne (`Hatch_Collider`) ; s'il n'y est pas, la trappe
+        // reste sonore et le dire ici vaut mieux que de faire semblant.
+        if (trappe.data.hatchObject && ship.node && trappe.collider !== noeudTrappeOn) {
+          const n = ship.node.getChildren
+            ? ship.node.getChildren((m) => m.name === trappe.data.hatchObject, false)[0]
+            : null;
+          if (n && n.setEnabled) n.setEnabled(trappe.collider);
+          noeudTrappeOn = trappe.collider;
+          if (!n && !trappeSansNoeud) {
+            trappeSansNoeud = true;
+            console.log(`trappe : aucun noeud « ${trappe.data.hatchObject} »`
+              + " dans le modele — l'ouverture ne retire aucun collider");
+          }
+        }
+        if (franchi) {
+          const clip = (events.of("HatchController") || { clips: {} })
+            .clips._closeHatchClip;
+          if (franchi === "entre" && clip) audio.playOneShot(clip);
+          trappe.drain();
+          for (const e of trappe.events.splice(0)) {
+            console.log(`annonce : ${e}`);
+          }
+        }
+      }
       // Les voyants suivent le MASQUE, pas les pieces mortes. `OnDamageShip`
       // reçoit `_damageLocationMask` — la sortie qui s'accumule (docs/49) — et
       // allume un voyant par position TOUCHEE. Le portage n'allumait rien tant
@@ -5360,8 +5525,14 @@ async function boot() {
                              t.position[2] - player.pos.z);
         const { arrival } = autopilotDistances(
           declared.frames, t.name, (t.gravity && t.gravity.upperSurfaceRadius) || 0);
-        if (canFlyTo(d, arrival)) autopilot.engage(t);
-        else console.log(`pilote auto : deja arrive (${Math.round(d)} u)`);
+        // Le refus est maintenant celui d'`InitFlyToDestination` lui-meme : il
+        // pose « too close to target », que rien n'affichait jusqu'ici.
+        if (canFlyTo(d, arrival)) {
+          autopilot.engage(t, [player.pos.x, player.pos.y, player.pos.z]);
+        } else {
+          autopilot.fin = "tropPres";
+          console.log(`pilote auto : deja arrive (${Math.round(d)} u)`);
+        }
       }
       autoPressed = false;
       window.__visee = lockOn;
@@ -5629,10 +5800,14 @@ async function boot() {
       // on ne fait pas de bruit de pas.
       const auSol = player.grounded && !(ship && ship.boarded);
       const vitesse = Math.hypot(player.vel.x, player.vel.y, player.vel.z);
-      const pas = footsteps.update(dt, auSol ? vitesse : 0, auSol);
+      // `OnJump` passe AVANT le pas : sauter coupe `grounded`, et le pas de
+      // l'image ne partira donc pas de toute facon.
+      const pas = player.jumped ? jumpSound()
+        : footsteps.update(dt, auSol ? vitesse : 0, auSol);
       if (pas) {
         const famille = events.family("PlayerMovementAudio",
-                                      pas.kind === "run" ? "_run" : "_walk");
+                                      pas.kind === "run" ? "_run"
+                                        : pas.kind === "jump" ? "_jump" : "_walk");
         if (famille.length) {
           audio.playOneShot(famille[Math.floor(Math.random() * famille.length)],
                             { volume: pas.volume, pitch: pas.pitch });

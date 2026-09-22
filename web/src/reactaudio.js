@@ -62,6 +62,12 @@ export function footstepInterval(speed) {
  * Etat pur : on la nourrit de la vitesse relative au sol et d'un pas de temps,
  * elle rend « walk », « run » ou rien. C'est la meme forme que le reste du
  * portage — la logique se teste sans navigateur, le son se joue ailleurs.
+ *
+ * `PlayRandomWalkClip` et `PlayRandomRunClip` sont `Random.Range(0, 6)` sur
+ * six champs numerotes, et rien d'autre : c'est `main.js` qui tire le fichier
+ * dans la famille que `kind` designe. Le VOLUME leur est passe
+ * (`_footstepVolume`), la HAUTEUR non — `Update` la pose sur la source juste
+ * avant l'appel, et c'est pourquoi elle sort d'ici plutot que de la.
  */
 export class Footsteps {
   constructor(rng = Math.random) {
@@ -88,6 +94,25 @@ export class Footsteps {
       volume: FOOTSTEP.volume,
     };
   }
+}
+
+/**
+ * `PlayerMovementAudio.OnJump` — et il n'obeit a AUCUNE des deux regles ci-dessus.
+ *
+ *     audio.pitch = 1f;
+ *     int i = Random.Range(0, 3);
+ *     audio.PlayOneShot(_jumpN);        // sans volume
+ *
+ * La hauteur est REMISE A UN — un saut ne se desaccorde pas comme un pas —, et
+ * le clip part a plein volume, la ou un pas sort a `_footstepVolume` (0,5).
+ * Trois clips, pas six.
+ *
+ * Ce port n'avait aucun son de saut. `CharacterMovementModel.OnJump` est
+ * l'evenement auquel `Awake` s'abonne : c'est le SAUT, pas le decollage du sac
+ * dorsal, qui le declenche.
+ */
+export function jumpSound() {
+  return { kind: "jump", pitch: 1, volume: 1 };
 }
 
 /** Reglages de `TurbulenceAudio`, tels que l'instance les porte. */

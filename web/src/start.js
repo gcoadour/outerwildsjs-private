@@ -32,6 +32,23 @@
 // premier instant, sans conversion.
 
 // @lit PlayerSpawner, SpawnPoint, TimeLoopTeleportReceiver
+//
+// `Warp` et `FindPlanetSpawns`, et ce qu'elles disent de la liste qu'on lit :
+//
+//     Warp(point)          if (point != null) { _targetWarpPoint = point;
+//                                               _doWarp = true; }
+//     FindPlanetSpawns()   _spawnList = FindObjectsOfType(typeof(SpawnPoint));
+//
+// `Warp` ne teleporte RIEN : elle leve un drapeau que `FixedUpdate` consomme.
+// C'est la regle d'Unity pour un corps physique — le deplacer hors du pas de
+// physique le laisse a moitie dans son ancienne pose —, et c'est le meme
+// report que `_doWarp` impose aux huit touches de debogage d'`Update`, une par
+// lieu d'apparition.
+//
+// Et `FindPlanetSpawns` explique pourquoi `_spawnList` est VIDE dans la scene :
+// la liste n'est pas serialisee, elle est cherchee au reveil. On ne peut donc
+// pas la lire dans le composant ; ce module lit les seize `SpawnPoint` poses,
+// ce qui est la meme liste par l'autre bout.
 // Le point d'apparition, son regard, et la relocalisation du joueur au
 // redemarrage de la boucle.
 

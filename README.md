@@ -52,7 +52,7 @@ ouvert en `file://` n'en est pas une.
 |---|---|
 | `data/scene/level0.json` | 7 688 nœuds, 16 271 composants, hiérarchie et transforms |
 | `data/components/level0.json` | 1 390 MonoBehaviour avec la **valeur** de leurs champs |
-| `data/solar_system.json` | 17 corps : positions, rayons, gravité, constantes de vol |
+| `data/solar_system.json` | 23 corps : positions, rayons, gravité, constantes de vol |
 | `data/gameplay.json` | vaisseau, ressources, 39 interactifs, 34 lisibles, 16 spawns, 14 volumes de référentiel |
 | `data/gltf/*.gltf` | 9 corps en glTF 2.0, hiérarchie, matériaux, squelettes, animations |
 | `data/audio/` | 97 clips, 97 sources placées, 17 zones d'ambiance et 22 émetteurs d'événement |

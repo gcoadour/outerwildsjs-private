@@ -49,7 +49,10 @@ export const SONDE = {
   // ProbeLauncher.LaunchProbe : le tir a vide vise une ORBITE
   orbitalMargin: 1.1,
   orbitalCap: 2,             // et jamais plus du double de la vitesse circulaire
-  // ProbeHorizonTracker
+  // ProbeHorizonTracker. `TrackHorizon(corps, secteur)` ne fait que s'ARMER :
+  // `enabled = true`, et les deux references rangees. Tout le travail est dans
+  // `FixedUpdate`, avec les cinq nombres ci-dessous. La methode n'a donc rien
+  // a porter — une piste qui se ferme a la lecture (docs/119-bruit.md).
   horizonMinPitch: -10,      // la fenetre de tir qui declenche le suivi d'horizon
   horizonMaxPitch: 55,
   horizonMaxCharge: 0.5,

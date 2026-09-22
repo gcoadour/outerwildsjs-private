@@ -226,6 +226,19 @@ export class Player {
 
   get physics() { return !!this.body; }
 
+  /**
+   * `PlayerCharacterController.StickToSurface`, et sa seule condition :
+   *
+   *     if (_jetpackModel.GetLocalAcceleration().y <= 0f)
+   *         base.StickToSurface();
+   *
+   * POUSSER VERS LE HAUT RELACHE L'ADHERENCE, et rien d'autre ne la relache —
+   * ni la vitesse, ni la pente, ni le saut. C'est ce qui rend le decollage
+   * possible sans sauter, et c'est deja ce que fait le verrou du sac dorsal
+   * ici : la composante verticale de la commande coupe le collage, tandis que
+   * `jetpackAccel` garde les deux autres (docs/119-bruit.md).
+   */
+
   /** Le joueur est-il pres d'une surface ? Le sac dorsal y pousse autrement. */
   nearSurface() {
     const f = this.field;
@@ -247,6 +260,12 @@ export class Player {
     const cmd = this.tumble > 0
       ? { forward: 0, right: 0, up: false, down: false, jump: false } : (input || {});
     this.jetpack = false;
+    // Remise a zero avant l'image : sans poussee, pas de fraction.
+    this.thrustFraction = 0;
+    // `CharacterMovementModel.OnJump` : l'evenement auquel `PlayerMovementAudio`
+    // s'abonne. `tryJump` le levait deja en rendant vrai, et personne ne le
+    // recueillait — le saut etait donc muet (docs/116-trappe.md).
+    this.jumped = false;
     this.world = world;
     if (this.physics) this.stepPhysics(dt, cmd, basis, origin);
     else this.stepAnalytic(dt, bodies, cmd, basis);
@@ -272,6 +291,7 @@ export class Player {
     this.vel.y += up.y * this.c.jumpSpeed;
     this.vel.z += up.z * this.c.jumpSpeed;
     this.grounded = false;
+    this.jumped = true;
     return true;
   }
 
@@ -296,6 +316,11 @@ export class Player {
                   input.forward || 0];
     this.gate.setGrounded(this.grounded, brut);
     const [rgt, vert, fwd] = this.gate.read(brut);
+    // `ThrusterModel.GetThrustFraction` = `|_localAcceleration| / maxThrust`, et
+    // l'acceleration est l'entree bornee AXE PAR AXE : la fraction est donc la
+    // NORME de l'entree, qui va jusqu'a racine(3). C'est elle que le
+    // `NoiseMaker` du joueur multiplie par cinq (docs/119-bruit.md).
+    this.thrustFraction = Math.hypot(rgt, vert, fwd);
     if (fwd || rgt) {
       a.x += (basis.fwd.x * fwd + basis.right.x * rgt) * lat;
       a.y += (basis.fwd.y * fwd + basis.right.y * rgt) * lat;
@@ -601,9 +626,18 @@ export const NOISE = { thrust: 5, launch: 5, launchFade: 1 };
  * Le portage rendait un booleen — 1 en poussant, 0,7 sinon — et n'avait pas du
  * tout le coup de la sonde. On pouvait donc lancer une sonde au nez d'un
  * predateur sans qu'il l'entende.
+ *
+ * ET LA FRACTION PEUT DEPASSER UN. `GetThrustFraction` vaut
+ * `|_localAcceleration| / _maxTranslationalThrust`, et
+ * `FireTranslationalThrusters` borne CHAQUE AXE separement a la poussee
+ * maximale — pas leur norme. Pousser sur les trois a la fois rend donc
+ * `racine(3)`, soit 1,73, et un bruit de 8,66. Le portage bornait la fraction a
+ * un, ce qui rendait inatteignable le seuil de 10 du `NoiseSensor`
+ * (docs/119-bruit.md). La borne INFERIEURE reste : une fraction negative n'a
+ * pas de sens.
  */
 export function playerNoise(thrustFraction, t, lastLaunchTime = -100, cfg = NOISE) {
-  const pousse = Math.max(0, Math.min(1, thrustFraction)) * cfg.thrust;
+  const pousse = Math.max(0, thrustFraction) * cfg.thrust;
   const u = Math.max(0, Math.min(1, (t - lastLaunchTime) / (cfg.launchFade || 1)));
   return pousse + (1 - u) * cfg.launch;
 }

@@ -17,7 +17,8 @@ import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
 import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
-         COMET_ELLIPSE, fociDistance, orbitStyle } from "../web/src/map.js";
+         COMET_ELLIPSE, fociDistance, orbitStyle, SolarMap,
+         MAP } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
@@ -49,7 +50,7 @@ import { relativeMotion, trackerReadout, directThreshold, motionDust,
          SHIP_NOZZLES } from "../web/src/tracker.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
-         BLINK } from "../web/src/attachments.js";
+         hatchControllers, Hatch, BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, zonesActives, isDay,
@@ -71,7 +72,7 @@ import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angl
 import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
          EndOfTimeMusic, END_OF_TIME, eventAudio, UISounds, UI_SOUNDS,
-         UI_VOLUME, REPAIR_FADE } from "../web/src/reactaudio.js";
+         UI_VOLUME, REPAIR_FADE, jumpSound } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
@@ -102,7 +103,7 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
 
 import { Flashback, PlayerDeathHandler, FLASHBACK, SnapshotTimer,
          frameLengths, displayTimes } from "../web/src/death.js";
-import { Settings } from "../web/src/settings.js";
+import { Settings, MenuInput } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
@@ -420,6 +421,60 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // L'anneau : depasser dix ramene a un, pas a dix.
   check("dix puis un", reg.step(10, 1), 1);
   check("un puis dix", reg.step(1, -1), 10);
+
+  // --- LA CADENCE DU MENU (docs/115-menu.md) ----------------------------
+  //
+  // `Menu.SELECT_DELAY` vaut 0,2 s, et QUATRE horloges le comptent.
+  {
+    const mi = new MenuInput();
+    check("le premier geste passe", mi.axes(10, 1, 0).move, -1);
+    check("le meme, aussitot, ne passe pas", mi.axes(10.1, 1, 0).move, 0);
+    // L'autre sens a sa PROPRE horloge : un aller-retour est immediat.
+    check("mais l'autre sens passe tout de suite", mi.axes(10.1, -1, 0).move, 1);
+    check("passe le delai, le premier repasse",
+          mi.axes(10.25, 1, 0).move, -1);
+    // Deux seuils, et ils ne sont pas les memes.
+    const s = new MenuInput();
+    check("a trois dixiemes, on navigue", s.axes(0, 0.3, 0).move, -1);
+    check("a trois dixiemes, on ne change RIEN",
+          s.axes(0, 0, 0.3).toggle, 0);
+    check("a six dixiemes, on change", s.axes(0, 0, 0.6).toggle, 1);
+    // Une option verrouillee n'accepte rien — mais se survole encore.
+    const v = new MenuInput();
+    const r = v.axes(0, 1, 1, true);
+    check("verrouillee, l'option refuse le changement", r.toggle, 0);
+    check("mais la navigation reste", r.move, -1);
+    // Le haut est teste AVANT le bas : les deux ne partent jamais ensemble.
+    const d = new MenuInput();
+    check("un seul sens a la fois", d.axes(0, 1, 0).move, -1);
+    // La souris ne se reveille qu'au-dela d'un dixieme de pixel.
+    const sm = new MenuInput();
+    check("a l'ouverture, la souris dort", sm.mouseActive, false);
+    check("un dixieme pile ne la reveille pas", sm.souris(0.1), false);
+    check("au-dela, oui", sm.souris(0.2), true);
+    check("et elle reste reveillee", sm.mouseActive, true);
+    check("le reveil ne se reannonce pas", sm.souris(50), false);
+    // `Menu.Open` relit `Screen.showCursor` : `Close` l'a remis a faux.
+    sm.reouvre(false);
+    check("rouvrir le menu rendort la souris", sm.mouseActive, false);
+  }
+
+  // `Open` / `Close` : les deux annonces de `Menu`, et la sortie par « Back »
+  // qui est le MEME chemin que la sortie par `cancel`.
+  {
+    const m = new Settings(null);
+    check("ouvrir annonce EnterMenuMode", m.ouvre().join(","), "EnterMenuMode");
+    check("et le menu est ouvert", m.open, true);
+    check("fermer annonce ExitMenuMode", m.ferme().join(","), "ExitMenuMode");
+    check("et il est ferme", m.open, false);
+    // Sans le build, la liste d'options est vide : on pose celle que
+    // `interface.js` extrait, dont la premiere ligne est « Back ».
+    const b = new Settings({ settings: { options: [{ key: "back", label: "Back" }] } });
+    b.ouvre();
+    b.index = b.options.findIndex((o) => o.key === "back");
+    check("l'option « Back » ferme aussi", b.toggle(0), "back");
+    check("et le menu est bien ferme", b.open, false);
+  }
 
   // LA NOUVELLE PARTIE. `TitleScreenMenu.ToggleOption` appelle
   // `TriggerLoad(true, ...)` sur deux de ses cinq options, et `TriggerLoad`
@@ -1843,14 +1898,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 // qui tourne peut servir de leurre.
 {
   const noise = new NoiseField();
-  check("silence total", noise.strongestAt([0, 0, 0]), null);
+  check("silence total", noise.sense([0, 0, 0]), null);
   noise.add([0, 0, 100], 1, 200);
   noise.add([0, 0, 20], 1, 200);
   check("deux sources", noise.count, 2);
-  check("la plus proche a force egale l'emporte",
-        round(noise.strongestAt([0, 0, 0]).distance), 20);
-  check("hors de portee du capteur, rien",
-        noise.strongestAt([0, 0, 1000], FISH.noiseRadius), null);
+  // `ListenForNoises` REND A LA PREMIERE qui qualifie — ici celle a cent
+  // unites, inscrite d'abord, et non la plus proche. C'est l'ordre
+  // d'inscription qui decide, et c'est ce que le portage avait invente
+  // autrement (docs/119-bruit.md).
+  check("c'est la PREMIERE inscrite qui l'emporte, pas la plus proche",
+        round(noise.sense([0, 0, 0]).source.distance), 100);
+  check("... et sous deux cents unites, c'est une cible",
+        noise.sense([0, 0, 0]).kind, "cible");
+  check("hors de portee, rien", noise.sense([0, 0, 1000]), null);
+
+  // LES DEUX SEUILS. Une source faible au-dela de deux cents unites ne
+  // s'entend pas ; la MEME source a plus de dix s'entend de n'importe ou, mais
+  // seulement comme un TROUBLE.
+  {
+    const loin = new NoiseField();
+    loin.add([0, 0, 5000], 1, Infinity, 5);
+    check("cinq d'assez loin, rien", loin.sense([0, 0, 0]), null);
+    const fort = new NoiseField();
+    fort.add([0, 0, 5000], 1, Infinity, 10.5);
+    const p = fort.sense([0, 0, 0]);
+    check("au-dela de dix, on s'entend de partout", p && p.kind, "trouble");
+    check("... et la distance n'y est pour rien", round(p.source.distance), 5000);
+    // DIX PILE NE SUFFIT PAS : le build compare en `>`, pas en `>=`.
+    const pile = new NoiseField();
+    pile.add([0, 0, 5000], 1, Infinity, 10);
+    check("dix pile ne passe pas", pile.sense([0, 0, 0]), null);
+    // Sous deux cents, le volume n'entre pas dans la comparaison.
+    const faible = new NoiseField();
+    faible.add([0, 0, 50], 0.01, Infinity, 0.05);
+    check("sous deux cents, le moindre bruit fait de vous une cible",
+          faible.sense([0, 0, 0]).kind, "cible");
+  }
 
   // Le leurre : le joueur se tait a 150 u, un poste joue a 30 u du predateur.
   const fish = new Anglerfish([0, 0, 0]);
@@ -3637,6 +3720,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("en l'air, on ne fait pas de bruit de pas",
         pas.update(2, 6, false), null);
 
+  // `OnJump` n'obeit a aucune des deux regles du pas (docs/116-trappe.md).
+  const saut = jumpSound();
+  check("un saut ne se desaccorde pas", saut.pitch, 1);
+  check("et il part a plein volume, pas a la moitie", saut.volume, 1);
+  check("sur sa propre famille de clips", saut.kind, "jump");
+
   check("sous vingt unites par seconde, pas de vent",
         turbulenceTarget(10, 1), 0);
   check("a mi-chemin des deux limites, la moitie du volume",
@@ -4283,6 +4372,44 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         Math.round(COMET_ELLIPSE.b), 7582);
   check("le foyer est a dix mille huit cents du centre",
         Math.round(fociDistance()), 10802);
+
+  // --- OUVRIR LA CARTE (docs/117-carte.md) --------------------------------
+  //
+  // `EnterMapView` : sans cible, le systeme entier ; avec une cible, on vous
+  // CADRE tous les deux, et le son a dix secondes de garde.
+  {
+    const faux = { hidden: true };
+    const m = new SolarMap(faux, []);
+    const sans = m.enterMapView([1000, 0, 2000], null, 0);
+    check("sans cible, la carte s'ouvre sur le systeme", m.zoom, MAP.defaultZoom);
+    check("et vise le centre", m.focal.join(","), "0,0");
+    check("avec les deux annonces du build",
+          sans.annonces.join(","), "EnterMapView,SwitchActiveCamera");
+    check("la premiere ouverture sonne", sans.sonne, true);
+    // Neuf secondes plus tard, la garde tient encore.
+    m.exitMapView();
+    check("fermer annonce aussi", m.open, false);
+    check("... les deux",
+          m.exitMapView().annonces.join(","), "ExitMapView,SwitchActiveCamera");
+    const tot = m.enterMapView([0, 0, 0], null, 9);
+    check("rouvrir dans les dix secondes est silencieux", tot.sonne, false);
+    const tard = m.enterMapView([0, 0, 0], null, 10.5);
+    check("au-dela, le son revient", tard.sonne, true);
+    // AVEC UNE CIBLE. Joueur a l'origine, cible a mille unites sur x.
+    const avec = m.enterMapView([0, 0, 0], [1000, 0, 0], 100);
+    // `tan(35°)` vaut 0,7002 : la demi-etendue est a un millieme pres la
+    // distance qui les separe. Sous le minimum, c'est le minimum qui gagne.
+    check("mille unites ne suffisent pas a sortir du zoom minimal",
+          m.zoom, MAP.minZoom);
+    check("le point vise est le MILIEU du segment", m.focal.join(","), "500,0");
+    check("et le zoom dure six dixiemes", avec.zoomDuration,
+          MAP.targetZoomDuration);
+    // Assez loin pour que le cadrage l'emporte sur le minimum.
+    m.enterMapView([0, 0, 0], [0, 0, 40000], 200);
+    check("a quarante mille, le cadrage l'emporte",
+          Math.round(m.zoom), Math.round(40000 / Math.tan(35 * Math.PI / 180) * 0.7));
+    check("et le milieu suit en z", m.focal.join(","), "0,20000");
+  }
   // ET LE SOLEIL EST BIEN A UN FOYER. La verification tient en une addition :
   // `a + c` doit rendre l'aphelie, c'est-a-dire l'endroit exact ou la scene
   // pose la comete — 24 000 du Soleil. C'est ce qui prouve que les deux
@@ -4678,6 +4805,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         playerNoise(0, 100.5, 100), NOISE.launch / 2);
   check("et a disparu au bout d'une seconde", playerNoise(0, 101, 100), 0);
   check("les deux s'ajoutent", playerNoise(1, 100, 100), NOISE.thrust + NOISE.launch);
+  // LA FRACTION DEPASSE UN. `FireTranslationalThrusters` borne chaque AXE, pas
+  // la norme : pousser sur les trois a la fois rend racine(3) (docs/119).
+  check("pousser sur les trois axes fait plus que cinq",
+        Number(playerNoise(Math.sqrt(3), 100).toFixed(3)),
+        Number((Math.sqrt(3) * NOISE.thrust).toFixed(3)));
+  // Et c'est la SEULE facon de passer dix : une diagonale pleine ne fait que
+  // 8,66, il y faut une sonde lancee dans la seconde.
+  check("une diagonale pleine ne suffit pas a passer dix",
+        playerNoise(Math.sqrt(3), 100) > 10, false);
+  check("avec une sonde fraiche, si",
+        playerNoise(Math.sqrt(3), 100, 100) > 10, true);
+  check("une poussee sur un seul axe n'y arrive jamais",
+        playerNoise(1, 100, 100) > 10, false);
 
   // L'ecrasement : cinq PAS de physique, pas cinq secondes.
   check("cinq pas de grace", COMPRESSION_GRACE, 5);
@@ -4859,6 +4999,41 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   ] } });
   check("trois tailles d'eclaboussure sont prevues", remous[0].splashes.length, 3);
   check("et aucune n'est resolue", remous[0].splashes.filter(Boolean).length, 0);
+
+  // --- LA TRAPPE (docs/116-trappe.md) ------------------------------------
+  {
+    const d = hatchControllers({ placed: { HatchController: [
+      { name: "HatchControls", position: [0, 0, 0], body: "Ship_Body",
+        volume: { radius: 3 },
+        fields: { _hatchObject: { name: "Hatch_Collider" },
+                  _openHatchClip: { name: "hatchopen_air" },
+                  _closeHatchClip: { name: "hatchclose_air" } } },
+    ] } })[0];
+    check("le collider de la trappe est nomme", d.hatchObject, "Hatch_Collider");
+    const h = new Hatch(d);
+    check("elle nait fermee", h.open, false);
+    check("et son collider est en place", h.collider, true);
+    check("l'appui l'ouvre", h.pressInteract(), true);
+    check("le collider disparait", h.collider, false);
+    check("avec son clip", h.drain().join(","), "hatchopen_air");
+    check("un second appui ne fait rien", h.pressInteract(), false);
+    // Entrer la referme TOUTE SEULE, et annonce.
+    check("entrer franchit le seuil", h.setInside(true), "entre");
+    check("et la referme", h.open, false);
+    check("avec le clip de fermeture", h.drain().join(","), "hatchclose_air");
+    check("en annoncant EnterShip", h.events.at(-1), "EnterShip");
+    // Sortir n'annonce QUE : rien ne rouvre la trappe.
+    check("sortir franchit l'autre sens", h.setInside(false), "sort");
+    check("et n'annonce que ExitShip", h.events.at(-1), "ExitShip");
+    check("la trappe reste fermee", h.open, false);
+    check("et rien ne sonne", h.drain().length, 0);
+    // Rester du meme cote ne franchit rien.
+    check("rester dehors ne franchit rien", h.setInside(false), null);
+    // Entrer SANS avoir ouvert appelle quand meme `CloseHatch` : le clip part.
+    check("entrer sans avoir ouvert franchit aussi", h.setInside(true), "entre");
+    check("et le build rejoue quand meme la fermeture",
+          h.drain().join(","), "hatchclose_air");
+  }
 
   // --- les impostures de planete (docs/56) --------------------------------
   //
@@ -7151,6 +7326,39 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("engage, l'abandon s'annonce", p.abort(), true);
     check("... et les drapeaux tombent",
           `${p.phase}/${p.matching}/${p.target}`, "repos/false/null");
+  }
+
+  // LES SIX ISSUES (docs/118-messages.md). `AutopilotGUI` a un message par
+  // facon de s'arreter, et le portage n'en disait que trois.
+  {
+    const neuf = () => new Autopilot({ pos: { x: 0, y: 0, z: 0 },
+                                       vel: { x: 0, y: 0, z: 0 }, thrust: 50 }, []);
+    const cible = (d) => ({ name: "x", position: [d, 0, 0], velocity: [0, 0, 0],
+                            gravity: { upperSurfaceRadius: 10 } });
+    // 1. abandon EN VOL.
+    const a = neuf();
+    a.engage(cible(100000), [0, 0, 0]);
+    a.abort();
+    check("abandonner un vol dit « autopilot ABORTED »", a.fin, "abandon");
+    // 2. abandon d'une simple EGALISATION — le build lit
+    //    `IsFlyingToDestination` AVANT que les drapeaux ne tombent.
+    const b = neuf();
+    b.matchVelocity(cible(100000));
+    b.abort();
+    check("abandonner une egalisation dit autre chose", b.fin, "abandonVitesse");
+    // 3. cible TROP PROCHE : le pilote refuse, et il le dit.
+    const c = neuf();
+    check("trop pres, le pilote refuse", c.engage(cible(5), [0, 0, 0]), false);
+    check("... et dit « too close to target »", c.fin, "tropPres");
+    check("... sans s'engager", c.phase, "repos");
+    // 4. EGALISATION reussie.
+    const d2 = neuf();
+    d2.matchVelocity({ name: "c", position: [0, 0, 0], velocity: [10, 0, 0],
+                       gravity: { upperSurfaceRadius: 10 } });
+    let n = 0;
+    while (d2.engaged && n < 1000) { d2.update(1 / 50); n += 1; }
+    check("une egalisation aboutie a son propre message", d2.fin, "vitesseAtteinte");
+    check("... et ce n'est pas une arrivee", d2.arrived, false);
   }
 }
 

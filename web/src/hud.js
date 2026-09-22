@@ -337,6 +337,24 @@ export class GuiMode {
  *
  * Les textes sont ceux du jeu, la faute de casse comprise — « autopilot
  * ABORTED », en capitales, est bien ce que le build affiche.
+ *
+ * `AutopilotGUI.DisplayMessage(texte, couleur, duree)` porte les trois colonnes
+ * de ce tableau, et rien de plus :
+ *
+ *     _readoutStyle.normal.textColor = couleur;
+ *     _readoutContent.text = texte;
+ *     _displayDuration = duree;  _initDisplayTime = Time.time;
+ *     _readoutDimensions = _readoutStyle.CalcSize(_readoutContent);
+ *
+ * Deux choses s'y lisent. La duree INFINIE des quatre messages d'etat n'est pas
+ * une facon de dire « tant que la phase dure » : `Update` les repose a chaque
+ * image tant que leur drapeau tient, et ne les efface JAMAIS de lui-meme. Le
+ * bandeau ne s'eteint donc que par un message de FIN — celui-la dure trois
+ * secondes, puis `_doDisplayReadout` tombe. C'est pourquoi il y a six issues
+ * et pas une : sans elles, le dernier « stage 2 » resterait a l'ecran.
+ *
+ * Et la LARGEUR est mesuree a la pose, pas au rendu : `CalcSize` une fois par
+ * message. Le bandeau est centre sur cette largeur-la.
  */
 export const AUTOPILOT_MESSAGES = {
   alignement: ["stage 1: aligning flight path", "#00ff00", Infinity],

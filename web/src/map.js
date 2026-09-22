@@ -12,6 +12,20 @@
 
 export const ZOOM_DEFAULT = 40000;
 export const ZOOM_MIN = 10000;
+/** Ce que `MapController` pose en ouvrant et en fermant la carte. */
+export const MAP = {
+  defaultZoom: ZOOM_DEFAULT,      // `_defaultZoomDist`
+  minZoom: ZOOM_MIN,              // `_minZoomDistance`
+  // `* 0.7f` : les sept dixiemes du cadrage exact joueur-cible.
+  fitFactor: 0.7,
+  // `_lastPlayAudioTime + 10f` : le son d'ouverture a dix secondes de garde.
+  audioCooldown: 10,
+  // La duree passee par l'appelant, et celle que la cible IMPOSE.
+  zoomDuration: 1,
+  targetZoomDuration: 0.6,
+  // Le champ de la camera du joueur, dont depend le cadrage.
+  fov: 70,
+};
 // MapMarker et IconGenerator.GenerateSquareBracket
 export const MARKER_ICON = 20;
 export const MARKER_LINE = 1;
@@ -186,6 +200,9 @@ export class SolarMap {
     this.focal = [0, 0];
     this.open = false;
     this.selected = null;
+    // `_lastPlayAudioTime` : moins l'infini, pour que la premiere ouverture
+    // sonne toujours.
+    this.lastAudio = -Infinity;
     this.hits = [];      // zones cliquables, recalculees a chaque rendu
     // Les couleurs d'orbite, telles que `MapOpenGL` les porte. Les constantes
     // ci-dessus restent le repli explicite quand l'extraction manque.
@@ -225,6 +242,80 @@ export class SolarMap {
   }
 
   toggle() { this.open = !this.open; this.canvas.hidden = !this.open; }
+
+  /**
+   * `MapController.EnterMapView(zoomDuration, rotationRate, snapToPlayer)`.
+   *
+   * Deux lois y vivent, et le portage n'avait ni l'une ni l'autre.
+   *
+   * SANS CIBLE, la carte s'ouvre sur le systeme entier :
+   *
+   *     _zoomDistance = _defaultZoomDist;  _focalOffset = Vector3.zero;
+   *
+   * AVEC UNE CIBLE VISEE, elle vous CADRE tous les deux :
+   *
+   *     d = Distance(cible, joueur)
+   *     _zoomDistance = Max(d / Tan(0,5 x fov x DEG2RAD) x 0,7, _minZoomDistance)
+   *     _focalOffset  = (joueur - focale) + (cible - joueur) x 0,5
+   *     _zoomDuration = 0,6f          // et non celui qu'on lui passe
+   *
+   * Le point vise est le MILIEU du segment joueur-cible, et la distance de
+   * camera est celle qui les tient juste a l'image, a sept dixiemes pres —
+   * avec un champ de 70 degres, `tan(35°)` vaut 0,7002, si bien que la demi-
+   * etendue vue est a un millieme pres la distance qui vous separe. Le
+   * cadrage n'est pas un reglage : il tombe de la geometrie.
+   *
+   * Et le zoom dure 0,6 s dans ce cas-la, quelle que soit la duree demandee.
+   * Ce portage ouvre la carte d'un coup ; la valeur est relevee ici pour que
+   * l'animation, le jour ou elle vient, n'ait pas a etre devinee.
+   *
+   * LE SON A DIX SECONDES DE GARDE :
+   *
+   *     if (Time.time > _lastPlayAudioTime + 10f) { ...; audio.Play(); }
+   *
+   * Ouvrir et refermer la carte coup sur coup est donc SILENCIEUX apres la
+   * premiere fois. C'est ce qui empeche le jeu de claquer a chaque coup d'oeil.
+   *
+   * @param player [x, y, z] du joueur
+   * @param target [x, y, z] de la cible visee, ou null
+   * @param now    secondes, pour la garde du son
+   * @returns { annonces, sonne, zoomDuration }
+   */
+  enterMapView(player, target = null, now = 0, fov = MAP.fov) {
+    this.open = true;
+    this.canvas.hidden = false;
+    let duree = MAP.zoomDuration;
+    if (target && player) {
+      const d = Math.hypot(target[0] - player[0], target[1] - player[1],
+                           target[2] - player[2]);
+      const demi = Math.tan(0.5 * fov * Math.PI / 180);
+      this.zoom = Math.max(d / (demi || 1) * MAP.fitFactor, MAP.minZoom);
+      this.focal = [player[0] + (target[0] - player[0]) * 0.5,
+                    player[2] + (target[2] - player[2]) * 0.5];
+      duree = MAP.targetZoomDuration;
+    } else {
+      this.zoom = MAP.defaultZoom;
+      this.focal = [0, 0];
+    }
+    const sonne = now > this.lastAudio + MAP.audioCooldown;
+    if (sonne) this.lastAudio = now;
+    return { annonces: ["EnterMapView", "SwitchActiveCamera"], sonne,
+             zoomDuration: duree };
+  }
+
+  /**
+   * `MapController.ExitMapView`.
+   *
+   * Elle ne touche NI au zoom NI au point vise : rouvrir la carte sans cible
+   * la retrouve au systeme entier parce qu'`EnterMapView` les repose, pas
+   * parce que la sortie les aurait ranges. Ce qu'elle range, ce sont les
+   * invites — `_showingPrompts = false` et `RemoveScreenPrompt(_closePrompt)`.
+   */
+  exitMapView() {
+    this.open = false;
+    this.canvas.hidden = true;
+    return { annonces: ["ExitMapView", "SwitchActiveCamera"] };
+  }
 
   /** Zoom borne, comme dans le jeu. */
   setZoom(z) { this.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_DEFAULT * 3, z)); }

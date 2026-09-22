@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **121 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`114`](114-poste.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **152 des 176** méthodes nommées, sur 75 classes ([`103`](103-refait.md) → [`120`](120-jumelles.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -105,6 +105,12 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| **les jumelles du sablier** | aucun primaire : elles tournent l'une autour de l'autre a 31,65, dans le repere de leur barycentre ([`120`](120-jumelles.md)) |
+| **ce que le predateur entend** | cible sous 200 unites quel que soit le volume, trouble au-dela si le volume passe DIX — et dix n'est atteint qu'en diagonale ([`119`](119-bruit.md)) |
+| **issues du pilote auto** | six facons de s'arreter et un message chacune ; le bandeau ne s'eteint que par une issue ([`118`](118-messages.md)) |
+| **ouverture de la carte** | avec une cible visee, la carte vous CADRE tous les deux, et le son a dix secondes de garde ([`117`](117-carte.md)) |
+| **trappe, saut, alarme** | la trappe retire un collider et se referme a l'ENTREE, le saut a son propre son, et l'alarme allume sa lumiere ([`116`](116-trappe.md)) |
+| **menu des reglages** | SELECT_DELAY a 0,2 s sur QUATRE horloges de temps reel, deux seuils, le clic droit qui recule, et fermer reprend la souris ([`115`](115-menu.md)) |
 | **poste de pilotage** | se lever ferme la vue d'atterrissage, le roulis ne se range qu'en se rasseyant, et l'ecretage REDRESSE la poussee sur le sol ([`114`](114-poste.md)) |
 | **degats du vaisseau** | seuil de trente pose par `Awake`, et l'integrite est le cumul soustrait — pas une courbe inventee ([`113`](113-seuil.md)) |
 | invites a l'ecran | trois zones, DEUX arbitrages : le bas montre tout ([`112`](112-invites.md)) |

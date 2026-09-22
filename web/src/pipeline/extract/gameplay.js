@@ -187,7 +187,10 @@ const WANT_VOLUME = new RegExp([
   // `GazeSwitch.Awake` lit son rayon dans son SphereCollider : sans le volume,
   // la loi du regard n'a aucune portee.
   "|GazeSwitch|MuseumEntryway|Surface|AudioShell|ResetSimulationTrigger",
-  "|LaunchTerminal|LaunchElevatorController)$",
+  // `HatchController.OnEntry` est un declencheur, et son rayon est celui du
+  // collider de « HatchControls » : c'est lui qui dit quand la trappe se
+  // referme derriere vous (docs/116-trappe.md).
+  "|LaunchTerminal|LaunchElevatorController|HatchController)$",
 ].join(""), "i");
 
 /**
