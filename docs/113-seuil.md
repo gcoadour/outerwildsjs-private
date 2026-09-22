@@ -92,16 +92,34 @@ Une troisième confusion tombait du même arbre : `this.total`, l'intégrité d'
 confondue avec `_shipTotalHealth`, qui borne le **cumul**. Des pièces
 increvables en sortaient dès qu'on donnait au vaisseau une grande santé.
 
-## Ce qui reste nommé et non porté
+## 3. Au-delà de trois pièces, la force se partage — et coûte plus cher
 
-`OnImpact` a une branche que ce portage n'a pas : quand **trois pièces sont déjà
-abîmées**, la force ne suit plus la formule — elle vaut `velocity / n`, la
-vitesse brute divisée par le nombre de pièces concernées, appliquée à chacune.
-Un choc à quarante réparti sur trois pièces leur inflige donc 13,3 chacune, bien
-plus que les 3,7 de la branche ordinaire. Le portage, lui, ne fait plus de
-nouvelle victime au-delà de trois et n'aggrave que la pièce touchée.
+`OnImpact` a **deux branches**, et le portage n'en avait qu'une et demie :
 
-C'est écrit ici plutôt que passé sous silence.
+```
+if (_damagedParts.Count < 3) {
+    ... la pièce la plus proche, la formule, et ExplodeShip par vitesse ...
+} else {
+    int n = nombre de pièces déjà abîmées dont le seuil est passé;
+    foreach (ces pièces) ApplyDamageForce(velocity / n, true);
+}
+```
+
+Passé trois pièces abîmées, le choc **ne cherche plus de nouvelle victime** —
+la quatrième position reste intacte, ce que le portage faisait déjà — mais il
+**se répartit sur celles qui le sont**, et non par la formule : `velocity / n`,
+la vitesse brute divisée par leur nombre.
+
+Un choc à trente-cinq réparti sur trois pièces leur coûte donc **11,67 chacune**,
+contre **1,85** pour la branche ordinaire. Un vaisseau déjà cabossé encaisse
+bien plus mal qu'un vaisseau neuf. Le portage rendait zéro.
+
+### Une bizarrerie gardée telle quelle
+
+`if (_instantDeathSpeed <= |velocity|) ExplodeShip();` vit **dans la première
+branche**, pas dans la seconde. Passé trois pièces abîmées, la mort instantanée
+par vitesse ne se déclenche donc plus, et seul le cumul peut encore tuer. C'est
+ce que le build fait ; c'est reproduit, et c'est dit.
 
 ## Gardé par
 
@@ -110,4 +128,6 @@ C'est écrit ici plutôt que passé sous silence.
   (3,70), les trois niveaux de bruit, les quatre chocs à cent qui **tuent une
   pièce sans détruire le vaisseau** — ce que la courbe inventée rendait
   impossible —, le propulseur coupé, et le cumul fatal avec l'intégrité qui
-  tombe à zéro avec lui.
+  tombe à zéro avec lui. Puis le partage : la quatrième position reste intacte,
+  les trois déjà abîmées prennent chacune `vitesse / 3`, et ce partage coûte
+  plus cher que la formule.

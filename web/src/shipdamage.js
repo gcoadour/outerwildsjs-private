@@ -258,6 +258,18 @@ export class ShipDamage {
     return Math.max(0, this.shipTotalHealth - this.cumul);
   }
 
+  /** `ApplyDamageForce` : ce qu'une piece perd, et ce qu'elle allume. */
+  _blesse(p, cle, force) {
+    p.integrity = Math.max(0, p.integrity - force);
+    p.totalDamage += force;
+    if (p.integrity <= 0) {
+      p.integrity = 0;
+      p.dead = true;
+    }
+    // Le masque d'alerte s'accumule, et c'est lui que le HUD affiche.
+    if (cle) this.mask |= LOCATIONS[cle] || 0;
+  }
+
   /** Le vaisseau a-t-il pris quelque chose ? */
   get damaged() { return this.cumul > 0 || this.deadParts.length > 0; }
 
@@ -312,36 +324,45 @@ export class ShipDamage {
     this.lastLocation = loc;
 
     let part = 0;
-    // Trois pieces abimees au plus : au-dela, un impact ne fait plus de
-    // nouvelle victime. Une piece deja abimee peut toujours l'etre davantage.
+    // `Awake` a ecrase le seuil serialise : c'est celui du reveil qui vaut, et
+    // il gate l'impact autant qu'il entre dans la force.
+    const seuil = this.seuilPiece;
     const abimees = Object.values(this.parts).filter((p) => p.totalDamage > 0);
-    const deja = loc ? this.parts[loc] && this.parts[loc].totalDamage > 0 : false;
-    if (loc && this.parts[loc] && (deja || abimees.length < 3)) {
-      // `Awake` a ecrase le seuil serialise : c'est celui du reveil qui vaut,
-      // et il gate l'impact autant qu'il entre dans la force.
-      const seuil = this.seuilPiece;
-      if (speed > seuil) {
+
+    if (abimees.length < 3) {
+      // TANT QU'IL Y A MOINS DE TROIS PIECES ABIMEES, le choc en cherche une
+      // nouvelle : la plus proche du point, et elle seule.
+      if (loc && this.parts[loc] && speed > seuil) {
         // force = 100 x (|v| - seuil) / (mortInstantanee - seuil)
         const denom = (this.instantDeathSpeed - seuil) || 1;
         part = 100 * (speed - seuil) / denom;
-        const p = this.parts[loc];
-        p.integrity = Math.max(0, p.integrity - part);
-        p.totalDamage += part;
-        if (p.integrity <= 0) p.dead = true;
-        // Le masque d'alerte s'accumule, et c'est lui que le HUD affiche.
-        this.mask |= LOCATIONS[loc];
+        this._blesse(this.parts[loc], loc, part);
+      }
+      // `if (_instantDeathSpeed <= |velocity|) ExplodeShip();` vit DANS cette
+      // branche, et pas dans l'autre. C'est une bizarrerie du build, gardee
+      // telle quelle : passe trois pieces abimees, la mort instantanee par
+      // vitesse ne se declenche plus, et seul le cumul peut encore tuer.
+      if (speed >= this.instantDeathSpeed) this.destroyed = true;
+    } else {
+      // AU-DELA DE TROIS, LA FORCE SE PARTAGE — et elle ne suit plus la
+      // formule. Le build applique `velocity / n` a chaque piece deja abimee
+      // dont le seuil est passe, `n` etant leur nombre. Un choc a quarante
+      // reparti sur trois pieces leur coute donc 13,3 chacune, bien PLUS que
+      // les 3,7 de la branche ordinaire (docs/113-seuil.md).
+      const concernees = abimees.filter(() => speed > seuil);
+      const n = concernees.length;
+      if (n > 0) {
+        part = speed / n;
+        for (const p of concernees) {
+          const cle = Object.keys(this.parts).find((k) => this.parts[k] === p);
+          this._blesse(p, cle, part);
+        }
       }
     }
 
-    // LES DEUX MORTS DU BUILD, et il n'y en a que deux :
-    //
-    //     if (_instantDeathSpeed <= |velocity|)          ExplodeShip();
-    //     if (Abs(_currentShipDamage) > _shipTotalHealth) ExplodeShip();
-    //
-    // La seconde est le CUMUL des `_totalDamage` des pieces, recalcule par
-    // `RecalculateShipDamge`. Il n'y a pas de troisieme condition, et pas
-    // d'integrite de coque.
-    if (speed >= this.instantDeathSpeed) this.destroyed = true;
+    // `Abs(_currentShipDamage) > _shipTotalHealth` : le CUMUL des
+    // `_totalDamage`, recalcule par `RecalculateShipDamge`. Il n'y a pas de
+    // troisieme condition, et pas d'integrite de coque.
     if (this.cumul > this.shipTotalHealth) this.destroyed = true;
     return { damage: this.soundLevel(speed), location: loc, part,
              destroyed: this.destroyed };

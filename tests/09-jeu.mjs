@@ -555,11 +555,24 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   trois.impact(35, [0, 1, 0]);       // haut
   trois.impact(35, [1, 0, 0]);       // droite
   check("trois pieces abimees", trois.alerted.length, 3);
+  const avantQuatrieme = trois.parts.gauche.totalDamage;
+  const dejaTrois = ["avant", "haut", "droite"].map((k) => trois.parts[k].totalDamage);
   const quatrieme = trois.impact(35, [-1, 0, 0]);   // gauche
-  check("la quatrieme ne prend rien", quatrieme.part, 0);
+  // AU-DELA DE TROIS, LA FORCE SE PARTAGE, et elle ne suit plus la formule :
+  // le build applique `velocity / n` a chaque piece DEJA abimee. Le portage
+  // rendait zero, ce qui etait une invention (docs/113-seuil.md).
+  check("la quatrieme position reste intacte",
+        trois.parts.gauche.totalDamage, avantQuatrieme);
   check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
-  // Une piece DEJA abimee peut toujours l'etre davantage.
-  check("mais une deja touchee, si", trois.impact(35, [0, 0, 1]).part > 0, true);
+  check("mais les trois deja abimees se partagent le choc",
+        round(quatrieme.part, 4), round(35 / 3, 4));
+  check("... et chacune l'a bien pris",
+        ["avant", "haut", "droite"].every(
+          (k, i) => round(trois.parts[k].totalDamage - dejaTrois[i], 4)
+                    === round(35 / 3, 4)), true);
+  // Le partage coute PLUS cher que la branche ordinaire : 11,67 contre 1,85.
+  check("le partage est plus lourd que la formule",
+        round(35 / 3, 2) > round(100 * (35 - 30) / 270, 2), true);
 
   // L'ORDRE DES VOYANTS DU CASQUE N'EST PAS CELUI DES DRAPEAUX.
   //
