@@ -174,137 +174,121 @@ export class ParticleField {
     return n;
   }
 
-  spawn(i, s, p) {
+  createSystem(s, p, nomOverride = null) {
     const B = this.B;
+    const ps = new B.ParticleSystem(nomOverride || s.name || `ps_unknown`,
+      Math.min(s.capacity || 200, MAX_CAPACITY), this.scene);
+    const tex = this.texture(s.texture);
+    if (tex) ps.particleTexture = tex;
+    ps.emitter = new B.Vector3(p[0], p[1], p[2]);
+
+    const c = s.color || [1, 1, 1, 1];
+    ps.color1 = new B.Color4(c[0], c[1], c[2], c[3]);
+    ps.color2 = new B.Color4(c[0], c[1], c[2], c[3] * 0.6);
+    ps.colorDead = new B.Color4(c[0], c[1], c[2], 0);
+    if (s.colorOverLife && s.colorOverLife.length > 1) {
+      for (const [t, k] of s.colorOverLife) {
+        const col = new B.Color4(k[0] * c[0], k[1] * c[1], k[2] * c[2], k[3] * c[3]);
+        ps.addColorGradient(t, col, col);
+      }
+    }
+    ps.blendMode = s.blend === "alpha"
+      ? B.ParticleSystem.BLENDMODE_STANDARD
+      : s.blend === "multiply"
+        ? B.ParticleSystem.BLENDMODE_MULTIPLY
+        : B.ParticleSystem.BLENDMODE_ADD;
+
+    const range = (r, fallback, floor) => {
+      const lo = r ? Math.max(floor, r[0]) : Math.max(floor, fallback);
+      const hi = r ? Math.max(lo, r[1]) : lo;
+      return [lo, hi];
+    };
+    const [smin, smax] = range(s.sizeRange, s.size || 1, 0.01);
+    ps.minSize = smin; ps.maxSize = smax;
+    if (s.sizeOverLife && s.sizeOverLife.length > 1) {
+      for (const [t, v] of s.sizeOverLife) ps.addSizeGradient(t, v, v);
+    }
+    if (s.rotationSpeed) {
+      ps.minAngularSpeed = -s.rotationSpeed;
+      ps.maxAngularSpeed = s.rotationSpeed;
+    }
+    if (s.velocity) {
+      const v = new B.Vector3(s.velocity.x, s.velocity.y, s.velocity.z);
+      if (v.lengthSquared() > 0) {
+        ps.direction1 = v.clone();
+        ps.direction2 = v.clone();
+        ps.minEmitPower = v.length();
+        ps.maxEmitPower = v.length();
+      }
+    }
+    if (s.clampVelocity && s.clampVelocity.magnitude > 0) {
+      ps.maxEmitPower = Math.min(ps.maxEmitPower, s.clampVelocity.magnitude);
+      ps.minEmitPower = Math.min(ps.minEmitPower, ps.maxEmitPower);
+      if (ps.addLimitVelocityGradient) {
+        ps.addLimitVelocityGradient(0, s.clampVelocity.magnitude);
+        ps.limitVelocityDamping = s.clampVelocity.dampen;
+      }
+    }
+    if (s.rotationBySpeed && s.rotationBySpeed.degreesPerSecond) {
+      const r = s.rotationBySpeed.degreesPerSecond * Math.PI / 180;
+      ps.minAngularSpeed = Math.min(ps.minAngularSpeed ?? 0, -r);
+      ps.maxAngularSpeed = Math.max(ps.maxAngularSpeed ?? 0, r);
+    }
+    if (s.sheet && tex && s.textureSize) {
+      const { tilesX, tilesY, cycles } = s.sheet;
+      const [tw, th] = s.textureSize;
+      ps.isAnimationSheetEnabled = true;
+      ps.spriteCellWidth = Math.max(1, Math.floor(tw / Math.max(1, tilesX)));
+      ps.spriteCellHeight = Math.max(1, Math.floor(th / Math.max(1, tilesY)));
+      ps.startSpriteCellID = 0;
+      ps.endSpriteCellID = Math.max(1, tilesX * tilesY) - 1;
+      ps.spriteCellChangeSpeed = (cycles || 1) <= 1 ? 0 : cycles;
+      ps.spriteCellLoop = true;
+    }
+    const [lmin, lmax] = range(s.lifetimeRange, s.lifetime || 1, 0.05);
+    ps.minLifeTime = lmin; ps.maxLifeTime = lmax;
+    ps.emitRate = Math.max(0.1, s.rate || 10);
+    const [vmin, vmax] = range(s.speedRange, s.startSpeed || 0, 0);
+    ps.minEmitPower = vmin; ps.maxEmitPower = vmax;
+    ps.updateSpeed = 0.016 * (s.speedScale || 1);
+
+    const sh = s.shape || { type: "sphere", radius: 1 };
+    const r2 = Math.max(0.01, sh.radius || 1);
+    if (sh.type === "box") ps.createBoxEmitter(
+      new B.Vector3(0, 1, 0), new B.Vector3(0, 1, 0),
+      new B.Vector3(-r2, -r2, -r2), new B.Vector3(r2, r2, r2));
+    else if (sh.type.startsWith("cone")) ps.createConeEmitter(
+      r2, Math.min(Math.PI / 2, (sh.angle || 30) * Math.PI / 180));
+    else if (sh.type.startsWith("hemisphere")) ps.createHemisphericEmitter(r2);
+    else ps.createSphereEmitter(r2);
+
+    if (s.subEmitters && s.subEmitters.length && B.SubEmitter) {
+      ps.subEmitters = s.subEmitters.map(sub => {
+        const cfg = this.systems.find(x => x.name === sub.name);
+        if (!cfg) return null;
+        const subPs = this.createSystem(cfg, p, `${ps.name}_sub_${sub.name}`);
+        if (!subPs) return null;
+        const type = sub.event === "birth" ? B.SubEmitterType.ATTACHED : B.SubEmitterType.END;
+        const em = new B.SubEmitter(subPs);
+        em.type = type;
+        em.inheritDirection = true;
+        em.inheritedVelocityAmount = 1;
+        return em;
+      }).filter(e => e);
+    }
+    return ps;
+  }
+
+  spawn(i, s, p) {
     try {
-      const ps = new B.ParticleSystem(s.name || `ps${i}`,
-        Math.min(s.capacity || 200, MAX_CAPACITY), this.scene);
-      const tex = this.texture(s.texture);
-      if (tex) ps.particleTexture = tex;
-      ps.emitter = new B.Vector3(p[0], p[1], p[2]);
-
-      const c = s.color || [1, 1, 1, 1];
-      ps.color1 = new B.Color4(c[0], c[1], c[2], c[3]);
-      ps.color2 = new B.Color4(c[0], c[1], c[2], c[3] * 0.6);
-      ps.colorDead = new B.Color4(c[0], c[1], c[2], 0);
-      // ColorModule : le degrade de couleur au fil de la vie de la particule.
-      // 110 systemes sur 135 en ont un, et c'est ce qui fait la difference
-      // entre une flamme et une tache orange — celle du feu de camp passe du
-      // vert au magenta puis au rouge en s'eteignant.
-      if (s.colorOverLife && s.colorOverLife.length > 1) {
-        for (const [t, k] of s.colorOverLife) {
-          const col = new B.Color4(k[0] * c[0], k[1] * c[1], k[2] * c[2], k[3] * c[3]);
-          ps.addColorGradient(t, col, col);
-        }
+      const ps = this.createSystem(s, p, s.name || `ps${i}`);
+      if (ps) {
+        ps.start();
+        this.live.set(i, ps);
+      } else {
+        this.failed++;
+        this.live.set(i, null);
       }
-      // Le mode de fusion vient du shader du materiau, pas d'une hypothese :
-      // 110 systemes sur 135 sont additifs, mais 25 sont en fusion alpha. Tout
-      // forcer en additif saturait le ciel.
-      ps.blendMode = s.blend === "alpha"
-        ? B.ParticleSystem.BLENDMODE_STANDARD
-        : s.blend === "multiply"
-          ? B.ParticleSystem.BLENDMODE_MULTIPLY
-          : B.ParticleSystem.BLENDMODE_ADD;
-
-      // Bornes plutot que valeur unique quand la courbe en donne deux : une
-      // gerbe dont toutes les etincelles ont exactement la meme taille et la
-      // meme duree de vie se voit tout de suite.
-      const range = (r, fallback, floor) => {
-        const lo = r ? Math.max(floor, r[0]) : Math.max(floor, fallback);
-        const hi = r ? Math.max(lo, r[1]) : lo;
-        return [lo, hi];
-      };
-      const [smin, smax] = range(s.sizeRange, s.size || 1, 0.01);
-      ps.minSize = smin; ps.maxSize = smax;
-      // SizeModule : la taille au fil de la vie, presente sur 80 systemes.
-      // Les valeurs sont des FACTEURS de la taille initiale, d'ou le gradient
-      // de facteur plutot qu'une taille absolue.
-      if (s.sizeOverLife && s.sizeOverLife.length > 1) {
-        for (const [t, v] of s.sizeOverLife) ps.addSizeGradient(t, v, v);
-      }
-      // RotationModule : vitesse angulaire, en radians par seconde. 28 systemes.
-      if (s.rotationSpeed) {
-        ps.minAngularSpeed = -s.rotationSpeed;
-        ps.maxAngularSpeed = s.rotationSpeed;
-      }
-      // Les quatre modules rares (docs/57-particules.md). Le compte disait
-      // qu'ils ne servaient JAMAIS ; refait, il en trouve quatre usages sur
-      // 135 systemes — et l'un des quatre est vide.
-      //
-      // VelocityModule : une vitesse constante ajoutee a chaque particule. Sur
-      // `CometTrail`, (0, 0, 100) en repere LOCAL : la queue de la comete part
-      // en arriere a cent unites par seconde, ce qui est ce qui en fait une
-      // queue plutot qu'un halo.
-      if (s.velocity) {
-        const v = new B.Vector3(s.velocity.x, s.velocity.y, s.velocity.z);
-        if (v.lengthSquared() > 0) {
-          ps.direction1 = v.clone();
-          ps.direction2 = v.clone();
-          ps.minEmitPower = v.length();
-          ps.maxEmitPower = v.length();
-        }
-      }
-      // ClampVelocityModule : une vitesse plafond, et un amortissement. Sur
-      // `Explosion_Fiery_Med`, plafond 100 et amortissement 1 — c'est-a-dire
-      // total : une etincelle qui depasse est ramenee au plafond, pas freinee.
-      if (s.clampVelocity && s.clampVelocity.magnitude > 0) {
-        ps.maxEmitPower = Math.min(ps.maxEmitPower, s.clampVelocity.magnitude);
-        ps.minEmitPower = Math.min(ps.minEmitPower, ps.maxEmitPower);
-        // L'amortissement n'a pas d'equivalent direct : Babylon freine par
-        // `limitVelocityOverTime`, qu'on regle sur le meme plafond.
-        if (ps.addLimitVelocityGradient) {
-          ps.addLimitVelocityGradient(0, s.clampVelocity.magnitude);
-          ps.limitVelocityDamping = s.clampVelocity.dampen;
-        }
-      }
-      // RotationBySpeedModule : tourner d'autant plus vite qu'on va vite. Sur
-      // `DissapatingParticles`, vingt degres par seconde sur une plage de
-      // vitesse de zero a un. Babylon n'a pas ce module : on ajoute la
-      // rotation a celle du RotationModule, ce qui est une approximation et se
-      // dit.
-      if (s.rotationBySpeed && s.rotationBySpeed.degreesPerSecond) {
-        const r = s.rotationBySpeed.degreesPerSecond * Math.PI / 180;
-        ps.minAngularSpeed = Math.min(ps.minAngularSpeed ?? 0, -r);
-        ps.maxAngularSpeed = Math.max(ps.maxAngularSpeed ?? 0, r);
-      }
-      // UVModule : planche de sprites. 13 systemes, dont les explosions.
-      if (s.sheet && tex && s.textureSize) {
-        const { tilesX, tilesY, cycles } = s.sheet;
-        const [tw, th] = s.textureSize;
-        ps.isAnimationSheetEnabled = true;
-        // La taille de case vient de l'extracteur, pas de tex.getSize() : la
-        // texture n'est pas forcement chargee au moment ou l'on cree le systeme,
-        // et une taille nulle donnerait des cases de 1 pixel.
-        ps.spriteCellWidth = Math.max(1, Math.floor(tw / Math.max(1, tilesX)));
-        ps.spriteCellHeight = Math.max(1, Math.floor(th / Math.max(1, tilesY)));
-        ps.startSpriteCellID = 0;
-        ps.endSpriteCellID = Math.max(1, tilesX * tilesY) - 1;
-        // Babylon etale la planche entiere sur la duree de vie quand la vitesse
-        // vaut 0, ce qui correspond exactement au cas cycles = 1 d'Unity.
-        // Au-dela, le rapport est approximatif : Babylon exprime une cadence,
-        // Unity un nombre de passages.
-        ps.spriteCellChangeSpeed = (cycles || 1) <= 1 ? 0 : cycles;
-        ps.spriteCellLoop = true;
-      }
-      const [lmin, lmax] = range(s.lifetimeRange, s.lifetime || 1, 0.05);
-      ps.minLifeTime = lmin; ps.maxLifeTime = lmax;
-      ps.emitRate = Math.max(0.1, s.rate || 10);
-      const [vmin, vmax] = range(s.speedRange, s.startSpeed || 0, 0);
-      ps.minEmitPower = vmin; ps.maxEmitPower = vmax;
-      ps.updateSpeed = 0.016 * (s.speedScale || 1);
-
-      const sh = s.shape || { type: "sphere", radius: 1 };
-      const r = Math.max(0.01, sh.radius || 1);
-      if (sh.type === "box") ps.createBoxEmitter(
-        new B.Vector3(0, 1, 0), new B.Vector3(0, 1, 0),
-        new B.Vector3(-r, -r, -r), new B.Vector3(r, r, r));
-      else if (sh.type.startsWith("cone")) ps.createConeEmitter(
-        r, Math.min(Math.PI / 2, (sh.angle || 30) * Math.PI / 180));
-      else if (sh.type.startsWith("hemisphere")) ps.createHemisphericEmitter(r);
-      else ps.createSphereEmitter(r);
-
-      ps.start();
-      this.live.set(i, ps);
     } catch (e) {
       this.failed++;
       this.live.set(i, null);

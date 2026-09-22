@@ -168,7 +168,7 @@ import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
          NIGHT_FADE } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone,
          Resources as Ressources } from "../web/src/resources.js";
-import { heatSources, heatAt, remoteConsoles, RemoteConsoles,
+import { heatAt, remoteConsoles, RemoteConsoles,
          Marshmallow, MALLOW } from "../web/src/consoles.js";
 import { lodThresholds } from "../web/src/lod.js";
 import { segmentDepthInSphere, occludes, lookRotation, alignToObserver,
@@ -1067,6 +1067,17 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("une sortie verticale n'a pas de lacet", lacet([0, 1, 0]), null);
   }
 
+  // L'effet de disparition graduelle (_vanishEffectPrefab).
+  {
+    const node = { scaling: { x: 1, setAll(v) { this.x = v; } } };
+    BlackHole.vanishEffect(node, 150, 100);
+    check("hors de portee, echelle pleine", node.scaling.x, 1);
+    BlackHole.vanishEffect(node, 70, 100);
+    check("a mi-chemin du trou noir, echelle moitie", round(node.scaling.x, 2), 0.5);
+    BlackHole.vanishEffect(node, 40, 100);
+    check("au rayon de capture, echelle nulle", node.scaling.x, 0);
+  }
+
   // LA LAISSE EST TIREE DU NOM : reproductible, et entre 150 et 750.
   const a = new DebrisField(); a.swallow("Shard_01");
   const b = new DebrisField(); b.swallow("Shard_01");
@@ -1713,8 +1724,8 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const gameplay = { placed: {
     OxygenVolume: [{ name: "Arbre", position: [0, 10, 0],
                      volume: { shape: "sphere", radius: 12, center: [0, 0, 0] } }],
-    HeatSource: [{ name: "FeuDeCamp", position: [50, 0, 0],
-                   fields: { _heat: 100 },
+    RadiationEmitter: [{ name: "FeuDeCamp", position: [50, 0, 0],
+                   fields: { radiationType: 1, magnitude: 100 },
                    volume: { shape: "sphere", radius: 4, center: [0, 0, 0] } }],
   } };
   const zones = oxygenZones(gameplay);
@@ -1724,7 +1735,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("dehors", inOxygenZone(zones, [0, 30, 0]), null);
   check("aucune zone : rien a signaler", oxygenZones({}).length, 0);
 
-  const heat = heatSources(gameplay);
+  const heat = radiationEmitters(gameplay).filter(e => e.type === 1);
   check("source de chaleur trouvee", heat.length, 1);
   check("au centre des braises, chaleur pleine", heatAt(heat, [50, 0, 0]), 100);
   check("a mi-rayon, la moitie", heatAt(heat, [52, 0, 0]), 50);
@@ -6691,11 +6702,6 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 {
   // --- LA FIN DE LA LISTE (docs/75-chaleur.md) ---
 
-  // LA CHALEUR QUI N'EXISTAIT PAS. `heatSources` ramassait les classes dont le
-  // NOM contient « heat » — il n'y en a AUCUNE dans ce build.
-  check("aucune classe de nom thermique", heatSources({ placed: {
-    SomethingElse: [{ name: "x", position: [0, 0, 0], volume: { radius: 3 } }],
-  } }).length, 0);
   // La chaleur est ailleurs : huit emetteurs de rayonnement de type 1.
   const gpR = { placed: { RadiationEmitter: [
     { name: "Campfire", body: "TimberHearth_Body", position: [0, 0, 0],
@@ -6710,7 +6716,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const emet = radiationEmitters(gpR);
   check("deux emetteurs", emet.length, 2);
   check("dont un seul thermique", emet.filter((e) => e.type === 1).length, 1);
-  const feux = heatSources(gpR, emet);
+  const feux = emet.filter(e => e.type === 1);
   check("une seule source de chaleur", feux.length, 1);
   check("et c'est le feu de camp", feux[0].name, "Campfire");
   // La courbe tient 100 jusqu'a dix unites, puis tombe a zero a quarante-cinq.
@@ -6817,6 +6823,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
       if (script === "SpacesuitAudioController") {
         return { clips: { _refillOxygenClip: "o2.ogg" } };
       }
+      if (script === "PlayerSubmergeAudio") {
+        return { clips: { _submergeClip: "plouf.ogg", _emergeClip: "sploush.ogg" } };
+      }
+      if (script === "FlashbackAudioController") {
+        return { clips: { _flashback: "woosh.ogg" } };
+      }
       return null;
     },
   };
@@ -6828,6 +6840,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("l'eteindre aussi", ui.fire("TurnOffFlashlight").file, "clic.ogg");
   check("viser", ui.fire("TargetReferenceFrame").file, "vise.ogg");
   check("lacher", ui.fire("UntargetReferenceFrame").file, "lache.ogg");
+  check("son d'immersion trouve par regex", ui.enterWater().file, "plouf.ogg");
+  check("son d'emergence", ui.exitWater().file, "sploush.ogg");
+  check("son de flashback", ui.flashback().file, "woosh.ogg");
   check("un evenement inconnu ne joue rien", ui.fire("N'importe quoi"), null);
   check("et sans clips, rien non plus", new UISounds(null).fire("AdvanceText"), null);
 

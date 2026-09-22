@@ -98,7 +98,9 @@ export function detachVelocity(point, centre, spin) {
           w[0] * r[1] - w[1] * r[0]];
 }
 
-/** Porteurs de croute, avec leurs proprietes de fragment. */
+import { BlackHole } from "./blackhole.js";
+
+/** Les six porteurs de fragments et leurs proprietes de build. */
 export function crustCarriers(gameplay) {
   return ((gameplay.placed || {}).MakeChildrenBreakable || []).map((c) => {
     const f = c.fields || {};
@@ -216,6 +218,11 @@ export class Crust {
         s.pos[k] += s.vel[k] * dt;
       }
       s.apply(s.pos);
+      // Effet de disparition graduelle (_vanishEffectPrefab) : on reduit
+      // l'echelle du fragment avant sa teleportation.
+      if (s.node) {
+        BlackHole.vanishEffect(s.node, r, 100);
+      }
       if (r < 40) {          // rayon de capture du trou noir
         s.remove();
         this.falling.splice(i, 1);

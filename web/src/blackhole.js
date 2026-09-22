@@ -140,6 +140,25 @@ export class BlackHole {
   }
 
   /**
+   * Simule l'effet visuel de `_vanishEffectPrefab` (absent du portage) en
+   * reduisant l'echelle du noeud a mesure qu'il approche du rayon de capture.
+   * C'est l'equivalent du fondu (eteints un a un) avant teleportation.
+   *
+   * @param node le noeud a reduire (fragment de croute)
+   * @param distance distance au centre du trou noir
+   * @param startRadius rayon a partir duquel le fondu commence
+   */
+  static vanishEffect(node, distance, startRadius = 100) {
+    if (!node) return;
+    if (distance > startRadius) {
+      if (node.scaling.x !== 1) node.scaling.setAll(1);
+      return;
+    }
+    const k = Math.max(0, (distance - CAPTURE_RADIUS) / (startRadius - CAPTURE_RADIUS));
+    node.scaling.setAll(k);
+  }
+
+  /**
    * Le lacet qui fait regarder dans la direction de sortie.
    *
    * `Quaternion.FromToRotation(camera.forward, whiteHole.forward)` tourne le

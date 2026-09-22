@@ -29,7 +29,7 @@ import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI, MenuInput } from "./settings.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
-         heatSources, heatAt, remoteConsoles, RemoteConsoles,
+         heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
@@ -904,10 +904,8 @@ async function boot() {
       })()
     : null;
   window.__sondeAncienne = sondeAncienne;
-  const emetteurs = radiationEmitters(gameplay);
-  const heat = heatSources(gameplay, emetteurs);
-  console.log(`${heat.length} sources de chaleur, dont `
-    + `${emetteurs.filter((e) => e.type === 1).length} feux de camp`);
+  const heat = radiationEmitters(gameplay);
+  console.log(`${heat.filter((e) => e.type === 1).length} sources de chaleur (feux de camp)`);
   // Sonde de verification : la chaleur EXISTE, et sur un feu elle vaut cent.
   window.__chaleur = { sources: heat,
                        sur: heat.length ? heatAt(heat, heat[0].position) : 0 };
@@ -917,7 +915,7 @@ async function boot() {
   console.log(`monde : ${(lighting.lights || []).length} lumieres, ` +
     `${dirFields.length} champs directionnels, ${polFields.length} champs polaires, ` +
     `${fluids.count} fluides, ` +
-    `${oxygen.length} zones d'oxygene, ${heat.length} sources de chaleur`);
+    `${oxygen.length} zones d'oxygene, ${heat.filter(e => e.type === 1).length} sources de chaleur`);
 
   // Les impostures de planete (docs/56-impostures.md). Les trois plans cables
   // sont dans la geometrie et leur renderer est ACTIF : sans ce lecteur, le
@@ -3130,7 +3128,7 @@ async function boot() {
     }
     const roulis = rollInput;
     rollInput = 0;
-    const input = death.dead
+    const input = (death.dead || dialogue.active)
       ? { forward: 0, right: 0, up: false, down: false, jump: false,
           roll: 0, loud: false } : {
         forward: axis(cmds.axis("Move Z", etatCmd) + ax.forward + gp.forward),
@@ -4974,7 +4972,18 @@ async function boot() {
     // l'image. Seuls les liquides comptent — la densite d'un fluide d'AIR est
     // sous 5, comme pour le vent de course (docs/46, lot 5).
     const sousLEau = !!(player.fluid && (player.fluid.density ?? 0) >= 5);
-    if (sousLEau !== fxEau) { fxEau = sousLEau; if (sousLEau) fx.enterWater(); else fx.exitWater(); }
+    if (sousLEau !== fxEau) {
+      fxEau = sousLEau;
+      if (sousLEau) {
+        fx.enterWater();
+        const s = sonsUI.enterWater();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+      } else {
+        fx.exitWater();
+        const s = sonsUI.exitWater();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+      }
+    }
     fx.update(now);
     postfx.appliquer(fx);
     if (fadeOverlay) fadeOverlay.style.opacity = String(fx.fadeFraction);
@@ -5057,7 +5066,12 @@ async function boot() {
         if (n) console.log(`son de mort demande (${death.cause}) : ${n} source(s)`);
       }
       // la sequence de flashback tient l'ecran, puis la boucle repart
+      const phaseAvant = death.state.phase;
       if (death.update(dt)) respawn();
+      if (phaseAvant === "attente" && death.state.phase !== "attente") {
+        const s = sonsUI.flashback();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+      }
     } else if (deathCued) {
       deathCued = null;
     }
@@ -5336,7 +5350,34 @@ async function boot() {
           sondeAncienne.pos[2] - anchorPos[2]));
       }
     }
-    for (const p of portes) p.update(now);
+    for (const p of portes) {
+      p.update(now);
+      if (p.noeud === undefined) {
+        p.noeud = null;
+        for (const e of geo) {
+          const n = e.nodes.get(p.data.name);
+          if (n) { p.noeud = n; break; }
+        }
+      }
+      if (p.noeud) {
+        for (const m of (p.noeud.getChildMeshes ? p.noeud.getChildMeshes() : [])) {
+          // L'alpha de la porte s'effondre en une seconde et on l'applique aux materiaux
+          if (m.material) {
+            m.material.alpha = p.alpha;
+            m.visibility = p.alpha;
+          }
+          // La solidite se coupe instantanement. Si c'est un collider cache, on le coupe.
+          // Si la physique est sur un maillage visuel, on filtre la collision pour ne pas le cacher avant la fin du fondu.
+          if (m.name.toLowerCase().includes("collider")) {
+            m.setEnabled(p.solid);
+          } else if (!p.solid && m.physicsBody) {
+            m.physicsBody.shape.filterMembershipMask = 0;
+          }
+        }
+        // Une fois completement invisible, on peut couper tout le noeud (comme pour la toile).
+        if (p.alpha <= 0) p.noeud.setEnabled(false);
+      }
+    }
     // Le casque suit le regard avec un vingtieme de retard, et seulement quand
     // on le porte. `pitch` est le tangage en angles d'Euler d'Unity : la bande
     // [70, 280] est celle qu'on ne peut pas atteindre, et le suivi vertical y

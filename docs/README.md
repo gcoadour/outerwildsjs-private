@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`122-finitions.md`](122-finitions.md) — **finitions et raccordements : portes d'énergie liées aux colliders, sons d'immersion et de flashback, sous-émetteurs Shuriken, immobilisation en dialogue et chaleur des émetteurs de rayonnement**
 - [`121-avis.md`](121-avis.md) — **la queue de `refait.mjs`, fermee : 176 sur 176. Une notification en cours fait tomber la suivante, un teleporteur met une demi-seconde a vous rendre, les meteores tombaient vers ce que le joueur avait sous les pieds, et une case du trace est epinglee au milieu**
 - [`120-jumelles.md`](120-jumelles.md) — **le sablier ne coulait pas : les jumelles n'ont aucun primaire et tournent l'une autour de l'autre à 31,65 — exactement la vitesse d'une orbite mutuelle circulaire —, et trois mesures indépendantes le disent**
 - [`119-bruit.md`](119-bruit.md) — **le prédateur n'écoute pas ce qu'on croyait : sous deux cents unités le moindre bruit fait de vous une cible, au-delà il faut passer dix — et dix est exactement le plafond du joueur, sauf en diagonale**

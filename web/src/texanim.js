@@ -60,18 +60,19 @@ export class TextureScrollers {
   /** Rattache les descriptions aux maillages d'un lot charge, par nom. */
   attach(meshes) {
     if (!this.data.length || !meshes || !meshes.length) return 0;
-    const libres = new Map();
-    for (const m of meshes) {
-      if (this.live.some((x) => x.mesh === m)) continue;
-      const l = libres.get(m.name) || [];
-      l.push(m);
-      libres.set(m.name, l);
-    }
+    const libres = new Set(meshes.filter((m) => !this.live.some((x) => x.mesh === m)));
     let n = 0;
     for (const s of this.data) {
-      const candidats = libres.get(s.name);
-      if (!candidats || !candidats.length) continue;
-      const cible = candidats.shift();
+      let cible = null;
+      for (const m of libres) {
+        if (m.name === s.name || m.name.includes(s.name)) {
+          cible = m;
+          break;
+        }
+      }
+      if (!cible) continue;
+      libres.delete(cible);
+
       // Le clone : sans lui, tous les maillages du meme materiau defileraient
       // ensemble, ce que Unity evite en instanciant par renderer.
       if (cible.material && typeof cible.material.clone === "function") {

@@ -358,6 +358,14 @@ export class UISounds {
     this.loop = null;      // le clip de boucle en cours, ou null
   }
 
+  clipRegex(script, regex, body = null) {
+    if (!this.events) return null;
+    const e = this.events.of(script, body);
+    if (!e || !e.clips) return null;
+    const key = Object.keys(e.clips).find(k => regex.test(k));
+    return key ? e.clips[key] : null;
+  }
+
   /** Le fichier d'un champ de clip sur un script donne, ou null. */
   clip(script, champ, body = null) {
     if (!this.events) return null;
@@ -405,6 +413,24 @@ export class UISounds {
   /** `OnRefillOxygen` : le plein d'oxygene s'entend, et a plein volume. */
   refillOxygen() {
     const f = this.clip("SpacesuitAudioController", "_refillOxygenClip");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** L'entree dans l'eau : clip deduit par son nom de champ. */
+  enterWater() {
+    const f = this.clipRegex("PlayerSubmergeAudio", /submerge/i);
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** La sortie de l'eau. */
+  exitWater() {
+    const f = this.clipRegex("PlayerSubmergeAudio", /emerge/i);
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Le son de la sequence de mort (flashback). */
+  flashback() {
+    const f = this.clipRegex("FlashbackAudioController", /.*/);
     return f ? { file: f, volume: 1 } : null;
   }
 }

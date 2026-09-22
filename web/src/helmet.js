@@ -1,6 +1,6 @@
 // Le casque, l'alarme, les voyants de degats et les notifications.
 //
-// @lit HUDHelmet, MasterAlarm, HUDDamageDisplay, NotificationManager
+// @lit HUDHelmet, MasterAlarm, HUDDamageDisplay, NotificationManager, RoastPromptEvent
 // Le lot « interface » de docs/44, que docs/46 avait laisse de cote : « le
 // portage a son propre HUD, et remplacer un HUD qui marche par une
 // transposition n'est pas un gain ».

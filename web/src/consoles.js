@@ -180,30 +180,7 @@ export const MIN_TOAST = 0.6;
  * Le motif est garde pour ce qu'il pourrait trouver ailleurs, et il est
  * desormais SECOND : les emetteurs passent d'abord.
  */
-export function heatSources(gameplay = {}, emitters = []) {
-  const out = [];
-  // Les emetteurs de rayonnement THERMIQUE : la vraie source.
-  for (const e of emitters) {
-    if (e.type !== 1) continue;
-    out.push({ name: e.name, position: e.position, body: e.body,
-               emitter: e, radius: 0, heat: e.magnitude });
-  }
-  for (const [cls, list] of Object.entries(gameplay.placed || {})) {
-    if (!/heat/i.test(cls)) continue;
-    for (const e of list) {
-      const f = e.fields || {};
-      const heat = Object.entries(f).find(([k, v]) =>
-        typeof v === "number" && /heat|temperature|intensity/i.test(k));
-      const radius = (e.volume && e.volume.radius) ||
-        Object.entries(f).find(([k, v]) =>
-          typeof v === "number" && v > 0 && /radius|range/i.test(k))?.[1] || 0;
-      if (!radius) continue;
-      out.push({ name: e.name, position: e.position, radius,
-                 heat: heat ? Math.abs(heat[1]) : 100 });
-    }
-  }
-  return out;
-}
+// @autrement HeatSource : la vraie chaleur vient des RadiationEmitter
 
 /**
  * Chaleur recue en un point, en unites de `_toastLevel` (0 a 100).
@@ -246,20 +223,15 @@ export function jetpackPrompts({
   return rien;
 }
 
-export function heatAt(sources, world, shiftOf = null) {
+export function heatAt(emitters, world, shiftOf = null) {
   let best = 0;
-  for (const s of sources) {
+  for (const s of emitters) {
+    if (s.type !== 1) continue;
     const dec = shiftOf ? (shiftOf(s) || [0, 0, 0]) : [0, 0, 0];
     const d = Math.hypot(world[0] - s.position[0] - dec[0],
                          world[1] - s.position[1] - dec[1],
                          world[2] - s.position[2] - dec[2]);
-    // Un emetteur porte SA courbe : ni lineaire, ni bornee par son collider.
-    // Celle des feux de camp tient 100 jusqu'a dix unites puis tombe a zero a
-    // quarante-cinq — le collider de 2,36, lui, est la forme du feu, pas sa
-    // portee, et c'est ce que le portage avait pris pour une portee.
-    if (s.emitter) { best = Math.max(best, radiationAt(s.emitter, d)); continue; }
-    if (d >= s.radius) continue;
-    best = Math.max(best, s.heat * (1 - d / s.radius));
+    best = Math.max(best, radiationAt(s, d));
   }
   return best;
 }

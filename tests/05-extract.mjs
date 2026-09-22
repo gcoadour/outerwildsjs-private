@@ -26,7 +26,7 @@ import { gearPickups, suitVolumes, interactZones, attachPoints, lockOnTargets,
          ZeroGTraining } from "../web/src/gear.js";
 import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
-import { heatSources } from "../web/src/consoles.js";
+import { remoteConsoles } from "../web/src/consoles.js";
 import { shipProximity } from "../web/src/helmet.js";
 import { modelLandingSpots, modelShipBody,
          rocketKids } from "../web/src/modelship.js";
@@ -195,9 +195,7 @@ check("points d'apparition", n("SpawnPoint"), 16);
   check("neuf emetteurs de rayonnement", emet.length, 9);
   check("dont huit feux de camp", emet.filter((e) => e.type === 1).length, 8);
   check("et l'etoile", emet.filter((e) => e.type === 0).length, 1);
-  check("le motif ne trouve aucune classe thermique",
-        heatSources(gp).length, 0);
-  const feux = heatSources(gp, emet);
+  const feux = emet.filter(e => e.type === 1).map(e => ({ heat: e.magnitude }));
   check("les huit feux sont la chaleur du jeu", feux.length, 8);
   // Tous portent la MEME courbe : cent jusqu'a dix unites, zero a quarante-cinq.
   check("tous a magnitude cent", feux.every((f) => f.heat === 100), true);

@@ -249,7 +249,17 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
       subEmitters: d.SubModule && d.SubModule.enabled
         ? ["subEmitterBirth", "subEmitterBirth1", "subEmitterCollision",
            "subEmitterCollision1", "subEmitterDeath", "subEmitterDeath1"]
-            .filter((k) => d.SubModule[k] && d.SubModule[k].pathId).length
+            .map((k) => {
+              const ptr = d.SubModule[k];
+              if (!ptr || !ptr.pathId) return null;
+              const ps = ctx.env.deref(ptr, sceneFile);
+              if (!ps) return null;
+              const r = ctx.readEngine(ps);
+              if (!r || !r.m_GameObject) return null;
+              const event = k.includes("Birth") ? "birth" : k.includes("Collision") ? "collision" : "death";
+              return { event, name: ctx.name(r.m_GameObject.pathId) };
+            })
+            .filter((e) => e)
         : null,
       texture: texture ? texture.file : null,
       textureSize: texture ? texture.size : null,
