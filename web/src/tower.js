@@ -44,6 +44,11 @@
 // comme etant dedans. Sans cela, revenir d'un menu vous laisse dehors alors
 // que vous n'avez pas bouge.
 
+export const TOWER_EVENTS = {
+  activate: "ActivateLaunchTower",
+  learnCodes: "LearnLaunchCodes",
+};
+
 /** Constructeur d'`Elevator`. La scene, elle, pose 31,5 et 5. */
 export const ELEVATOR = { trackHeight: 10, liftDuration: 3 };
 

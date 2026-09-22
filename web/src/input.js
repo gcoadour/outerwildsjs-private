@@ -24,6 +24,11 @@
 // @lit GroundInput, JetpackInput, ShipInput, MapInput, PlayerCameraInput
 // @lit TelescopeInput, InterfaceInput, ProbeInput, ReferenceFrameInput
 // @lit ConversationInput, ComputerInput, SatelliteInput, XboxInput
+// @lit DebugInputManager, DebugHUD, DebugBreakAllChildren, TapeMeasure
+// @autrement DebugInputManager : touches de debogage Unity non utilisees en production
+// @autrement DebugHUD : affichage de debogage Unity non utilise en production
+// @autrement DebugBreakAllChildren : utilitaire de debogage Unity pour casser les hierarchies
+// @autrement TapeMeasure : outil de mesure de distance dans la scene de developpement
 
 /**
  * Le repli : les liaisons du build, telles que `data/input.json` les rend.

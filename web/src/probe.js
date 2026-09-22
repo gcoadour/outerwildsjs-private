@@ -26,6 +26,11 @@
 // @lit ProbeHorizonTracker, ProbeGUI, ProbeDestructionMessenger, ProbeInfo
 // @lit HighSpeedCollisionSensor, SelfDestruct, HideInMapView
 
+export const TUTORIAL_EVENTS = {
+  startProbe: "StartProbeTutorial",
+  completeShipProbe: "CompleteShipProbeTutorial",
+};
+
 /**
  * Les nombres, tous lus dans le build.
  *
@@ -357,6 +362,7 @@ export class Probe {
     this.tracking = null;
     // ProbeAnchor : la boucle de vol s'eteint en une demi-seconde
     this.flightLoop = 1;
+    this.events = [];
   }
 
   /** `ProbeLantern` : eteinte en vol, elle monte a 50 en deux secondes une fois posee. */
@@ -389,6 +395,7 @@ export class Probe {
     // ou elle s'est plantee.
     this.localImpact = cible && cible.worldToLocal
       ? cible.worldToLocal(this.pos) : [...this.pos];
+    this.events.push("ProbeAnchorToSurface");
     return true;
   }
 
@@ -410,7 +417,10 @@ export class Probe {
       }
       return this;
     }
-    if (!this.colliderOn && this.age >= this.cfg.colliderDelay) this.colliderOn = true;
+    if (!this.colliderOn && this.age >= this.cfg.colliderDelay) {
+      this.colliderOn = true;
+      this.events.push("IgnoreProbeCollider");
+    }
 
     const f = ctx.field;
     if (f) {
@@ -613,6 +623,7 @@ export class ProbeLauncher {
     this.lastSnapshot = { size: taille, rear: arriere, distance: d,
                           anchored: this.probe.anchored };
     this.events.push("ProbeSnapshot");
+    this.events.push("ProbeSnapshotImage");
     if (arriere) this.events.push("RearviewProbeSnapshot");
     if (!this.probe.anchored) this.events.push("MidairProbeSnapshot");
     return this.lastSnapshot;

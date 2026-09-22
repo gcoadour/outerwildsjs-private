@@ -24,6 +24,11 @@ function qrot(q, v) {
           vz + w * tz + x * ty - y * tx];
 }
 
+export const OBSERVATORY_EVENTS = {
+  triggerMap: "TriggerObservatoryMap",
+};
+
+// @lit ObservatoryMap
 export class Interactables {
   /**
    * @param gameplay data/gameplay.json
@@ -32,6 +37,13 @@ export class Interactables {
   constructor(gameplay) {
     const placed = (gameplay && gameplay.placed) || {};
     this.items = [];
+    for (const x of placed.ObservatoryMap || []) {
+      this.items.push({
+        kind: "observatoryMap", name: x.name, world: x.position,
+        range: 3, prompt: " View Solar System",
+        body: x.body || null,
+      });
+    }
     for (const x of placed.InteractReceiver || []) {
       this.items.push({
         kind: "interact", name: x.name, world: x.position,

@@ -31,9 +31,15 @@
 // La musique de voyage et celle de la fin des temps sont les deux declencheurs
 // que docs/43-pnj-son-decollage.md avait releves et laisses ouverts.
 
-// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController
+// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController, PlayerAudioEffects
 // Le son d'evenement : seize classes, et une couche entiere qui manquait
 // (docs/46-migration-lots.md, lot 5).
+
+export const AUDIO_EVENTS = {
+  playerEnterBlackHole: "PlayerEnterBlackHole",
+  suitUp: "SuitUp",
+  removeSuit: "RemoveSuit",
+};
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -432,5 +438,23 @@ export class UISounds {
   flashback() {
     const f = this.clipRegex("FlashbackAudioController", /.*/);
     return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Le son d'enfilage de la combinaison (PlayerAudioEffects._suitUpSound). */
+  suitUp() {
+    const f = this.clip("PlayerAudioEffects", "_suitUpSound");
+    return f ? { file: f, volume: 0.7 } : null;
+  }
+
+  /** Le son de retrait de la combinaison (PlayerAudioEffects._removeSuitSound). */
+  removeSuit() {
+    const f = this.clip("PlayerAudioEffects", "_removeSuitSound") || this.clip("PlayerAudioEffects", "_suitUpSound");
+    return f ? { file: f, volume: 0.7 } : null;
+  }
+
+  /** Le son d'aspiration dans le trou noir (PlayerAudioEffects._blackHoleWarp). */
+  blackHoleWarp() {
+    const f = this.clip("PlayerAudioEffects", "_blackHoleWarp");
+    return f ? { file: f, volume: 0.5 } : null;
   }
 }

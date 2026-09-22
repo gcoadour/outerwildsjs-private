@@ -28,8 +28,14 @@
 // (0,5 ; 0,5 ; 0,5) qui figurait ici etait FAUX. Mesure sur le build, le
 // brouillard de la scene est un vert-gris tres sombre — trois fois plus
 // sombre que ce qui etait recopie.
-// @lit PlayerCameraController
+// @lit PlayerCameraController, FogCloak
+// @autrement FogCloak : masquage des rendus gere par setVisible de FogCloaks
 // Le plan lointain reduit dans le brouillard vient de son `LateUpdate`.
+
+export const FOG_EVENTS = {
+  enterBramble: "EnterBrambleFog",
+  exitBramble: "ExitBrambleFog",
+};
 //
 // `AddDegreesY(d)` est une ligne — `_degreesY += d` — et c'est ce qui en fait
 // une trouvaille : le cap de la camera est un CHAMP de ce controleur, qu'on

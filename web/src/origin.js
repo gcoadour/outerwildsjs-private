@@ -33,6 +33,10 @@
 // sans qu'on ait a le toucher. C'est ce que fait ce module en ne deplaçant que
 // les racines de corps.
 
+export const ORIGIN_EVENTS = {
+  recenteredUniverse: "RecenteredUniverse",
+};
+
 export class FloatingOrigin {
   constructor(threshold = 500) {
     this.threshold = threshold;

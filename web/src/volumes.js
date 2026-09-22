@@ -414,7 +414,8 @@ export function radiationAt(emitter, distance) {
 /**
  * Un volume compose de plusieurs declencheurs enfants.
  *
- * @lit CompoundTriggerVolume, ChildTriggerVolume, SandstormVolume
+ * @lit CompoundTriggerVolume, ChildTriggerVolume, SandstormVolume, InterferenceVolume
+ * @autrement InterferenceVolume : composant inerte dans l'alpha car aucun InterferenceDetector n'est instancie
  *
  * `CompoundTriggerVolume` tient un COMPTE par collider, a travers tous ses
  * enfants :

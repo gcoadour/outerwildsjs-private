@@ -37,7 +37,15 @@
 // la duree cumulee, le plan qui avance, le tourbillon et le flou final. Ce qui
 // n'en vient PAS : la liste exacte des valeurs de `DeathType`, qui vit dans
 // l'assembly. Les causes ci-dessous sont donc celles que CE portage sait
-// produire, chacune reliee a un evenement du jeu qui existe vraiment.
+// @lit PlayerDeathHandler, Flashback
+// @autrement Flashback : la gestion des textures et passes Unity (Load, ActivateScene, UpdateCameraEffects, ConvertToTexture2D) est portee par le canvas et shaders WebGL
+
+export const DEATH_EVENTS = {
+  triggerPlayerDeath: "TriggerPlayerDeath",
+  triggerFlashback: "TriggerFlashback",
+  startFlashback: "StartFlashback",
+  finishFlashback: "FinishFlashback",
+};
 
 export const FLASHBACK = {
   // `FLASHBACK_START_DELAY` : de `TriggerFlashback` a `StartFlashback`.

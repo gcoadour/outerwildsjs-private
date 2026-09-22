@@ -17,8 +17,14 @@
 //                 une HUDCamera dediee ; leur etendue a l'ecran depend de cette
 //                 camera, que ce portage ne reproduit pas.
 
-// @lit GUIMode, PromptManager, PlayerResourceGUI
+// @lit GUIMode, PromptManager, PlayerResourceGUI, HUDCameraScript
 // Les quatre modes d'affichage, le catalogue d'invites et les jauges.
+
+export const HUD_EVENTS = {
+  changeGUIMode: "ChangeGUIMode",
+  addScreenPrompt: "AddScreenPrompt",
+  removeScreenPrompt: "RemoveScreenPrompt",
+};
 
 const DIR = "data/interface/";
 

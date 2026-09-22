@@ -4,10 +4,20 @@
 // Quatre systemes que le portage n'avait jamais regardes, un exemplaire de
 // chacun dans la scene.
 
-// @lit MarshmallowStick, ShipComputerCamera, RemoteFlightConsole
+// @lit MarshmallowStick, ShipComputer, ShipComputerCamera, RemoteFlightConsole
+// @autrement ShipComputer : consultation des secteurs portee par current, move et zoom
 // L'ordinateur de bord, la lampe et la guimauve.
 
 import { radiationAt } from "./volumes.js";
+
+export const COMPUTER_EVENTS = {
+  updated: "ComputerUpdated",
+};
+
+export const MALLOW_EVENTS = {
+  eat: "EatMarshmallow",
+  startTutorial: "StartTutorial",
+};
 
 /**
  * Ordinateur de bord.

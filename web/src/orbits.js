@@ -23,7 +23,8 @@
 // @autrement OWRigidbody : vingt-neuf methodes qui transmettent a un Rigidbody
 // de PhysX, la ou ce portage a Havok et son propre integrateur. Les refaire une
 // par une serait reecrire un moteur physique pour faire baisser un chiffre.
-// @lit OWRigidbody, InitialMotion, InitialVelocity
+// @autrement InertiaTensorCalibrator : Havok calcule nativement les tenseurs d'inertie des corps rigides
+// @lit OWRigidbody, InitialMotion, InitialVelocity, InertiaTensorCalibrator
 // Les corps mobiles et leur mouvement de depart.
 
 import { fieldStrength } from "./gravity.js";

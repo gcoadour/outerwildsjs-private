@@ -33,12 +33,14 @@ export const MARKER_RADIUS = 0.51;
 export const TRAIL_COUNT = 100;
 export const TRAIL_ANGLE = 5;      // degres entre deux points de trace
 
+// @lit MinimapHUD
 // Ce que `Minimap` et `MinimapHUD` se disent par GlobalMessenger. Les nommer
 // ici, c'est ce que compte `scripts/evenements.mjs`.
 export const MINIMAP_EVENTS = {
   on: "MinimapEnabled",
   off: "MinimapDisabled",
   acquire: "AquireMinimap",   // orthographe du build, faute comprise
+  shipDestroyed: "ShipDestroyed",
 };
 
 const norm = (v) => {

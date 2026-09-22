@@ -27,7 +27,8 @@
 // etait donc lue sans etre nommee, ce que le recensement ne peut pas deviner
 // (docs/65-onde.md).
 
-// @lit SettingsMenu, Menu
+// @lit SettingsMenu, Menu, LoadTimeTracker
+// @autrement LoadTimeTracker : mesure du temps de chargement des scenes Unity
 // Les sept options de `SettingsMenu`, et ce que chacune commande.
 //
 // `SettingsMenu.UpdateOptionText` ecrit les sept libelles, et `Open` / `Close`
@@ -42,6 +43,10 @@
 // c'est le pendant d'une regle qu'on ne trouve pas dans `SettingsMenu` mais
 // dans `Menu.Update` : le curseur n'apparait pas a l'ouverture, il apparait
 // quand la souris BOUGE (voir `MenuInput` ci-dessous).
+
+export const MENU_EVENTS = {
+  loadFromMenu: "LoadFromMenu",
+};
 
 const KEY = "outerwilds.settings";
 

@@ -56,6 +56,13 @@
 
 import { insideVolume } from "./gravity.js";
 
+export const TELEPORT_EVENTS = {
+  enterCentral: "EnterTimeLoopCentral",
+  exitCentral: "ExitTimeLoopCentral",
+  teleportPlayer: "TeleportPlayer",
+  fireAllTeleporters: "FireAllTeleporters",
+};
+
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const len = (v) => Math.hypot(v[0], v[1], v[2]);
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];

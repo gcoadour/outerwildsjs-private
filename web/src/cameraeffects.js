@@ -30,8 +30,19 @@
 // avec ses parametres. Le portage rend la vignette par un post-processus de
 // Babylon regle sur les MEMES nombres (`postfx.js`), ce qui est le cas prevu
 // par docs/103 : une implementation originale, pas une transposition.
-// @lit PlayerCameraEffectController, GlowEffect, Vignetting, GrayscaleEffect, TwirlEffect
+// @lit PlayerCameraEffectController, GlowEffect, Vignetting, GrayscaleEffect, TwirlEffect, CustomAspectRatio, ClearAlphaChannel, DepthOfFieldScatter
+// @autrement ClearAlphaChannel : passe de shader nettoyant le canal alpha du framebuffer Unity
+// @autrement DepthOfFieldScatter : effet de profondeur de champ scatter Unity 4
 // L'etat des six effets d'image de la camera du joueur (docs/47).
+
+export const CAMERA_EVENTS = {
+  disableGUI: "DisableGUI",
+  triggerFlashback: "TriggerFlashback",
+  enterWaterZone: "EnterWaterZone",
+  exitWaterZone: "ExitWaterZone",
+  teleportPlayer: "TeleportPlayer",
+  takeNewPlanetPicture: "TakeNewPlanetPicture",
+};
 
 export const WAKE_DURATION = 3;
 export const TWIRL_START_ANGLE = 220;
@@ -97,6 +108,7 @@ export function reglagesDe(camera, nom) {
   const un = (k) => (c.effects && c.effects[k] && c.effects[k][0]) || null;
   return {
     fov: c.fov ?? null,
+    aspectRatio: (c.effects && c.effects.CustomAspectRatio && c.effects.CustomAspectRatio[0] && c.effects.CustomAspectRatio[0]._aspectRatio) ?? null,
     noise: un("NoiseEffect"),
     grain: un("NoiseAndGrain"),
     motionBlur: un("MotionBlur"),

@@ -33,5 +33,5 @@ echo "   attendu (Linux) : 5c7defadfd42368402d95a1da9f753e1dcb8e50ef184801718fa8
 
 echo ">> Extraction dans work/game"
 unzip -q -o "$ZIP" -d work/game
-find work/game -maxdepth 2 -name '*_Data' -printf '   %p\n'
+find work/game -maxdepth 2 -name '*_Data' -exec echo "   {}" \;
 echo ">> Version Unity : $(head -c 40 work/game/*_Data/mainData | tr -c '[:print:]' '\n' | grep -m1 -E '^[0-9]+\.[0-9]+')"

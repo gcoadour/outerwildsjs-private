@@ -57,7 +57,7 @@ const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
                 // lancement (docs/91-remise-a-zero.md).
                 "ResetSimulationTrigger",
                 "MajorSector", "ProbePromptTrigger", "TelescopePromptTrigger",
-                "RadiationEmitter",
+                "RadiationEmitter", "ObservatoryMap",
                 // §5 le son reactif : le jeu repond a ce qu'on FAIT.
                 "PlayerMovementAudio", "TurbulenceAudio", "ThrusterAudio",
                 "SpacesuitAudioController", "PlayerAudioEffects",

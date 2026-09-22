@@ -14,6 +14,12 @@
 // Tout ce module est de la logique pure : il ne touche ni a Babylon ni au DOM,
 // et rend des positions, des booleens et des durees que l'affichage applique.
 
+export const PROXIMITY_EVENTS = {
+  enter: "EnterShipProximity",
+  exit: "ExitShipProximity",
+  helmetActivated: "HelmetHUDActivated",
+};
+
 /**
  * `_helmetLagSpeed`. Le constructeur pose 0,1 ; l'INSTANCE pose 0,05, et c'est
  * elle qui gagne — comme la course de l'ascenseur (docs/51-tour.md). Le casque

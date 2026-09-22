@@ -19,6 +19,12 @@
 // constructeur (150 -> 33, de la 2e a la 17e) ne servent nulle part : les deux
 // instances posees les remplacent toutes les quatre.
 
+export const SAND_EVENTS = {
+  debugTransfer: "DebugSandTransfer",
+  enterTimeLoopCentral: "EnterTimeLoopCentral",
+  exitTimeLoopCentral: "ExitTimeLoopCentral",
+};
+
 /** Fraction de la transition, bornee comme le fait le build (`Clamp01`). */
 export function sandProgress(minutes, start, end) {
   if (!(end > start)) return minutes >= end ? 1 : 0;

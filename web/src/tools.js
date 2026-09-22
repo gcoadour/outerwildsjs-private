@@ -21,6 +21,10 @@
 
 import { effetsSecondaires } from "./postfx.js";
 
+export const TELESCOPE_EVENTS = {
+  completeTutorial: "CompleteTelescopeTutorial",
+};
+
 // `Telescope`, serialise sur PlayerCamera : `_minFOV` 10, `_maxFOV` 60,
 // `_zoomInSeconds` 2. Le constructeur, lui, pose 15 / 60 / 2 — c'est
 // l'instance qui gagne.

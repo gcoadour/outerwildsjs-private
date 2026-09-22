@@ -9,7 +9,15 @@
 // Quatre QuantumOrbit sont posees sur quatre corps hotes, chacune avec son
 // rayon : Brittle Hollow 1400, Twin01 1700, Timber Hearth 1100, Giant's Deep
 // 1500. La lune se trouve autour de l'un d'eux, et change d'hote des qu'on
-// cesse de la regarder.
+// @lit QuantumMoon, QuantumOrbit, QuantumFogBoundary, AlignQuantumMoon
+// @autrement QuantumMoon : l'effondrement et l'observation quantique sont portes par update, relocate et isObserved
+// @autrement AlignQuantumMoon : l'alignement face a la camera est porte par alignToObserver
+
+export const QUANTUM_EVENTS = {
+  enterMoon: "EnterQuantumMoon",
+  exitMoon: "ExitQuantumMoon",
+  switchOff: "SwitchFlashlightOff",
+};
 
 export const LOCK_MAX = 2000;
 export const LOCK_MIN = 150;

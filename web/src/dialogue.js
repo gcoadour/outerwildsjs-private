@@ -50,6 +50,11 @@
 
 import { paginate, LAYOUT } from "./dialogueui.js";
 
+export const CONVERSATION_EVENTS = {
+  enter: "EnterConversation",
+  exit: "ExitConversation",
+};
+
 const STORAGE_KEY = "outerwildsjs.knowledge";
 
 export async function loadDialogue() {

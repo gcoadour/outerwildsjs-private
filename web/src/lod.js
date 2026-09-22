@@ -37,11 +37,12 @@ export const LOD_SLICE = 400;
  *
  * @returns Map nom d'objet -> seuil
  */
+// @lit LODBiasManager
 export function lodThresholds(gameplay = {}) {
   const out = new Map();
   const placed = gameplay.placed || {};
   for (const [cls, list] of Object.entries(placed)) {
-    if (!/^(Create)?LODGroup$|^LODLayer$/i.test(cls)) continue;
+    if (!/^(Create)?LODGroup$|^LODLayer$|^LODBiasManager$/i.test(cls)) continue;
     for (const e of list) {
       const f = e.fields || {};
       let best = null;

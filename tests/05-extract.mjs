@@ -1223,7 +1223,7 @@ check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
   const subs = parts.systems.filter((s) => s.subEmitters !== null);
   check("deux modules de sous-emetteurs", subs.length, 2);
   check("dont un entierement vide",
-        subs.filter((s) => s.subEmitters === 0).length, 1);
+        subs.filter((s) => (Array.isArray(s.subEmitters) ? s.subEmitters.length === 0 : s.subEmitters === 0)).length, 1);
 }
 
 // Le casque, l'alarme, les voyants, les invites de guimauve (docs/52-casque.md).

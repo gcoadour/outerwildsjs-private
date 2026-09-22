@@ -27,6 +27,14 @@
 import { insideVolume } from "./gravity.js";
 import { restingPoint } from "./frames.js";
 
+export const GEAR_EVENTS = {
+  suitUp: "SuitUp",
+  removeSuit: "RemoveSuit",
+  aquireProbe: "AquireProbe",
+  aquireMinimap: "AquireMinimap",
+  suitWarning: "TriggerSuitWarning",
+};
+
 /** Les deux objets a ramasser, avec ce que chacun debloque. */
 export function gearPickups(gameplay) {
   return ((gameplay.placed || {}).GearPickup || []).map((c) => {

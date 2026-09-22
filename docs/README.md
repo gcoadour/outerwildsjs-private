@@ -143,3 +143,5 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`48-ciel-mesure.md`](48-ciel-mesure.md) — **le ciel mesuré : la voûte qui tourne enfin, dix visages de nuage, et mille étoiles qui s'éteignent pendant la boucle**
 - [`47-effets-image.md`](47-effets-image.md) — **les effets d'image, et le commentaire qui les cachait : 24 effets sur 15 caméras, le champ de vision et le télescope corrigés**
 - [`46-migration-lots.md`](46-migration-lots.md) — **six lots écrits : référentiels déclarés, décor vivant, son d'événement, équipement à ramasser, décalcomanies, volumes de jeu**
+- [`122-finitions.md`](122-finitions.md) — **finitions et raccordements : portes, sons réactifs, sous-émetteurs et chaleur**
+- [`123-evenements-recensement.md`](123-evenements-recensement.md) — **recensement complet et événements globaux : 100 % des composants et événements raccordés**

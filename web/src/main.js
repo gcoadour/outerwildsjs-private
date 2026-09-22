@@ -97,6 +97,8 @@ import { directionalFields, polarFields, insideVolume,
 // @autrement Tonemapping : quatre methodes de courbe et de cible de rendu,
 // c'est-a-dire l'implementation d'un shader d'Unity 4. Babylon a la sienne, et
 // c'est elle qu'on regle (docs/103-refait.md).
+// @lit Locator
+// @autrement Locator : singleton d'acces global aux composants remplace par le contexte du moteur web
 // @lit TonemappingManager, Tonemapping, DS_Decals, DS_DecalsMeshRenderer, DS_DecalProjector
 // Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
 // `_isTonemappingActive` faux par defaut du manager ; les decalcomanies passent
@@ -4291,6 +4293,7 @@ async function boot() {
         // `OnPlayerEnterBlackHole` : l'image se visse de 220 a 360 degres en
         // deux secondes. C'est ce qui fait qu'on ne voit pas la coupure.
         fx.enterBlackHole(now);
+        sonsUI.blackHoleWarp();
         player.pos.x = t.position[0]; player.pos.y = t.position[1]; player.pos.z = t.position[2];
         player.vel.x = t.velocity[0]; player.vel.y = t.velocity[1]; player.vel.z = t.velocity[2];
         // `ReceiveWarpedPlayer` aligne l'avant de la camera sur celui du trou

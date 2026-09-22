@@ -17,6 +17,8 @@
 // pour que l'enchainement se lise a l'ecran ; elles sont ici en clair pour
 // qu'on ne les prenne pas pour des mesures.
 
+// @lit Detonator
+// @autrement Detonator : le composant Detonator d'Unity 4 est remplace par la mise en scene Babylon de SunStage
 export const SUN_SHOW = {
   shrinkSeconds: 12,     // duree de la contraction avant l'explosion
   shrinkTo: 0.62,        // echelle atteinte au creux de la contraction
