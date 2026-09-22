@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`112-invites.md`](112-invites.md) — **la zone du bas n'arbitre rien : le portage appliquait une règle de plus que le build, et n'importe quelle invite pouvait chasser les codes de lancement**
 - [`111-passages.md`](111-passages.md) — **on n'arrive pas quelque part, on y arrive *avec* quelque chose : la vitesse du point d'arrivée et le regard du récepteur, que le portage ne posait ni l'un ni l'autre**
 - [`110-croute.md`](110-croute.md) — **un morceau de croûte ne tombe pas droit : il part avec la vitesse du point d'où il se détache, et un champ à zéro ne veut pas dire que rien ne se passe**
 - [`109-anglerfish.md`](109-anglerfish.md) — **le prédateur ne va pas droit sur vous : il oriente son avant d'un dixième par pas, accélère en une demi-seconde au lieu de vingt et une, et ne se retourne pas quand on est pile derrière**

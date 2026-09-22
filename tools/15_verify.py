@@ -42,6 +42,30 @@ CHROMIUM = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 # Le reveil, mesure dans la page. Sorti du corps de `_run` parce que son
 # texte JavaScript contiendrait des guillemets triples au milieu d'une
 # chaine qui en est deja faite.
+# Les trois zones d'invites. Sorti du corps de `_run` pour la meme raison que
+# `REVEIL_JS` : son JavaScript porte des guillemets triples.
+INVITES_JS = '''() => {
+  const p = window.__prompts;
+  if (!p) return null;
+  const avant = {};
+  for (const z of ["center", "bottom", "left"]) {
+    avant[z] = p.zones[z].innerHTML;
+  }
+  const lot = [{ text: "un", priority: 0 }, { text: "deux", priority: 3 }];
+  const compte = (z) => {
+    p.set(z, lot, 0);
+    return p.zones[z].querySelectorAll(".ow-prompt").length;
+  };
+  const r = { centre: compte("center"), bas: compte("bottom"),
+              gauche: compte("left") };
+  // On remet la page telle qu'elle etait : un controle ne change rien.
+  for (const z of ["center", "bottom", "left"]) {
+    p.set(z, [], 0);
+    p.zones[z].innerHTML = avant[z];
+  }
+  return r;
+}'''
+
 REVEIL_JS = '''() => {
   const r = window.__reveil;
   if (!r) return null;
@@ -941,6 +965,20 @@ def _run(url, heavy, profil=None, zip_path=None):
             # 471 u sur Timber Hearth : on demarre au village, pas au vaisseau.
             rep.at_least("le vaisseau est a distance de marche",
                          round(depart["marche"] or 0, 0), 100)
+
+        # --- les trois zones d'invites (docs/112-invites.md) -------------------
+        #
+        # `PromptManager` tient `_highestLeftPriority` et
+        # `_highestCenterPriority`, et AUCUN `_highestBottomPriority` : la zone
+        # du bas montre tout ce qu'on lui donne. Ce portage arbitrait les trois,
+        # et une invite de priorite superieure pouvait donc chasser les codes de
+        # lancement.
+        invites = page.evaluate(INVITES_JS)
+        if invites:
+            rep.eq("au centre, seule la priorite maximale reste",
+                   invites["centre"], 1)
+            rep.eq("a gauche aussi", invites["gauche"], 1)
+            rep.eq("mais en bas, tout s'affiche", invites["bas"], 2)
 
         # --- le reveil (docs/108-reveil.md) ------------------------------------
         #

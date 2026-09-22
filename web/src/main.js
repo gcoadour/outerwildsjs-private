@@ -1323,6 +1323,7 @@ async function boot() {
   const uiRoot = document.getElementById("ui");
   const resHUD = iface && uiRoot ? new ResourceHUD(uiRoot, iface) : null;
   const prompts = iface && uiRoot ? new Prompts(uiRoot, iface) : null;
+  window.__prompts = prompts;   // sonde : les trois zones et leur arbitrage
   let lastHealth = resources.health;
   window.__ui = { resHUD, prompts, iface };
   window.__resources = resources;   // sonde de verification

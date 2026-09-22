@@ -207,11 +207,43 @@ export class ResourceHUD {
 /**
  * Invites contextuelles.
  *
- * PromptManager tient trois listes. Au centre et a gauche, seules les invites
- * de priorite maximale restent visibles : c'est ce qui evite que « Parler » et
- * « Embarquer » s'affichent ensemble. Les invites de gauche glissent depuis
- * 400 px a leur apparition, sur une demi-seconde.
+ * @lit PromptManager
+ *
+ * `PromptManager` tient TROIS listes, et le deuxieme argument
+ * d'`AddScreenPrompt` decide laquelle : 0 en bas, 1 au centre, 2 a gauche. Les
+ * invites de gauche glissent depuis 400 px a leur apparition, sur une demi-
+ * seconde (docs/28-hud.md).
+ *
+ * LE BAS N'ARBITRE RIEN, et ce portage l'arbitrait. Le build tient
+ * `_highestLeftPriority` et `_highestCenterPriority` — recalcules par
+ * `AddScreenPrompt` et `RemoveScreenPrompt` a chaque entree et chaque sortie —
+ * et il n'existe AUCUN `_highestBottomPriority`. La zone du bas montre donc
+ * tout ce qu'on lui donne ; c'est celle des codes de lancement, qu'aucune
+ * autre invite ne doit pouvoir chasser.
+ *
+ * DEUX ALIGNEMENTS, PAS TROIS. `SetAlignment(1)` pour le bas et le centre,
+ * `SetAlignment(0)` pour la gauche : la colonne de gauche est ferree a gauche,
+ * les deux autres sont centrees.
+ *
+ * `UpdatePromptDimensions` et `CalculatePromptDimensions` mesurent la PLUS
+ * LARGE invite du bas et de la gauche — la colonne prend la largeur de son
+ * plus large element, et pas celle du texte courant. Le centre n'en a pas
+ * besoin : il n'a qu'une invite a la fois, posee a
+ * `_centerPromptScreenPosition`. Ici c'est la mise en page qui s'en charge,
+ * et les proportions sont celles du catalogue.
  */
+/**
+ * `GetHighestPriority(liste)`, et ce qu'on en garde.
+ *
+ * Le build recalcule ce maximum a chaque ajout et chaque retrait, et n'affiche
+ * que les invites qui l'atteignent. C'est ce qui evite que « Parler » et
+ * « Embarquer » s'affichent ensemble.
+ */
+export function maxPriority(list) {
+  const top = (list || []).reduce((m, p) => Math.max(m, (p && p.priority) || 0), 0);
+  return (list || []).filter((p) => (p.priority || 0) >= top);
+}
+
 export class Prompts {
   constructor(root, conf) {
     this.c = conf.prompts;
@@ -240,8 +272,9 @@ export class Prompts {
     const node = this.zones[zone];
     if (!node) return;
     const list = (items || []).filter((p) => p && p.text);
-    const top = list.reduce((m, p) => Math.max(m, p.priority || 0), 0);
-    const keep = list.filter((p) => (p.priority || 0) >= top);
+    // Le bas ne garde pas que le maximum : il n'a pas de priorite la plus
+    // haute a tenir, et tout ce qu'on lui donne s'affiche.
+    const keep = zone === "bottom" ? list : maxPriority(list);
 
     const seen = new Set();
     node.textContent = "";

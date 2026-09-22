@@ -121,7 +121,7 @@ import { rolloffModel, curveGain, AudioField, AudioMixer,
 import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
 import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
 import { DialogueSystem } from "../web/src/dialogue.js";
-import { AUTOPILOT_MESSAGES } from "../web/src/hud.js";
+import { AUTOPILOT_MESSAGES, maxPriority } from "../web/src/hud.js";
 import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          brakingDistance, flyStep, autopilotRotation,
          autopilotMessageKey } from "../web/src/autopilot.js";
@@ -7134,6 +7134,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la vitesse se mesure depuis le centre du corps",
         Number(Math.hypot(...detachVelocity([110, 0, 0], [100, 0, 0],
                                             spin)).toFixed(6)), 10);
+}
+
+
+// --- les trois zones d'invites, et celle qui n'arbitre pas --------------
+{
+  const l = [{ text: "a", priority: 0 }, { text: "b", priority: 3 },
+             { text: "c", priority: 3 }, { text: "d", priority: 1 }];
+  check("seules les invites de priorite maximale restent",
+        maxPriority(l).map((p) => p.text).join(","), "b,c");
+  check("sans priorite, tout est a zero donc tout reste",
+        maxPriority([{ text: "x" }, { text: "y" }]).length, 2);
+  check("une liste vide ne casse rien", maxPriority([]).length, 0);
+  check("... ni une liste absente", maxPriority(null).length, 0);
+  // La zone du BAS, elle, n'arbitre pas : il n'existe aucun
+  // `_highestBottomPriority` dans le build. Cela se mesure dans le DOM, pas
+  // ici — `Prompts.set` a besoin d'un document (tools/15_verify.py).
 }
 
 report();

@@ -552,7 +552,21 @@ export class Player {
  */
 export const INTERACT_RANGE = 10;
 
-/** Les quatre etats que `PlayerState` tient, et rien d'autre. */
+/**
+ * Les quatre etats que `PlayerState` tient, et rien d'autre.
+ *
+ * Quatre booleens STATIQUES et leurs accesseurs. `InShipProximity()` et
+ * `AtFlightConsole()` ne sont que des lectures de champ — le filtre de
+ * `refait.mjs` ne les reconnait pas comme telles parce que le build les nomme
+ * SANS prefixe, la ou il ecrit ailleurs `GetSecondsRemaining` ou `IsDay`. Ce
+ * sont pourtant les memes accesseurs, et ce qui compte est le champ.
+ *
+ *     Reset()
+ *         _isDead = _atFlightConsole = _insideShip = _inShipProximity = false;
+ *
+ * `Reset` les remet tous les quatre a faux — la mort comprise, qui est le seul
+ * a ne pas se defaire tout seul en cours de boucle.
+ */
 export class PlayerState {
   constructor() {
     this.insideShip = false;

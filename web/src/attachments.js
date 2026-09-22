@@ -50,6 +50,30 @@ export function alignedBodies(gameplay) {
  * et herite du mouvement par la hierarchie — c'est le meme constat que pour
  * `AttachOnAwake` (docs/46, lot 1). La loi est posee et gardee quand meme,
  * parce que ce qui bouge seul ne passe pas par la hierarchie.
+ *
+ * LES ACCELERATIONS S'ADDITIONNENT, et c'est le contraire de la regle qui vaut
+ * partout ailleurs dans ce jeu : un detecteur de champ ordinaire retient le
+ * champ DOMINANT (docs/04-gravite.md), celui-ci les somme tous.
+ *
+ *     GetInheritedAcceleration()
+ *         if (_dirty) {
+ *             _netInheritedAcceleration = Vector3.zero;
+ *             foreach (FieldDetector d in _inheritedDetectorList)
+ *                 _netInheritedAcceleration += d.GetFieldAcceleration();
+ *             _dirty = false;
+ *         }
+ *         return _netInheritedAcceleration;
+ *     FixedUpdate()
+ *         _owRigidbody.AddAcceleration(GetInheritedAcceleration());
+ *
+ * `AddInheritedFieldDetector`, `RemoveInheritedFieldDetector` et
+ * `ClearInheritedFields` n'ont rien a refaire ici : elles tiennent la LISTE et
+ * l'abonnement a `OnDetectorUpdated`, dont le seul effet est de lever `_dirty`
+ * — un cache. Ce portage recalcule la somme a chaque appel, ce qui est le meme
+ * resultat sans le cache. `AddInheritedFieldDetector` refuse par ailleurs
+ * d'heriter du detecteur du corps LUI-MEME (« Cannot inherit from an attached
+ * field detector! »), ce qui ne peut pas arriver dans un portage ou la liste
+ * est celle des champs qu'on lui passe.
  */
 // @vide aucun `FieldInheritor` ne bouge seul : ce decor est enfant du glTF de son corps (docs/68)
 export function inheritedAcceleration(fields) {
