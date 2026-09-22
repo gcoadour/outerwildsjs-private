@@ -47,6 +47,13 @@
  * telle quelle dans l'IL, sans borne : au-dela, `AnimationState.time` depasse
  * la duree du clip, et Unity le laisse a sa derniere pose puisque le clip est
  * en `Once`. On borne donc a la duree plutot qu'a la chaleur.
+ *
+ * `Marshmallow.Toast(quantite)` est ce qui remplit ce compteur, et c'est tout
+ * ce qu'elle fait : `_toastLevel += quantite`. PAS DE BORNE, pas de vitesse,
+ * pas de seuil — la guimauve accumule sans fin, et c'est `GetHeatLevel` qui
+ * rend ce total tel quel. Une guimauve oubliee sur le feu ne « brule » donc
+ * pas a un moment precis : elle depasse, simplement, et l'animation reste a sa
+ * derniere pose. Le portage accumule de meme (docs/121-avis.md).
  */
 export const THERM_HEAT_SPAN = 40;
 

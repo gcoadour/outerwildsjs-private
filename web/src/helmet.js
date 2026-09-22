@@ -222,10 +222,46 @@ export class DamageDisplay {
  * `NotificationManager` n'en tient qu'UNE : une nouvelle remplace la
  * precedente. Elle s'efface au bout de sa duree, et le composant s'eteint.
  */
+/**
+ * L'UNIQUE notification de ce build, et sa duree.
+ *
+ * `NotificationManager` porte un seul objet — `ProbeLaunchWindowObstructed` —
+ * et une seule methode qui l'affiche : `OnProbeLaunchAborted`, abonnee a
+ * l'annonce du meme nom. Une seconde et demie, plus un son negatif.
+ *
+ * Le portage avait la classe, le refus de tir, et l'annonce ; il ne les avait
+ * jamais reliees, et refuser un tir n'affichait donc rien
+ * (docs/121-avis.md).
+ */
+export const NOTIFICATIONS = {
+  ProbeLaunchAborted: { texte: "PROBE LAUNCH WINDOW OBSTRUCTED", duree: 1.5 },
+};
+
 export class Notifications {
   constructor() { this.current = null; this.t0 = 0; this.duration = 0; }
 
+  /** L'annonce du build, telle qu'elle arrive — ou null si elle n'en pose pas. */
+  annonce(evenement, t = 0) {
+    const n = NOTIFICATIONS[evenement];
+    if (!n) return null;
+    return this.display(n.texte, n.duree, t);
+  }
+
+  /**
+   * `NotificationManager.DisplayNotification(go, duration)`, et sa premiere
+   * ligne est toute la loi :
+   *
+   *     if (_currentNotification == null) { ... }
+   *
+   * UNE NOTIFICATION EN COURS FAIT TOMBER LA SUIVANTE. Elle n'est ni mise en
+   * file, ni remplacee : elle est perdue. Le portage ecrasait la courante, si
+   * bien que deux avis coup sur coup n'en laissaient voir qu'un — le SECOND,
+   * la ou le build montre le PREMIER pour toute sa duree.
+   *
+   * @returns la notification affichee, qui peut etre celle d'avant
+   */
   display(texte, duree, t = 0) {
+    if (this.current !== null) return this.current;
     this.current = texte;
     this.duration = duree;
     this.t0 = t;

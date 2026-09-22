@@ -328,6 +328,7 @@ export class GuiMode {
   get hidden() { return this.index === 3; }
 }
 
+// @lit AutopilotGUI
 /**
  * Messages du pilote automatique.
  *

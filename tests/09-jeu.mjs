@@ -22,6 +22,7 @@ import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
+         NOTIFICATIONS,
          roastPrompts, roastBroken, shipProximity, RoastPrompt, helmetSettings,
          HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
@@ -68,6 +69,7 @@ import { tornadoPivots, TornadoPivots, matchTransforms,
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
+         Teleporters, TELEPORT_DELAY,
          DecorField } from "../web/src/decor.js";
 import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
@@ -3665,6 +3667,32 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("soleil entre les deux : rien", teleporterFires(tel, 1, 5, 6), false);
   check("moins de cinq secondes : rien",
         teleporterFires(tel, 1, 30, TELEPORT_COOLDOWN - 1), false);
+
+  // LE DEPART N'EST PAS L'ARRIVEE (docs/121-avis.md). `FireTeleporter` joue
+  // particules et son, puis confie le corps au recepteur pour une DEMI-SECONDE.
+  {
+    const t0 = { name: "Teleporter", alignmentWindow: 180, occlusionWindow: 0,
+                 receiver: "R", volume: { shape: "sphere", radius: 50,
+                                          center: [0, 0, 0] },
+                 position: [0, 0, 0], body: null };
+    const p = new Teleporters([t0]);
+    const monde = () => ({ self: [0, 0, 0], up: [0, 1, 0], target: [0, 100, 0],
+                           receiver: [0, 100, 0] });
+    // Le depart a lieu, mais rien n'arrive encore.
+    const a = p.update(0.1, [0, 0, 0], [0, -1000, 0], monde);
+    check("a l'appui, rien n'est encore arrive", a, null);
+    check("mais le depart est annonce", p.depart !== null, true);
+    check("et il emporte le joueur", p.depart.carries, true);
+    // Quatre dixiemes plus tard, toujours en vol.
+    check("a quatre dixiemes, toujours en vol",
+          p.update(0.3, [0, 0, 0], [0, -1000, 0], monde), null);
+    // La demi-seconde passee, on arrive — et le depart ne se rejoue pas.
+    const b = p.update(0.2, [0, 0, 0], [0, -1000, 0], monde);
+    check("passe la demi-seconde, on arrive", b !== null, true);
+    check("au point du recepteur", b.arrival.join(","), "0,100,0");
+    check("et le depart ne se rejoue pas", p.depart, null);
+    check("le delai du build est d'une demi-seconde", TELEPORT_DELAY, 0.5);
+  }
 }
 
 {
@@ -4772,14 +4800,32 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("sans degat, le voyant general s'eteint",
         voyants.update(1.8, false, [])[0], false);
 
-  // Les notifications : une seule a la fois, et elle s'efface.
+  // LES NOTIFICATIONS : LA PREMIERE GAGNE (docs/121-avis.md).
+  //
+  // `DisplayNotification` s'ouvre sur `if (_currentNotification == null)` :
+  // une notification en cours fait TOMBER la suivante. Ce test disait
+  // « une nouvelle remplace l'ancienne » — la regle du portage, pas celle du
+  // build, gardee sous un invariant.
   const notes = new Notifications();
   check("au depart, rien", notes.update(0), null);
   notes.display("sonde genee", 3, 0);
   check("elle s'affiche", notes.update(1), "sonde genee");
   notes.display("autre chose", 3, 1);
-  check("une nouvelle remplace l'ancienne", notes.update(2), "autre chose");
-  check("et elle s'efface au bout de sa duree", notes.update(4.1), null);
+  check("la seconde est PERDUE, pas mise en file", notes.update(2), "sonde genee");
+  check("et la premiere s'efface au bout de SA duree", notes.update(3.1), null);
+  // Une fois la place libre, la suivante passe.
+  notes.display("autre chose", 3, 4);
+  check("la suivante s'affiche alors", notes.update(5), "autre chose");
+
+  // L'unique notification de ce build, et sa duree.
+  {
+    const n = new Notifications();
+    check("le refus de tir affiche un avis",
+          n.annonce("ProbeLaunchAborted", 0), NOTIFICATIONS.ProbeLaunchAborted.texte);
+    check("une seconde et demie", NOTIFICATIONS.ProbeLaunchAborted.duree, 1.5);
+    check("et il s'efface", n.update(1.6), null);
+    check("une annonce inconnue n'affiche rien", n.annonce("Rien", 2), null);
+  }
 
   // Les huit invites de la guimauve : quatre unites, et toutes la portent.
   const guimauves = roastPrompts({ placed: { RoastPromptEvent: [
@@ -5593,6 +5639,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Le point neuf est le DERNIER de la liste : l'onde defile vers la gauche.
   check("le dernier point est le plus recent", onde.ordered()[499], 0.75);
   check("et le tampon garde sa taille", onde.ordered().length, 500);
+  // `ShiftPoints` epingle la case 497 a 0,5 A CHAQUE image : un cran plat
+  // permanent pres du bord droit (docs/121-avis.md).
+  check("la case epinglee est la 497e", WAVE.pin, 497);
+  {
+    const pleine = new SoundWave();
+    for (let i = 0; i < 500; i++) pleine.push(1, 1);
+    const t = pleine.ordered();
+    check("tout le trace est en haut", new Set(t.filter((_, i) => i !== WAVE.pin)).size, 1);
+    check("... sauf la case epinglee", t[WAVE.pin], 0.5);
+    // Sans la regle, elle vaudrait ce que l'onde porte.
+    check("que le portage peut aussi ne pas poser", pleine.ordered(null)[WAVE.pin], 1);
+  }
   // Cinq cents images plus tard, le premier point a disparu.
   const courte = new SoundWave(4);
   for (const v of [1, 1, 1, 1, 1]) courte.push(v, 1);
@@ -5717,6 +5775,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const vAvant = retombe.meteors[0].vel[1];
   retombe.step(1, { dir: { x: 0, y: -1, z: 0 }, magnitude: 20 });
   check("le champ le freine", retombe.meteors[0].vel[1], vAvant - 20);
+  // LE CHAMP SE LIT AU METEORE, pas au joueur (docs/121-avis.md) : `step`
+  // accepte une FONCTION de la position, et c'est celle-la que le moteur
+  // passe.
+  {
+    const parPosition = new MeteorLaunchers(tireur, () => 0);
+    parPosition.update(1, 6);
+    let vu = null;
+    const av = parPosition.meteors[0].vel[1];
+    parPosition.step(1, (p) => {
+      vu = p.slice();
+      return { dir: { x: 0, y: -1, z: 0 }, magnitude: 10 };
+    });
+    check("le champ est demande A la position du meteore",
+          vu !== null && vu.length === 3, true);
+    check("et il freine de dix", parPosition.meteors[0].vel[1], av - 10);
+  }
   // Il ne vit pas eternellement.
   const vieux = new MeteorLaunchers(tireur, () => 0);
   vieux.update(1, 6);

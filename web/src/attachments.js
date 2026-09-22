@@ -102,6 +102,15 @@ export function fieldInheritors(gameplay) {
  *
  * `_duration` vaut -1 : elles clignotent sans fin. Un `_duration` positif
  * eteindrait le composant au bout du compte.
+ *
+ * `Activate(duration)` est ce qui poserait ce compte :
+ *
+ *     _duration = duration;  enabled = true;
+ *
+ * Elle n'a AUCUN appelant dans le build. Les deux instances partent de leur
+ * valeur serialisee, -1, et personne ne vient jamais leur en donner une autre :
+ * le clignotement a duree limitee existe et ne sert pas ici
+ * (docs/121-avis.md).
  */
 export const BLINK = { on: 1, off: 1, duration: -1 };
 

@@ -23,6 +23,15 @@
 // `_initialOccupants` ferme la boucle : ce qui commence DEDANS recoit son
 // OnEntry au demarrage, sans avoir rien traverse.
 //
+// `FireEntryEvent(occupant)` n'est qu'un relais :
+//
+//     if (OnEntry != null) OnEntry(occupant);
+//
+// Rien de plus. C'est `OWEffectVolume.Awake` qui s'y abonne, et le seuil ne
+// decide donc de RIEN — ni de qui entre, ni de ce que l'entree fait. Il porte
+// la geometrie, l'effet porte la consequence, et c'est ce que ce module fait
+// deja en rendant des seuils que `volumes.js` interroge (docs/121-avis.md).
+//
 // @lit EntrywayTrigger
 // @lit SunlessZone
 

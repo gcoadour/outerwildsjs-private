@@ -19,6 +19,20 @@
 // grise. Le systeme n'est pas une technique aboutie qu'il faudrait rattraper :
 // c'est un chantier de l'alpha.
 //
+// `TakeSnapshot` dit pourquoi un plan manquant tue la camera :
+//
+//     transform.position = _planeTransform.position
+//                        + _planeTransform.forward * _distanceToPlanet;
+//     transform.LookAt(_planeTransform);
+//     camera.Render();
+//
+// LA CAMERA SE RANGE PAR RAPPORT AU PLAN, pas a la planete. Elle se pose
+// DEVANT lui — le long de son avant — et se retourne vers lui, si bien que la
+// planete se retrouve derriere le plan, dans le champ. Sans `_planeTransform`,
+// les trois lignes lancent une exception de reference nulle : les deux cameras
+// sans plan ne sont pas « inertes », elles sont CASSEES, et c'est une raison
+// de plus de ne pas chercher a les rattraper (docs/121-avis.md).
+//
 // CE QUE LE PORTAGE Y GAGNE QUAND MEME. Les trois plans cables sont dans la
 // geometrie exportee, leur renderer est ACTIF, et ils se tournent vers la
 // camera depuis docs/46 (lot 3). Le portage collait donc trois quads plats,

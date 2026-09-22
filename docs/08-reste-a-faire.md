@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **152 des 176** méthodes nommées, sur 75 classes ([`103`](103-refait.md) → [`120`](120-jumelles.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **176 des 176** méthodes nommées, sur 75 classes — le dénominateur est fermé ([`103`](103-refait.md) → [`121`](121-avis.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -105,6 +105,7 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| **la queue de `refait.mjs`** | un avis en cours fait tomber le suivant, un teleporteur met 0,5 s, les meteores lisent le champ A LEUR position ([`121`](121-avis.md)) |
 | **les jumelles du sablier** | aucun primaire : elles tournent l'une autour de l'autre a 31,65, dans le repere de leur barycentre ([`120`](120-jumelles.md)) |
 | **ce que le predateur entend** | cible sous 200 unites quel que soit le volume, trouble au-dela si le volume passe DIX — et dix n'est atteint qu'en diagonale ([`119`](119-bruit.md)) |
 | **issues du pilote auto** | six facons de s'arreter et un message chacune ; le bandeau ne s'eteint que par une issue ([`118`](118-messages.md)) |

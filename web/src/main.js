@@ -101,6 +101,12 @@ import { directionalFields, polarFields, insideVolume,
 // Le tonemapping est pilote par le reglage « luminosite », qui reproduit le
 // `_isTonemappingActive` faux par defaut du manager ; les decalcomanies passent
 // par `applyDecals` (docs/46-migration-lots.md, lot 2).
+//
+// `DS_Decals.AddDecalsMeshRendererComponentToGameObject(go)` tient en une
+// ligne — `return go.AddComponent<DS_DecalsMeshRenderer>()` — et c'est une
+// fabrique d'EDITEUR : rien dans la scene ne l'appelle, les
+// `DS_DecalsMeshRenderer` y sont deja poses. Une piste qui se ferme a la
+// lecture (docs/121-avis.md).
 
 import { fluidVolumes, fluidDetectors, FluidField } from "./fluids.js";
 import { CameraEffects, loadCameras, reglagesDuJoueur,
@@ -4309,8 +4315,18 @@ async function boot() {
     // blessent au contact passe la demi-seconde d'immunite du prefabrique.
     if (meteores.launchers.length) {
       meteores.update(dt, now);
-      meteores.step(dt, player.field);
-      const touche = meteores.hits([player.pos.x, player.pos.y, player.pos.z], 1);
+      // Le champ dominant AU METEORE, et non celui du joueur : un caillou
+      // au-dessus de Brittle Hollow retombe vers Brittle Hollow, meme quand le
+      // joueur est ailleurs (docs/121-avis.md).
+      meteores.step(dt, (p) => dominantField(bodies, { x: p[0] - anchorPos[0],
+                                                       y: p[1] - anchorPos[1],
+                                                       z: p[2] - anchorPos[2] }));
+      // Les meteores vivent en coordonnees MONDE, comme leurs lanceurs ; le
+      // joueur vit dans le repere courant. Le contact se testait entre les
+      // deux, et ne pouvait donc jamais se produire (docs/121-avis.md).
+      const touche = meteores.hits([player.pos.x + anchorPos[0],
+                                    player.pos.y + anchorPos[1],
+                                    player.pos.z + anchorPos[2]], 1);
       if (touche) {
         meteores.consume(touche);
         resources.damage(touche.damage);
@@ -4324,8 +4340,10 @@ async function boot() {
           m.isPickable = false;
           meteorMeshes.push(m);
         }
+        // La scene est dans le repere courant ; le meteore est en monde.
         const q = meteores.meteors[i].pos;
-        meteorMeshes[i].position.set(q[0], q[1], q[2]);
+        meteorMeshes[i].position.set(q[0] - anchorPos[0], q[1] - anchorPos[1],
+                                     q[2] - anchorPos[2]);
         meteorMeshes[i].setEnabled(true);
       }
       for (let i = meteores.meteors.length; i < meteorMeshes.length; i++) {
@@ -4616,7 +4634,14 @@ async function boot() {
         }
         photosEnVol = 0;
       }
-      if (e === "ProbeLaunchAborted") console.log("tir de sonde refuse : pas de fenetre");
+      if (e === "ProbeLaunchAborted") {
+        // `NotificationManager.OnProbeLaunchAborted` : l'avis une seconde et
+        // demie, PUIS le son negatif. Le portage se contentait d'une ligne de
+        // journal (docs/121-avis.md).
+        notifications.annonce("ProbeLaunchAborted", now);
+        bipUI("PlayNegativeUISound");
+        console.log("tir de sonde refuse : pas de fenetre");
+      }
       if (e === "ProbeSnapshot" && probes.lastSnapshot) {
         console.log(`photo de sonde : ${probes.lastSnapshot.size} px`
           + (probes.lastSnapshot.rear ? " (arriere)" : ""));
@@ -5724,9 +5749,16 @@ async function boot() {
                  receiverUp: t.receiverRotation
                    ? qrotDecor(t.receiverRotation, [0, 1, 0]) : null };
       });
-      if (parti) {
+      // `FireTeleporter` joue les particules et le son A L'APPUI, et confie le
+      // corps au recepteur pour une demi-seconde. Le portage faisait tout dans
+      // la meme image : on entendait le passage en etant deja arrive
+      // (docs/121-avis.md).
+      if (passages.depart) {
         const son = (events.of("AncientTeleporter") || { clips: {} }).clips._teleportSound;
         if (son) audio.playOneShot(son);
+        console.log(`passage : ${passages.depart.teleporter.name} part`);
+      }
+      if (parti) {
         if (parti.carries) {
           // On arrive AU point d'arrivee, exprime dans le repere courant.
           player.pos.x = parti.arrival[0] - anchorPos[0];

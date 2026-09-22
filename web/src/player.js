@@ -275,6 +275,23 @@ export class Player {
   }
 
   /**
+   * `PlayerJetpackController.ReadRotationalInput`, et son exclusion :
+   *
+   *     Vector3 v = Vector3.zero;
+   *     if (_canRoll) v.z -= roll.GetAxis();
+   *     else          v.y += yaw.GetAxis();
+   *     v.x -= pitch.GetAxis();
+   *     return v;
+   *
+   * ROULIS ET LACET NE S'ADDITIONNENT JAMAIS : `_canRoll` choisit l'un OU
+   * l'autre. Et pour le joueur il vaut faux par defaut — `Update` le repose a
+   * faux puis ne le leve que si la touche `swapRollAndYaw` est TENUE. C'est
+   * exactement `rollMode(tenue, false)` de `landing.js`, la moitie gauche de
+   * la meme ligne que le vaisseau lit avec son propre defaut
+   * (docs/121-avis.md). Le tangage, lui, passe toujours.
+   */
+
+  /**
    * Saut : sur le FRONT de la touche, et au sol.
    *
    * Le portage faisait sauter ET monter avec la meme touche, en commentant

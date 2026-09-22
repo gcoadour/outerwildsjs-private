@@ -45,6 +45,18 @@
 // report que `_doWarp` impose aux huit touches de debogage d'`Update`, une par
 // lieu d'apparition.
 //
+// `TimeLoopTeleportReceiver.RelocateBody` ajoute UNE ligne a celle de son
+// parent, et elle est devant :
+//
+//     FireEvent("EnterTimeLoopCentral");
+//     base.RelocateBody(corps);            // AncientTeleportReceiver
+//
+// Le retour au debut de boucle emprunte donc le meme chemin qu'un passage
+// ancien — meme position, meme vitesse de point, meme rotation — et s'annonce
+// en plus. Et il passe par `RelocateBody` DIRECTEMENT, sans le delai d'une
+// demi-seconde de `TeleportBody` : la boucle ne fait pas attendre
+// (docs/121-avis.md).
+//
 // Et `FindPlanetSpawns` explique pourquoi `_spawnList` est VIDE dans la scene :
 // la liste n'est pas serialisee, elle est cherchee au reveil. On ne peut donc
 // pas la lire dans le composant ; ce module lit les seize `SpawnPoint` poses,

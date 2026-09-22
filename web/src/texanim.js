@@ -14,6 +14,12 @@
 //     voisines ne defilent pas en phase.
 
 // @lit TextureAnimatorMultipleMats, OffsetTextureAnimate
+//
+// `OffsetTextureAnimate.Main` est VIDE — un seul `ret`. C'est le point
+// d'entree qu'UnityScript ajoute a tout script compile en classe, et il ne
+// sert a rien ici : tout le defilement est dans `Update`. Une piste qui se
+// ferme a la lecture, et il fallait la lire pour le savoir
+// (docs/121-avis.md).
 // Les quarante-quatre textures qui defilent : le sable, les cascades, les
 // ecrans (docs/42-lumieres.md).
 

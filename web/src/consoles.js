@@ -372,6 +372,27 @@ export class Marshmallow {
  * Leurs invites sont deja au catalogue, ce qui dit que le jeu attendait bien
  * une interaction a portee : ces consoles se prennent en main, elles ne
  * s'allument pas toutes seules.
+ *
+ * `RespawnModelShip` remet le vaisseau modele sur son point — et la ligne qui
+ * compte est la troisieme :
+ *
+ *     _modelShipBody.SetPosition(_respawnPoint.position);
+ *     _modelShipBody.transform.rotation = _respawnPoint.rotation;
+ *     _modelShipBody.SetVelocity(
+ *         _attachedBody.GetPointVelocity(_respawnPoint.position));
+ *     _modelShipBody.SetAngularVelocity(Vector3.zero);
+ *     _playerAudioSource.PlayOneShot(_respawnAudioClip, 0.5f);
+ *
+ * IL NE REAPPARAIT PAS IMMOBILE : il reprend la vitesse du POINT ou il est
+ * repose, sur le corps qui le porte. C'est la meme loi qu'en se levant du
+ * poste de pilotage (`PlayerAttachPoint.DetachPlayer`, docs/97), et pour la
+ * meme raison — l'observatoire tourne avec Timber Hearth. Reposer un objet a
+ * zero sur un sol qui bouge le fait glisser.
+ *
+ * Ce portage ne fait pas encore reapparaitre le modele : `modelShipBody` en
+ * lit la pose, et le crash s'annonce, mais rien ne le repose. La loi est
+ * relevee ici pour que le jour ou on le fera, la vitesse du point y soit —
+ * c'est elle qu'on oublie, pas la position.
  */
 export const CONSOLE_REACH = 8;
 

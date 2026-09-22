@@ -232,6 +232,9 @@ export const WAVE = {
   xOffset: 0.4, yOffset: -0.3,
   // `_beginTopVertex` … `_endBottomVertex`, d'`Awake`.
   x0: 0.4, y0: 0.15, x1: 0.6, y1: 0.25,
+  // `if (i == 497) _points[i] = 0.5f` dans `ShiftPoints` : une case epinglee
+  // au milieu, a chaque image. Le cran plat est dans le jeu.
+  pin: 497,
 };
 
 /** La duree de reference du trace : `_numPoints` images. */
@@ -251,6 +254,38 @@ export const WAVE_POINTS = WAVE.points;
  *
  * Le curseur DESCEND : le point neuf s'ecrit a droite et l'onde defile vers la
  * gauche.
+ *
+ * `ShiftPoints` fait le meme defilement a la main, et il y cache une bizarrerie :
+ *
+ *     for (int i = _points.Length - 1; i >= 0; i--) {
+ *         if (i == 0) _points[0] = _points[_points.Length - 1];
+ *         else        _points[i] = _points[i - 1];
+ *         if (i == 497) _points[i] = 0.5f;
+ *     }
+ *
+ * UN INDICE EST EPINGLE AU MILIEU. Le tableau fait 500 cases (`_numPoints` du
+ * constructeur, alloue dans `Awake`), et la 497e — la troisieme en partant de
+ * la fin — est remise a 0,5 a CHAQUE image, quoi qu'on y ait ecrit. Le trace
+ * porte donc un cran plat permanent pres de son bord droit. Il n'y a rien a
+ * comprendre : c'est ecrit, et c'est reproduit par `PIN` ci-dessous.
+ *
+ * Et l'enroulement est du meme tonneau : a `i = 0`, `_points[499]` a DEJA ete
+ * ecrase par l'ancien `_points[498]`, si bien que `_points[0]` recoit cette
+ * valeur-la et non celle que la derniere case portait en entrant. Un tampon
+ * circulaire — celui de ce module — donne la meme image sans ce detour.
+ *
+ * `CreateLineMaterial` construit son materiau depuis une SOURCE DE SHADER
+ * ecrite en dur dans la methode :
+ *
+ *     Shader "Lines/Colored Blended" { SubShader { Pass {
+ *         Blend SrcAlpha OneMinusSrcAlpha
+ *         ZWrite Off Cull Off Fog { Mode Off }
+ *         BindChannels { Bind "vertex", vertex Bind "color", color } } } }
+ *
+ * Pas de texture, pas de profondeur, pas de brouillard, pas de faces
+ * arriere : des lignes colorees melangees par l'alpha, et rien d'autre. Le
+ * portage trace l'onde sur un canevas 2D, ce qui a exactement ces proprietes
+ * sans avoir a les demander (docs/121-avis.md).
  */
 export class SoundWave {
   constructor(n = WAVE.points) {
@@ -277,11 +312,13 @@ export class SoundWave {
    * est celui qui vient JUSTE APRES lui dans le tampon, et le plus ancien est
    * celui qu'on va ecrire. On remonte donc a l'envers.
    */
-  ordered() {
+  ordered(pin = WAVE.pin) {
     const out = new Array(this.n);
     for (let i = 0; i < this.n; i++) {
       out[i] = this.points[(this.cursor + this.n - i) % this.n];
     }
+    // La case epinglee de `ShiftPoints`, a sa place dans le trace.
+    if (pin != null && pin >= 0 && pin < this.n) out[pin] = 0.5;
     return out;
   }
 }
