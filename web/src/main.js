@@ -3294,7 +3294,7 @@ async function boot() {
       // vaudrait rien — le vaisseau bouge.
       if (ship.boarded && shipRepairs.length && ship.damage) {
         const avarie = ship.damage;
-        const abimee = avarie.deadParts.length || avarie.integrity < avarie.total;
+        const abimee = avarie.damaged;
         const en_cours = shipRepairs.find((r) => !r.done) || null;
         if (abimee && en_cours) {
           const tenaitAvant = en_cours.holding;
@@ -3955,7 +3955,7 @@ async function boot() {
       }
       // La reparation : ce qui est en cours, et l'invite quand il y a a faire.
       if (ship && ship.boarded && ship.damage &&
-          (ship.damage.deadParts.length || ship.damage.integrity < ship.damage.total)) {
+          ship.damage.damaged) {
         bits.push(repairFraction > 0
           ? `réparation ${(repairFraction * 100).toFixed(0)} %`
           : "H pour réparer");
@@ -5189,7 +5189,8 @@ async function boot() {
     }
     // L'alarme generale : sous trente pour cent de coque, et pas avant.
     if (ship) {
-      const frac = ship.damage.total > 0 ? ship.damage.integrity / ship.damage.total : 1;
+      const frac = ship.damage.shipTotalHealth > 0
+        ? ship.damage.integrity / ship.damage.shipTotalHealth : 1;
       const crie = alarme.update(frac);
       if (resHUD) resHUD.setAlarm(crie);
       // `PlaySuitWarningSound` vient de `PlayerResourceGUI.Update` : c'est
@@ -5223,7 +5224,7 @@ async function boot() {
       // `ShipDamage.alerted` disait cette liste depuis le lot de docs/49, et
       // personne ne la lui demandait.
       const touchees = ship.damage.alerted;
-      voyants.update(now, ship.damage.integrity < ship.damage.total,
+      voyants.update(now, ship.damage.damaged,
                      ALERT_ORDER.map((k) => touchees.includes(k)),
                      presDuVaisseau);
     }

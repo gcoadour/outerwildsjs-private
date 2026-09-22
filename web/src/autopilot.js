@@ -355,12 +355,15 @@ export class Autopilot {
   }
 }
 
-/** Degats d'impact du vaisseau. Retourne les points perdus. */
-export function impactDamage(speed) {
-  if (speed >= DAMAGE.instantDeath) return DAMAGE.total;
-  if (speed < DAMAGE.light) return 0;
-  // progression lineaire entre le seuil leger et le seuil de mort instantanee
-  const t = (speed - DAMAGE.light) / (DAMAGE.instantDeath - DAMAGE.light);
-  const severity = speed >= DAMAGE.medium ? 1 : 0.4;
-  return Math.min(DAMAGE.total, DAMAGE.total * t * severity * 3);
-}
+// `impactDamage` vivait ici, et c'etait une INVENTION : « progression lineaire
+// entre le seuil leger et le seuil de mort instantanee », avec une severite de
+// 0,4 ou 1. Elle prenait `_lightImpactThreshold` et `_mediumImpactThreshold`
+// pour des seuils de DEGATS ; ce sont les seuils du BRUIT, et leur seul autre
+// emploi dans `OnImpact` est de choisir entre `_lightImpactClip` et
+// `_mediumImpactClip`.
+//
+// `ShipDamageController` ne porte AUCUN champ de sante de coque. Il explose sur
+// deux conditions seulement — la vitesse d'un choc, et le cumul des degats des
+// pieces au-dela de `_shipTotalHealth`. C'est ce que `shipdamage.js` fait
+// maintenant, et l'integrite du vaisseau y est une soustraction
+// (docs/113-seuil.md).

@@ -107,7 +107,7 @@ import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
-         engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
+         engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
@@ -514,29 +514,52 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Un test gardait donc la lecture fausse, et il aurait refuse la correction.
   const alpha = new ShipDamage({ _damageLocationMask: 0, _shipTotalHealth: 100,
                                  _instantDeathSpeed: 300,
+                                 _mediumImpactThreshold: 30,
                                  _disableDamagedThrusters: false });
   check("au depart, aucune alerte", alpha.alerted.length, 0);
+  // LE SEUIL VIENT DU REVEIL, pas de la scene : `Awake` ecrase les
+  // `_impactThreshold` serialises par `_mediumImpactThreshold + modificateur`,
+  // soit trente (docs/113-seuil.md).
+  check("le seuil d'une piece est celui du reveil", alpha.seuilPiece, 30);
+  check("... et il vaut celui des pieces generiques ici",
+        alpha.seuilGenerique, alpha.seuilPiece);
+  check("un modificateur le deplacerait",
+        awakeThreshold({ _mediumImpactThreshold: 30,
+                         _enginePartImpactModifier: 12 }, true), 42);
+  check("et celui des generiques est un autre champ",
+        awakeThreshold({ _mediumImpactThreshold: 30,
+                         _enginePartImpactModifier: 12 }, false), 30);
+  // SOUS LE SEUIL, AUCUNE PIECE N'EST ABIMEE. Le portage lisait le zero
+  // serialise et abimait le reacteur le plus proche au moindre contact.
+  const doux = alpha.impact(25, [0, -1, 0]);
+  check("un choc sous trente n'abime aucune piece", doux.part, 0);
+  check("et n'allume aucune alerte", alpha.alerted.length, 0);
   const r = alpha.impact(40, [0, -1, 0]);
-  check("degats a 40 u/s", round(r.damage, 1), 26.3);
-  // force = 100 x (40 - 0) / (300 - 0)
-  check("la piece prend sa part, et elle n'est pas nulle", round(r.part, 2), 13.33);
-  check("integrite entamee", round(alpha.integrity, 1), 73.7);
+  // `damage` n'est plus une sante de coque inventee : c'est le NIVEAU DE BRUIT,
+  // seule chose que `_lightImpactThreshold` et `_mediumImpactThreshold`
+  // commandent dans `OnImpact` (docs/113-seuil.md).
+  check("quarante unites par seconde font un choc moyen", r.damage, 2);
+  check("vingt-cinq, un choc leger", alpha.soundLevel(25), 1);
+  check("et dix, aucun bruit", alpha.soundLevel(10), 0);
+  // force = 100 x (40 - 30) / (300 - 30) : le seuil entre DEUX fois.
+  check("la piece prend sa part, et elle n'est pas nulle", round(r.part, 2), 3.7);
   check("et le masque porte desormais l'arriere", alpha.alerted.join(","), "arriere");
 
   // TROIS PIECES ABIMEES AU PLUS. Au-dela, un impact ne fait plus de nouvelle
   // victime — la quatrieme position reste intacte quoi qu'il arrive.
-  const trois = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300 });
-  // Vingt unites par seconde : au-dessus du seuil leger (15), donc un impact
-  // reel, et assez doux pour que la coque survive aux cinq chocs.
-  trois.impact(20, [0, 0, 1]);       // avant
-  trois.impact(20, [0, 1, 0]);       // haut
-  trois.impact(20, [1, 0, 0]);       // droite
+  const trois = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
+                                 _mediumImpactThreshold: 30 });
+  // Trente-cinq unites par seconde : juste au-dessus du seuil du reveil, donc
+  // un impact qui abime, et le plus doux qui le fasse.
+  trois.impact(35, [0, 0, 1]);       // avant
+  trois.impact(35, [0, 1, 0]);       // haut
+  trois.impact(35, [1, 0, 0]);       // droite
   check("trois pieces abimees", trois.alerted.length, 3);
-  const quatrieme = trois.impact(20, [-1, 0, 0]);   // gauche
+  const quatrieme = trois.impact(35, [-1, 0, 0]);   // gauche
   check("la quatrieme ne prend rien", quatrieme.part, 0);
   check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
   // Une piece DEJA abimee peut toujours l'etre davantage.
-  check("mais une deja touchee, si", trois.impact(20, [0, 0, 1]).part > 0, true);
+  check("mais une deja touchee, si", trois.impact(35, [0, 0, 1]).part > 0, true);
 
   // L'ORDRE DES VOYANTS DU CASQUE N'EST PAS CELUI DES DRAPEAUX.
   //
@@ -550,8 +573,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         ALERT_ORDER.map((k) => LOCATIONS[k]).join(","), "4,1,16,8,2");
   {
     // Un choc a l'arriere allume le PREMIER voyant, pas le troisieme.
-    const seul = new ShipDamage({ _shipTotalHealth: 1e9 });
-    seul.impact(20, [0, 0, -1]);
+    const seul = new ShipDamage({ _shipTotalHealth: 1e9,
+                                  _mediumImpactThreshold: 30 });
+    seul.impact(35, [0, 0, -1]);
     const allumes = ALERT_ORDER.map((k) => seul.alerted.includes(k));
     check("l'arriere touche allume le voyant de tete",
           allumes.join(","), "true,false,false,false,false");
@@ -578,18 +602,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // `_disableDamagedThrusters` vaut FAUX dans cette alpha : une piece morte ne
   // coupe rien. Le mecanisme est porte quand meme.
   //
-  // Quinze chocs a 20 u/s : la piece perd 100 (20/3 par choc) et meurt, quand
-  // la coque n'en perd que 31 — c'est tout l'interet des degats localises.
+  // Quatre chocs a 100 u/s : la piece perd 25,93 a chaque fois — 100 x (100-30)
+  // / (300-30) — et meurt au quatrieme. Avec la courbe de coque inventee que ce
+  // portage avait, la coque mourait AVANT, et `_disableDamagedThrusters` ne
+  // pouvait donc jamais couper quoi que ce soit (docs/113-seuil.md).
   const use = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
+                               _mediumImpactThreshold: 30,
                                _disableDamagedThrusters: true });
-  for (let i = 0; i < 15; i++) use.impact(20, [0, 0, -1]);
-  check("piece morte apres une serie de chocs", use.parts.arriere.dead, true);
+  for (let i = 0; i < 4; i++) use.impact(100, [0, 0, -1]);
+  check("piece morte apres quatre chocs", use.parts.arriere.dead, true);
   check("le propulseur coupe est hors service", use.thrustFactor("arriere"), 0);
   check("les autres poussent encore", use.thrustFactor("avant"), 1);
+  check("et le vaisseau, lui, n'a pas explose", use.destroyed, false);
 
   const sansOption = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
+                                      _mediumImpactThreshold: 30,
                                       _disableDamagedThrusters: false });
-  for (let i = 0; i < 15; i++) sansOption.impact(20, [0, 0, -1]);
+  for (let i = 0; i < 4; i++) sansOption.impact(100, [0, 0, -1]);
   check("sans _disableDamagedThrusters, la piece morte ne coupe rien",
         sansOption.thrustFactor("arriere"), 1);
 
@@ -602,17 +631,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la boucle le rend entier", perdu.destroyed, false);
   check("et efface son alerte", perdu.mask, 0);
 
-  const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300 });
-  // Chaque choc a 20 u/s coute 6,67 a la piece : il en faut quinze pour que le
-  // cumul passe la sante totale, et la coque, elle, tient encore.
-  for (let i = 0; i < 14; i++) usure.impact(20, [0, 0, -1]);
-  check("quatorze chocs ne suffisent pas", usure.destroyed, false);
-  check("et la coque tient encore", usure.integrity > 0, true);
-  usure.impact(20, [0, 0, -1]);
+  const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300,
+                                 _mediumImpactThreshold: 30 });
+  // `Abs(_currentShipDamage) > _shipTotalHealth` : le cumul des `_totalDamage`
+  // des pieces, et rien d'autre. A 100 u/s chaque choc coute 25,93 ; il en faut
+  // quatre pour passer cent.
+  for (let i = 0; i < 3; i++) usure.impact(100, [0, 0, -1]);
+  check("trois chocs ne suffisent pas", usure.destroyed, false);
+  check("et l'integrite est ce qui reste avant le cumul fatal",
+        round(usure.integrity, 1), round(100 - 3 * 100 * 70 / 270, 1));
+  usure.impact(100, [0, 0, -1]);
   check("le cumul au-dela de la sante totale, si", usure.destroyed, true);
+  check("et l'integrite est tombee a zero", usure.integrity, 0);
 
   // Reparer retire la position de l'alerte.
-  const repare = new ShipDamage({ _shipTotalHealth: 1e9 });
+  const repare = new ShipDamage({ _shipTotalHealth: 1e9,
+                                  _mediumImpactThreshold: 30 });
   repare.impact(40, [0, 0, -1]);
   check("l'alerte est levee", repare.covers("arriere"), true);
   repare.repair("arriere");
