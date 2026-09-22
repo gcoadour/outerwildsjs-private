@@ -340,8 +340,10 @@ export class Ship {
         const vRel = [this.vel.x - (L.velocity ? L.velocity[0] : 0),
                       this.vel.y - (L.velocity ? L.velocity[1] : 0),
                       this.vel.z - (L.velocity ? L.velocity[2] : 0)];
+        // `FromToRotation(-transform.up, d)` : le BAS du vaisseau, pas son nez.
+        const bas = [-a.up[0], -a.up[1], -a.up[2]];
         acc = limitOrbitThrust(acc.map((x) => x * this.effectiveThrust), vRel,
-                               radial, orbitSpeed(L.body, d), dt)
+                               radial, orbitSpeed(L.body, d), dt, bas)
           .map((x) => x / (this.effectiveThrust || 1));
       }
       this.vel.x += acc[0] * t;

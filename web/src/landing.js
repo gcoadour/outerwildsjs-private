@@ -50,6 +50,39 @@ export function rollMode(swapHeld, rollByDefault = false) {
 }
 
 /**
+ * `ShipThrusterController.ResetRollSettings` : les trois champs du roulis
+ * remis a plat.
+ *
+ *   _rollByDefault = false; _flipRollFactor = 1; _isRollMode = false;
+ *
+ * Le build ne l'appelle QU'A UN endroit, et c'est la ou on ne l'attend pas :
+ * `FlightConsole.OnPressInteract`, en S'ASSEYANT. Rien ne remet le roulis en
+ * place en se LEVANT.
+ *
+ * La raison tient dans `ExitFlightConsole`, qui ne touche pas au roulis :
+ * `InvertRoll` et `SetRollByDefault` ne sont appeles que dans la branche de la
+ * touche d'atterrissage. Se lever en vue d'atterrissage laisse donc le manche
+ * inverse et le roulis par defaut — pour toujours, si on ne se rasseyait pas.
+ * La remise a plat au moment de s'asseoir est le filet.
+ */
+
+/**
+ * `ShipThrusterController.ReadTranslationalInput` — ce qui en est porte, et ou.
+ *
+ * Quatre lois y vivent, et le portage les applique chacune la ou elle sert :
+ *
+ *   - POSE, on ne peut que monter : `input.x = input.z = 0`, et
+ *     `input.y = Clamp01(input.y)` — on ne s'enfonce pas dans la piste ;
+ *   - l'ALLUMAGE, `_isIgniting` / `_ignitionDuration`, qui rend une seconde de
+ *     poussee sans acceleration et annule si on relache (`Ship.ignition`,
+ *     docs/66) ;
+ *   - la LIMITE DE SECTEUR, `Min(GetThrustLimit(), maxThrust) / maxThrust`
+ *     applique a l'entree entiere (`sectorThrustLimit`, `Ship.effectiveThrust`) ;
+ *   - l'ECRETAGE ORBITAL, `_limitOrbitSpeed`, porte par `limitOrbitThrust`
+ *     ci-dessous.
+ */
+
+/**
  * `ShipThrusterController.ReadRotationalInput` — ce qui en est porte, et ou.
  *
  * Trois choses y sont dites, et elles vivent chacune la ou le portage les
@@ -92,6 +125,38 @@ export function project(v, axe) {
   return mul(axe, dot(v, axe) / l2);
 }
 
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                         a[2] * b[0] - a[0] * b[2],
+                         a[0] * b[1] - a[1] * b[0]];
+
+/**
+ * `Quaternion.FromToRotation(de, vers) * v` : la rotation du plus court chemin,
+ * appliquee a un vecteur (Rodrigues, sans quaternion).
+ *
+ * Le cas a 180 degres n'a pas d'axe unique — deux perpendiculaires donnent deux
+ * resultats differents. Unity en choisit un, nous aussi, et le vaisseau qui
+ * pointe exactement a l'oppose du centre pendant un ecretage n'existe pas dans
+ * une partie : c'est une defense, pas une correspondance.
+ */
+export function rotateFromTo(v, de, vers) {
+  const nd = norme(de), nv = norme(vers);
+  if (!(nd > 0) || !(nv > 0)) return v.slice();
+  const a = mul(de, 1 / nd), b = mul(vers, 1 / nv);
+  const k = cross(a, b);
+  const s = norme(k), c = dot(a, b);
+  if (!(s > 1e-9)) {
+    if (c > 0) return v.slice();
+    // Demi-tour autour d'une perpendiculaire : v -> 2(u.v)u - v.
+    const ref = Math.abs(a[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const p = cross(a, ref);
+    const u180 = mul(p, 1 / norme(p));
+    return sub(mul(u180, 2 * dot(u180, v)), v);
+  }
+  const u = mul(k, 1 / s);
+  return add(add(mul(v, c), mul(cross(u, v), s)),
+             mul(u, dot(u, v) * (1 - c)));
+}
+
 /**
  * L'ecretage de `_limitOrbitSpeed`, a la lettre.
  *
@@ -104,18 +169,34 @@ export function project(v, axe) {
  * C'est ce qui rend un atterrissage manoeuvrable. Sans lui, chaque correction
  * laterale ajoute de la vitesse orbitale, et on rate le sol en tournant autour.
  *
+ * Une ligne du build manquait, et elle ne se lit pas comme une optimisation :
+ *
+ *   thrust = FromToRotation(-ship.up, d) * ship.TransformDirection(input * max)
+ *
+ * La poussee est REDRESSEE avant d'etre decomposee — le bas du vaisseau est
+ * amene sur le radial —, et la sortie ne defait jamais cette rotation. Quand
+ * l'ecretage mord sur un vaisseau incline, la poussee ne part donc pas ou le
+ * nez regarde : elle part dans le repere du sol. C'est ce qui fait qu'un
+ * atterrissage de travers se redresse tout seul au lieu de deriver, et ca ne
+ * coute rien tant que l'alignement automatique tient le vaisseau droit.
+ *
  * @param accel   poussee en monde, deja en unites d'acceleration
  * @param velRel  vitesse du vaisseau MOINS celle du referentiel
  * @param radial  du vaisseau vers le centre du referentiel
  * @param vOrbite `orbitSpeed(corps, |radial|)`
+ * @param bas     le bas du vaisseau (`-transform.up`), ou null pour ne pas
+ *                redresser — le repli, quand l'appelant n'a pas d'assiette
  */
-export function limitOrbitThrust(accel, velRel, radial, vOrbite, dt) {
+export function limitOrbitThrust(accel, velRel, radial, vOrbite, dt, bas = null) {
   if (!(dt > 0) || !(vOrbite > 0) || !(norme(accel) > 0)) return accel;
+  const pousse = bas ? rotateFromTo(accel, bas, radial) : accel;
   const tangentielle = sub(velRel, project(velRel, radial));
-  const aRadiale = project(accel, radial);
-  const aTangente = sub(accel, aRadiale);
+  const aRadiale = project(pousse, radial);
+  const aTangente = sub(pousse, aRadiale);
   const prevue = add(tangentielle, mul(aTangente, dt));
   const v = norme(prevue);
+  // Sous la vitesse orbitale, le build ne REECRIT PAS l'entree : la poussee
+  // sort telle qu'elle est entree, redressement compris.
   if (!(v > vOrbite)) return accel;
   const bornee = mul(prevue, vOrbite / v);
   return add(aRadiale, mul(sub(bornee, tangentielle), 1 / dt));
@@ -124,13 +205,17 @@ export function limitOrbitThrust(accel, velRel, radial, vOrbite, dt) {
 /**
  * `FlightConsole.GetAllowLandingMode`.
  *
- * Quatre conditions, toutes necessaires : un referentiel qui autorise
- * l'alignement automatique, le vaisseau PAS pose, et la distance sous
- * `GetAutoAlignmentDistance()` — que le portage extrait deja sous le nom
+ * Quatre conditions, toutes necessaires. La premiere se lisait mal : la
+ * methode s'ouvre sur `if (!enabled) return false`, et `enabled` est ici celui
+ * de la CONSOLE — le joueur assis au poste. Debout, le mode d'atterrissage ne
+ * peut pas s'etablir, meme en orbite basse. Viennent ensuite un referentiel
+ * qui autorise l'alignement automatique, le vaisseau PAS pose, et la distance
+ * sous `GetAutoAlignmentDistance()` — que le portage extrait deja sous le nom
  * `alignment` (docs/frames).
  */
 export function allowLandingMode({ frame = null, landed = false,
-                                   distance = Infinity } = {}) {
+                                   distance = Infinity, auPoste = true } = {}) {
+  if (!auPoste) return false;
   if (!frame || landed) return false;
   if (frame.alignment == null) return false;
   return distance < frame.alignment;
@@ -191,6 +276,52 @@ export class LandingView {
     this.on = true;
     this.events.push("SwitchActiveCamera", "EnterLandingView");
     return true;
+  }
+
+  /**
+   * `FlightConsole.ExitFlightConsole` — ce que se lever fait de la vue.
+   *
+   *   if (!_playerCam.enabled) ExitLandingView();
+   *   _doLandingCamTransition = false;
+   *
+   * Deux cas, et le second est celui qu'on n'ecrit pas spontanement :
+   *
+   *   - la camera d'atterrissage EST passee : on repasse par `ExitLandingView`,
+   *     avec son recentrage et ses deux annonces ;
+   *   - elle ne l'est pas ENCORE : la transition est simplement ANNULEE, sans
+   *     annonce. La vue n'a jamais eu lieu.
+   *
+   * Et ce qu'il ne fait PAS, dans les deux cas : le roulis. `InvertRoll` et
+   * `SetRollByDefault` ne vivent que dans la branche de la touche
+   * (`FlightConsole.Update`), jamais dans `ExitLandingView`. Se lever en vue
+   * d'atterrissage laisse donc `_flipRollFactor` a -1 et `_rollByDefault` a
+   * vrai — c'est exactement le trou que `ResetRollSettings` bouche, en se
+   * rasseyant et nulle part ailleurs.
+   *
+   * `ExitLandingMode` ne part pas non plus : `enabled = false` arrete `Update`,
+   * donc `UpdateLandingMode`, et `_isLandingMode` reste vrai jusqu'a ce qu'on
+   * se rasseye. L'appelant ne doit donc PAS appeler `updateMode` hors du
+   * poste ; l'annonce arrive en retard, et c'est ce que le build fait.
+   *
+   * @returns vrai si la vue etait etablie (et donc si le regard se recentre)
+   */
+  exitConsole() {
+    const etablie = this.on;
+    if (etablie) {
+      this.on = false;
+      this.events.push("SwitchActiveCamera", "ExitLandingView");
+    }
+    this.transition = false;
+    return etablie;
+  }
+
+  /**
+   * `ShipThrusterController.ResetRollSettings`, appele par
+   * `FlightConsole.OnPressInteract` : en s'asseyant, et la seulement.
+   */
+  resetRoll() {
+    this.rollByDefault = false;
+    this.flipRollFactor = 1;
   }
 
   /**

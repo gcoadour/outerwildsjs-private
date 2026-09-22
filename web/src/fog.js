@@ -30,6 +30,16 @@
 // sombre que ce qui etait recopie.
 // @lit PlayerCameraController
 // Le plan lointain reduit dans le brouillard vient de son `LateUpdate`.
+//
+// `AddDegreesY(d)` est une ligne — `_degreesY += d` — et c'est ce qui en fait
+// une trouvaille : le cap de la camera est un CHAMP de ce controleur, qu'on
+// pousse d'un increment. `AlignPlayerWithField` s'en sert pour rendre au
+// regard ce que le corps a pris pendant un redressement ([`106`](
+// ../../docs/106-redressement.md)), et c'est pourquoi le build n'y ecrit qu'un
+// seul axe : son lacet ne se re-derive de rien, il se garde. Ce portage
+// re-derive son repere du haut a chaque image et doit donc rendre les DEUX
+// angles (`steadyLook`) — la meme correction, par l'autre bout
+// (docs/121-avis.md).
 
 export const FOG_COLOR = [0.1456, 0.1567, 0.1403];
 export const FOG_MODE = "exp2";

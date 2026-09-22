@@ -658,6 +658,32 @@ export function discreteRotationDuration(from, to, rate = FIELD_ALIGN.rate) {
 }
 
 /**
+ * `AlignPlayerWithField.UpdateDiscreteRotation` — l'autre moitie, et elle est
+ * refaite ailleurs.
+ *
+ *     t = (Time.time - _initDiscreteRotationTime) / _discreteRotationDuration;
+ *     t = Mathf.SmoothStep(0f, 1f, t);
+ *     _lastBetweenRotation = _betweenRotation;
+ *     _betweenRotation = Quaternion.Slerp(_fromRotation, _toRotation, t);
+ *     _owRigidbody.AddRotation(_betweenRotation * Inverse(_lastBetweenRotation));
+ *     if (t >= 1f) _doDiscreteRotation = false;
+ *
+ * DEUX CHOSES, ET LES DEUX VIVENT DEJA DANS CE PORTAGE.
+ *
+ * L'adoucissement est un `SmoothStep`, pas une rampe : la rotation part
+ * doucement et s'arrete doucement, sur la duree que `discreteRotationDuration`
+ * ci-dessus calcule. C'est exactement `snapDegrees`, qui interpole les deux
+ * degres du recentrage sous le meme `SmoothStep` — et c'est par la que
+ * `main.js` mene ce mouvement.
+ *
+ * Et la rotation est AJOUTEE, jamais posee : `AddRotation(courante x
+ * inverse(precedente))` n'applique que le PAS de l'image, si bien que ce que
+ * le joueur fait tourner pendant ce temps n'est pas efface. Ce portage
+ * re-derive son repere du haut a chaque image et rend le regard par
+ * `steadyLook` : meme resultat, par l'autre bout (docs/106-redressement.md).
+ */
+
+/**
  * L'alignement du joueur sur son champ, et ce qu'il fait aux commandes.
  *
  * `CheckAlignmentRequirements` rend VRAI a la toute premiere image, quoi qu'il

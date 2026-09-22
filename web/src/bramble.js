@@ -26,7 +26,7 @@ export const FISH = {
   chaseSpeed: 42,
   escapeDistance: 300,
   habitatRadius: 1200,
-  noiseRadius: 200,
+  noiseRadius: 200,   // `NoiseSensor._detectAsTargetRadius`, sur les quatre
   // `AddAngularVelocityChange(w * 0.1f)` : le predateur ne tourne qu'un DIXIEME
   // du chemin par pas de physique. C'est toute sa faiblesse.
   turnPart: 0.1,
@@ -38,6 +38,15 @@ export const FISH = {
   // de collision sur la bouche. 25 unites est l'ordre de grandeur du maillage
   // d'AnglerFish ; c'est un choix de ce portage, comme le dit docs/16-bramble.md.
   catchRadius: 25,
+};
+
+/**
+ * Les deux seuils de `NoiseSensor.ListenForNoises`, et ils ne sont pas de la
+ * meme espece : l'un est une DISTANCE serialisee, l'autre un VOLUME en dur.
+ */
+export const NOISE_SENSE = {
+  targetRadius: FISH.noiseRadius,   // `_detectAsTargetRadius`, 200 sur les quatre
+  disturbanceVolume: 10,            // `vol > 10f`, ecrit dans la methode
 };
 
 const dist = (a, b) => Math.hypot(a[0] - b.x, a[1] - b.y, a[2] - b.z);
@@ -129,8 +138,11 @@ export function fishStep(avant, vers, vitesse, vitesseMax, dt, cfg = FISH,
  * Deux consequences de jeu, et c'est tout l'interet : on peut se trahir en
  * laissant tourner une source sonore, et on peut s'en servir comme leurre.
  *
- * Le niveau percu ne s'additionne pas d'une source a l'autre : le capteur suit
- * la plus forte, comme le detecteur de gravite suit le champ dominant.
+ * ET LE CAPTEUR NE COMPARE RIEN. Ce module tenait « la source la plus forte,
+ * attenuee par la distance » — une loi ecrite ici, pas lue. `ListenForNoises`
+ * parcourt sa liste et REND A LA PREMIERE qui qualifie ; le volume n'entre
+ * dans la decision que pour le seuil de dix, et la distance que pour le rayon
+ * de cible. L'ordre d'inscription decide du reste (docs/119-bruit.md).
  */
 export class NoiseField {
   constructor() { this.sources = []; }
@@ -142,25 +154,64 @@ export class NoiseField {
    * @param level    force, 0 a 1
    * @param radius   portee au-dela de laquelle elle n'est plus audible
    */
-  add(position, level = 1, radius = FISH.noiseRadius) {
+  add(position, level = 1, radius = FISH.noiseRadius, volume = null) {
     if (!(level > 0) || !(radius > 0)) return;
-    this.sources.push({ position: position.slice(), level, radius });
+    // `volume` est l'echelle du build (`NoiseMaker._netVolume`, jusqu'a 13,66
+    // pour le joueur) ; `level` reste celle du champ du portage, de 0 a 1.
+    // Les deux vivent cote a cote parce que le seuil de dix se lit sur la
+    // premiere et la comparaison entre sources sur la seconde.
+    this.sources.push({ position: position.slice(), level, radius,
+                        volume: volume == null ? level : volume });
   }
 
-  /** La source la plus forte entendue depuis un point, ou null. */
-  strongestAt(point, reach = Infinity) {
-    let best = null;
+  /**
+   * `NoiseSensor.ListenForNoises` — DEUX issues, et elles ne se ressemblent pas.
+   *
+   *     foreach (NoiseMaker n in _noiseMakerList) {
+   *         float vol = n.GetVolume();
+   *         if (vol <= 0f) continue;
+   *         float d = Distance(transform.position, n.transform.position);
+   *         if (d < _detectAsTargetRadius) { DetectTarget(n.GetAttachedBody()); return; }
+   *         else if (vol > 10f)            { DetectDisturbance(n.transform.position); return; }
+   *     }
+   *
+   * SOUS DEUX CENTS UNITES, LE MOINDRE BRUIT FAIT DE VOUS UNE CIBLE : le
+   * volume n'entre pas dans la comparaison, seule la distance. Pousser une
+   * seconde a un dixieme suffit.
+   *
+   * AU-DELA, IL FAUT PASSER DIX, et la distance ne compte plus du tout : un
+   * bruit assez fort s'entend de n'importe ou dans le systeme. Mais il n'est
+   * alors qu'un TROUBLE — on vient voir l'endroit, on ne vous poursuit pas.
+   *
+   * Et la boucle REND A LA PREMIERE source qui qualifie, pas a la plus proche
+   * ni a la plus forte. L'ordre d'inscription decide.
+   *
+   * @returns {{kind:"cible"|"trouble", source}|null}
+   */
+  sense(point, cfg = NOISE_SENSE) {
     for (const s of this.sources) {
+      if (!(s.level > 0)) continue;
       const d = Math.hypot(s.position[0] - point[0], s.position[1] - point[1],
                            s.position[2] - point[2]);
-      const range = Math.min(s.radius, reach);
-      if (d > range) continue;
-      // une source lointaine s'entend moins qu'une source proche de meme force
-      const heard = s.level * (1 - d / range);
-      if (!best || heard > best.heard) best = { ...s, distance: d, heard };
+      // LA PORTEE EST UNE EXTENSION DE CE PORTAGE, pas une regle du build : le
+      // build n'a qu'UN `NoiseMaker`, celui du joueur, et il s'entend de
+      // partout. Les sources qu'on y ajoute — les emetteurs audio — ont, elles,
+      // une portee au-dela de laquelle elles ne s'entendent plus, et c'est ce
+      // qui permet de s'en servir comme leurre. Le joueur passe `Infinity`.
+      if (s.radius != null && d > s.radius) continue;
+      if (d < cfg.targetRadius) return { kind: "cible", source: { ...s, distance: d } };
+      if (s.volume > cfg.disturbanceVolume) {
+        return { kind: "trouble", source: { ...s, distance: d } };
+      }
     }
-    return best;
+    return null;
   }
+
+  // `strongestAt` vivait ici : « la source la plus forte, attenuee par la
+  // distance ». Le build ne compare RIEN et n'attenue RIEN — il prend la
+  // premiere source qui qualifie, et le volume n'entre dans la decision que
+  // pour le seuil de dix. C'etait une loi inventee, et son test gardait donc
+  // un raisonnement (docs/119-bruit.md).
 
   get count() { return this.sources.length; }
 }
@@ -174,6 +225,7 @@ export class Anglerfish {
     this.spin = 0;
     this.caught = false;
     this.forward = [0, 0, 1];
+    this.disturbance = null;
   }
 
   constructor(home, cfg = FISH) {
@@ -192,6 +244,9 @@ export class Anglerfish {
     // partie de son etat, parce que c'est lui qu'on oriente et lui qu'on suit.
     this.forward = [0, 0, 1];
     this.spin = 0;            // ce qui reste de sa rotation, a l'arret
+    // L'endroit d'un `DetectDisturbance` : on y va, et on n'y poursuit rien.
+    this.disturbance = null;
+    this.trouble = false;
   }
 
   /**
@@ -212,11 +267,19 @@ export class Anglerfish {
     // Un champ de bruit est un objet, donc toujours « vrai » : sans cette
     // distinction, un champ vide valait « le joueur fait du bruit » et le
     // predateur poursuivait une proie parfaitement silencieuse.
-    const field = !!(noisy && typeof noisy === "object" && noisy.strongestAt);
-    const heard = field ? noisy.strongestAt(this.position, this.cfg.noiseRadius) : null;
+    const field = !!(noisy && typeof noisy === "object" && noisy.sense);
+    // `ListenForNoises` : une CIBLE sous deux cents unites, un TROUBLE au-dela
+    // si le volume passe dix. Le portage n'entendait rien au-dela de deux
+    // cents, quelle que soit la force (docs/119-bruit.md).
+    const percu = field ? noisy.sense(this.position) : null;
+    const heard = percu ? percu.source : null;
     const noise = heard ? heard.position : [player.x, player.y, player.z];
-    const audible = field ? !!heard : (!!noisy && d < this.cfg.noiseRadius);
+    // Un trouble ne fait pas poursuivre : on vient VOIR l'endroit.
+    const audible = field ? (percu ? percu.kind === "cible" : false)
+                          : (!!noisy && d < this.cfg.noiseRadius);
+    const trouble = !!(percu && percu.kind === "trouble");
     this.heard = heard;
+    this.trouble = trouble;
 
     // Ce qui echappe, c'est la SOURCE poursuivie : un joueur parti loin ne
     // ramene pas le predateur chez lui tant qu'une autre source l'appelle.
@@ -225,13 +288,19 @@ export class Anglerfish {
       this.state = "repos";           // le joueur a echappe, ou on s'eloigne trop
     } else if (audible) {
       this.state = "poursuit";
+    } else if (trouble) {
+      // `DetectDisturbance(position)` : on va voir l'ENDROIT, pas la proie.
+      this.state = "inspecte";
+      this.disturbance = heard.position.slice();
     } else if (this.state === "poursuit" && d < this.cfg.escapeDistance) {
       this.state = "inspecte";        // dernier point connu
+      this.disturbance = null;
     }
 
     const target = this.state === "repos" ? this.home
                                           : (this.state === "poursuit" ? noise
-                                             : [player.x, player.y, player.z]);
+                                             : (this.disturbance
+                                                || [player.x, player.y, player.z]));
     const want = this.state === "poursuit" ? this.cfg.chaseSpeed
                : this.state === "inspecte" ? this.cfg.investigateSpeed : 0;
 

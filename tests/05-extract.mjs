@@ -8,6 +8,7 @@ import { extractScene } from "../web/src/pipeline/extract/scene.js";
 import { extractCameras } from "../web/src/pipeline/extract/camera.js";
 import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
+import { buildOrbits, advance, currentPosition } from "../web/src/orbits.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
 import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
@@ -76,7 +77,42 @@ check("MonoBehaviour avec valeurs", comps.count, 1390);
 console.time("systeme solaire");
 const solar = extractSolarSystem(ctx);
 console.timeEnd("systeme solaire");
-check("corps du systeme solaire", solar.bodies.length, 17);
+// 17 corps portaient un `GravityWell` ou un `PlanetoidSector` ; six de plus
+// n'ont qu'un `OWRigidbody` et une `InitialMotion` — dont `FocalBody`, le
+// barycentre des jumelles, sans lequel elles n'ont pas de repere ou tourner
+// (docs/120-jumelles.md).
+check("corps du systeme solaire", solar.bodies.length, 23);
+check("dont ceux qui n'ont aucune gravite",
+      solar.bodies.filter((b) => !b.gravity).length, 13);
+// LES JUMELLES TOURNENT L'UNE AUTOUR DE L'AUTRE. Aucun primaire, une vitesse
+// lineaire de 31,65 chacune, et 500 unites d'ecart : la vitesse d'une orbite
+// mutuelle circulaire a 250 du barycentre vaut `sqrt(4 x 250)` = 31,62.
+{
+  const by = new Map(solar.bodies.filter((b) => b.bodyName)
+                                 .map((b) => [b.bodyName, b]));
+  const t1 = by.get("Twin01_Body"), t2 = by.get("Twin02_Body");
+  check("les jumelles pendent sous le barycentre",
+        `${t1.parentBody}/${t2.parentBody}`, "FocalBody/FocalBody");
+  check("et n'ont aucun primaire d'orbite",
+        `${t1.orbit.primary}/${t2.orbit.primary}`, "null/null");
+  check("elles partent a 31,65 en sens oppose",
+        `${t1.orbit.initLinearSpeed.toFixed(2)}/${t1.orbit.initLinearDirection.x}`
+        + `/${t2.orbit.initLinearDirection.x}`, "31.65/1/-1");
+  const o = buildOrbits(solar.bodies);
+  check("le portage les fait donc tourner, et non tenir en place",
+        o.states.get(t1).kind, "libre");
+  let dmin = Infinity, dmax = 0;
+  for (let i = 0; i < 20000; i++) {
+    advance(o, 0.01);
+    const a = currentPosition(o, t1), b = currentPosition(o, t2);
+    const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    dmin = Math.min(dmin, d); dmax = Math.max(dmax, d);
+  }
+  // Deux cents secondes, soit quatre revolutions : l'ecart ne bouge pas d'une
+  // unite. C'est bien une orbite circulaire, et non une chute.
+  check("apres quatre revolutions, l'ecart tient", Math.round(dmin), 500);
+  check("... des deux cotes", Math.round(dmax), 501);
+}
 const withGravity = solar.bodies.filter((b) => b.gravity && b.gravity.surfaceAcceleration);
 console.log("     corps avec gravite:", withGravity.length);
 for (const b of solar.bodies.slice(0, 6)) {

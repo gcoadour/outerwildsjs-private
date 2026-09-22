@@ -25,6 +25,11 @@
 // @autrement GlowEffect : les six methodes sont les passes d'un flou additif a
 // N iterations. Le portage porte la GRANDEUR — `blurIterations`, de 2 a 32 — et
 // la rend avec ce que le navigateur a, sans refaire les passes (docs/103).
+// @autrement Vignetting : `CheckResources` et `Main` sont la plomberie d'un
+// shader d'Unity 4 — verifier qu'un `Material` est la, puis `Graphics.Blit`
+// avec ses parametres. Le portage rend la vignette par un post-processus de
+// Babylon regle sur les MEMES nombres (`postfx.js`), ce qui est le cas prevu
+// par docs/103 : une implementation originale, pas une transposition.
 // @lit PlayerCameraEffectController, GlowEffect, Vignetting, GrayscaleEffect, TwirlEffect
 // L'etat des six effets d'image de la camera du joueur (docs/47).
 
@@ -204,7 +209,18 @@ export class CameraEffects {
 
   // --- les deux mecaniques -------------------------------------------------
 
-  /** Fondu au noir, avec gris et vignette qui se referment avec lui. */
+  /**
+   * `PlayerCameraEffectController.FadeOut(duration)`.
+   *
+   *     _fadingOut = true; _initFadeTime = Time.time; _fadeDuration = duration;
+   *     _grayScaleEffect.effectAmount = 0f;
+   *     _grayScaleEffect.enabled = true;
+   *     _vignette.enabled = true;
+   *
+   * DEUX effets, pas un : le gris ET la vignette s'allument ensemble, et le
+   * gris est REMIS A ZERO — un fondu qui en interrompt un autre repart du
+   * blanc, il ne continue pas le precedent.
+   */
   fadeOut(duree, t = 0) {
     this._fade = { t0: t, duree };
     this.grayscale = { enabled: true, amount: 0 };
@@ -212,7 +228,20 @@ export class CameraEffects {
   }
 
   /**
-   * Un eclair de couleur : le glow monte vers une teinte, puis redescend.
+   * `PlayerCameraEffectController.FlashScreen(intensity, color, intro, outro)`
+   * — un eclair de couleur : le glow monte vers une teinte, puis redescend.
+   *
+   *     _glowEffect.enabled = true;  _glowEffect.blurIterations = 10;
+   *     _initFlashIntensity = _glowEffect.glowIntensity;   // d'OU L'ON PART
+   *     _initFlashColor     = _glowEffect.glowTint;
+   *
+   * Les dix iterations sont posees en dur a chaque eclair, quelles que soient
+   * celles de la scene (une, sur la camera du joueur) : c'est le seul moment
+   * du jeu ou le halo s'etale vraiment.
+   *
+   * Et le depart est l'etat COURANT, pas le repos — deux eclairs qui se
+   * chevauchent s'enchainent depuis la teinte ou le premier en etait, comme
+   * les fondus sonores d'`OWAudioSource` (docs/104-arbitrage.md).
    *
    * L'adoucissement n'est pas le meme dans les deux sens, et c'est ce qui donne
    * sa brutalite a l'eclair : `t⁴` quand on MONTE en intensite (rien, rien,

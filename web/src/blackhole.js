@@ -96,7 +96,18 @@ export class BlackHole {
    *   le portage n'a qu'un appelant par image.
    *
    * `ReceiveWarpedBody`, lui, est la porte des DEBRIS : il ne passe pas par
-   * `ForceWarp` du tout, il met en file (voir `DebrisField`).
+   * `ForceWarp` du tout, il met en file (voir `DebrisField`). Et c'est
+   * `Vanish(corps)` qui l'y envoie, en DEUX temps :
+   *
+   *     foreach (Renderer r in corps.GetComponentsInChildren<Renderer>())
+   *         r.gameObject.SetActive(false);
+   *     _whiteHole.ReceiveWarpedBody(corps);
+   *
+   * LE CORPS DISPARAIT AVANT D'ARRIVER. Ses rendus sont eteints un a un — pas
+   * le corps lui-meme, qui continue d'exister et de se deplacer — puis il est
+   * remis au trou blanc. Entre les deux, il est invisible et bien la : c'est
+   * ce qui fait qu'un morceau de croute avale ne laisse rien voir du transit,
+   * et qu'il ressort entier de l'autre cote (docs/121-avis.md).
    *
    * DETERMINISTE, et le portage le tirait au hasard : on ressort DROIT DEVANT
    * le trou blanc, a exactement son rayon, a vingt unites par seconde. Le cone

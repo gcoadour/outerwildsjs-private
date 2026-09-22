@@ -270,6 +270,32 @@ export function meteorLaunchers(gameplay) {
 export const TELEPORT_COOLDOWN = 5;
 
 /**
+ * ET LE DEPART N'EST PAS L'ARRIVEE : une demi-seconde les separe.
+ *
+ *     AncientTeleporter.FireTeleporter()
+ *         _teleportParticles.Play();
+ *         audio.PlayOneShot(_teleportSound);
+ *         _receiver.TeleportBody(_playerBody, 0.5f);
+ *         FireEvent("TeleportPlayer");
+ *         _lastFireTime = Time.time;
+ *
+ *     AncientTeleportReceiver.TeleportBody(corps, delai)
+ *         if (delai > 0f) { _incomingBody = corps; _teleportTime = Time.time;
+ *                           _teleportDelay = delai; enabled = true; }
+ *         else            RelocateBody(corps);
+ *
+ * Les particules et le son partent TOUT DE SUITE, le corps une demi-seconde
+ * plus tard. Le portage faisait tout dans la meme image : on entendait le
+ * passage au moment ou l'on etait deja de l'autre cote.
+ *
+ * Le zero de `TeleportBody` est la porte de service, et elle sert :
+ * `TimeLoopTeleportReceiver.RelocateBody` appelle directement la relocalisation
+ * — le retour au debut de boucle est instantane, lui, et annonce en plus
+ * `EnterTimeLoopCentral` (docs/121-avis.md).
+ */
+export const TELEPORT_DELAY = 0.5;
+
+/**
  * Les six passages, avec leur arrivee resolue.
  *
  * `_receiver` est resolu par `ownerInfo`, qui rend un nom, une position et un
@@ -335,6 +361,10 @@ export class Teleporters {
     this.list = list;
     this.since = list.map(() => TELEPORT_COOLDOWN);
     this.lastFired = null;
+    // Ce qui vient de PARTIR — particules et son — et qui n'est pas encore
+    // arrive. `update` le rend en arrivant, une demi-seconde plus tard.
+    this.depart = null;
+    this.enVol = null;
   }
 
   get count() { return this.list.length; }
@@ -347,6 +377,17 @@ export class Teleporters {
    */
   update(dt, at, sun, world) {
     this.lastFired = null;
+    this.depart = null;
+    // Le corps EN VOL arrive quand son delai est ecoule, et il arrive avant
+    // qu'un nouveau depart ne soit examine.
+    if (this.enVol) {
+      this.enVol.reste -= dt;
+      if (this.enVol.reste <= 0) {
+        this.lastFired = this.enVol.record;
+        this.enVol = null;
+        return this.lastFired;
+      }
+    }
     for (let i = 0; i < this.list.length; i++) {
       const t = this.list[i];
       this.since[i] += dt;
@@ -360,12 +401,16 @@ export class Teleporters {
       // la geometrie du systeme, pas sur la presence. Ce qui change, c'est
       // qu'il emporte ou non le joueur.
       const carries = !!(at && t.volume && insideVolume(t, at));
-      this.lastFired = { teleporter: t, carries, arrival: w.receiver || w.target,
-                         // `SetRotation(transform.rotation)` : l'avant et le
-                         // haut du recepteur, si la scene les donne.
-                         forward: w.receiverForward || null,
-                         up: w.receiverUp || null };
-      return this.lastFired;
+      const record = { teleporter: t, carries, arrival: w.receiver || w.target,
+                       // `SetRotation(transform.rotation)` : l'avant et le
+                       // haut du recepteur, si la scene les donne.
+                       forward: w.receiverForward || null,
+                       up: w.receiverUp || null };
+      // `FireTeleporter` joue les particules et le son ICI, et confie le corps
+      // au recepteur avec un delai d'une demi-seconde.
+      this.depart = record;
+      this.enVol = { record, reste: TELEPORT_DELAY };
+      return null;
     }
     return null;
   }
@@ -892,6 +937,26 @@ export const METEOR = { damage: 50, ignoreSeconds: 0.5, life: 60 };
  * TIRE UN NOUVEAU DELAI entre `_minInterval` et `_maxInterval`. Le delai n'est
  * donc pas une periode : deux lanceurs ne se synchronisent jamais, et le meme
  * lanceur ne bat pas deux fois pareil.
+ *
+ * `LaunchMeteor` fait ensuite trois choses, et les deux premieres se tiennent :
+ *
+ *     GameObject m = Instantiate(_meteorPrefab, transform.position,
+ *                                transform.rotation);
+ *     m.transform.parent = transform.root;          // la RACINE, pas le lanceur
+ *     if (_targetBody != null && _targetBody.GetGravityField() != null)
+ *         m.GetSingleFieldDetector().SetDetectableField(champ, true);
+ *     if (_launchParticles != null) _launchParticles.Play();
+ *
+ * LE METEORE EST RATTACHE A LA RACINE, pas au lanceur : il part avec la pose
+ * du lanceur et ne le suit plus. Sans cela, un lanceur qui tourne avec sa
+ * planete emporterait ses propres meteores.
+ *
+ * ET IL NE SENT QU'UN SEUL CHAMP. `SingleFieldDetector.SetDetectableField`
+ * remplace le detecteur dominant par un detecteur a un corps : le meteore
+ * tombe vers la cible, et sur ELLE seule, meme en passant a portee d'un autre
+ * corps. C'est l'unique endroit du build ou la regle du champ dominant
+ * ([`04`](../../docs/04-gravite.md)) est mise de cote, et c'est ce qui rend la
+ * pluie de meteores dirigee plutot qu'erratique (docs/121-avis.md).
  */
 export class MeteorLaunchers {
   /** @param rng tirage dans [0, 1[, injecte pour que le test soit reproductible */
@@ -931,13 +996,28 @@ export class MeteorLaunchers {
   /**
    * Avance les meteores. Le champ dominant les infléchit, comme la sonde — ils
    * retombent donc sur la planete qui les a craches.
+   *
+   * Les positions sont celles des LANCEURS, donc du monde : l'appelant convertit
+   * pour lire le champ et pour tester les contacts.
+   *
+   * @param field le champ subi : un champ tel quel, ou une FONCTION de la
+   *   position du meteore. Le portage passait celui du JOUEUR a tous les
+   *   meteores — un caillou au-dessus de Brittle Hollow tombait donc vers ce
+   *   que le joueur, ailleurs, avait sous les pieds.
+   *
+   *   `_targetBody` est nul sur les quatre lanceurs, donc
+   *   `SingleFieldDetector.SetDetectableField` n'est JAMAIS appele dans ce
+   *   build : un meteore y garde le detecteur ordinaire, celui du champ
+   *   dominant. C'est donc bien la regle commune qui s'applique, et il faut
+   *   la lire AU METEORE (docs/121-avis.md).
    */
   step(dt, field = null, cfg = METEOR) {
     for (const m of this.meteors) {
-      if (field) {
-        m.vel[0] += field.dir.x * field.magnitude * dt;
-        m.vel[1] += field.dir.y * field.magnitude * dt;
-        m.vel[2] += field.dir.z * field.magnitude * dt;
+      const f = typeof field === "function" ? field(m.pos) : field;
+      if (f) {
+        m.vel[0] += f.dir.x * f.magnitude * dt;
+        m.vel[1] += f.dir.y * f.magnitude * dt;
+        m.vel[2] += f.dir.z * f.magnitude * dt;
       }
       m.pos[0] += m.vel[0] * dt;
       m.pos[1] += m.vel[1] * dt;

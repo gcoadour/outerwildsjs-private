@@ -38,6 +38,21 @@
 // qu'une coincidence.
 
 // @lit AttachOnAwake, MatchInitialMotion, MajorReferenceFrameVolume, ReferenceFrameVolume
+//
+// `GenerateReferenceFrame` est la meme methode dans les deux classes, et c'est
+// SON ARGUMENT qui les separe :
+//
+//   ReferenceFrameVolume       new ReferenceFrame(corps, position, 0f, 0f)
+//   MajorReferenceFrameVolume  new ReferenceFrame(corps, position,
+//                                  _autopilotArrivalDistance,
+//                                  _autoAlignmentDistance)
+//
+// UN REFERENTIEL ORDINAIRE A DES DISTANCES NULLES. Le pilote automatique ne
+// peut donc pas viser une arrivee sur lui, et l'alignement automatique ne s'y
+// etablit jamais : il ne sert qu'a dire de quel corps on suit la vitesse.
+// Seuls les MAJEURS portent les deux distances, et c'est ce que `frames.js`
+// lit depuis docs/46 — la difference etait mesuree, elle n'etait pas nommee
+// (docs/121-avis.md).
 // Les referentiels declares du build et les deux lois d'heritage de mouvement
 // (docs/46-migration-lots.md, lot 1).
 

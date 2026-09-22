@@ -42,6 +42,30 @@ CHROMIUM = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 # Le reveil, mesure dans la page. Sorti du corps de `_run` parce que son
 # texte JavaScript contiendrait des guillemets triples au milieu d'une
 # chaine qui en est deja faite.
+# Les trois zones d'invites. Sorti du corps de `_run` pour la meme raison que
+# `REVEIL_JS` : son JavaScript porte des guillemets triples.
+INVITES_JS = '''() => {
+  const p = window.__prompts;
+  if (!p) return null;
+  const avant = {};
+  for (const z of ["center", "bottom", "left"]) {
+    avant[z] = p.zones[z].innerHTML;
+  }
+  const lot = [{ text: "un", priority: 0 }, { text: "deux", priority: 3 }];
+  const compte = (z) => {
+    p.set(z, lot, 0);
+    return p.zones[z].querySelectorAll(".ow-prompt").length;
+  };
+  const r = { centre: compte("center"), bas: compte("bottom"),
+              gauche: compte("left") };
+  // On remet la page telle qu'elle etait : un controle ne change rien.
+  for (const z of ["center", "bottom", "left"]) {
+    p.set(z, [], 0);
+    p.zones[z].innerHTML = avant[z];
+  }
+  return r;
+}'''
+
 REVEIL_JS = '''() => {
   const r = window.__reveil;
   if (!r) return null;
@@ -942,6 +966,20 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.at_least("le vaisseau est a distance de marche",
                          round(depart["marche"] or 0, 0), 100)
 
+        # --- les trois zones d'invites (docs/112-invites.md) -------------------
+        #
+        # `PromptManager` tient `_highestLeftPriority` et
+        # `_highestCenterPriority`, et AUCUN `_highestBottomPriority` : la zone
+        # du bas montre tout ce qu'on lui donne. Ce portage arbitrait les trois,
+        # et une invite de priorite superieure pouvait donc chasser les codes de
+        # lancement.
+        invites = page.evaluate(INVITES_JS)
+        if invites:
+            rep.eq("au centre, seule la priorite maximale reste",
+                   invites["centre"], 1)
+            rep.eq("a gauche aussi", invites["gauche"], 1)
+            rep.eq("mais en bas, tout s'affiche", invites["bas"], 2)
+
         # --- le reveil (docs/108-reveil.md) ------------------------------------
         #
         # `SpawnPlayer` ouvre les yeux quatre-vingts degres au-dessus de
@@ -1661,10 +1699,16 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("deux coquilles sonores", coq["n"], 2)
             rep.eq("concentriques sur Giant's Deep", sorted(coq["rayons"]), [205, 498])
             rep.at_least("appariees a leur source", coq["appariees"], 1)
-        # On part avec le sol : la vitesse initiale n'est pas zero.
+        # ON PART AVEC LE SOL, et c'est la vitesse DE DEPART qu'on mesure.
+        #
+        # Ce controle lisait `player.vel` en cours de parcours et appelait cela
+        # « la vitesse initiale ». Il mesurait donc ce que le joueur avait fait
+        # depuis — debout sans bouger, sa vitesse retombe, et le controle
+        # tombait avec elle des que le parcours s'allongeait (une extraction
+        # complete suffit). Le depart, lui, est un instant : on le garde.
         sol = page.evaluate("""() => {
-          const p = window.__player;
-          return p ? Math.hypot(p.vel.x, p.vel.y, p.vel.z) : null;
+          const v = window.__start && window.__start.v0;
+          return v ? Math.hypot(v[0], v[1], v[2]) : null;
         }""")
         if sol is not None:
             rep.check("le joueur ne part pas immobile sur un sol qui tourne",
@@ -2512,6 +2556,44 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("ressortir la referme", att3["on"], False)
             rep.eq("le manche relace", att3["roule"], False)
             rep.eq("et le roulis reprend son sens", att3["flip"], 1)
+
+            # `ExitFlightConsole` (docs/114-poste.md) : SE LEVER ferme la vue,
+            # et ne range PAS le roulis. Seul le navigateur peut le dire — le
+            # branchement vit dans `main.js`, que les tests Node ne chargent
+            # pas. On rend ensuite au joueur sa place et sa vitesse : se lever
+            # le decale de quatre unites et lui donne celle du siege, ce que
+            # les controles suivants n'ont pas demande.
+            page.keyboard.press("KeyR")
+            page.wait_for_timeout(900)
+            avant_leve = page.evaluate("""() => {
+              const p = window.__player;
+              return { on: window.__atterrissage.on,
+                       pos: [p.pos.x, p.pos.y, p.pos.z],
+                       vel: [p.vel.x, p.vel.y, p.vel.z] };
+            }""")
+            page.keyboard.press("KeyE")
+            page.wait_for_timeout(300)
+            leve = page.evaluate("""() => {
+              const a = window.__atterrissage;
+              return { boarded: window.__shipRef.boarded, on: a.on,
+                       flip: a.flipRollFactor, roule: a.rollByDefault,
+                       annonces: a.events.slice(-2) };
+            }""")
+            rep.eq("la vue etait bien ouverte avant de se lever",
+                   avant_leve["on"], True)
+            rep.eq("se lever quitte le poste", leve["boarded"], False)
+            rep.eq("et referme la vue d'atterrissage", leve["on"], False)
+            rep.eq("avec les deux annonces de la sortie", leve["annonces"],
+                   ["SwitchActiveCamera", "ExitLandingView"])
+            # Ce que le build ne fait PAS : ranger le roulis.
+            rep.eq("le manche reste inverse", leve["flip"], -1)
+            rep.eq("et le roulis reste le defaut", leve["roule"], True)
+            page.evaluate("""(e) => {
+              const p = window.__player;
+              p.pos.x = e.pos[0]; p.pos.y = e.pos[1]; p.pos.z = e.pos[2];
+              p.vel.x = e.vel[0]; p.vel.y = e.vel[1]; p.vel.z = e.vel[2];
+              window.__atterrissage.resetRoll();
+            }""", avant_leve)
         page.evaluate("() => { window.__shipRef.boarded = false; }")
         page.wait_for_timeout(300)
 
@@ -2629,6 +2711,52 @@ def _run(url, heavy, profil=None, zip_path=None):
                  s.values.flightSensitivity = avant;
                  return [double, Math.round(petit * 100) / 100];
                }"""), [2, 0.2])
+
+        # --- la cadence du menu (docs/115-menu.md) ----------------------------
+        #
+        # `Menu.SELECT_DELAY` vaut 0,2 s. La repetition automatique d'un
+        # navigateur tourne a trente millisecondes : sans la cadence, garder
+        # une fleche enfoncee parcourt les sept options en un clin d'oeil.
+        # Les evenements sont envoyes en RAFALE depuis la page, ce que
+        # `page.keyboard.press` ne sait pas faire assez vite.
+        menu = page.evaluate("""() => {
+          const s = window.__gui.settings;
+          const tape = (code) => dispatchEvent(new KeyboardEvent("keydown", { code }));
+          tape("Escape");
+          s.index = 0;
+          for (let i = 0; i < 10; i++) tape("ArrowDown");
+          return { ouvert: s.open, rafale: s.index };
+        }""")
+        rep.eq("le canal Pause ouvre le menu", menu["ouvert"], True)
+        rep.eq("dix fleches en rafale n'avancent que d'une ligne",
+               menu["rafale"], 1)
+        # L'annonce ne part qu'a l'image suivante : le bloc des modes lit
+        # l'ETAT, il ne rejoue pas l'appel.
+        page.wait_for_timeout(150)
+        rep.eq("et le jeu de commandes devient celui du menu",
+               page.evaluate("() => window.__modes.mode"), "menu")
+        rep.eq("avec l'annonce du build",
+               page.evaluate("() => window.__modes.events.at(-1)"),
+               "EnterMenuMode")
+        page.wait_for_timeout(250)
+        menu2 = page.evaluate("""() => {
+          const s = window.__gui.settings;
+          const tape = (code) => dispatchEvent(new KeyboardEvent("keydown", { code }));
+          tape("ArrowDown");
+          const apres = s.index;
+          // L'autre sens a sa propre horloge : l'aller-retour est immediat.
+          tape("ArrowUp");
+          const retour = s.index;
+          tape("Escape");
+          return { apres, retour, ouvert: s.open };
+        }""")
+        rep.eq("passe le delai, la fleche repasse", menu2["apres"], 2)
+        rep.eq("et l'autre sens ne l'attend pas", menu2["retour"], 1)
+        rep.eq("le canal Pause referme le menu", menu2["ouvert"], False)
+        page.wait_for_timeout(150)
+        rep.eq("avec l'annonce de sortie",
+               page.evaluate("() => window.__modes.events.at(-1)"),
+               "ExitMenuMode")
 
         # --- les deux tables de manette (docs/94-manette.md) ------------------
         rep.eq("les deux tables de manette s'accordent dans la page",

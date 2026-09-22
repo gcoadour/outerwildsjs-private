@@ -50,6 +50,30 @@ export function alignedBodies(gameplay) {
  * et herite du mouvement par la hierarchie — c'est le meme constat que pour
  * `AttachOnAwake` (docs/46, lot 1). La loi est posee et gardee quand meme,
  * parce que ce qui bouge seul ne passe pas par la hierarchie.
+ *
+ * LES ACCELERATIONS S'ADDITIONNENT, et c'est le contraire de la regle qui vaut
+ * partout ailleurs dans ce jeu : un detecteur de champ ordinaire retient le
+ * champ DOMINANT (docs/04-gravite.md), celui-ci les somme tous.
+ *
+ *     GetInheritedAcceleration()
+ *         if (_dirty) {
+ *             _netInheritedAcceleration = Vector3.zero;
+ *             foreach (FieldDetector d in _inheritedDetectorList)
+ *                 _netInheritedAcceleration += d.GetFieldAcceleration();
+ *             _dirty = false;
+ *         }
+ *         return _netInheritedAcceleration;
+ *     FixedUpdate()
+ *         _owRigidbody.AddAcceleration(GetInheritedAcceleration());
+ *
+ * `AddInheritedFieldDetector`, `RemoveInheritedFieldDetector` et
+ * `ClearInheritedFields` n'ont rien a refaire ici : elles tiennent la LISTE et
+ * l'abonnement a `OnDetectorUpdated`, dont le seul effet est de lever `_dirty`
+ * — un cache. Ce portage recalcule la somme a chaque appel, ce qui est le meme
+ * resultat sans le cache. `AddInheritedFieldDetector` refuse par ailleurs
+ * d'heriter du detecteur du corps LUI-MEME (« Cannot inherit from an attached
+ * field detector! »), ce qui ne peut pas arriver dans un portage ou la liste
+ * est celle des champs qu'on lui passe.
  */
 // @vide aucun `FieldInheritor` ne bouge seul : ce decor est enfant du glTF de son corps (docs/68)
 export function inheritedAcceleration(fields) {
@@ -78,6 +102,15 @@ export function fieldInheritors(gameplay) {
  *
  * `_duration` vaut -1 : elles clignotent sans fin. Un `_duration` positif
  * eteindrait le composant au bout du compte.
+ *
+ * `Activate(duration)` est ce qui poserait ce compte :
+ *
+ *     _duration = duration;  enabled = true;
+ *
+ * Elle n'a AUCUN appelant dans le build. Les deux instances partent de leur
+ * valeur serialisee, -1, et personne ne vient jamais leur en donner une autre :
+ * le clignotement a duree limitee existe et ne sert pas ici
+ * (docs/121-avis.md).
  */
 export const BLINK = { on: 1, off: 1, duration: -1 };
 
@@ -161,4 +194,101 @@ export function waterEffects(gameplay) {
         .map((k) => (f[k] || {}).name || null),
     };
   });
+}
+
+/**
+ * LA TRAPPE DU VAISSEAU, et ce qu'elle a de contre-intuitif.
+ *
+ *     OnPressInteract()   OpenHatch();
+ *     OpenHatch()         _hatchObject.SetActive(false);
+ *                         audio.PlayOneShot(_openHatchClip);
+ *     CloseHatch()        _hatchObject.SetActive(true);
+ *                         _interactVolume.ResetInteraction();
+ *                         audio.PlayOneShot(_closeHatchClip);
+ *     OnEntry(c)          if (c.tag == "PlayerDetector") {
+ *                             CloseHatch(); _isPlayerInShip = true;
+ *                             FireEvent("EnterShip"); }
+ *     OnExit(c)           if (c.tag == "PlayerDetector") {
+ *                             _isPlayerInShip = false;
+ *                             FireEvent("ExitShip"); }
+ *
+ * TROIS CHOSES QUE LE PORTAGE N'AVAIT PAS.
+ *
+ * `_hatchObject` est `Hatch_Collider` : ouvrir la trappe ne joue AUCUNE
+ * animation, ca DESACTIVE un collider. La trappe est une barriere physique, et
+ * l'ouvrir la retire — voila pourquoi il n'y a ni charniere ni duree.
+ *
+ * Elle se referme TOUTE SEULE, et pas ou on croit : `OnEntry`, c'est-a-dire
+ * quand le joueur est entre. On ouvre, on entre, elle claque derriere soi. Rien
+ * ne la referme en sortant — `OnExit` ne fait qu'annoncer —, donc sortir laisse
+ * la trappe grande ouverte jusqu'a ce qu'on rentre.
+ *
+ * Et c'est elle qui annonce `EnterShip` / `ExitShip`. Pas le poste de pilotage :
+ * on est « dans le vaisseau » des qu'on a passe la trappe, assis ou debout.
+ */
+export function hatchControllers(gameplay) {
+  return ((gameplay.placed || {}).HatchController || []).map((c) => {
+    const f = c.fields || {};
+    return {
+      name: c.name, body: c.body || null, position: c.position,
+      // Le rayon du declencheur d'entree, lu dans le collider et non devine.
+      volume: c.volume || null,
+      hatchObject: (f._hatchObject || {}).name || null,
+      openClip: (f._openHatchClip || {}).name || null,
+      closeClip: (f._closeHatchClip || {}).name || null,
+    };
+  });
+}
+
+/** L'etat d'une trappe : ouverte ou non, le joueur dedans ou non. */
+export class Hatch {
+  constructor(data = {}) {
+    this.data = data;
+    this.open = false;
+    this.inside = false;
+    this.events = [];
+    this.clips = [];
+  }
+
+  /** `OnPressInteract` -> `OpenHatch`. @returns vrai si elle s'ouvre. */
+  pressInteract() {
+    if (this.open) return false;
+    this.open = true;
+    if (this.data.openClip) this.clips.push(this.data.openClip);
+    return true;
+  }
+
+  /**
+   * `OnEntry` / `OnExit` sur le detecteur du joueur.
+   *
+   * `CloseHatch` est appele SANS condition a l'entree : meme trappe deja
+   * fermee, le clip part. Le portage se serait spontanement garde d'un
+   * doublon ; le build ne s'en garde pas, et c'est audible quand on franchit
+   * la zone sans avoir ouvert.
+   *
+   * @returns {"entre"|"sort"|null}
+   */
+  setInside(dedans) {
+    const d = !!dedans;
+    if (d === this.inside) return null;
+    this.inside = d;
+    if (d) {
+      this.open = false;
+      if (this.data.closeClip) this.clips.push(this.data.closeClip);
+      this.events.push("EnterShip");
+      return "entre";
+    }
+    this.events.push("ExitShip");
+    return "sort";
+  }
+
+  /** `_hatchObject.activeSelf` : le collider est-il en place ? */
+  get collider() { return !this.open; }
+
+  drain() { return this.clips.splice(0); }
+
+  reset() {
+    this.open = false; this.inside = false;
+    this.events.length = 0; this.clips.length = 0;
+  }
 }

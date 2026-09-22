@@ -27,10 +27,130 @@
 // etait donc lue sans etre nommee, ce que le recensement ne peut pas deviner
 // (docs/65-onde.md).
 
-// @lit SettingsMenu
+// @lit SettingsMenu, Menu
 // Les sept options de `SettingsMenu`, et ce que chacune commande.
+//
+// `SettingsMenu.UpdateOptionText` ecrit les sept libelles, et `Open` / `Close`
+// ne font presque rien d'autre que ce que le portage faisait deja :
+//
+//     Open(parent)    if (loadedLevel != 0) Time.timeScale = 0;  base.Open(parent)
+//     Close()         if (loadedLevel != 0) { Screen.showCursor = false;
+//                                             Screen.lockCursor = true;
+//                                             Time.timeScale = 1; }  base.Close()
+//
+// LA PAUSE ETAIT PORTEE ; LE CURSEUR NON. Fermer le menu REPREND la souris, et
+// c'est le pendant d'une regle qu'on ne trouve pas dans `SettingsMenu` mais
+// dans `Menu.Update` : le curseur n'apparait pas a l'ouverture, il apparait
+// quand la souris BOUGE (voir `MenuInput` ci-dessous).
 
 const KEY = "outerwilds.settings";
+
+/**
+ * Les constantes de `Menu` — la classe de base, que `SettingsMenu` etend et
+ * dont le portage n'avait porte que la navigation.
+ */
+export const MENU = {
+  // `Menu.SELECT_DELAY`. Toutes les cadences du menu valent 0,2 s.
+  selectDelay: 0.2,
+  // DEUX SEUILS, et ils different : 0,2 sur `moveZ` pour NAVIGUER, 0,5 sur
+  // `moveX` pour CHANGER une valeur. Changer demande donc un geste plus franc
+  // que parcourir — on ne modifie pas un reglage en effleurant le manche.
+  moveThreshold: 0.2,
+  toggleThreshold: 0.5,
+  // `Vector3.Distance(Input.mousePosition, _lastMousePos) > 0.1f` : le menu
+  // passe a la souris des qu'elle bouge d'un dixieme de pixel.
+  mouseWake: 0.1,
+};
+
+/**
+ * `Menu.Update`, sa cadence et ses trois facons de valider.
+ *
+ * QUATRE HORLOGES, PAS UNE. `_lastAxisUpTime`, `_lastAxisDownTime`,
+ * `_lastAxisLeftTime` et `_lastAxisRightTime` sont des champs distincts :
+ * monter puis descendre dans la foulee ne coute rien, tandis que monter deux
+ * fois demande 0,2 s. C'est ce qui rend un aller-retour vif et une repetition
+ * reguliere, et une seule horloge partagee l'aurait rate.
+ *
+ * ET ELLES COMPTENT EN TEMPS REEL. `Time.realtimeSinceStartup`, pas
+ * `Time.time` : `Open` vient de poser `timeScale = 0`, et un menu cadence sur
+ * l'horloge du jeu serait fige avec lui. Le portage mesurait l'appui clavier,
+ * dont la repetition automatique du navigateur tourne a trente millisecondes —
+ * six fois trop vite.
+ */
+export class MenuInput {
+  constructor(cfg = MENU) {
+    this.cfg = cfg;
+    // -Infini : le premier geste passe toujours.
+    this.horloges = { haut: -Infinity, bas: -Infinity,
+                      gauche: -Infinity, droite: -Infinity };
+    // `_mouseActive = Screen.showCursor` a l'ouverture : faux, puisque le jeu
+    // tourne souris prise. Le survol ne choisit donc rien tant qu'on n'a pas
+    // bouge la souris au moins une fois.
+    this.mouseActive = false;
+  }
+
+  /**
+   * @param now     secondes de temps REEL (que la pause ne fige pas)
+   * @param moveZ   axe avant/arriere, brut
+   * @param moveX   axe gauche/droite, brut
+   * @param verrouillee l'option courante est-elle verrouillee
+   * @returns { move: -1|0|1, toggle: -1|0|1 }
+   */
+  axes(now, moveZ = 0, moveX = 0, verrouillee = false) {
+    const c = this.cfg;
+    let move = 0;
+    // `Menu.Update` teste le HAUT d'abord, et n'essaie le bas que si le haut
+    // n'a rien donne : les deux ne partent jamais ensemble.
+    if (moveZ > c.moveThreshold) {
+      if (now > this.horloges.haut + c.selectDelay) {
+        move = -1; this.horloges.haut = now;
+      }
+    } else if (moveZ < -c.moveThreshold) {
+      if (now > this.horloges.bas + c.selectDelay) {
+        move = 1; this.horloges.bas = now;
+      }
+    }
+    // UNE OPTION VERROUILLEE N'ACCEPTE RIEN. Le bloc entier de validation est
+    // saute — on peut la survoler, pas l'actionner.
+    let toggle = 0;
+    if (!verrouillee) {
+      if (moveX > c.toggleThreshold) {
+        if (now > this.horloges.droite + c.selectDelay) {
+          toggle = 1; this.horloges.droite = now;
+        }
+      } else if (moveX < -c.toggleThreshold) {
+        if (now > this.horloges.gauche + c.selectDelay) {
+          toggle = -1; this.horloges.gauche = now;
+        }
+      }
+    }
+    return { move, toggle };
+  }
+
+  /**
+   * La souris qui se reveille : au-dela d'un dixieme de pixel, le curseur
+   * reparait et le verrou tombe.
+   *
+   *   if (Distance(mousePosition, _lastMousePos) > 0.1f) {
+   *       Screen.lockCursor = false; Screen.showCursor = true;
+   *       _mouseActive = true; }
+   *
+   * Rien ne la rendort : `_mouseActive` ne retombe qu'a la prochaine
+   * ouverture, ou `Menu.Open` le relit sur `Screen.showCursor` — que `Close`
+   * vient de remettre a faux.
+   */
+  souris(distance) {
+    if (!(distance > this.cfg.mouseWake)) return false;
+    const reveil = !this.mouseActive;
+    this.mouseActive = true;
+    return reveil;
+  }
+
+  /** `Menu.Open` : `_mouseActive = Screen.showCursor`. */
+  reouvre(curseurVisible = false) {
+    this.mouseActive = !!curseurVisible;
+  }
+}
 
 export class Settings {
   constructor(conf) {
@@ -71,6 +191,35 @@ export class Settings {
     }
     this.confirmNewGame = false;
     this.load();
+  }
+
+  /**
+   * `SettingsMenu.Open` puis `Menu.Open(null)`.
+   *
+   * La pause est ailleurs — le `dt` de la boucle vaut zero tant que
+   * `this.open` est vrai —, et ce qui manquait est l'annonce : `Menu.Open`
+   * leve `EnterMenuMode` quand il n'a pas de menu parent, ce qui est le cas
+   * du seul menu de ce portage.
+   *
+   * @returns les annonces du build
+   */
+  ouvre() {
+    this.open = true;
+    this.confirmNewGame = false;
+    return ["EnterMenuMode"];
+  }
+
+  /**
+   * `SettingsMenu.Close` : le curseur REPRIS, puis `Menu.Close` et son annonce.
+   *
+   * L'appelant doit reverrouiller la souris — c'est la moitie du travail de
+   * cette methode dans le build, et la seule qu'un module sans DOM ne peut pas
+   * faire lui-meme.
+   */
+  ferme() {
+    this.open = false;
+    this.confirmNewGame = false;
+    return ["ExitMenuMode"];
   }
 
   load() {
@@ -132,11 +281,12 @@ export class Settings {
     const o = this.options[this.index];
     if (!o || o.locked) return null;
     switch (o.key) {
-      case "back": this.open = false; return "back";
+      // `Back` appelle `Close()`, qui reprend la souris et releve la pause :
+      // la sortie par l'option et la sortie par `cancel` sont le meme chemin.
+      case "back": this.ferme(); return "back";
       case "newGame":
         if (!this.confirmNewGame) { this.confirmNewGame = true; return null; }
-        this.confirmNewGame = false;
-        this.open = false;
+        this.ferme();
         return "newGame";
       case "invertY": this.values.invertY = !this.values.invertY; break;
       case "lookSensitivity":
@@ -223,6 +373,17 @@ export class SettingsUI {
         if (this.onPick) this.onPick();
         this.render();
       });
+      // `Menu.Update` : `GetMouseButtonDown(1)` appelle `ToggleOption(-1)`.
+      // Le bouton DROIT recule la valeur — c'est la seule facon de baisser une
+      // sensibilite a la souris, et le portage n'avait que la montee.
+      d.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (o.locked) return;
+        this.s.index = i;
+        this.s.toggle(-1);
+        if (this.onPick) this.onPick();
+        this.render();
+      });
       this.el.appendChild(d);
       return d;
     });
@@ -259,6 +420,25 @@ export class SettingsUI {
     this.el.style.transform = k < 1 ? `scale(${k.toFixed(3)})` : "";
   }
 
+  /**
+   * `Menu.UpdateColor` et `Menu.Suspend(true)`, qui sont la meme image.
+   *
+   *     UpdateColor()   pour chaque option :
+   *         verrouillee     HSV(40, 0,40, 0,15)
+   *         selectionnee    HSV(40, 0,50, 0,70)
+   *         sinon           HSV(40, 0,50, 0,30)
+   *     Suspend(hide)   enabled = false; si hide, chaque GUIText s'eteint
+   *
+   * Une seule TEINTE pour les trois etats — 40 degres, l'ambre du jeu —, et
+   * c'est la VALEUR qui distingue : 0,15 pour une option morte, 0,30 pour une
+   * option vivante, 0,70 pour celle qu'on vise. La saturation ne bouge qu'a
+   * l'etat verrouille, et de peu. `interface.js` les calcule deja depuis ces
+   * trois triplets ; elles ne sont pas ecrites en dur ici.
+   *
+   * `Suspend` est ce que fait la premiere ligne : le menu ferme cache ses
+   * elements plutot que de les detruire — c'est pourquoi `Open` les rallume un
+   * a un plutot que de les recreer.
+   */
   render() {
     const s = this.s;
     this.el.hidden = !s.open;

@@ -34,6 +34,26 @@
 
 // @lit BreakableFragment, MakeChildrenBreakable, DetachableFragment
 // Les 122 fragments de la croute : 72 tombent, 50 se brisent.
+//
+// `MakeBreakable(enfant)` est la methode qui tire ce sort, et l'ordre y compte :
+//
+//     enfant.AddBreakableFragment().Init(_integrity, _propagateToChildFraction,
+//                                        _fractureMaterial);
+//     if (Random.Range(0f, 1f) < _fractionDetachable)
+//         enfant.AddDetachableFragment().Init(_mass, _dragCoefficient,
+//                                             _escapeFromParentSpeed,
+//                                             _fieldDetection);
+//     else enfant.AddCollider();
+//
+// TOUT ENFANT EST D'ABORD CASSABLE, et seule une part tiree au sort devient en
+// plus DETACHABLE. Les deux ne s'excluent pas : un fragment detachable se
+// brise aussi. Et celui qui ne l'est pas recoit un collider a la place — il
+// reste solide, il ne disparait pas.
+//
+// Le tirage est fait UNE FOIS, au reveil, et non a chaque impact : la carte des
+// morceaux qui tomberont est figee avant qu'on arrive. C'est pourquoi ce
+// portage tire lui aussi une fois, par `hash01` sur le nom — meme loi, tirage
+// reproductible (docs/121-avis.md).
 
 export const FIELD_PARENT_ONLY = 2;
 

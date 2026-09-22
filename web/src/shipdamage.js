@@ -12,8 +12,35 @@
 // pas un interrupteur eteint. La mecanique tournait ; le portage l'avait
 // desactivee en lisant un resultat pour une permission.
 //
-// Restent nuls, et ceux-la pour de bon : `_genericPartImpactModifier` et
-// `_enginePartImpactModifier`, qu'aucune methode de la classe n'emploie.
+// LES DEUX MODIFICATEURS SERVENT, et ce commentaire disait le contraire :
+// « restent nuls, et ceux-la pour de bon, qu'aucune methode de la classe
+// n'emploie ». `Awake` les emploie, et c'est la que tout se joue —
+//
+//     foreach (ShipComponent c in _components)
+//         c.SetImpactThreshold(_mediumImpactThreshold + _genericPartImpactModifier);
+//     foreach (ShipComponent c in _components)
+//         if (c.GetType() == typeof(EngineComponent)) {
+//             c.SetImpactThreshold(_mediumImpactThreshold + _enginePartImpactModifier);
+//             ((EngineComponent)c).ToggleEngineDamage(_disableDamagedThrusters);
+//         }
+//
+// — parce que `SetImpactThreshold` ECRASE le champ serialise. Les dix
+// `EngineComponent` portent `_impactThreshold = 0` dans la scene, et cette
+// valeur ne survit pas au reveil : tous les composants du vaisseau repartent a
+// `_mediumImpactThreshold + modificateur`, soit TRENTE.
+//
+// Deux consequences, et ce sont des consequences de jeu (docs/113-seuil.md) :
+//
+//   - un choc sous trente unites par seconde n'abime AUCUNE piece. Le portage
+//     lisait le zero serialise et abimait le reacteur le plus proche au moindre
+//     contact ;
+//   - le seuil entre deux fois dans la force, et trente au lieu de zero la
+//     reduit d'autant. A cinquante unites par seconde, la piece prend 7,4 au
+//     lieu de 16,7.
+//
+// Les deux modificateurs sont nuls, donc les generiques et les reacteurs ont le
+// MEME seuil dans ce build. La distinction existe et ne se voit pas ; elle est
+// portee quand meme, comme le drapeau des propulseurs.
 //
 // LES CINQ POSITIONS DU BUILD. `DamageAlertLocation`, lue dans la table
 // Constant : Front 1, Top 2, Back 4, Left 8, Right 16. Ce sont des DRAPEAUX, et
@@ -43,13 +70,13 @@
 // Les dix `EngineComponent` portent chacun une `ThrusterLocation` (Left,
 // FrontLeft, TopLeft, BottomLeft, BackLeft, et les cinq de droite) et une
 // `_alertLocation` qui vaut Left pour les cinq de gauche et Right pour les cinq
-// de droite. Leur `_impactThreshold` vaut ZERO : n'importe quel choc abime le
-// reacteur le plus proche.
+// de droite. Leur `_impactThreshold` serialise vaut zero, et `Awake` le remonte
+// a trente : c'est le seuil du reveil qui vaut, pas celui de la scene.
 
 // @lit ShipDamageController, ShipComponent, EngineComponent
 // Le modele de degats du build, relu a l'endroit (docs/49-queue.md).
 
-import { impactDamage, DAMAGE } from "./autopilot.js";
+import { DAMAGE } from "./autopilot.js";
 
 /**
  * `DamageAlertLocation`, lue dans la table Constant de l'assembly : cinq
@@ -118,11 +145,29 @@ export function engineComponents(gameplay) {
       thrusterIndex: f._thrusterLocation ?? 0,
       alertBit: f._alertLocation ?? 0,
       location: alerte ? alerte[0] : null,
-      // Zero sur les dix : n'importe quel choc abime le reacteur le plus proche.
+      // Ce que la SCENE porte : zero sur les dix. `Awake` l'ecrase au reveil,
+      // et c'est `awakeThreshold` ci-dessous qui donne la valeur qui vaut.
       impactThreshold: f._impactThreshold ?? 0,
       integrity: f._integrity ?? 100,
     };
   });
+}
+
+/**
+ * Le seuil qu'un composant porte APRES `Awake`, et non celui de la scene.
+ *
+ *     c.SetImpactThreshold(_mediumImpactThreshold + modificateur);
+ *
+ * `SetImpactThreshold` ecrit le champ : la valeur serialisee ne survit pas au
+ * reveil. Le modificateur est celui des reacteurs pour un `EngineComponent`,
+ * celui des pieces generiques sinon — tous deux nuls dans ce build, donc trente
+ * partout (docs/113-seuil.md).
+ */
+export function awakeThreshold(fields = {}, engine = false) {
+  const base = fields._mediumImpactThreshold ?? DAMAGE.medium;
+  const mod = engine ? (fields._enginePartImpactModifier ?? 0)
+                     : (fields._genericPartImpactModifier ?? 0);
+  return base + mod;
 }
 
 export class ShipDamage {
@@ -140,11 +185,23 @@ export class ShipDamage {
     this.generic = fields._genericPartImpactModifier ?? 0;
     this.engine = fields._enginePartImpactModifier ?? 0;
     this.disableDamagedThrusters = !!fields._disableDamagedThrusters;
+    // Les deux modificateurs sont nuls ici, donc reacteurs et pieces
+    // generiques partagent le meme seuil. On garde les deux : la distinction
+    // existe dans le build, et elle s'allumerait si un modificateur changeait.
+    this.seuilPiece = awakeThreshold(fields, true);
+    this.seuilGenerique = awakeThreshold(fields, false);
+    // `_lightImpactThreshold` et `_mediumImpactThreshold` choisissent le CLIP
+    // d'impact, et rien d'autre. Les prendre pour des seuils de degats etait
+    // l'erreur qui a fait naitre la courbe de coque inventee.
+    this.lightSound = fields._lightImpactThreshold ?? DAMAGE.light;
+    this.mediumSound = fields._mediumImpactThreshold ?? DAMAGE.medium;
     this.shipTotalHealth = fields._shipTotalHealth ?? DAMAGE.total;
     this.instantDeathSpeed = fields._instantDeathSpeed ?? DAMAGE.instantDeath ?? 300;
+    // L'integrite d'une PIECE, serialisee a 100 sur chacun des dix
+    // `EngineComponent`. Elle n'a rien a voir avec `_shipTotalHealth`, qui
+    // borne le CUMUL : les confondre faisait naitre des pieces increvables.
     this.total = DAMAGE.total;
 
-    this.integrity = this.total;
     this.parts = {};
     for (const k of Object.keys(LOCATIONS)) {
       this.parts[k] = { name: PART_AT[k], integrity: this.total, dead: false, totalDamage: 0 };
@@ -155,6 +212,66 @@ export class ShipDamage {
     this.lastImpact = 0;
     this.lastLocation = null;
   }
+
+  /**
+   * Quel BRUIT d'impact, et c'est tout ce que ces deux seuils commandent.
+   *
+   *     if (|v| >= _mediumImpactThreshold) ... _mediumImpactClip ...
+   *     else if (|v| >= _lightImpactThreshold) ... _lightImpactClip ...
+   *
+   * Rendu comme un niveau de 0 a 2, pour que l'appelant choisisse son clip.
+   */
+  soundLevel(speed) {
+    if (speed >= (this.mediumSound ?? DAMAGE.medium)) return 2;
+    if (speed >= (this.lightSound ?? DAMAGE.light)) return 1;
+    return 0;
+  }
+
+  /**
+   * `RecalculateShipDamge` : la somme des `_totalDamage` des pieces.
+   *
+   * Le build n'a PAS d'integrite de coque. `ShipDamageController` ne porte
+   * aucun champ de sante propre : il explose sur deux conditions seulement, la
+   * vitesse d'un choc et ce cumul-la. L'« integrite » du vaisseau est donc ce
+   * qu'il lui reste avant le cumul fatal — une soustraction, pas un compteur
+   * separe (docs/113-seuil.md).
+   */
+  get cumul() {
+    return Object.values(this.parts).reduce((s, p) => s + p.totalDamage, 0);
+  }
+
+  /**
+   * Ce qu'il reste au vaisseau, de `_shipTotalHealth` a zero.
+   *
+   * CE QUI A ETE RETIRE : une courbe de degats de coque inventee par ce
+   * portage — « progression lineaire entre le seuil leger et le seuil de mort
+   * instantanee », avec une severite de 0,4 ou 1. Elle prenait
+   * `_lightImpactThreshold` et `_mediumImpactThreshold` pour des seuils de
+   * DEGATS ; ce sont les seuils du BRUIT, et leur seul autre emploi dans
+   * `OnImpact` est de choisir entre `_lightImpactClip` et `_mediumImpactClip`.
+   *
+   * Elle avait une consequence qu'aucun test ne voyait : la coque mourait
+   * toujours avant qu'une piece n'atteigne zero, si bien que
+   * `_disableDamagedThrusters` ne pouvait JAMAIS couper un propulseur.
+   */
+  get integrity() {
+    return Math.max(0, this.shipTotalHealth - this.cumul);
+  }
+
+  /** `ApplyDamageForce` : ce qu'une piece perd, et ce qu'elle allume. */
+  _blesse(p, cle, force) {
+    p.integrity = Math.max(0, p.integrity - force);
+    p.totalDamage += force;
+    if (p.integrity <= 0) {
+      p.integrity = 0;
+      p.dead = true;
+    }
+    // Le masque d'alerte s'accumule, et c'est lui que le HUD affiche.
+    if (cle) this.mask |= LOCATIONS[cle] || 0;
+  }
+
+  /** Le vaisseau a-t-il pris quelque chose ? */
+  get damaged() { return this.cumul > 0 || this.deadParts.length > 0; }
 
   /** La position est-elle dans le masque d'alerte COURANT ? */
   covers(location) {
@@ -192,11 +309,13 @@ export class ShipDamage {
    * @returns {damage, location, part, destroyed}
    */
   impact(speed, normal = null, point = null) {
-    const damage = impactDamage(speed);
-    if (damage <= 0) return { damage: 0, location: null, part: 0, destroyed: this.destroyed };
-
+    // `OnImpact` n'a pas de garde d'entree : il joue un bruit selon la vitesse
+    // — leger au-dessus de quinze, moyen au-dessus de trente — puis cherche la
+    // piece. Un choc plus doux que le seuil leger ne fait meme pas de bruit.
+    if (!(speed > 0)) {
+      return { damage: 0, location: null, part: 0, destroyed: this.destroyed };
+    }
     this.lastImpact = Math.round(speed);
-    this.integrity = Math.max(0, this.integrity - damage);
 
     // Le build choisit par PROXIMITE quand il a des composants poses, et le
     // portage retombe sur la normale quand il n'en a pas.
@@ -205,31 +324,48 @@ export class ShipDamage {
     this.lastLocation = loc;
 
     let part = 0;
-    // Trois pieces abimees au plus : au-dela, un impact ne fait plus de
-    // nouvelle victime. Une piece deja abimee peut toujours l'etre davantage.
+    // `Awake` a ecrase le seuil serialise : c'est celui du reveil qui vaut, et
+    // il gate l'impact autant qu'il entre dans la force.
+    const seuil = this.seuilPiece;
     const abimees = Object.values(this.parts).filter((p) => p.totalDamage > 0);
-    const deja = loc ? this.parts[loc] && this.parts[loc].totalDamage > 0 : false;
-    if (loc && this.parts[loc] && (deja || abimees.length < 3)) {
-      const seuil = proche ? proche.impactThreshold : 0;
-      if (speed > seuil) {
+
+    if (abimees.length < 3) {
+      // TANT QU'IL Y A MOINS DE TROIS PIECES ABIMEES, le choc en cherche une
+      // nouvelle : la plus proche du point, et elle seule.
+      if (loc && this.parts[loc] && speed > seuil) {
         // force = 100 x (|v| - seuil) / (mortInstantanee - seuil)
         const denom = (this.instantDeathSpeed - seuil) || 1;
         part = 100 * (speed - seuil) / denom;
-        const p = this.parts[loc];
-        p.integrity = Math.max(0, p.integrity - part);
-        p.totalDamage += part;
-        if (p.integrity <= 0) p.dead = true;
-        // Le masque d'alerte s'accumule, et c'est lui que le HUD affiche.
-        this.mask |= LOCATIONS[loc];
+        this._blesse(this.parts[loc], loc, part);
+      }
+      // `if (_instantDeathSpeed <= |velocity|) ExplodeShip();` vit DANS cette
+      // branche, et pas dans l'autre. C'est une bizarrerie du build, gardee
+      // telle quelle : passe trois pieces abimees, la mort instantanee par
+      // vitesse ne se declenche plus, et seul le cumul peut encore tuer.
+      if (speed >= this.instantDeathSpeed) this.destroyed = true;
+    } else {
+      // AU-DELA DE TROIS, LA FORCE SE PARTAGE — et elle ne suit plus la
+      // formule. Le build applique `velocity / n` a chaque piece deja abimee
+      // dont le seuil est passe, `n` etant leur nombre. Un choc a quarante
+      // reparti sur trois pieces leur coute donc 13,3 chacune, bien PLUS que
+      // les 3,7 de la branche ordinaire (docs/113-seuil.md).
+      const concernees = abimees.filter(() => speed > seuil);
+      const n = concernees.length;
+      if (n > 0) {
+        part = speed / n;
+        for (const p of concernees) {
+          const cle = Object.keys(this.parts).find((k) => this.parts[k] === p);
+          this._blesse(p, cle, part);
+        }
       }
     }
 
-    // Deux morts distinctes : le choc unique trop violent, et l'usure.
-    if (speed > this.instantDeathSpeed) this.destroyed = true;
-    const cumul = Object.values(this.parts).reduce((s, p) => s + p.totalDamage, 0);
-    if (cumul > this.shipTotalHealth) this.destroyed = true;
-    if (this.integrity <= 0) this.destroyed = true;
-    return { damage, location: loc, part, destroyed: this.destroyed };
+    // `Abs(_currentShipDamage) > _shipTotalHealth` : le CUMUL des
+    // `_totalDamage`, recalcule par `RecalculateShipDamge`. Il n'y a pas de
+    // troisieme condition, et pas d'integrite de coque.
+    if (this.cumul > this.shipTotalHealth) this.destroyed = true;
+    return { damage: this.soundLevel(speed), location: loc, part,
+             destroyed: this.destroyed };
   }
 
   /**
@@ -273,9 +409,8 @@ export class ShipDamage {
     p.totalDamage = 0;
     // Reparer une piece retire sa position de l'alerte.
     this.mask &= ~LOCATIONS[cible];
-    // L'integrite de coque est la moyenne des pieces : elle remonte d'autant.
-    const parts = Object.values(this.parts);
-    this.integrity = parts.reduce((s, x) => s + x.integrity, 0) / parts.length;
+    // L'integrite remonte d'elle-meme : elle est `_shipTotalHealth` moins le
+    // cumul, et le cumul vient de tomber.
     if (this.integrity > 0) this.destroyed = false;
     return cible;
   }
@@ -286,7 +421,6 @@ export class ShipDamage {
   }
 
   reset() {
-    this.integrity = this.total;
     this.destroyed = false;
     this.lastImpact = 0;
     this.lastLocation = null;

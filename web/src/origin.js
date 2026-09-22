@@ -19,6 +19,19 @@
 // @lit CenterOfTheUniverse
 // Le recentrage du monde autour du joueur, que le build appelle « le centre
 // de l'univers ».
+//
+// `RecenterUniverseAroundPlayer` ment sur son nom, et la methode le prouve :
+//
+//     if (!enabled) return;
+//     Vector3 c = _centerBody.transform.position;
+//     for (int i = 0; i < transform.childCount; i++)
+//         transform.GetChild(i).position -= c;
+//
+// C'est `_centerBody` qu'on retranche, pas le joueur — exactement le choix
+// explique ci-dessus, et il vient du build. Et le decalage s'applique aux
+// ENFANTS DIRECTS seulement : tout ce qui pend dessous suit par la hierarchie,
+// sans qu'on ait a le toucher. C'est ce que fait ce module en ne deplaçant que
+// les racines de corps.
 
 export class FloatingOrigin {
   constructor(threshold = 500) {

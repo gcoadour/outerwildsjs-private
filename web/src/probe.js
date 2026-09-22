@@ -49,14 +49,30 @@ export const SONDE = {
   // ProbeLauncher.LaunchProbe : le tir a vide vise une ORBITE
   orbitalMargin: 1.1,
   orbitalCap: 2,             // et jamais plus du double de la vitesse circulaire
-  // ProbeHorizonTracker
+  // ProbeHorizonTracker. `TrackHorizon(corps, secteur)` ne fait que s'ARMER :
+  // `enabled = true`, et les deux references rangees. Tout le travail est dans
+  // `FixedUpdate`, avec les cinq nombres ci-dessous. La methode n'a donc rien
+  // a porter — une piste qui se ferme a la lecture (docs/119-bruit.md).
   horizonMinPitch: -10,      // la fenetre de tir qui declenche le suivi d'horizon
   horizonMaxPitch: 55,
   horizonMaxCharge: 0.5,
   horizonHeight: 200,        // au-dela de l'horizon + 200, on ne corrige plus
   horizonSlerp: 0.1,         // par pas de physique
-  // ProbeCollider
-  colliderDelay: 0.2,        // le collider ne s'allume qu'apres, sinon on se tire dessus
+  // ProbeCollider. `ActivateCollider` fait TROIS choses, et la deuxieme est
+  // la vraie :
+  //
+  //     collider.enabled = true;
+  //     Physics.IgnoreCollision(collider, colliderDuJoueur);
+  //     FireEvent("IgnoreProbeCollider", collider);  enabled = false;
+  //
+  // Le delai de 0,2 s ci-dessous n'empeche pas de se tirer dessus — c'est
+  // l'ignorance PERMANENTE du collider du joueur qui le fait. Le delai ne sert
+  // qu'a laisser la sonde sortir de la main avant de devenir solide pour le
+  // reste du monde, et l'annonce dit aux autres d'en faire autant
+  // (`IgnoreProbeCollision.Awake` l'ecoute). Le portage ne fait pas entrer la
+  // sonde en collision avec le joueur, ce qui est la meme chose par l'autre
+  // bout (docs/121-avis.md).
+  colliderDelay: 0.2,
   colliderRadius: 0.45,
   detectorRadius: 0.75,
   // ProbeAnchor
@@ -172,6 +188,20 @@ export function orbitalSpeed(g, r, pitch, cfg = SONDE) {
  * Le nombre surprend jusqu'a ce qu'on voie a quoi il sert : la premiere sonde
  * de la partie est celle qui apprend le geste, et le jeu refuse de la laisser
  * partir dans un mur ou elle ne montrerait rien.
+ */
+/**
+ * `ProbeLauncher.CheckLaunchWindow(distance)` tient en une ligne :
+ *
+ *     return Physics.Raycast(transform.position, transform.forward,
+ *                            distance, OWLayerMask.GetPhysicalMask());
+ *
+ * UN RAYON, DEPUIS LE LANCEUR, LE LONG DE SON AVANT — pas depuis l'oeil, et
+ * pas dans un cone. Et il rend VRAI quand la fenetre est BOUCHEE : le nom
+ * trompe, et c'est l'appelant qui refuse le tir. Le masque est celui des
+ * couches physiques, donc les declencheurs ne comptent pas.
+ *
+ * Ce module lui passe la longueur ci-dessous, qui est la seule chose qui
+ * change entre un joueur qui sait se servir d'une sonde et un qui l'ignore.
  */
 export function launchWindowLength(sait, cfg = SONDE) {
   return sait ? cfg.launchWindow : cfg.tutorialWindow;

@@ -235,33 +235,66 @@ export class Autopilot {
     // l'arrivee juste : l'ecart de plus de 50 unites donne « undershot target »
     this.arrived = false;
     this.arrivalError = null;
+    // Le message de FIN, choisi au moment ou le pilote s'arrete : six issues
+    // distinctes dans `AutopilotGUI`, et le portage n'en disait que trois
+    // (docs/118-messages.md).
+    this.fin = null;
     this.matching = false;   // `_isMatchingVelocity`
     this.flying = false;     // `_isFlyingToDestination`
   }
 
-  engage(body) {
+  /**
+   * `InitFlyToDestination(frame)`, et son refus.
+   *
+   *     if (!frame.GetAllowAutopilot()) return false;                  // muet
+   *     if (|cible - moi| < frame.GetAutopilotArrivalDistance()) {
+   *         OnAlreadyAtDestination(); enabled = false; return false; } // « too close »
+   *
+   * DEUX refus, et ils ne se ressemblent pas : un referentiel qui n'autorise
+   * pas le pilote ne dit RIEN, tandis qu'une cible trop proche s'annonce. Le
+   * portage n'avait ni l'un ni l'autre, si bien que « too close to target »
+   * figurait au catalogue des messages sans que rien ne puisse l'afficher.
+   *
+   * @param position position du vaisseau, pour le refus de proximite
+   */
+  engage(body, position = null) {
     if (!body) return false;
-    this.target = body;
-    this.arrived = false;
-    this.phase = "alignement";
-    this.arrivalError = null;
-    this.matching = false;   // `_isMatchingVelocity`
-    this.flying = true;      // `_isFlyingToDestination`
     // Les deux distances viennent du `MajorReferenceFrameVolume` du corps vise
     // (docs/46, lot 1) : 1 000 partout, 2 500 pour Giant's Deep et Dark
     // Bramble, et un alignement de 0 a 1 000 — zero pour Dark Bramble, ou l'on
     // ne s'aligne sur rien.
     const surface = (body.gravity && body.gravity.upperSurfaceRadius) || 100;
     const d = autopilotDistances(this.frames, body.bodyName || body.name, surface);
+    if (position && body.position) {
+      const dist = Math.hypot(body.position[0] - position[0],
+                              body.position[1] - position[1],
+                              body.position[2] - position[2]);
+      if (dist < d.arrival) { this.fin = "tropPres"; return false; }
+    }
+    this.target = body;
+    this.arrived = false;
+    this.phase = "alignement";
+    this.arrivalError = null;
+    this.fin = null;
+    this.matching = false;   // `_isMatchingVelocity`
+    this.flying = true;      // `_isFlyingToDestination`
     this.arrival = d.arrival;
     this.alignment = d.alignment;
     this.declared = d.declared;
     return true;
   }
 
-  /** `Abort` : les quatre drapeaux tombent ensemble, et l'annonce part. */
+  /**
+   * `Abort` : les quatre drapeaux tombent ensemble, et l'annonce part.
+   *
+   * `OnAbortAutopilot` choisit son message sur `IsFlyingToDestination`, LU
+   * AVANT que les drapeaux ne tombent : « autopilot ABORTED » en vol,
+   * « velocity match ABORTED » pendant une simple egalisation. Le portage
+   * disait le premier dans les deux cas.
+   */
   abort() {
     const etait = this.phase !== "repos";
+    if (etait && !this.fin) this.fin = this.flying ? "abandon" : "abandonVitesse";
     this.target = null;
     this.phase = "repos";
     this.matching = false;
@@ -278,6 +311,7 @@ export class Autopilot {
     this.target = body;
     this.arrived = false;
     this.arrivalError = null;
+    this.fin = null;
     this.matching = true;
     this.flying = false;
     this.phase = "egalisation";
@@ -320,11 +354,15 @@ export class Autopilot {
       s.vel.z += pas.input[2] * k;
       if (pas.done) {
         // `OnArriveAtDestination(distance - arrivalDistance)` pendant un vol,
-        // `OnMatchedVelocity()` sinon.
+        // `OnMatchedVelocity()` sinon. Et `OnArriveAtDestination` ne nomme que
+        // le manque : au-dela de cinquante unites c'est « undershot target »,
+        // en deca — et meme cinquante unites TROP LOIN — c'est « autopilot
+        // complete ». Le depassement n'a pas de mot.
         if (this.flying) {
           this.arrivalError = Math.round(d - arrival);
           this.arrived = true;
-        }
+          this.fin = this.arrivalError > 50 ? "arriveCourt" : "arrive";
+        } else this.fin = "vitesseAtteinte";
         this.abort();
       }
       return this.phase;
@@ -355,12 +393,15 @@ export class Autopilot {
   }
 }
 
-/** Degats d'impact du vaisseau. Retourne les points perdus. */
-export function impactDamage(speed) {
-  if (speed >= DAMAGE.instantDeath) return DAMAGE.total;
-  if (speed < DAMAGE.light) return 0;
-  // progression lineaire entre le seuil leger et le seuil de mort instantanee
-  const t = (speed - DAMAGE.light) / (DAMAGE.instantDeath - DAMAGE.light);
-  const severity = speed >= DAMAGE.medium ? 1 : 0.4;
-  return Math.min(DAMAGE.total, DAMAGE.total * t * severity * 3);
-}
+// `impactDamage` vivait ici, et c'etait une INVENTION : « progression lineaire
+// entre le seuil leger et le seuil de mort instantanee », avec une severite de
+// 0,4 ou 1. Elle prenait `_lightImpactThreshold` et `_mediumImpactThreshold`
+// pour des seuils de DEGATS ; ce sont les seuils du BRUIT, et leur seul autre
+// emploi dans `OnImpact` est de choisir entre `_lightImpactClip` et
+// `_mediumImpactClip`.
+//
+// `ShipDamageController` ne porte AUCUN champ de sante de coque. Il explose sur
+// deux conditions seulement — la vitesse d'un choc, et le cumul des degats des
+// pieces au-dela de `_shipTotalHealth`. C'est ce que `shipdamage.js` fait
+// maintenant, et l'integrite du vaisseau y est une soustraction
+// (docs/113-seuil.md).

@@ -217,6 +217,24 @@ function jourNuit(z) {
 }
 
 /**
+ * `OWAudioSource.UpdateSourceVolume` — ce que le fondu ci-dessous commande, et
+ * ce qu'il ne commande PAS.
+ *
+ *     _audioSource.volume = _maxSourceVolume * _localVolume
+ *                         * _audioTrack.GetVolume();
+ *
+ * TROIS FACTEURS, ET UN SEUL EST A LA SOURCE. `_maxSourceVolume` est son
+ * plafond, serialise ; `_localVolume` est ce que le fondu deplace, de 0 a 1 ;
+ * et `_audioTrack.GetVolume()` est le volume de la PISTE — un reglage commun a
+ * toutes les sources qui la partagent. Une source ne connait donc jamais son
+ * volume final : elle connait sa part.
+ *
+ * Ce portage n'a pas de pistes : `AmbienceMixer` applique le produit des deux
+ * premiers, et le navigateur tient le troisieme sur son noeud de sortie. Le
+ * resultat est le meme produit, range ailleurs (docs/121-avis.md).
+ */
+
+/**
  * Le fondu d'`OWAudioSource`, et il tient en quatre methodes.
  *
  *     FadeTo(cible, duree, pause)

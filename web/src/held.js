@@ -21,6 +21,25 @@
 //
 // @lit MarshmallowStick, Marshmallow, TelescopeGUI, RadiationDetector
 
+// `RadiationDetector`, ET CE QUI EN EST MORT DANS CE BUILD. Le portage lit
+// `TotalHeat` — la chaleur, qui grille la guimauve — et rien d'autre. Les
+// quatre methodes qui restent se ferment a la lecture (docs/103-refait.md) :
+//
+//   TotalLight, TotalRadiation   de simples lectures de champ (`oldTotalLight`,
+//                                `oldTotalRadiation`), et leurs SEULS appelants
+//                                sont `Test`, `RadiationDetectorTestPrinter` et
+//                                `LensFlareFlicker` — dont la scene ne pose
+//                                AUCUNE instance. Rien ne les lit en jeu ;
+//   AddEmitter, RemoveEmitter    la liste des emetteurs. Une seule chose s'y
+//                                decide, et elle merite d'etre notee :
+//
+//     if (UseRaycasts) radiationEmitters.Add(emitter, poids);
+//     else             radiationEmitters.Add(emitter, 1);
+//
+//   — sans lancer de rayon, un emetteur compte pour UN, quel que soit le poids
+//   qu'on lui donne. Le poids n'existe que si le detecteur trace vers chaque
+//   source.
+
 /**
  * `MarshmallowStick.Update` : `_marshmallow.GetHeatLevel() / 40f`.
  *
@@ -28,6 +47,13 @@
  * telle quelle dans l'IL, sans borne : au-dela, `AnimationState.time` depasse
  * la duree du clip, et Unity le laisse a sa derniere pose puisque le clip est
  * en `Once`. On borne donc a la duree plutot qu'a la chaleur.
+ *
+ * `Marshmallow.Toast(quantite)` est ce qui remplit ce compteur, et c'est tout
+ * ce qu'elle fait : `_toastLevel += quantite`. PAS DE BORNE, pas de vitesse,
+ * pas de seuil — la guimauve accumule sans fin, et c'est `GetHeatLevel` qui
+ * rend ce total tel quel. Une guimauve oubliee sur le feu ne « brule » donc
+ * pas a un moment precis : elle depasse, simplement, et l'animation reste a sa
+ * derniere pose. Le portage accumule de meme (docs/121-avis.md).
  */
 export const THERM_HEAT_SPAN = 40;
 

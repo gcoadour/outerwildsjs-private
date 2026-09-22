@@ -17,10 +17,12 @@ import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
 import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
-         COMET_ELLIPSE, fociDistance, orbitStyle } from "../web/src/map.js";
+         COMET_ELLIPSE, fociDistance, orbitStyle, SolarMap,
+         MAP } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
+         NOTIFICATIONS,
          roastPrompts, roastBroken, shipProximity, RoastPrompt, helmetSettings,
          HELMET_LAG, HELMET_LAG_CTOR,
          HELMET_AMPLITUDE, ALARM_THRESHOLD, BLINK_PERIOD,
@@ -49,7 +51,7 @@ import { relativeMotion, trackerReadout, directThreshold, motionDust,
          SHIP_NOZZLES } from "../web/src/tracker.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
-         BLINK } from "../web/src/attachments.js";
+         hatchControllers, Hatch, BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
          repairVolumes, Repair } from "../web/src/volumes.js";
 import { ambienceZones, zonesActives, isDay,
@@ -67,11 +69,12 @@ import { tornadoPivots, TornadoPivots, matchTransforms,
 import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angleBetween,
          signedAngleAround, facePlayerStep, FACE_SLERP, nozzleFires,
          THRUSTER_NOZZLES, RandomTimer, teleporterFires, TELEPORT_COOLDOWN,
+         Teleporters, TELEPORT_DELAY,
          DecorField } from "../web/src/decor.js";
 import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
          EndOfTimeMusic, END_OF_TIME, eventAudio, UISounds, UI_SOUNDS,
-         UI_VOLUME, REPAIR_FADE } from "../web/src/reactaudio.js";
+         UI_VOLUME, REPAIR_FADE, jumpSound } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
@@ -102,12 +105,12 @@ import { SONDE, ProbeLauncher as Lanceur, Probe as Sonde, chargeFraction,
 
 import { Flashback, PlayerDeathHandler, FLASHBACK, SnapshotTimer,
          frameLengths, displayTimes } from "../web/src/death.js";
-import { Settings } from "../web/src/settings.js";
+import { Settings, MenuInput } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
-         engineComponents, THRUSTERS } from "../web/src/shipdamage.js";
+         engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
@@ -121,7 +124,7 @@ import { rolloffModel, curveGain, AudioField, AudioMixer,
 import { aiffToWav, extended80 } from "../web/src/pipeline/audioenc.js";
 import { sniffContainer, clipContainer } from "../web/src/pipeline/extract/audio.js";
 import { DialogueSystem } from "../web/src/dialogue.js";
-import { AUTOPILOT_MESSAGES } from "../web/src/hud.js";
+import { AUTOPILOT_MESSAGES, maxPriority } from "../web/src/hud.js";
 import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          brakingDistance, flyStep, autopilotRotation,
          autopilotMessageKey } from "../web/src/autopilot.js";
@@ -421,6 +424,60 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("dix puis un", reg.step(10, 1), 1);
   check("un puis dix", reg.step(1, -1), 10);
 
+  // --- LA CADENCE DU MENU (docs/115-menu.md) ----------------------------
+  //
+  // `Menu.SELECT_DELAY` vaut 0,2 s, et QUATRE horloges le comptent.
+  {
+    const mi = new MenuInput();
+    check("le premier geste passe", mi.axes(10, 1, 0).move, -1);
+    check("le meme, aussitot, ne passe pas", mi.axes(10.1, 1, 0).move, 0);
+    // L'autre sens a sa PROPRE horloge : un aller-retour est immediat.
+    check("mais l'autre sens passe tout de suite", mi.axes(10.1, -1, 0).move, 1);
+    check("passe le delai, le premier repasse",
+          mi.axes(10.25, 1, 0).move, -1);
+    // Deux seuils, et ils ne sont pas les memes.
+    const s = new MenuInput();
+    check("a trois dixiemes, on navigue", s.axes(0, 0.3, 0).move, -1);
+    check("a trois dixiemes, on ne change RIEN",
+          s.axes(0, 0, 0.3).toggle, 0);
+    check("a six dixiemes, on change", s.axes(0, 0, 0.6).toggle, 1);
+    // Une option verrouillee n'accepte rien — mais se survole encore.
+    const v = new MenuInput();
+    const r = v.axes(0, 1, 1, true);
+    check("verrouillee, l'option refuse le changement", r.toggle, 0);
+    check("mais la navigation reste", r.move, -1);
+    // Le haut est teste AVANT le bas : les deux ne partent jamais ensemble.
+    const d = new MenuInput();
+    check("un seul sens a la fois", d.axes(0, 1, 0).move, -1);
+    // La souris ne se reveille qu'au-dela d'un dixieme de pixel.
+    const sm = new MenuInput();
+    check("a l'ouverture, la souris dort", sm.mouseActive, false);
+    check("un dixieme pile ne la reveille pas", sm.souris(0.1), false);
+    check("au-dela, oui", sm.souris(0.2), true);
+    check("et elle reste reveillee", sm.mouseActive, true);
+    check("le reveil ne se reannonce pas", sm.souris(50), false);
+    // `Menu.Open` relit `Screen.showCursor` : `Close` l'a remis a faux.
+    sm.reouvre(false);
+    check("rouvrir le menu rendort la souris", sm.mouseActive, false);
+  }
+
+  // `Open` / `Close` : les deux annonces de `Menu`, et la sortie par « Back »
+  // qui est le MEME chemin que la sortie par `cancel`.
+  {
+    const m = new Settings(null);
+    check("ouvrir annonce EnterMenuMode", m.ouvre().join(","), "EnterMenuMode");
+    check("et le menu est ouvert", m.open, true);
+    check("fermer annonce ExitMenuMode", m.ferme().join(","), "ExitMenuMode");
+    check("et il est ferme", m.open, false);
+    // Sans le build, la liste d'options est vide : on pose celle que
+    // `interface.js` extrait, dont la premiere ligne est « Back ».
+    const b = new Settings({ settings: { options: [{ key: "back", label: "Back" }] } });
+    b.ouvre();
+    b.index = b.options.findIndex((o) => o.key === "back");
+    check("l'option « Back » ferme aussi", b.toggle(0), "back");
+    check("et le menu est bien ferme", b.open, false);
+  }
+
   // LA NOUVELLE PARTIE. `TitleScreenMenu.ToggleOption` appelle
   // `TriggerLoad(true, ...)` sur deux de ses cinq options, et `TriggerLoad`
   // appelle `CreateNewPlayerSave` : une partie neuve EFFACE la sauvegarde. Le
@@ -514,29 +571,65 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Un test gardait donc la lecture fausse, et il aurait refuse la correction.
   const alpha = new ShipDamage({ _damageLocationMask: 0, _shipTotalHealth: 100,
                                  _instantDeathSpeed: 300,
+                                 _mediumImpactThreshold: 30,
                                  _disableDamagedThrusters: false });
   check("au depart, aucune alerte", alpha.alerted.length, 0);
+  // LE SEUIL VIENT DU REVEIL, pas de la scene : `Awake` ecrase les
+  // `_impactThreshold` serialises par `_mediumImpactThreshold + modificateur`,
+  // soit trente (docs/113-seuil.md).
+  check("le seuil d'une piece est celui du reveil", alpha.seuilPiece, 30);
+  check("... et il vaut celui des pieces generiques ici",
+        alpha.seuilGenerique, alpha.seuilPiece);
+  check("un modificateur le deplacerait",
+        awakeThreshold({ _mediumImpactThreshold: 30,
+                         _enginePartImpactModifier: 12 }, true), 42);
+  check("et celui des generiques est un autre champ",
+        awakeThreshold({ _mediumImpactThreshold: 30,
+                         _enginePartImpactModifier: 12 }, false), 30);
+  // SOUS LE SEUIL, AUCUNE PIECE N'EST ABIMEE. Le portage lisait le zero
+  // serialise et abimait le reacteur le plus proche au moindre contact.
+  const doux = alpha.impact(25, [0, -1, 0]);
+  check("un choc sous trente n'abime aucune piece", doux.part, 0);
+  check("et n'allume aucune alerte", alpha.alerted.length, 0);
   const r = alpha.impact(40, [0, -1, 0]);
-  check("degats a 40 u/s", round(r.damage, 1), 26.3);
-  // force = 100 x (40 - 0) / (300 - 0)
-  check("la piece prend sa part, et elle n'est pas nulle", round(r.part, 2), 13.33);
-  check("integrite entamee", round(alpha.integrity, 1), 73.7);
+  // `damage` n'est plus une sante de coque inventee : c'est le NIVEAU DE BRUIT,
+  // seule chose que `_lightImpactThreshold` et `_mediumImpactThreshold`
+  // commandent dans `OnImpact` (docs/113-seuil.md).
+  check("quarante unites par seconde font un choc moyen", r.damage, 2);
+  check("vingt-cinq, un choc leger", alpha.soundLevel(25), 1);
+  check("et dix, aucun bruit", alpha.soundLevel(10), 0);
+  // force = 100 x (40 - 30) / (300 - 30) : le seuil entre DEUX fois.
+  check("la piece prend sa part, et elle n'est pas nulle", round(r.part, 2), 3.7);
   check("et le masque porte desormais l'arriere", alpha.alerted.join(","), "arriere");
 
   // TROIS PIECES ABIMEES AU PLUS. Au-dela, un impact ne fait plus de nouvelle
   // victime — la quatrieme position reste intacte quoi qu'il arrive.
-  const trois = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300 });
-  // Vingt unites par seconde : au-dessus du seuil leger (15), donc un impact
-  // reel, et assez doux pour que la coque survive aux cinq chocs.
-  trois.impact(20, [0, 0, 1]);       // avant
-  trois.impact(20, [0, 1, 0]);       // haut
-  trois.impact(20, [1, 0, 0]);       // droite
+  const trois = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
+                                 _mediumImpactThreshold: 30 });
+  // Trente-cinq unites par seconde : juste au-dessus du seuil du reveil, donc
+  // un impact qui abime, et le plus doux qui le fasse.
+  trois.impact(35, [0, 0, 1]);       // avant
+  trois.impact(35, [0, 1, 0]);       // haut
+  trois.impact(35, [1, 0, 0]);       // droite
   check("trois pieces abimees", trois.alerted.length, 3);
-  const quatrieme = trois.impact(20, [-1, 0, 0]);   // gauche
-  check("la quatrieme ne prend rien", quatrieme.part, 0);
+  const avantQuatrieme = trois.parts.gauche.totalDamage;
+  const dejaTrois = ["avant", "haut", "droite"].map((k) => trois.parts[k].totalDamage);
+  const quatrieme = trois.impact(35, [-1, 0, 0]);   // gauche
+  // AU-DELA DE TROIS, LA FORCE SE PARTAGE, et elle ne suit plus la formule :
+  // le build applique `velocity / n` a chaque piece DEJA abimee. Le portage
+  // rendait zero, ce qui etait une invention (docs/113-seuil.md).
+  check("la quatrieme position reste intacte",
+        trois.parts.gauche.totalDamage, avantQuatrieme);
   check("et l'alerte ne s'etend pas", trois.alerted.length, 3);
-  // Une piece DEJA abimee peut toujours l'etre davantage.
-  check("mais une deja touchee, si", trois.impact(20, [0, 0, 1]).part > 0, true);
+  check("mais les trois deja abimees se partagent le choc",
+        round(quatrieme.part, 4), round(35 / 3, 4));
+  check("... et chacune l'a bien pris",
+        ["avant", "haut", "droite"].every(
+          (k, i) => round(trois.parts[k].totalDamage - dejaTrois[i], 4)
+                    === round(35 / 3, 4)), true);
+  // Le partage coute PLUS cher que la branche ordinaire : 11,67 contre 1,85.
+  check("le partage est plus lourd que la formule",
+        round(35 / 3, 2) > round(100 * (35 - 30) / 270, 2), true);
 
   // L'ORDRE DES VOYANTS DU CASQUE N'EST PAS CELUI DES DRAPEAUX.
   //
@@ -550,8 +643,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         ALERT_ORDER.map((k) => LOCATIONS[k]).join(","), "4,1,16,8,2");
   {
     // Un choc a l'arriere allume le PREMIER voyant, pas le troisieme.
-    const seul = new ShipDamage({ _shipTotalHealth: 1e9 });
-    seul.impact(20, [0, 0, -1]);
+    const seul = new ShipDamage({ _shipTotalHealth: 1e9,
+                                  _mediumImpactThreshold: 30 });
+    seul.impact(35, [0, 0, -1]);
     const allumes = ALERT_ORDER.map((k) => seul.alerted.includes(k));
     check("l'arriere touche allume le voyant de tete",
           allumes.join(","), "true,false,false,false,false");
@@ -578,18 +672,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // `_disableDamagedThrusters` vaut FAUX dans cette alpha : une piece morte ne
   // coupe rien. Le mecanisme est porte quand meme.
   //
-  // Quinze chocs a 20 u/s : la piece perd 100 (20/3 par choc) et meurt, quand
-  // la coque n'en perd que 31 — c'est tout l'interet des degats localises.
+  // Quatre chocs a 100 u/s : la piece perd 25,93 a chaque fois — 100 x (100-30)
+  // / (300-30) — et meurt au quatrieme. Avec la courbe de coque inventee que ce
+  // portage avait, la coque mourait AVANT, et `_disableDamagedThrusters` ne
+  // pouvait donc jamais couper quoi que ce soit (docs/113-seuil.md).
   const use = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
+                               _mediumImpactThreshold: 30,
                                _disableDamagedThrusters: true });
-  for (let i = 0; i < 15; i++) use.impact(20, [0, 0, -1]);
-  check("piece morte apres une serie de chocs", use.parts.arriere.dead, true);
+  for (let i = 0; i < 4; i++) use.impact(100, [0, 0, -1]);
+  check("piece morte apres quatre chocs", use.parts.arriere.dead, true);
   check("le propulseur coupe est hors service", use.thrustFactor("arriere"), 0);
   check("les autres poussent encore", use.thrustFactor("avant"), 1);
+  check("et le vaisseau, lui, n'a pas explose", use.destroyed, false);
 
   const sansOption = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
+                                      _mediumImpactThreshold: 30,
                                       _disableDamagedThrusters: false });
-  for (let i = 0; i < 15; i++) sansOption.impact(20, [0, 0, -1]);
+  for (let i = 0; i < 4; i++) sansOption.impact(100, [0, 0, -1]);
   check("sans _disableDamagedThrusters, la piece morte ne coupe rien",
         sansOption.thrustFactor("arriere"), 1);
 
@@ -602,17 +701,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la boucle le rend entier", perdu.destroyed, false);
   check("et efface son alerte", perdu.mask, 0);
 
-  const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300 });
-  // Chaque choc a 20 u/s coute 6,67 a la piece : il en faut quinze pour que le
-  // cumul passe la sante totale, et la coque, elle, tient encore.
-  for (let i = 0; i < 14; i++) usure.impact(20, [0, 0, -1]);
-  check("quatorze chocs ne suffisent pas", usure.destroyed, false);
-  check("et la coque tient encore", usure.integrity > 0, true);
-  usure.impact(20, [0, 0, -1]);
+  const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300,
+                                 _mediumImpactThreshold: 30 });
+  // `Abs(_currentShipDamage) > _shipTotalHealth` : le cumul des `_totalDamage`
+  // des pieces, et rien d'autre. A 100 u/s chaque choc coute 25,93 ; il en faut
+  // quatre pour passer cent.
+  for (let i = 0; i < 3; i++) usure.impact(100, [0, 0, -1]);
+  check("trois chocs ne suffisent pas", usure.destroyed, false);
+  check("et l'integrite est ce qui reste avant le cumul fatal",
+        round(usure.integrity, 1), round(100 - 3 * 100 * 70 / 270, 1));
+  usure.impact(100, [0, 0, -1]);
   check("le cumul au-dela de la sante totale, si", usure.destroyed, true);
+  check("et l'integrite est tombee a zero", usure.integrity, 0);
 
   // Reparer retire la position de l'alerte.
-  const repare = new ShipDamage({ _shipTotalHealth: 1e9 });
+  const repare = new ShipDamage({ _shipTotalHealth: 1e9,
+                                  _mediumImpactThreshold: 30 });
   repare.impact(40, [0, 0, -1]);
   check("l'alerte est levee", repare.covers("arriere"), true);
   repare.repair("arriere");
@@ -1796,14 +1900,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 // qui tourne peut servir de leurre.
 {
   const noise = new NoiseField();
-  check("silence total", noise.strongestAt([0, 0, 0]), null);
+  check("silence total", noise.sense([0, 0, 0]), null);
   noise.add([0, 0, 100], 1, 200);
   noise.add([0, 0, 20], 1, 200);
   check("deux sources", noise.count, 2);
-  check("la plus proche a force egale l'emporte",
-        round(noise.strongestAt([0, 0, 0]).distance), 20);
-  check("hors de portee du capteur, rien",
-        noise.strongestAt([0, 0, 1000], FISH.noiseRadius), null);
+  // `ListenForNoises` REND A LA PREMIERE qui qualifie — ici celle a cent
+  // unites, inscrite d'abord, et non la plus proche. C'est l'ordre
+  // d'inscription qui decide, et c'est ce que le portage avait invente
+  // autrement (docs/119-bruit.md).
+  check("c'est la PREMIERE inscrite qui l'emporte, pas la plus proche",
+        round(noise.sense([0, 0, 0]).source.distance), 100);
+  check("... et sous deux cents unites, c'est une cible",
+        noise.sense([0, 0, 0]).kind, "cible");
+  check("hors de portee, rien", noise.sense([0, 0, 1000]), null);
+
+  // LES DEUX SEUILS. Une source faible au-dela de deux cents unites ne
+  // s'entend pas ; la MEME source a plus de dix s'entend de n'importe ou, mais
+  // seulement comme un TROUBLE.
+  {
+    const loin = new NoiseField();
+    loin.add([0, 0, 5000], 1, Infinity, 5);
+    check("cinq d'assez loin, rien", loin.sense([0, 0, 0]), null);
+    const fort = new NoiseField();
+    fort.add([0, 0, 5000], 1, Infinity, 10.5);
+    const p = fort.sense([0, 0, 0]);
+    check("au-dela de dix, on s'entend de partout", p && p.kind, "trouble");
+    check("... et la distance n'y est pour rien", round(p.source.distance), 5000);
+    // DIX PILE NE SUFFIT PAS : le build compare en `>`, pas en `>=`.
+    const pile = new NoiseField();
+    pile.add([0, 0, 5000], 1, Infinity, 10);
+    check("dix pile ne passe pas", pile.sense([0, 0, 0]), null);
+    // Sous deux cents, le volume n'entre pas dans la comparaison.
+    const faible = new NoiseField();
+    faible.add([0, 0, 50], 0.01, Infinity, 0.05);
+    check("sous deux cents, le moindre bruit fait de vous une cible",
+          faible.sense([0, 0, 0]).kind, "cible");
+  }
 
   // Le leurre : le joueur se tait a 150 u, un poste joue a 30 u du predateur.
   const fish = new Anglerfish([0, 0, 0]);
@@ -3535,6 +3667,32 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("soleil entre les deux : rien", teleporterFires(tel, 1, 5, 6), false);
   check("moins de cinq secondes : rien",
         teleporterFires(tel, 1, 30, TELEPORT_COOLDOWN - 1), false);
+
+  // LE DEPART N'EST PAS L'ARRIVEE (docs/121-avis.md). `FireTeleporter` joue
+  // particules et son, puis confie le corps au recepteur pour une DEMI-SECONDE.
+  {
+    const t0 = { name: "Teleporter", alignmentWindow: 180, occlusionWindow: 0,
+                 receiver: "R", volume: { shape: "sphere", radius: 50,
+                                          center: [0, 0, 0] },
+                 position: [0, 0, 0], body: null };
+    const p = new Teleporters([t0]);
+    const monde = () => ({ self: [0, 0, 0], up: [0, 1, 0], target: [0, 100, 0],
+                           receiver: [0, 100, 0] });
+    // Le depart a lieu, mais rien n'arrive encore.
+    const a = p.update(0.1, [0, 0, 0], [0, -1000, 0], monde);
+    check("a l'appui, rien n'est encore arrive", a, null);
+    check("mais le depart est annonce", p.depart !== null, true);
+    check("et il emporte le joueur", p.depart.carries, true);
+    // Quatre dixiemes plus tard, toujours en vol.
+    check("a quatre dixiemes, toujours en vol",
+          p.update(0.3, [0, 0, 0], [0, -1000, 0], monde), null);
+    // La demi-seconde passee, on arrive — et le depart ne se rejoue pas.
+    const b = p.update(0.2, [0, 0, 0], [0, -1000, 0], monde);
+    check("passe la demi-seconde, on arrive", b !== null, true);
+    check("au point du recepteur", b.arrival.join(","), "0,100,0");
+    check("et le depart ne se rejoue pas", p.depart, null);
+    check("le delai du build est d'une demi-seconde", TELEPORT_DELAY, 0.5);
+  }
 }
 
 {
@@ -3589,6 +3747,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la hauteur est tiree autour de 1", pas.update(2, 6).pitch, 1);
   check("en l'air, on ne fait pas de bruit de pas",
         pas.update(2, 6, false), null);
+
+  // `OnJump` n'obeit a aucune des deux regles du pas (docs/116-trappe.md).
+  const saut = jumpSound();
+  check("un saut ne se desaccorde pas", saut.pitch, 1);
+  check("et il part a plein volume, pas a la moitie", saut.volume, 1);
+  check("sur sa propre famille de clips", saut.kind, "jump");
 
   check("sous vingt unites par seconde, pas de vent",
         turbulenceTarget(10, 1), 0);
@@ -4236,6 +4400,44 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         Math.round(COMET_ELLIPSE.b), 7582);
   check("le foyer est a dix mille huit cents du centre",
         Math.round(fociDistance()), 10802);
+
+  // --- OUVRIR LA CARTE (docs/117-carte.md) --------------------------------
+  //
+  // `EnterMapView` : sans cible, le systeme entier ; avec une cible, on vous
+  // CADRE tous les deux, et le son a dix secondes de garde.
+  {
+    const faux = { hidden: true };
+    const m = new SolarMap(faux, []);
+    const sans = m.enterMapView([1000, 0, 2000], null, 0);
+    check("sans cible, la carte s'ouvre sur le systeme", m.zoom, MAP.defaultZoom);
+    check("et vise le centre", m.focal.join(","), "0,0");
+    check("avec les deux annonces du build",
+          sans.annonces.join(","), "EnterMapView,SwitchActiveCamera");
+    check("la premiere ouverture sonne", sans.sonne, true);
+    // Neuf secondes plus tard, la garde tient encore.
+    m.exitMapView();
+    check("fermer annonce aussi", m.open, false);
+    check("... les deux",
+          m.exitMapView().annonces.join(","), "ExitMapView,SwitchActiveCamera");
+    const tot = m.enterMapView([0, 0, 0], null, 9);
+    check("rouvrir dans les dix secondes est silencieux", tot.sonne, false);
+    const tard = m.enterMapView([0, 0, 0], null, 10.5);
+    check("au-dela, le son revient", tard.sonne, true);
+    // AVEC UNE CIBLE. Joueur a l'origine, cible a mille unites sur x.
+    const avec = m.enterMapView([0, 0, 0], [1000, 0, 0], 100);
+    // `tan(35°)` vaut 0,7002 : la demi-etendue est a un millieme pres la
+    // distance qui les separe. Sous le minimum, c'est le minimum qui gagne.
+    check("mille unites ne suffisent pas a sortir du zoom minimal",
+          m.zoom, MAP.minZoom);
+    check("le point vise est le MILIEU du segment", m.focal.join(","), "500,0");
+    check("et le zoom dure six dixiemes", avec.zoomDuration,
+          MAP.targetZoomDuration);
+    // Assez loin pour que le cadrage l'emporte sur le minimum.
+    m.enterMapView([0, 0, 0], [0, 0, 40000], 200);
+    check("a quarante mille, le cadrage l'emporte",
+          Math.round(m.zoom), Math.round(40000 / Math.tan(35 * Math.PI / 180) * 0.7));
+    check("et le milieu suit en z", m.focal.join(","), "0,20000");
+  }
   // ET LE SOLEIL EST BIEN A UN FOYER. La verification tient en une addition :
   // `a + c` doit rendre l'aphelie, c'est-a-dire l'endroit exact ou la scene
   // pose la comete — 24 000 du Soleil. C'est ce qui prouve que les deux
@@ -4598,14 +4800,32 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("sans degat, le voyant general s'eteint",
         voyants.update(1.8, false, [])[0], false);
 
-  // Les notifications : une seule a la fois, et elle s'efface.
+  // LES NOTIFICATIONS : LA PREMIERE GAGNE (docs/121-avis.md).
+  //
+  // `DisplayNotification` s'ouvre sur `if (_currentNotification == null)` :
+  // une notification en cours fait TOMBER la suivante. Ce test disait
+  // « une nouvelle remplace l'ancienne » — la regle du portage, pas celle du
+  // build, gardee sous un invariant.
   const notes = new Notifications();
   check("au depart, rien", notes.update(0), null);
   notes.display("sonde genee", 3, 0);
   check("elle s'affiche", notes.update(1), "sonde genee");
   notes.display("autre chose", 3, 1);
-  check("une nouvelle remplace l'ancienne", notes.update(2), "autre chose");
-  check("et elle s'efface au bout de sa duree", notes.update(4.1), null);
+  check("la seconde est PERDUE, pas mise en file", notes.update(2), "sonde genee");
+  check("et la premiere s'efface au bout de SA duree", notes.update(3.1), null);
+  // Une fois la place libre, la suivante passe.
+  notes.display("autre chose", 3, 4);
+  check("la suivante s'affiche alors", notes.update(5), "autre chose");
+
+  // L'unique notification de ce build, et sa duree.
+  {
+    const n = new Notifications();
+    check("le refus de tir affiche un avis",
+          n.annonce("ProbeLaunchAborted", 0), NOTIFICATIONS.ProbeLaunchAborted.texte);
+    check("une seconde et demie", NOTIFICATIONS.ProbeLaunchAborted.duree, 1.5);
+    check("et il s'efface", n.update(1.6), null);
+    check("une annonce inconnue n'affiche rien", n.annonce("Rien", 2), null);
+  }
 
   // Les huit invites de la guimauve : quatre unites, et toutes la portent.
   const guimauves = roastPrompts({ placed: { RoastPromptEvent: [
@@ -4631,6 +4851,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         playerNoise(0, 100.5, 100), NOISE.launch / 2);
   check("et a disparu au bout d'une seconde", playerNoise(0, 101, 100), 0);
   check("les deux s'ajoutent", playerNoise(1, 100, 100), NOISE.thrust + NOISE.launch);
+  // LA FRACTION DEPASSE UN. `FireTranslationalThrusters` borne chaque AXE, pas
+  // la norme : pousser sur les trois a la fois rend racine(3) (docs/119).
+  check("pousser sur les trois axes fait plus que cinq",
+        Number(playerNoise(Math.sqrt(3), 100).toFixed(3)),
+        Number((Math.sqrt(3) * NOISE.thrust).toFixed(3)));
+  // Et c'est la SEULE facon de passer dix : une diagonale pleine ne fait que
+  // 8,66, il y faut une sonde lancee dans la seconde.
+  check("une diagonale pleine ne suffit pas a passer dix",
+        playerNoise(Math.sqrt(3), 100) > 10, false);
+  check("avec une sonde fraiche, si",
+        playerNoise(Math.sqrt(3), 100, 100) > 10, true);
+  check("une poussee sur un seul axe n'y arrive jamais",
+        playerNoise(1, 100, 100) > 10, false);
 
   // L'ecrasement : cinq PAS de physique, pas cinq secondes.
   check("cinq pas de grace", COMPRESSION_GRACE, 5);
@@ -4812,6 +5045,41 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   ] } });
   check("trois tailles d'eclaboussure sont prevues", remous[0].splashes.length, 3);
   check("et aucune n'est resolue", remous[0].splashes.filter(Boolean).length, 0);
+
+  // --- LA TRAPPE (docs/116-trappe.md) ------------------------------------
+  {
+    const d = hatchControllers({ placed: { HatchController: [
+      { name: "HatchControls", position: [0, 0, 0], body: "Ship_Body",
+        volume: { radius: 3 },
+        fields: { _hatchObject: { name: "Hatch_Collider" },
+                  _openHatchClip: { name: "hatchopen_air" },
+                  _closeHatchClip: { name: "hatchclose_air" } } },
+    ] } })[0];
+    check("le collider de la trappe est nomme", d.hatchObject, "Hatch_Collider");
+    const h = new Hatch(d);
+    check("elle nait fermee", h.open, false);
+    check("et son collider est en place", h.collider, true);
+    check("l'appui l'ouvre", h.pressInteract(), true);
+    check("le collider disparait", h.collider, false);
+    check("avec son clip", h.drain().join(","), "hatchopen_air");
+    check("un second appui ne fait rien", h.pressInteract(), false);
+    // Entrer la referme TOUTE SEULE, et annonce.
+    check("entrer franchit le seuil", h.setInside(true), "entre");
+    check("et la referme", h.open, false);
+    check("avec le clip de fermeture", h.drain().join(","), "hatchclose_air");
+    check("en annoncant EnterShip", h.events.at(-1), "EnterShip");
+    // Sortir n'annonce QUE : rien ne rouvre la trappe.
+    check("sortir franchit l'autre sens", h.setInside(false), "sort");
+    check("et n'annonce que ExitShip", h.events.at(-1), "ExitShip");
+    check("la trappe reste fermee", h.open, false);
+    check("et rien ne sonne", h.drain().length, 0);
+    // Rester du meme cote ne franchit rien.
+    check("rester dehors ne franchit rien", h.setInside(false), null);
+    // Entrer SANS avoir ouvert appelle quand meme `CloseHatch` : le clip part.
+    check("entrer sans avoir ouvert franchit aussi", h.setInside(true), "entre");
+    check("et le build rejoue quand meme la fermeture",
+          h.drain().join(","), "hatchclose_air");
+  }
 
   // --- les impostures de planete (docs/56) --------------------------------
   //
@@ -5371,6 +5639,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Le point neuf est le DERNIER de la liste : l'onde defile vers la gauche.
   check("le dernier point est le plus recent", onde.ordered()[499], 0.75);
   check("et le tampon garde sa taille", onde.ordered().length, 500);
+  // `ShiftPoints` epingle la case 497 a 0,5 A CHAQUE image : un cran plat
+  // permanent pres du bord droit (docs/121-avis.md).
+  check("la case epinglee est la 497e", WAVE.pin, 497);
+  {
+    const pleine = new SoundWave();
+    for (let i = 0; i < 500; i++) pleine.push(1, 1);
+    const t = pleine.ordered();
+    check("tout le trace est en haut", new Set(t.filter((_, i) => i !== WAVE.pin)).size, 1);
+    check("... sauf la case epinglee", t[WAVE.pin], 0.5);
+    // Sans la regle, elle vaudrait ce que l'onde porte.
+    check("que le portage peut aussi ne pas poser", pleine.ordered(null)[WAVE.pin], 1);
+  }
   // Cinq cents images plus tard, le premier point a disparu.
   const courte = new SoundWave(4);
   for (const v of [1, 1, 1, 1, 1]) courte.push(v, 1);
@@ -5495,6 +5775,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const vAvant = retombe.meteors[0].vel[1];
   retombe.step(1, { dir: { x: 0, y: -1, z: 0 }, magnitude: 20 });
   check("le champ le freine", retombe.meteors[0].vel[1], vAvant - 20);
+  // LE CHAMP SE LIT AU METEORE, pas au joueur (docs/121-avis.md) : `step`
+  // accepte une FONCTION de la position, et c'est celle-la que le moteur
+  // passe.
+  {
+    const parPosition = new MeteorLaunchers(tireur, () => 0);
+    parPosition.update(1, 6);
+    let vu = null;
+    const av = parPosition.meteors[0].vel[1];
+    parPosition.step(1, (p) => {
+      vu = p.slice();
+      return { dir: { x: 0, y: -1, z: 0 }, magnitude: 10 };
+    });
+    check("le champ est demande A la position du meteore",
+          vu !== null && vu.length === 3, true);
+    check("et il freine de dix", parPosition.meteors[0].vel[1], av - 10);
+  }
   // Il ne vit pas eternellement.
   const vieux = new MeteorLaunchers(tireur, () => 0);
   vieux.update(1, 6);
@@ -5838,8 +6134,34 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("sous la vitesse orbitale, la poussee passe",
         libre.map((x) => round(x, 6)).join(","), "0,1,0");
 
+  // Le REDRESSEMENT (`FromToRotation(-transform.up, d)`). Vaisseau couche :
+  // son BAS pointe le long de y, le centre est le long de x. Deja au-dessus de
+  // la vitesse orbitale (six contre cinq), pour que l'ecretage morde.
+  //
+  // Sans assiette, la poussee reste tangentielle : les neuf unites sont
+  // entierement mangees, et il reste juste le freinage qui ramene a cinq.
+  const droit = limitOrbitThrust([0, 9, 0], [0, 6, 0], radial, vOrb, 1);
+  check("sans assiette, la poussee tangentielle devient un freinage",
+        droit.map((x) => round(x, 6)).join(","), "0,-1,0");
+  // Redressee, la MEME poussee devient radiale et passe entiere — le freinage
+  // vers la vitesse orbitale s'y ajoute, il ne la remplace pas.
+  const couche = limitOrbitThrust([0, 9, 0], [0, 6, 0], radial, vOrb, 1,
+                                  [0, 1, 0]);
+  check("redressee, elle part vers le sol et passe entiere",
+        round(couche[0], 6), 9);
+  check("et le freinage tangentiel s'y ajoute", round(couche[1], 6), -1);
+  // Sous la vitesse orbitale, le build ne reecrit pas l'entree : le
+  // redressement ne s'applique QUE quand l'ecretage mord.
+  const doux = limitOrbitThrust([0, -1, 0], [0, 1, 0], radial, vOrb, 1,
+                                [0, -1, 0]);
+  check("sans ecretage, le redressement ne s'applique pas",
+        doux.map((x) => round(x, 6)).join(","), "0,-1,0");
+
   check("sans referentiel, pas de mode atterrissage",
         allowLandingMode({ frame: null, distance: 10 }), false);
+  check("debout, pas de mode atterrissage non plus",
+        allowLandingMode({ frame: { alignment: 500 }, distance: 10,
+                           auPoste: false }), false);
   check("pose, pas davantage",
         allowLandingMode({ frame: { alignment: 500 }, landed: true, distance: 10 }),
         false);
@@ -5878,6 +6200,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const vite = new LandingView();
   check("a vingt-cinq unites, l'egalisation part",
         vite.toggle(0, ATTERRISSAGE.matchSpeed + 5).match, true);
+
+  // SE LEVER (`ExitFlightConsole`). La vue tombe, le roulis NON.
+  const leve = new LandingView();
+  leve.toggle(0, null);
+  leve.update(1);
+  leve.events.length = 0;
+  check("se lever en vue d'atterrissage la referme", leve.exitConsole(), true);
+  check("avec les deux annonces de la sortie",
+        leve.events.join(","), "SwitchActiveCamera,ExitLandingView");
+  check("le manche reste inverse", leve.flipRollFactor, -1);
+  check("et le roulis reste le defaut", leve.rollByDefault, true);
+  // `ResetRollSettings`, en se RASSEYANT : le seul endroit qui repare.
+  leve.resetRoll();
+  check("se rasseoir remet le manche a plat", leve.flipRollFactor, 1);
+  check("et rend le lacet par defaut", leve.rollByDefault, false);
+
+  // Se lever PENDANT la bascule annule la transition, sans annonce : la vue
+  // n'a jamais eu lieu.
+  const tot = new LandingView();
+  tot.toggle(0, null);
+  tot.events.length = 0;
+  check("se lever pendant la bascule n'ouvre rien", tot.exitConsole(), false);
+  check("et n'annonce rien", tot.events.length, 0);
+  check("la transition est annulee", tot.transition, false);
+  check("la touche repond de nouveau", tot.update(1), false);
 
   // Un mort ne commande RIEN — pas meme d'ouvrir le menu.
   const mo = new Modes();
@@ -7054,6 +7401,39 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("... et les drapeaux tombent",
           `${p.phase}/${p.matching}/${p.target}`, "repos/false/null");
   }
+
+  // LES SIX ISSUES (docs/118-messages.md). `AutopilotGUI` a un message par
+  // facon de s'arreter, et le portage n'en disait que trois.
+  {
+    const neuf = () => new Autopilot({ pos: { x: 0, y: 0, z: 0 },
+                                       vel: { x: 0, y: 0, z: 0 }, thrust: 50 }, []);
+    const cible = (d) => ({ name: "x", position: [d, 0, 0], velocity: [0, 0, 0],
+                            gravity: { upperSurfaceRadius: 10 } });
+    // 1. abandon EN VOL.
+    const a = neuf();
+    a.engage(cible(100000), [0, 0, 0]);
+    a.abort();
+    check("abandonner un vol dit « autopilot ABORTED »", a.fin, "abandon");
+    // 2. abandon d'une simple EGALISATION — le build lit
+    //    `IsFlyingToDestination` AVANT que les drapeaux ne tombent.
+    const b = neuf();
+    b.matchVelocity(cible(100000));
+    b.abort();
+    check("abandonner une egalisation dit autre chose", b.fin, "abandonVitesse");
+    // 3. cible TROP PROCHE : le pilote refuse, et il le dit.
+    const c = neuf();
+    check("trop pres, le pilote refuse", c.engage(cible(5), [0, 0, 0]), false);
+    check("... et dit « too close to target »", c.fin, "tropPres");
+    check("... sans s'engager", c.phase, "repos");
+    // 4. EGALISATION reussie.
+    const d2 = neuf();
+    d2.matchVelocity({ name: "c", position: [0, 0, 0], velocity: [10, 0, 0],
+                       gravity: { upperSurfaceRadius: 10 } });
+    let n = 0;
+    while (d2.engaged && n < 1000) { d2.update(1 / 50); n += 1; }
+    check("une egalisation aboutie a son propre message", d2.fin, "vitesseAtteinte");
+    check("... et ce n'est pas une arrivee", d2.arrived, false);
+  }
 }
 
 
@@ -7134,6 +7514,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la vitesse se mesure depuis le centre du corps",
         Number(Math.hypot(...detachVelocity([110, 0, 0], [100, 0, 0],
                                             spin)).toFixed(6)), 10);
+}
+
+
+// --- les trois zones d'invites, et celle qui n'arbitre pas --------------
+{
+  const l = [{ text: "a", priority: 0 }, { text: "b", priority: 3 },
+             { text: "c", priority: 3 }, { text: "d", priority: 1 }];
+  check("seules les invites de priorite maximale restent",
+        maxPriority(l).map((p) => p.text).join(","), "b,c");
+  check("sans priorite, tout est a zero donc tout reste",
+        maxPriority([{ text: "x" }, { text: "y" }]).length, 2);
+  check("une liste vide ne casse rien", maxPriority([]).length, 0);
+  check("... ni une liste absente", maxPriority(null).length, 0);
+  // La zone du BAS, elle, n'arbitre pas : il n'existe aucun
+  // `_highestBottomPriority` dans le build. Cela se mesure dans le DOM, pas
+  // ici — `Prompts.set` a besoin d'un document (tools/15_verify.py).
 }
 
 report();
