@@ -21,6 +21,25 @@
 //
 // @lit MarshmallowStick, Marshmallow, TelescopeGUI, RadiationDetector
 
+// `RadiationDetector`, ET CE QUI EN EST MORT DANS CE BUILD. Le portage lit
+// `TotalHeat` — la chaleur, qui grille la guimauve — et rien d'autre. Les
+// quatre methodes qui restent se ferment a la lecture (docs/103-refait.md) :
+//
+//   TotalLight, TotalRadiation   de simples lectures de champ (`oldTotalLight`,
+//                                `oldTotalRadiation`), et leurs SEULS appelants
+//                                sont `Test`, `RadiationDetectorTestPrinter` et
+//                                `LensFlareFlicker` — dont la scene ne pose
+//                                AUCUNE instance. Rien ne les lit en jeu ;
+//   AddEmitter, RemoveEmitter    la liste des emetteurs. Une seule chose s'y
+//                                decide, et elle merite d'etre notee :
+//
+//     if (UseRaycasts) radiationEmitters.Add(emitter, poids);
+//     else             radiationEmitters.Add(emitter, 1);
+//
+//   — sans lancer de rayon, un emetteur compte pour UN, quel que soit le poids
+//   qu'on lui donne. Le poids n'existe que si le detecteur trace vers chaque
+//   source.
+
 /**
  * `MarshmallowStick.Update` : `_marshmallow.GetHeatLevel() / 40f`.
  *

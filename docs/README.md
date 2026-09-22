@@ -58,6 +58,7 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 
 ## Ce qui manque
 
+- [`114-poste.md`](114-poste.md) — **se lever ne range rien : la vue d'atterrissage qui restait ouverte, le roulis inversé qu'aucune sortie ne répare, et une poussée que l'écrêtage redresse sur le sol**
 - [`113-seuil.md`](113-seuil.md) — **le seuil d'impact ne vient pas de la scène mais du réveil, et il n'y a pas d'intégrité de coque : deux erreurs qui se tenaient l'une l'autre, et un mécanisme porté, testé, et mort**
 - [`112-invites.md`](112-invites.md) — **la zone du bas n'arbitre rien : le portage appliquait une règle de plus que le build, et n'importe quelle invite pouvait chasser les codes de lancement**
 - [`111-passages.md`](111-passages.md) — **on n'arrive pas quelque part, on y arrive *avec* quelque chose : la vitesse du point d'arrivée et le regard du récepteur, que le portage ne posait ni l'un ni l'autre**

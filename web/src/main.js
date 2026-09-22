@@ -2963,8 +2963,16 @@ async function boot() {
         ? autopilotDistances(declared.frames, cibleAtt.name,
                              (cibleAtt.gravity && cibleAtt.gravity.upperSurfaceRadius) || 0)
         : null;
-      const modeAtt = atterrissage.updateMode(
-        { frame: cadreAtt, landed: !!(ship && ship.onPad), distance: dAtt });
+      // `GetAllowLandingMode` s'ouvre sur `if (!enabled)` : hors du poste, le
+      // mode ne s'etablit pas. Et `UpdateLandingMode` ne TOURNE pas hors du
+      // poste non plus — `ExitFlightConsole` coupe le composant —, si bien que
+      // `ExitLandingMode` n'est annonce qu'en se rasseyant. Le retard est du
+      // build ; l'appel est donc garde par `boarded`, pas seulement l'etat.
+      const modeAtt = (ship && ship.boarded)
+        ? atterrissage.updateMode({ frame: cadreAtt, auPoste: true,
+                                    landed: !!(ship && ship.onPad),
+                                    distance: dAtt })
+        : null;
       if (modeAtt) {
         // `ShipThrusterController.OnEnterLandingMode` retient le referentiel ;
         // c'est lui qui sert d'axe radial a l'ecretage.
@@ -3326,6 +3334,15 @@ async function boot() {
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
+          // `ExitFlightConsole` : la vue d'atterrissage tombe en se levant, et
+          // une bascule en cours est annulee. Le regard se recentre comme le
+          // fait `CenterCamera(140)`, au meme rythme que le reste.
+          // Les annonces RESTENT dans `atterrissage.events` : c'est la trace
+          // que le reste du portage et les controles navigateur lisent, comme
+          // pour l'entree. Seul le tour de la sortie part vers les modes.
+          const avantSortie = atterrissage.events.length;
+          if (atterrissage.exitConsole()) snapRegard = 0;
+          for (const e of atterrissage.events.slice(avantSortie)) modes.annonce(e);
           // ON SE LEVE AVEC LA VITESSE DU SIEGE, jamais avec zero :
           // `SetVelocity(attachedOWRigidbody.GetPointVelocity(point))`. Sans
           // cette ligne, quitter le poste d'un vaisseau qui file a deux cents
@@ -3345,6 +3362,11 @@ async function boot() {
         } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
                    pdata.knowsLaunchCodes) {
           ship.boarded = true;
+          // `OnPressInteract` appelle `ResetRollSettings` : c'est le SEUL
+          // endroit du build qui remet le roulis a plat, et il fallait bien
+          // qu'il y en ait un — se lever en vue d'atterrissage laisse le
+          // manche inverse.
+          atterrissage.resetRoll();
           // `OnEnterShip` : la protection du premier tour s'arrete la. Le jeu
           // decide qu'une fois aux commandes, on joue pour de bon.
           if (pdata.enterShip()) {

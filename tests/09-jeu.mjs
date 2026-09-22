@@ -5885,8 +5885,34 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("sous la vitesse orbitale, la poussee passe",
         libre.map((x) => round(x, 6)).join(","), "0,1,0");
 
+  // Le REDRESSEMENT (`FromToRotation(-transform.up, d)`). Vaisseau couche :
+  // son BAS pointe le long de y, le centre est le long de x. Deja au-dessus de
+  // la vitesse orbitale (six contre cinq), pour que l'ecretage morde.
+  //
+  // Sans assiette, la poussee reste tangentielle : les neuf unites sont
+  // entierement mangees, et il reste juste le freinage qui ramene a cinq.
+  const droit = limitOrbitThrust([0, 9, 0], [0, 6, 0], radial, vOrb, 1);
+  check("sans assiette, la poussee tangentielle devient un freinage",
+        droit.map((x) => round(x, 6)).join(","), "0,-1,0");
+  // Redressee, la MEME poussee devient radiale et passe entiere — le freinage
+  // vers la vitesse orbitale s'y ajoute, il ne la remplace pas.
+  const couche = limitOrbitThrust([0, 9, 0], [0, 6, 0], radial, vOrb, 1,
+                                  [0, 1, 0]);
+  check("redressee, elle part vers le sol et passe entiere",
+        round(couche[0], 6), 9);
+  check("et le freinage tangentiel s'y ajoute", round(couche[1], 6), -1);
+  // Sous la vitesse orbitale, le build ne reecrit pas l'entree : le
+  // redressement ne s'applique QUE quand l'ecretage mord.
+  const doux = limitOrbitThrust([0, -1, 0], [0, 1, 0], radial, vOrb, 1,
+                                [0, -1, 0]);
+  check("sans ecretage, le redressement ne s'applique pas",
+        doux.map((x) => round(x, 6)).join(","), "0,-1,0");
+
   check("sans referentiel, pas de mode atterrissage",
         allowLandingMode({ frame: null, distance: 10 }), false);
+  check("debout, pas de mode atterrissage non plus",
+        allowLandingMode({ frame: { alignment: 500 }, distance: 10,
+                           auPoste: false }), false);
   check("pose, pas davantage",
         allowLandingMode({ frame: { alignment: 500 }, landed: true, distance: 10 }),
         false);
@@ -5925,6 +5951,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const vite = new LandingView();
   check("a vingt-cinq unites, l'egalisation part",
         vite.toggle(0, ATTERRISSAGE.matchSpeed + 5).match, true);
+
+  // SE LEVER (`ExitFlightConsole`). La vue tombe, le roulis NON.
+  const leve = new LandingView();
+  leve.toggle(0, null);
+  leve.update(1);
+  leve.events.length = 0;
+  check("se lever en vue d'atterrissage la referme", leve.exitConsole(), true);
+  check("avec les deux annonces de la sortie",
+        leve.events.join(","), "SwitchActiveCamera,ExitLandingView");
+  check("le manche reste inverse", leve.flipRollFactor, -1);
+  check("et le roulis reste le defaut", leve.rollByDefault, true);
+  // `ResetRollSettings`, en se RASSEYANT : le seul endroit qui repare.
+  leve.resetRoll();
+  check("se rasseoir remet le manche a plat", leve.flipRollFactor, 1);
+  check("et rend le lacet par defaut", leve.rollByDefault, false);
+
+  // Se lever PENDANT la bascule annule la transition, sans annonce : la vue
+  // n'a jamais eu lieu.
+  const tot = new LandingView();
+  tot.toggle(0, null);
+  tot.events.length = 0;
+  check("se lever pendant la bascule n'ouvre rien", tot.exitConsole(), false);
+  check("et n'annonce rien", tot.events.length, 0);
+  check("la transition est annulee", tot.transition, false);
+  check("la touche repond de nouveau", tot.update(1), false);
 
   // Un mort ne commande RIEN — pas meme d'ouvrir le menu.
   const mo = new Modes();

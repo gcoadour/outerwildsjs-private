@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **109 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`113`](113-seuil.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **121 des 176** méthodes nommées, sur 77 classes ([`103`](103-refait.md) → [`114`](114-poste.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -105,6 +105,7 @@ portage.
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
 | réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| **poste de pilotage** | se lever ferme la vue d'atterrissage, le roulis ne se range qu'en se rasseyant, et l'ecretage REDRESSE la poussee sur le sol ([`114`](114-poste.md)) |
 | **degats du vaisseau** | seuil de trente pose par `Awake`, et l'integrite est le cumul soustrait — pas une courbe inventee ([`113`](113-seuil.md)) |
 | invites a l'ecran | trois zones, DEUX arbitrages : le bas montre tout ([`112`](112-invites.md)) |
 | **passages anciens** | on arrive avec la vitesse du point d'arrivee, et tourne vers ce qu'il regarde ([`111`](111-passages.md)) |

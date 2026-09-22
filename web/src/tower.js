@@ -76,6 +76,32 @@ export function elevators(gameplay) {
  *
  * Ne connait ni Babylon ni le DOM : il rend une fraction de 0 (en bas) a 1 (en
  * haut) et un volume sonore, et le moteur en fait une position.
+ *
+ * `StartLift` et `DeactivateControls`, et ce qu'elles font vraiment :
+ *
+ *     StartLift()
+ *         enabled = true;
+ *         _initLocalPos = transform.localPosition;   // on part d'OU L'ON EST
+ *         _initLiftTime = Time.time;
+ *         audio.Play(); audio.PlayOneShot(_elevatorStartClip);
+ *         if (_elevatorLight != null) _elevatorLight.enabled = false;
+ *     DeactivateControls()
+ *         _interactVolume.collider.enabled = false;
+ *
+ * DEUX CHOSES, ET UNE SEULE COMPTE ICI :
+ *
+ *   - le depart se prend a la position COURANTE, pas au bout de la course.
+ *     Rappuyer a mi-chemin repart donc d'ou la cabine se trouve, et la duree
+ *     reste pleine — c'est le meme choix qu'`OWAudioSource.FadeTo`
+ *     (docs/104-arbitrage.md), et ce module le fait deja par `this.from` ;
+ *   - LA LUMIERE S'ETEINT PENDANT LA COURSE, et se rallume a l'arrivee (fin
+ *     d'`Update`). Mais `_elevatorLight` est NUL sur l'unique instance de la
+ *     scene : les deux lignes ne font rien dans ce build. On ne monte donc pas
+ *     dans le noir, et il n'y a pas de lumiere a eteindre.
+ *
+ * `DeactivateControls` est ce que `unlocked` fait ici : le build coupe le
+ * collider du volume d'interaction, ce portage refuse l'appui. Les deux
+ * empechent la meme chose.
  */
 export class Elevator {
   constructor(data) {

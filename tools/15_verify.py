@@ -2556,6 +2556,44 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("ressortir la referme", att3["on"], False)
             rep.eq("le manche relace", att3["roule"], False)
             rep.eq("et le roulis reprend son sens", att3["flip"], 1)
+
+            # `ExitFlightConsole` (docs/114-poste.md) : SE LEVER ferme la vue,
+            # et ne range PAS le roulis. Seul le navigateur peut le dire — le
+            # branchement vit dans `main.js`, que les tests Node ne chargent
+            # pas. On rend ensuite au joueur sa place et sa vitesse : se lever
+            # le decale de quatre unites et lui donne celle du siege, ce que
+            # les controles suivants n'ont pas demande.
+            page.keyboard.press("KeyR")
+            page.wait_for_timeout(900)
+            avant_leve = page.evaluate("""() => {
+              const p = window.__player;
+              return { on: window.__atterrissage.on,
+                       pos: [p.pos.x, p.pos.y, p.pos.z],
+                       vel: [p.vel.x, p.vel.y, p.vel.z] };
+            }""")
+            page.keyboard.press("KeyE")
+            page.wait_for_timeout(300)
+            leve = page.evaluate("""() => {
+              const a = window.__atterrissage;
+              return { boarded: window.__shipRef.boarded, on: a.on,
+                       flip: a.flipRollFactor, roule: a.rollByDefault,
+                       annonces: a.events.slice(-2) };
+            }""")
+            rep.eq("la vue etait bien ouverte avant de se lever",
+                   avant_leve["on"], True)
+            rep.eq("se lever quitte le poste", leve["boarded"], False)
+            rep.eq("et referme la vue d'atterrissage", leve["on"], False)
+            rep.eq("avec les deux annonces de la sortie", leve["annonces"],
+                   ["SwitchActiveCamera", "ExitLandingView"])
+            # Ce que le build ne fait PAS : ranger le roulis.
+            rep.eq("le manche reste inverse", leve["flip"], -1)
+            rep.eq("et le roulis reste le defaut", leve["roule"], True)
+            page.evaluate("""(e) => {
+              const p = window.__player;
+              p.pos.x = e.pos[0]; p.pos.y = e.pos[1]; p.pos.z = e.pos[2];
+              p.vel.x = e.vel[0]; p.vel.y = e.vel[1]; p.vel.z = e.vel[2];
+              window.__atterrissage.resetRoll();
+            }""", avant_leve)
         page.evaluate("() => { window.__shipRef.boarded = false; }")
         page.wait_for_timeout(300)
 
