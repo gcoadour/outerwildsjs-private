@@ -507,10 +507,12 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   //              `PlayOneShot` : six pas de marche, six de course, trois de
   //              saut, quatre propulseurs de rotation, huit sons d'interface…
   //              (docs/46, lot 5)
-  check("clips exportes en tout", audioFiles.length, 97);
+  //   97 -> 110  ShipThrusterAudio (7 clips) et PlayerImpactAudio (10 clips,
+  //              dont 4 partages) extraits pour la fidelite sensorielle (docs/124)
+  check("clips exportes en tout", audioFiles.length, 110);
   check("clips en Ogg Vorbis", parExt.ogg ?? 0, 23);
-  // 73 RIFF, plus l'AIFF converti.
-  check("clips en WAV", parExt.wav ?? 0, 74);
+  // 86 RIFF, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 87);
   check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
   check("l'unique AIFF du build a ete converti",
         audio.stats["AIFF convertis en WAV"] ?? 0, 1);
@@ -582,12 +584,16 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 
   // Les sons d'evenement : qui les porte, et avec quelle loi.
   const ev = eventAudio(audio);
-  check("emetteurs de son d'evenement", ev.count, 22);
+  check("emetteurs de son d'evenement", ev.count, 24);
   check("six pas de marche", ev.family("PlayerMovementAudio", "_walk").length, 6);
   check("six pas de course", ev.family("PlayerMovementAudio", "_run").length, 6);
   check("trois sauts", ev.family("PlayerMovementAudio", "_jump").length, 3);
   check("quatre propulseurs de rotation",
         ev.family("ThrusterAudio", "_rotationalThrust", "Player_Body").length, 4);
+  check("sept clips de propulseurs de vaisseau",
+        Object.keys(ev.of("ShipThrusterAudio").clips).length, 7);
+  check("dix clips d'impact du joueur",
+        Object.keys(ev.of("PlayerImpactAudio").clips).length, 10);
   check("et le vaisseau miniature a son propre propulseur",
         ev.of("ThrusterAudio", "ModelShip_Body").clips._translationalClip
           .startsWith("ModelRocketThruster"), true);

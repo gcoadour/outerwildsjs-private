@@ -2,6 +2,7 @@
 // Constantes tirees de PlayerResources dans le build :
 //   oxygene 400 s, carburant 15, recharge 0,75/s, sante 100, combinaison 100,
 //   degats d'impact entre 20 et 40 u/s.
+// @lit PlayerResources
 
 /**
  * Zones qui rechargent l'oxygene, hors du vaisseau.
@@ -98,7 +99,8 @@ export class Resources {
     if (this.dead) return;
 
     if (inSupply) {
-      this.oxygen = Math.min(this.maxOxygen, this.oxygen + dt * 10);
+      // PlayerResources.Update : _currentOxygen += 100f * Time.deltaTime
+      this.oxygen = Math.min(this.maxOxygen, this.oxygen + dt * 100);
       this.fuel = Math.min(this.maxFuel, this.fuel + dt * this.fuelRecharge * 4);
     } else {
       this.oxygen -= dt;
@@ -121,6 +123,7 @@ export class Resources {
    * comptes par le volume (vingt par seconde pour la colonne de sable).
    */
   /**
+   * PlayerResources.ApplyInstantDamage : degats en points.
    * @param points degats a retirer
    * @returns {number} les points REELLEMENT perdus
    *

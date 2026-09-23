@@ -2060,6 +2060,7 @@ async function boot() {
     // la boucle (`PlayerData`), ce qu'on porte non. Le paquetage est a nouveau
     // dans la cabine au debut de chaque boucle, et se ramasse a nouveau.
     equipment.suit = false;
+    player.setSuit(false);
     equipment.probe = false;
     equipment.minimap = false;
     equipment.taken.clear();
@@ -3350,9 +3351,21 @@ async function boot() {
       // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils
       // s'entendent par la meme voie que les autres sons d'evenement.
       for (const e of ship.events) {
-        if (e === "StartShipIgnition") console.log("allumage du vaisseau");
-        if (e === "CancelShipIgnition") console.log("allumage interrompu");
-        if (e === "CompleteShipIgnition") console.log("decollage");
+        if (e === "StartShipIgnition") {
+          console.log("allumage du vaisseau");
+          const s = sonsUI.shipIgnition();
+          if (s) audio.loopAt(s.file, 1);
+        }
+        if (e === "CancelShipIgnition") {
+          console.log("allumage interrompu");
+          const s = sonsUI.shipIgnition();
+          if (s) audio.loopAt(s.file, 0);
+        }
+        if (e === "CompleteShipIgnition") {
+          console.log("decollage");
+          const s = sonsUI.shipIgnition();
+          if (s) audio.loopAt(s.file, 0);
+        }
       }
       ship.sync(BABYLON);
       if (ship.boarded) {
@@ -3481,6 +3494,9 @@ async function boot() {
             resources.invulnerable = false;
             console.log("annonce : EnterShip — les degats portent desormais");
           }
+          // PlayerResources.OnEnterShip : la sante est integralement restauree
+          resources.health = resources.maxHealth;
+          resources.dead = false;
           // S'asseoir prend du TEMPS : la duree du demi-tour est l'angle entre
           // l'avant du joueur et celui du siege, divise par cent degres par
           // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
@@ -5050,12 +5066,15 @@ async function boot() {
     }
     // Le vaisseau detruit tue son pilote. Hors du vaisseau, il tombe.
     if (ship && ship.destroyed && ship.boarded) death.kill("impact");
-    // Impact : la chute. `Resources.applyImpact` portait les seuils du build
-    // (20 et 40 u/s) sans que rien ne l'appelle jamais.
-    if (player.grounded && !wasGrounded && fallSpeed > resources.minImpact) {
-      const lost = resources.applyImpact(fallSpeed);
-      if (lost > 0 && resHUD) resHUD.damage(now);
-      if (resources.dead) death.kill("impact");
+    // Impact : PlayerImpactAudio (au-dela de 3 u/s) et Resources.applyImpact (au-dela de 20 u/s)
+    if (player.grounded && !wasGrounded && fallSpeed > 3) {
+      const sonImp = sonsUI.playerImpact(fallSpeed, true);
+      if (sonImp) audio.playOneShot(sonImp.file, { volume: sonImp.volume });
+      if (fallSpeed > resources.minImpact) {
+        const lost = resources.applyImpact(fallSpeed);
+        if (lost > 0 && resHUD) resHUD.damage(now);
+        if (resources.dead) death.kill("impact");
+      }
     }
 
     if (death.dead) {
@@ -5385,6 +5404,7 @@ async function boot() {
     // on le porte. `pitch` est le tangage en angles d'Euler d'Unity : la bande
     // [70, 280] est celle qu'on ne peut pas atteindre, et le suivi vertical y
     // est bride.
+    player.setSuit(equipment.suit);
     if (equipment.suit && !casque.worn && casque.state !== 0) casque.suitUp();
     if (!equipment.suit && casque.worn) casque.removeSuit();
     // §U LES JAUGES SONT SUR LA VISIERE. `HUDCameraScript` les eteint a
@@ -5896,18 +5916,36 @@ async function boot() {
       if (clipVent) audio.loopAt(clipVent, vent);
       // Les propulseurs : fondu court a l'allumage, un peu plus long a l'arret.
       // (le detail des buses est plus bas, avec les particules)
-      const pousse = !!(ship && ship.boarded
-        ? (input.forward || input.right || input.up)
-        : player.jetpack);
-      const tourne = !!(ship && ship.boarded && input.roll);
+      const shipEnVol = !!(ship && ship.boarded);
+      const pousseeShip = shipEnVol
+        ? Math.hypot(input.forward || 0, input.right || 0, input.up || 0)
+        : 0;
+      const pousse = shipEnVol ? (pousseeShip > 0) : !!player.jetpack;
+      const tourne = !!(shipEnVol && input.roll);
       const niveau = thrusterSound.update(dt, pousse, tourne);
-      const th = events.of("ThrusterAudio", "Player_Body");
-      if (th) {
-        if (th.clips._translationalClip) audio.loopAt(th.clips._translationalClip, niveau);
+      const thShip = events.of("ShipThrusterAudio") || events.of("ThrusterAudio", "Ship_Body");
+      const thPlayer = events.of("ThrusterAudio", "Player_Body");
+      const th = shipEnVol ? thShip : thPlayer;
+      const thAutre = shipEnVol ? thPlayer : thShip;
+      if (thAutre && thAutre.clips) {
+        if (thAutre.clips._translationalClip) audio.loopAt(thAutre.clips._translationalClip, 0);
+        if (thAutre.clips._highPowerThrusterClip) audio.loopAt(thAutre.clips._highPowerThrusterClip, 0);
+      }
+      if (th && th.clips) {
+        if (shipEnVol && th.clips._highPowerThrusterClip) {
+          const high = pousseeShip > 0.8;
+          audio.loopAt(th.clips._highPowerThrusterClip, high ? niveau : 0);
+          if (th.clips._translationalClip) audio.loopAt(th.clips._translationalClip, high ? 0 : niveau);
+        } else if (th.clips._translationalClip) {
+          audio.loopAt(th.clips._translationalClip, niveau);
+        }
         if (thrusterSound.fired !== null) {
-          const rot = events.family("ThrusterAudio", "_rotationalThrust", "Player_Body");
+          const rot = (shipEnVol && events.of("ShipThrusterAudio"))
+            ? events.family("ShipThrusterAudio", "_rotationalThrust")
+            : events.family("ThrusterAudio", "_rotationalThrust", shipEnVol ? "Ship_Body" : "Player_Body");
           const f = rot[thrusterSound.fired % (rot.length || 1)];
-          if (f) audio.playOneShot(f, { volume: THRUSTER_AUDIO.rotationalVolume });
+          const vol = th.params?._rotationalThrustVolume ?? THRUSTER_AUDIO.rotationalVolume;
+          if (f) audio.playOneShot(f, { volume: vol });
         }
       }
     }

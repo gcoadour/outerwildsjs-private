@@ -80,7 +80,11 @@ export class SunStage {
       phase = "explosion";
       const r = loop.shockwaveRadius || 0;
       scale = Math.min(c.maxScale, c.shrinkTo + r / this.radius);
-      const since = r / 2000;            // secondes ecoulees depuis l'explosion
+      // Temps ecoule depuis l'explosion : le temps reel de boucle donne l'eclair
+      // bref de 0,8 s ; repli sur la distance si seul le rayon est fourni.
+      const since = (loop.elapsed != null && loop.supernovaAt != null)
+        ? Math.max(0, loop.elapsed - loop.supernovaAt)
+        : r / 2000;
       flash = Math.max(0, 1 - since / c.flashSeconds);
       shock.radius = r;
       // l'onde palit en s'etendant : elle reste lisible une quinzaine de

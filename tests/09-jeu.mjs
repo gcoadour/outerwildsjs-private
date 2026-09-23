@@ -74,7 +74,8 @@ import { projectOut, fromToRotation, qrot, qmul, lookRotation as decorLook, angl
 import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
          EndOfTimeMusic, END_OF_TIME, eventAudio, UISounds, UI_SOUNDS,
-         UI_VOLUME, REPAIR_FADE, jumpSound } from "../web/src/reactaudio.js";
+         UI_VOLUME, REPAIR_FADE, jumpSound, playerImpactSound,
+         IMPACT_AUDIO } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
@@ -7545,6 +7546,49 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // La zone du BAS, elle, n'arbitre pas : il n'existe aucun
   // `_highestBottomPriority` dans le build. Cela se mesure dans le DOM, pas
   // ici — `Prompts.set` a besoin d'un document (tools/15_verify.py).
+}
+
+// --- les six correctifs visuels et gameplay issus de la comparaison (docs/124) ---
+{
+  // 1. Sons d'impact du joueur (PlayerImpactAudio) selon la vitesse et l'axe
+  check("impact sous 3 m/s : aucun son", playerImpactSound(2.5, true), null);
+  check("impact a 3 m/s pile : aucun son", playerImpactSound(IMPACT_AUDIO.minSpeed, false), null);
+  const sonPieds = playerImpactSound(10, true, () => 0.1);
+  check("chute moderee sur les pieds : landingImpact", sonPieds, "_landingImpact1");
+  const sonCorps = playerImpactSound(10, false, () => 0.1);
+  check("choc modere contre paroi : lightImpact", sonCorps, "_lightImpact1");
+  const sonMoyen = playerImpactSound(25, true, () => 0.5);
+  check("impact violent (20-30 m/s) : mediumImpact", sonMoyen, "_mediumImpact2");
+  const sonLourd = playerImpactSound(35, false, () => 0.9);
+  check("impact critique (> 30 m/s) : heavyImpact", sonLourd, "_heavyImpact");
+
+  // 2. Vitesse et jetpack selon la combinaison (Player.setSuit)
+  const joueur = new Player({ groundSpeed: 7, suitGroundSpeed: 6 }, [0, 100, 0]);
+  check("sans combinaison : vitesse initiale de 7 m/s", joueur.c.groundSpeed, 7);
+  check("sans combinaison : non vetu", joueur.suited, false);
+  joueur.setSuit(true);
+  check("avec combinaison : vitesse reduite a 6 m/s", joueur.c.groundSpeed, 6);
+  check("avec combinaison : vetu", joueur.suited, true);
+  joueur.setSuit(false);
+  check("retrait combinaison : vitesse retablie a 7 m/s", joueur.c.groundSpeed, 7);
+  check("retrait combinaison : non vetu", joueur.suited, false);
+
+  // 3. Cadence de recharge en oxygene (100 unites/seconde, PlayerResources.Update)
+  const res = new Ressources();
+  res.oxygen = 0;
+  res.update(0.5, { inSupply: true });
+  check("recharge en oxygene a 100 u/s (50 u en 0,5s)", res.oxygen, 50);
+  res.update(3.5, { inSupply: true });
+  check("plein complet en 4 secondes", res.oxygen, res.maxOxygen);
+
+  // 4. Eclair blanc de supernova (duree reelle de 0,8s depuis supernovaAt)
+  const sun = new SunStage();
+  sun.update({ supernova: true, elapsed: 100.2, supernovaAt: 100.0, shockwaveRadius: 50 });
+  check("eclair de supernova actif a t = 0,2s", Number(sun.state.flash.toFixed(2)), 0.75);
+  sun.update({ supernova: true, elapsed: 100.8, supernovaAt: 100.0, shockwaveRadius: 200 });
+  check("eclair de supernova termine a t = 0,8s", Number(sun.state.flash.toFixed(2)), 0);
+  sun.update({ supernova: true, elapsed: 101.5, supernovaAt: 100.0, shockwaveRadius: 500 });
+  check("eclair de supernova eteint apres 0,8s", sun.state.flash, 0);
 }
 
 report();

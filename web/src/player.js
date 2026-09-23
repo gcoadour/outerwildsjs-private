@@ -207,6 +207,8 @@ export class Player {
     this.groundNormal = null;   // normale du dernier appui, ou null
     this.field = null;
     this.fluid = null;    // volume de fluide traverse, ou null
+    this.c.initGroundSpeed = this.c.groundSpeed ?? 7;
+    this.suited = false;
     this.jetpack = false; // le sac dorsal pousse-t-il ? (c'est lui qui brule)
     // Les deux verrous de `PlayerJetpackController` : la panne de carburant et
     // la poussee horizontale qui ne repart pas apres un saut.
@@ -216,6 +218,16 @@ export class Player {
     this.mass = this.c.mass;
     this.body = null;     // agregat Havok, si physique active
     this.scene = null;
+  }
+
+  /**
+   * Adapte la vitesse au sol et l'acces au sac dorsal selon la combinaison.
+   * PlayerCharacterController.OnSuitUp passe a _suitGroundSpeed (6) ;
+   * OnRemoveSuit retablit _initGroundSpeed (7).
+   */
+  setSuit(suited) {
+    this.suited = !!suited;
+    this.c.groundSpeed = this.suited ? (this.c.suitGroundSpeed ?? 6) : (this.c.initGroundSpeed ?? 7);
   }
 
   usePhysics(BABYLON, scene, aggregate) {
@@ -450,9 +462,12 @@ export class Player {
       this.vel.z = nz + vn * up.z;
       this.tryJump(input, up);
       body.setLinearVelocity(new B.Vector3(this.vel.x, this.vel.y, this.vel.z));
-    } else {
+    } else if (this.suited) {
       const a = this.jetpackAccel(input, basis, up);
       force.addInPlace(new B.Vector3(a.x, a.y, a.z).scale(this.mass));
+    } else {
+      this.jetpack = false;
+      this.thrustFraction = 0;
     }
     body.applyForce(force, node.absolutePosition);
   }
@@ -518,9 +533,12 @@ export class Player {
       this.vel.x = nx + vn * up.x; this.vel.y = ny + vn * up.y;
       this.vel.z = nz + vn * up.z;
       this.tryJump(input, up);
-    } else {
+    } else if (this.suited) {
       const a = this.jetpackAccel(input, basis, up);
       this.vel.x += a.x * dt; this.vel.y += a.y * dt; this.vel.z += a.z * dt;
+    } else {
+      this.jetpack = false;
+      this.thrustFraction = 0;
     }
     this.pos.x += this.vel.x * dt;
     this.pos.y += this.vel.y * dt;

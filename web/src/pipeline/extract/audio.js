@@ -119,6 +119,7 @@ export function clipContainer(clip, bytes) {
  * laisses ouverts.
  */
 const EVENT_AUDIO = ["PlayerMovementAudio", "PlayerSubmergeAudio", "ThrusterAudio",
+                     "ShipThrusterAudio", "PlayerImpactAudio",
                      "TurbulenceAudio", "SpacesuitAudioController", "PlayerAudioEffects",
                      "UIAudioController", "RepairAudioController",
                      "FlashbackAudioController", "AncientTeleporter", "Elevator",

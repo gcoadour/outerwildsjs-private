@@ -31,7 +31,7 @@
 // La musique de voyage et celle de la fin des temps sont les deux declencheurs
 // que docs/43-pnj-son-decollage.md avait releves et laisses ouverts.
 
-// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController, PlayerAudioEffects
+// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, ShipThrusterAudio, PlayerImpactAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController, PlayerAudioEffects
 // Le son d'evenement : seize classes, et une couche entiere qui manquait
 // (docs/46-migration-lots.md, lot 5).
 
@@ -457,4 +457,42 @@ export class UISounds {
     const f = this.clip("PlayerAudioEffects", "_blackHoleWarp");
     return f ? { file: f, volume: 0.5 } : null;
   }
+
+  /**
+   * Son d'allumage du vaisseau (ShipThrusterAudio._ignitionClip).
+   * Relie a ShipThrusterAudio.PlayThrusters et ShipThrusterAudio.StopThrusters.
+   */
+  shipIgnition() {
+    const f = this.clip("ShipThrusterAudio", "_ignitionClip");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Son d'impact du joueur (PlayerImpactAudio). */
+  playerImpact(speed, isFeetLanding = false, alea = Math.random) {
+    const champ = playerImpactSound(speed, isFeetLanding, alea);
+    if (!champ) return null;
+    const f = this.clip("PlayerImpactAudio", champ);
+    return f ? { file: f, volume: Math.min(1, Math.max(0.2, speed / 30)) } : null;
+  }
+}
+
+export const IMPACT_AUDIO = {
+  minSpeed: 3,
+  landingSpeed: 20,
+  mediumSpeed: 30,
+};
+
+/**
+ * Selection de clip d'impact selon la vitesse et l'axe (PlayerImpactAudio.OnImpact).
+ */
+export function playerImpactSound(speed, isFeetLanding = false, alea = Math.random) {
+  if (speed <= IMPACT_AUDIO.minSpeed) return null;
+  const idx = Math.min(2, Math.floor(alea() * 3)) + 1;
+  if (speed <= IMPACT_AUDIO.landingSpeed) {
+    return isFeetLanding ? `_landingImpact${idx}` : `_lightImpact${idx}`;
+  }
+  if (speed <= IMPACT_AUDIO.mediumSpeed) {
+    return `_mediumImpact${idx}`;
+  }
+  return "_heavyImpact";
 }
