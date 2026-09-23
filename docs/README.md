@@ -145,3 +145,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`46-migration-lots.md`](46-migration-lots.md) — **six lots écrits : référentiels déclarés, décor vivant, son d'événement, équipement à ramasser, décalcomanies, volumes de jeu**
 - [`122-finitions.md`](122-finitions.md) — **finitions et raccordements : portes, sons réactifs, sous-émetteurs et chaleur**
 - [`123-evenements-recensement.md`](123-evenements-recensement.md) — **recensement complet et événements globaux : 100 % des composants et événements raccordés**
+- [`124-comparaison-fixes.md`](124-comparaison-fixes.md) — **comparaison alpha Unity et moteur Web : six correctifs visuels et gameplay**
