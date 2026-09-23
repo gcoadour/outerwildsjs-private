@@ -194,20 +194,25 @@ export class MeshLOD {
 
   /** Eteint un maillage trop petit a l'ecran, rallume-le des qu'il grandit. */
   apply(mesh, camera) {
+    if (!mesh || (mesh.isDisposed && mesh.isDisposed())) return;
     if (!mesh.getBoundingInfo || mesh.__lodPinned) return;
-    const bs = mesh.getBoundingInfo().boundingSphere;
-    const c = bs.centerWorld, r = bs.radiusWorld;
-    if (!(r > 0)) return;
-    const d = Math.hypot(c.x - camera.x, c.y - camera.y, c.z - camera.z);
-    const ratio = d > 1e-6 ? r / d : Infinity;
-    const limit = this.thresholdFor(mesh);
-    const on = ratio >= limit;
-    // isVisible plutot que setEnabled : le maillage garde sa place dans la
-    // hierarchie et ses enfants, on ne fait que cesser de le dessiner.
-    if (mesh.isVisible !== on) {
-      mesh.isVisible = on;
-      this.hidden += on ? -1 : 1;
-      if (!on && limit !== this.ratio) this.fromBuild += 1;
+    try {
+      const bs = mesh.getBoundingInfo().boundingSphere;
+      const c = bs.centerWorld, r = bs.radiusWorld;
+      if (!(r > 0)) return;
+      const d = Math.hypot(c.x - camera.x, c.y - camera.y, c.z - camera.z);
+      const ratio = d > 1e-6 ? r / d : Infinity;
+      const limit = this.thresholdFor(mesh);
+      const on = ratio >= limit;
+      // isVisible plutot que setEnabled : le maillage garde sa place dans la
+      // hierarchie et ses enfants, on ne fait que cesser de le dessiner.
+      if (mesh.isVisible !== on) {
+        mesh.isVisible = on;
+        this.hidden += on ? -1 : 1;
+        if (!on && limit !== this.ratio) this.fromBuild += 1;
+      }
+    } catch (e) {
+      // Tolere les erreurs passageres lors de modifications/suppressions de maillages
     }
   }
 

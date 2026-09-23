@@ -48,7 +48,7 @@ void main() {
   // la distorsion se voit surtout en incidence rasante
   float edge = 1.0 - abs(dot(n, v));
   float d = 1.0 - clamp(length(b.xy) * bumpAmt * edge, 0.0, 0.75);
-  gl_FragColor = vec4(tint * d, 1.0);
+  gl_FragColor = vec4(clamp(tint * d, 0.0, 1.0), 1.0);
 }`;
 
 export function makeDistortion(BABYLON, scene, bumpTexture = null,
@@ -63,10 +63,17 @@ export function makeDistortion(BABYLON, scene, bumpTexture = null,
   mat.setFloat("time", 0);
   mat.setFloat("hasBump", bumpTexture ? 1 : 0);
   mat.setVector3("tint", new BABYLON.Vector3(...tint));
+  if (!bumpTexture && BABYLON.RawTexture) {
+    // Texture normale unitaire 1x1 RGBA (128, 128, 255, 255) pour lier le sampler
+    const raw = new Uint8Array([128, 128, 255, 255]);
+    bumpTexture = new BABYLON.RawTexture(raw, 1, 1, BABYLON.Engine.TEXTUREFORMAT_RGBA, scene, false, false, BABYLON.Texture.NEAREST_SAMPLINGMODE);
+  }
   if (bumpTexture) mat.setTexture("bumpMap", bumpTexture);
-  // Blend DstColor Zero : multiplication du fond
+  // Blend DstColor Zero : multiplication du fond en file transparente
   mat.alphaMode = BABYLON.Engine.ALPHA_MULTIPLY;
   mat.alpha = 0.999;
+  mat.needAlphaBlending = () => true;
+  mat.needAlphaTesting = () => false;
   mat.backFaceCulling = false;
   mat.disableDepthWrite = true;
   return mat;

@@ -150,8 +150,10 @@ export class Ship {
   /** Rapproche la geometrie de la position ET de l'orientation simulees. */
   sync(BABYLON) {
     if (!this.node) return;
-    this.node.setAbsolutePosition(
-      new BABYLON.Vector3(this.pos.x, this.pos.y, this.pos.z));
+    if (this.node.parent) {
+      this.node.parent = null;
+    }
+    this.node.position.set(this.pos.x, this.pos.y, this.pos.z);
     if (this.usePhysicsToRotate) {
       const q = this.quat;
       if (!this.node.rotationQuaternion) {

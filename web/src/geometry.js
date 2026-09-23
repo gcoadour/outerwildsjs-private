@@ -221,7 +221,15 @@ export function bootFiles(homeBodyName) {
 
 /** Noeud d'un corps precis dans un lot (ex. "TimberHearth_Body"), ou null. */
 export function findBodyNode(entry, bodyName) {
-  return (entry && entry.nodes && entry.nodes.get(bodyName)) || null;
+  if (!entry || !entry.nodes) return null;
+  if (entry.nodes.get(bodyName)) return entry.nodes.get(bodyName);
+  const low = bodyName.toLowerCase();
+  for (const [k, v] of entry.nodes.entries()) {
+    if (k.toLowerCase() === low || k.endsWith("/" + bodyName) || k.endsWith(bodyName)) {
+      return v;
+    }
+  }
+  return null;
 }
 
 /**

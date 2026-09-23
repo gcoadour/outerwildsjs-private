@@ -126,6 +126,7 @@ export function extractDialogue(ctx) {
     const ctrl = controllers.get(gid) || null;
     conversations.push({
       name: ctx.name(gid),
+      body: ctx.bodyOf(gid),
       // QUI parle. Les quatorze zones s'appellent toutes « ConversationZone »
       // ou presque ; le personnage est leur PARENT, et c'est lui qui porte le
       // `FacePlayerWhenTalking` qu'on veut declencher (docs/46, lot 3).

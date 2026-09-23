@@ -447,7 +447,20 @@ async function boot() {
   origin.offset.z = home.position0[2];
   origin.anchorName = home.name;
   syncBodies(BABYLON, entries);
-  engine.runRenderLoop(() => scene.render());
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    console.warn("Contexte WebGL perdu");
+  }, false);
+  canvas.addEventListener("webglcontextrestored", () => {
+    console.warn("Contexte WebGL restaure");
+  }, false);
+  engine.runRenderLoop(() => {
+    try {
+      scene.render();
+    } catch (e) {
+      console.warn("Erreur render loop interceptee :", e);
+    }
+  });
   addEventListener("resize", () => engine.resize());
 
   // --- geometrie reelle et physique ---
@@ -1111,6 +1124,18 @@ async function boot() {
   {
     const entry = entryForBody(geo, home.name);
     const node = entry ? findBodyNode(entry, "Ship_Body") : null;
+    if (node) {
+      // Detacher le vaisseau de sa hierarchie parente pour eliminer les rotations heritees
+      node.parent = null;
+      if (node.getChildMeshes) {
+        for (const m of node.getChildMeshes(false)) {
+          m.setEnabled(true);
+          m.isVisible = true;
+          MeshLOD.pin(m);
+        }
+      }
+      MeshLOD.pin(node);
+    }
     const spawnWorld = shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
       const local = [spawnWorld[0] - home.position0[0],
@@ -3523,9 +3548,11 @@ async function boot() {
         }
       }
     }
+    const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
+                     player.pos.z + anchorPos[2]];
     // --- dialogue ---
     const convo = (!ship || !ship.boarded)
-      ? dialogue.nearest(player.pos, anchorPos) : null;
+      ? dialogue.nearest(playerW, (b) => decalageDuCorps(typeof b === "string" ? b : (b && b.body) || "TimberHearth_Body", anchorPos)) : null;
     if (interactPressed) {
       if (dialogue.active) {
         const avant = dialogue.active;
@@ -3533,6 +3560,7 @@ async function boot() {
         // Deux clips differents : avancer CLIQUE, finir a son propre son.
         bipUI(dialogue.active ? "AdvanceText" : "ExitDialogueMode");
         if (!dialogue.active && avant) { /* la conversation s'est fermee */ }
+        interactPressed = false;
       }
       else if (convo) {
         // L'arbre se choisit a l'ouverture, comme le fait
@@ -3551,10 +3579,12 @@ async function boot() {
             console.log(`enfant aux fusees : ${choix}`);
           }
         }
-        dialogue.open({ ...convo,
+        if (dialogue.open({ ...convo,
                         tree: arbre || selectTree(pdata, convo, dialogue.trees,
                                                   controllers,
-                                                  dialogue.stateOf(convo)) });
+                                                  dialogue.stateOf(convo)) })) {
+          interactPressed = false;
+        }
       }
     }
     if (dialogue.active && optionPressed > 0) dialogue.choose(optionPressed - 1);
@@ -3569,8 +3599,6 @@ async function boot() {
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
     // comportement d'avant.
-    const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
-                     player.pos.z + anchorPos[2]];
 
     // LE SECTEUR MAJEUR ACTIF, une fois pour l'image.
     //
@@ -3660,9 +3688,10 @@ async function boot() {
           // On se leve avec la vitesse du point. Une planete qui tourne en
           // porte une, et c'est elle qu'on emporte — pas zero.
           pointsAttache.detach([0, 0, 0]);
+          interactPressed = false;
         }
       } else if (interactPressed && !dialogue.active && focus
-                 && focus.kind === "zone") {
+                 && (focus.kind === "zone" || focus.kind === "interact")) {
         // `HatchController.OnPressInteract` : la zone « Open Hatch » ne pose
         // pas de point d'accrochage, elle RETIRE un collider. C'est la seule
         // des sept zones qui fasse autre chose que s'asseoir.
@@ -3673,6 +3702,7 @@ async function boot() {
             if (clip) audio.playOneShot(clip);
             console.log(`trappe ouverte (${c})`);
           }
+          interactPressed = false;
         }
         const point = pointsAttache.at(focus.world);
         if (point && point !== siegePilotage) {
@@ -3699,6 +3729,7 @@ async function boot() {
               console.log(a.goingToTheEnd ? "ascenseur : en haut" : "ascenseur : en bas");
             }
           }
+          interactPressed = false;
         }
       } else if (interactPressed && !dialogue.active && focus
                  && focus.kind === "readable" && focus.text) {
@@ -3709,6 +3740,7 @@ async function boot() {
         if (dialogue.read(focus)) {
           bipUI("AdvanceText");
           console.log(`lecture : ${focus.name}`);
+          interactPressed = false;
         }
       }
     }
@@ -3832,6 +3864,7 @@ async function boot() {
           console.log(`equipement : ${gagne.join(", ")}`);
           const son = (events.of("PlayerAudioEffects") || { clips: {} }).clips._suitUpSound;
           if (son) audio.playOneShot(son);
+          interactPressed = false;
         }
         break;
       }
@@ -3889,7 +3922,6 @@ async function boot() {
         console.log("annonce : CompleteZeroGTraining — systemes du satellite retablis");
       }
     }
-    interactPressed = false;
 
     if (resHUD) {
       // la vignette rouge s'allume sur toute perte de sante, quelle qu'en soit
@@ -4095,7 +4127,7 @@ async function boot() {
     if (hud2) {
       const bits = [`boucle ${loop.loopCount} — ${loop.label}` +
                     (death.dead ? ` — mort : ${death.label} (${death.state.phase})` : ""),
-                    resources.summary()];
+                    equipment.suit ? resources.summary() : "sans combinaison"];
       if (particleMap.length) bits.push(
         `particules ${particles.count} (${particles.particles})`);
       if (audioMap.length) bits.push(
@@ -4793,6 +4825,7 @@ async function boot() {
             baton.toggle();
             console.log("annonce : BeginRoasting");
           }
+          interactPressed = false;
         }
         if (inv.etat.update(d)) {
           // `OnStopRoasting` ne range le baton QUE s'il est sorti.
@@ -4850,8 +4883,8 @@ async function boot() {
     }
 
     // Etat de l'interface tactile : un menu ouvert sort la croix et suspend le
-    // pilotage, la carte laisse ses gestes au canvas.
-    touch.setContext({ menu: settings.open || computer.open, map: solarMap.open });
+    // pilotage, la carte laisse ses gestes au canvas, la combinaison affiche le jetpack.
+    touch.setContext({ menu: settings.open || computer.open, map: solarMap.open, suit: equipment.suit });
     // Le mode « masque » de GUIMode ne cache pas que les invites : il rend
     // l'ecran entier au jeu, bandeau d'etat compris. Le dialogue vit dans le
     // meme bandeau et n'est pas concerne : c'est une conversation en cours,
@@ -5645,9 +5678,11 @@ async function boot() {
           for (const a of ascenseurs) a.activateControls();
           bipUI("PlayAffirmativeUISound");
           console.log("tour de lancement actionnee");
+          interactPressed = false;
         } else if (r === "refuse") {
           bipUI("PlayNegativeUISound");
           console.log("tour de lancement : codes inconnus");
+          interactPressed = false;
         }
         break;
       }
@@ -6066,6 +6101,7 @@ async function boot() {
     );
     // Les touches relachees pendant l'image le deviennent maintenant : une
     // frappe plus courte qu'une image compte pour une image entiere.
+    interactPressed = false;
     appliquerRelachements();
   });
 }

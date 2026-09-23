@@ -59,7 +59,7 @@ const SHADERS = {
         total += w;
       }
       halo /= total;
-      gl_FragColor = vec4(src + halo * tint * intensity, 1.0);
+      gl_FragColor = vec4(clamp(src + halo * tint * intensity, 0.0, 1.0), 1.0);
     }`,
 
   // --- vignette : assombrissement, aberration chromatique, flou ------------
@@ -87,9 +87,9 @@ const SHADERS = {
       c.b = texture2D(textureSampler, vUV - shift + soft).b;
       // intensite 0,375 (au repos) doit rester discrete ; 1 000 (a la mort)
       // doit tout fermer. La racine donne cette progression-la.
-      float k = clamp(sqrt(intensity / 1000.0), 0.0, 1.0);
+      float k = clamp(sqrt(max(0.0, intensity) / 1000.0), 0.0, 1.0);
       float v = 1.0 - k * smoothstep(0.25, 1.0, r);
-      gl_FragColor = vec4(c * clamp(v, 0.0, 1.0), 1.0);
+      gl_FragColor = vec4(clamp(c * clamp(v, 0.0, 1.0), 0.0, 1.0), 1.0);
     }`,
 
   // --- gris : le build pousse `effectAmount` jusqu'a 2, on borne a 1 -------
@@ -100,7 +100,7 @@ const SHADERS = {
     void main(void) {
       vec3 c = texture2D(textureSampler, vUV).rgb;
       float g = dot(c, vec3(0.299, 0.587, 0.114));
-      gl_FragColor = vec4(mix(c, vec3(g), clamp(amount, 0.0, 1.0)), 1.0);
+      gl_FragColor = vec4(clamp(mix(c, vec3(g), clamp(amount, 0.0, 1.0)), 0.0, 1.0), 1.0);
     }`,
 
   // --- tourbillon : l'image se visse autour de son centre -----------------
@@ -119,7 +119,7 @@ const SHADERS = {
       float a = angle * 0.017453292 * max(0.0, 1.0 - dist);
       float s = sin(a), c = cos(a);
       vec2 p = vec2(d.x * c - d.y * s, d.x * s + d.y * c) + center;
-      gl_FragColor = texture2D(textureSampler, clamp(p, 0.0, 1.0));
+      gl_FragColor = vec4(clamp(texture2D(textureSampler, clamp(p, 0.0, 1.0)).rgb, 0.0, 1.0), 1.0);
     }`,
 
   // --- bloom : seuil, etalement, addition ---------------------------------
@@ -152,7 +152,7 @@ const SHADERS = {
       // Add (screenBlend = 0) ou Screen (1) : le build demande Add partout.
       vec3 add = src + sum;
       vec3 scr = vec3(1.0) - (vec3(1.0) - src) * (vec3(1.0) - clamp(sum, 0.0, 1.0));
-      gl_FragColor = vec4(mix(add, scr, screenBlend), 1.0);
+      gl_FragColor = vec4(clamp(mix(add, scr, screenBlend), 0.0, 1.0), 1.0);
     }`,
 
   // --- NoiseEffect : la vieille pellicule de la camera du satellite -------
@@ -173,7 +173,7 @@ const SHADERS = {
       float x = bruit(vec2(floor(time * 12.0), 3.0));
       if (abs(vUV.x - x) < 0.0015) c += scratch;
       float y = dot(c, vec3(0.299, 0.587, 0.114));
-      gl_FragColor = vec4(mix(c, vec3(y), monochrome), 1.0);
+      gl_FragColor = vec4(clamp(mix(c, vec3(y), monochrome), 0.0, 1.0), 1.0);
     }`,
 
   // --- NoiseAndGrain : le grain de la camera d'atterrissage ---------------
@@ -189,7 +189,7 @@ const SHADERS = {
       vec3 n = vec3(bruit(vUV * tiling.x + time),
                     bruit(vUV * tiling.y + time + 11.0),
                     bruit(vUV * tiling.z + time + 23.0)) - vec3(0.5);
-      gl_FragColor = vec4(c + n * strength * 0.05, 1.0);
+      gl_FragColor = vec4(clamp(c + n * strength * 0.05, 0.0, 1.0), 1.0);
     }`,
 
 };
@@ -294,8 +294,10 @@ export class PostFX {
     if (fx.glow.enabled) {
       this.allumer("glow");
       this.passes.glow.onApply = (e) => {
-        e.setFloat3("tint", ...fx.glow.tint.map((c) => Math.min(c, 8)));
-        e.setFloat("intensity", Math.min(fx.glow.intensity, 8));
+        // Normaliser les teintes si elles sont exprimees en 0-255
+        const normTint = fx.glow.tint.map((c) => (c > 1 ? c / 255 : Math.max(0, c)));
+        e.setFloat3("tint", ...normTint);
+        e.setFloat("intensity", Math.min(Math.max(0, fx.glow.intensity), 2.0));
         e.setFloat("radius", (fx.glow.blurSpread || 0.5) * Math.max(1, fx.glow.iterations) * 4);
         e.setFloat2("texelSize", ...t);
       };

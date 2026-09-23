@@ -132,8 +132,15 @@ export class DialogueSystem {
 
   // --- interaction ---
 
-  /** Conversation la plus proche du joueur, dans le repere courant. */
-  nearest(pos, frameOffset, maxDist = 6) {
+  /**
+   * Conversation la plus proche du joueur, dans le repere courant.
+   * Accepte un point monde et une fonction shiftOf(corps), ou un decalage de repere.
+   */
+  nearest(pos, frameOffsetOrShiftOf = [0, 0, 0], maxDist = 6, shiftOf = null) {
+    const fnShift = typeof frameOffsetOrShiftOf === "function" ? frameOffsetOrShiftOf : shiftOf;
+    const px = Array.isArray(pos) ? pos[0] : (pos && typeof pos.x === "number" ? pos.x : 0);
+    const py = Array.isArray(pos) ? pos[1] : (pos && typeof pos.y === "number" ? pos.y : 0);
+    const pz = Array.isArray(pos) ? pos[2] : (pos && typeof pos.z === "number" ? pos.z : 0);
     let best = null, bestD = maxDist;
     for (const c of this.conversations) {
       // Une conversation SANS arbre pose dans la scene reste jouable si un
@@ -142,9 +149,19 @@ export class DialogueSystem {
       // choisit l'arbre au demarrage. L'ecarter ici le rendait muet, et avec
       // lui les codes de lancement qu'il est le seul a donner.
       if (!c.tree && !(c.controller && c.controller.trees)) continue;
-      const d = Math.hypot(c.position[0] - frameOffset[0] - pos.x,
-                           c.position[1] - frameOffset[1] - pos.y,
-                           c.position[2] - frameOffset[2] - pos.z);
+      let d;
+      if (fnShift) {
+        const sh = fnShift(c.body || c) || [0, 0, 0];
+        const rx = px - sh[0];
+        const ry = py - sh[1];
+        const rz = pz - sh[2];
+        d = Math.hypot(c.position[0] - rx, c.position[1] - ry, c.position[2] - rz);
+      } else {
+        const off = Array.isArray(frameOffsetOrShiftOf) ? frameOffsetOrShiftOf : [0, 0, 0];
+        d = Math.hypot(c.position[0] - off[0] - px,
+                       c.position[1] - off[1] - py,
+                       c.position[2] - off[2] - pz);
+      }
       if (d < bestD) { bestD = d; best = c; }
     }
     return best;

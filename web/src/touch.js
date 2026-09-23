@@ -400,6 +400,9 @@ export class TouchControls {
     this.moveStick = null;
     this.lookStick = null;
     this.boostBtn = null;
+    this.upBtn = null;
+    this.downBtn = null;
+    this.suit = false;
     this.context = { menu: false, map: false };
     return this;
   }
@@ -595,7 +598,10 @@ export class TouchControls {
     for (const f of FACE) {
       const b = this.button(face, { ...f, cls: `tc-f-${f.slot} ${f.cls || ""}` });
       if (f.key === "boost") this.boostBtn = b;
+      if (f.key === "up") this.upBtn = b;
+      if (f.key === "down") this.downBtn = b;
     }
+    this.updateSuitButtons();
     for (const d of DPAD) this.button(this.dpad, { ...d, cls: `tc-d-${d.slot} tc-key` });
     for (const m of CONFIRM) {
       this.button(this.menuGroup, { ...m, cls: `tc-f-${m.slot} tc-key ${m.cls}` });
@@ -606,6 +612,11 @@ export class TouchControls {
     this.uiRoot.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
+  updateSuitButtons() {
+    if (this.upBtn) this.upBtn.style.display = this.suit ? "" : "none";
+    if (this.downBtn) this.downBtn.style.display = this.suit ? "" : "none";
+  }
+
   /**
    * Axes maintenus : le bouton et le cran de course disent la meme chose, et
    * l'un ne doit pas effacer l'autre. Le bouton « accelerer » s'allume donc
@@ -614,8 +625,14 @@ export class TouchControls {
   syncHold() {
     // Le cran de course du manche gauche MONTE : c'est ce que la majuscule fait
     // dans le build, et l'accelerateur qu'il allumait avant n'existe pas.
-    this.axes.up = this.held.up || this.sprint;
-    this.axes.down = this.held.down;
+    // Sans combinaison, les propulseurs verticaux sont inactifs.
+    if (!this.suit) {
+      this.axes.up = false;
+      this.axes.down = false;
+    } else {
+      this.axes.up = this.held.up || this.sprint;
+      this.axes.down = this.held.down;
+    }
     this.axes.jump = this.held.jump;
     this.axes.probe = this.held.probe;
     // Le cran de course du manche gauche n'accelere plus rien : le build n'a
@@ -677,6 +694,11 @@ export class TouchControls {
    */
   setContext(ctx) {
     if (!this.enabled) return;
+    if (ctx.suit !== undefined && this.suit !== !!ctx.suit) {
+      this.suit = !!ctx.suit;
+      this.updateSuitButtons();
+      this.syncHold();
+    }
     const menu = !!ctx.menu, map = !!ctx.map;
     if (menu === this.context.menu && map === this.context.map) return;
     this.context = { menu, map };

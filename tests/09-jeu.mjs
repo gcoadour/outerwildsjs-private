@@ -7589,6 +7589,38 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("eclair de supernova termine a t = 0,8s", Number(sun.state.flash.toFixed(2)), 0);
   sun.update({ supernova: true, elapsed: 101.5, supernovaAt: 100.0, shockwaveRadius: 500 });
   check("eclair de supernova eteint apres 0,8s", sun.state.flash, 0);
+
+  // 5. Dialogue.nearest avec shiftOf en coordonnees orbitales
+  {
+    const dsys = new DialogueSystem({
+      trees: { "1": { start: "b1", branches: { b1: { id: "b1", talk: ["salut"] } } } },
+      conversations: [
+        { name: "Slate", character: "Slate", body: "TimberHearth_Body", position: [10, 20, 30], tree: "1" }
+      ]
+    });
+    // Sans shiftOf (dans le repere local au repos)
+    check("dialogue.nearest local direct", dsys.nearest([11, 20, 30], [0, 0, 0]).character, "Slate");
+    // Avec shiftOf (decalage orbital du corps porteur de +5000 sur X)
+    const shift = (b) => (b === "TimberHearth_Body" || (b && b.body === "TimberHearth_Body") ? [5000, 0, 0] : [0, 0, 0]);
+    // Le joueur est en position monde [5011, 20, 30]
+    check("dialogue.nearest avec shiftOf", dsys.nearest([5011, 20, 30], shift).character, "Slate");
+    // Le joueur est trop loin
+    check("dialogue.nearest trop loin avec shiftOf", dsys.nearest([5050, 20, 30], shift), null);
+  }
+
+  // 6. InteractReceiver porte son corps porteur
+  {
+    const cat = new Interactables({ placed: {
+      InteractReceiver: [
+        { name: "Terminal", position: [100, 0, 0], body: "TimberHearth_Body", fields: { _prompt: "Codes", _interactRange: 5 } }
+      ]
+    } });
+    check("InteractReceiver preserve le body", cat.items[0].body, "TimberHearth_Body");
+    const shift = (it) => (it.body === "TimberHearth_Body" ? [2000, 0, 0] : [0, 0, 0]);
+    // Focus avec prise en compte du shift
+    const vise = cat.focus({ x: 2101, y: 0, z: 0 }, [0, 0, 0], { x: -1, y: 0, z: 0 }, shift);
+    check("InteractReceiver atteignable avec shift", vise ? vise.name : null, "Terminal");
+  }
 }
 
 report();

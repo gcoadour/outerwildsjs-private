@@ -49,6 +49,7 @@ export class Interactables {
         kind: "interact", name: x.name, world: x.position,
         range: (x.fields && x.fields._interactRange) || 2,
         prompt: (x.fields && x.fields._prompt) || null,
+        body: x.body || null,
       });
     }
     for (const x of placed.ReadableObject || []) {
