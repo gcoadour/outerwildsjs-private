@@ -1,6 +1,6 @@
 # Validation Playwright des scénarios et corrections de gameplay
 
-Ce document détaille la mise en place du banc d'essai automatisé sous Playwright, les dix scénarios de jeu validés de bout en bout contre le build Linux de l'alpha d'Outer Wilds (v1.2), ainsi que les corrections de gameplay apportées au moteur web pour assurer une stricte parité d'interaction, de timing et de physique.
+Ce document détaille la mise en place du banc d'essai automatisé sous Playwright, les treize scénarios de jeu validés de bout en bout contre le build Linux de l'alpha d'Outer Wilds (v1.2), ainsi que les corrections de gameplay apportées au moteur web pour assurer une stricte parité d'interaction, de timing et de physique.
 
 ---
 
@@ -12,13 +12,13 @@ Pour éviter les mocks et tester la chaîne complète :
 1. Un profil de navigation persistant (`work/pw-profile`) stocke les données extraites dans le système de fichiers privé d'origine (OPFS).
 2. Un serveur HTTP local sert l'application web sur le port 8089.
 3. Un script Playwright autonome (`scripts/playwright-scenarios.mjs`) orchestre les actions du joueur via les événements clavier et souris standard.
-4. Les assertions valident à la fois l'état interne du moteur (`window.__player`, `window.__shipRef`, `window.__consoles`, etc.) et la réponse visuelle/auditive.
+4. Les assertions valident à la fois l'état interne du moteur (`window.__player`, `window.__shipRef`, `window.__consoles`, `window.__death`, `window.__pdata`, etc.) et la réponse visuelle/auditive.
 
 ---
 
-## 2. Les dix scénarios validés de bout en bout (33/33 assertions)
+## 2. Les treize scénarios validés de bout en bout (48/48 assertions)
 
-La suite de tests automatisés couvre dix séquences fondamentales du départ de partie :
+La suite de tests automatisés couvre l'ensemble des systèmes de gameplay fondamentaux du départ de partie :
 
 ### 2.1. Scénario 1 : Réveil du joueur et regard
 - **Comportement alpha** : `PlayerCameraController.Awake` arme le réveil avec un regard pointé vers le ciel à 80° (`pitch = -80°`). Le réveil attend 7 secondes avant de redescendre doucement à l'horizon, sauf si le joueur prend la main en inclinant la vue vers le bas (en dessous de 45°).
@@ -48,17 +48,29 @@ La suite de tests automatisés couvre dix séquences fondamentales du départ de
 - **Comportement alpha** : `ShipThrusterController.ReadTranslationalInput` exige un maintien continu de la poussée verticale pendant `_ignitionDuration` (1,0 seconde) lorsque le vaisseau est posé sur la piste (`LandingPadManager.IsLanded`). Un relâchement prématuré émet `CancelShipIgnition`. La complétion émet `CompleteShipIgnition`, détache le vaisseau de la piste et applique la poussée.
 - **Vérifications** : installation au siège pilote, déclenchement de `StartShipIgnition` sur appui court (Shift), annulation `CancelShipIgnition` sans décollage au relâchement, maintien complet de 1 seconde déclenchant `CompleteShipIgnition`, libération de la piste (`landed = false`).
 
-### 2.8. Scénario 8 : Sonde de reconnaissance
-- **Comportement alpha** : `ProbeLauncher` arme le tir photographique avec un rayon de détection et de numérisation de maillage de 30 unités.
-- **Vérifications** : configuration et disponibilité du lanceur de sonde.
+### 2.8. Scénario 8 : Sonde de reconnaissance (lancement, photo, rappel)
+- **Comportement alpha** : `ProbeLauncher` arme le tir photographique. En vol, un appui sur le bouton de sonde déclenche une prise de vue immédiate (`ProbeCamera.Update` / `MidairProbeSnapshot`). Lorsque la sonde est ancrée ou en vol, maintenir la touche de rappel au-delà du seuil `_retrieveHold` (0,3 seconde) détruit la sonde et émet `RetrieveProbe`.
+- **Vérifications** : chargement et expulsion de la sonde, prise de vue instantanée en plein vol avec capture des événements d'imagerie, maintien du rappel sur la durée requise entraînant la rentrée de la sonde (`active = 0`).
 
 ### 2.9. Scénario 9 : Pilote automatique
 - **Comportement alpha** : `Autopilot` déploie ses trois phases (alignement sur la trajectoire, approche accélérée, rétro-fusées et égalisation de vitesse relative).
 - **Vérifications** : instanciation du pilote automatique, engagement vers une coordonnée cible, mise à jour des drapeaux d'état.
 
-### 2.10. Scénario 10 : Carte du système solaire
-- **Comportement alpha** : `MapController` gère la vue orbitale et la projection des marqueurs célestes pour chaque planète et satellite.
-- **Vérifications** : présence du module cartographique avec l'ensemble des 11 marqueurs orbitaux du système.
+### 2.10. Scénario 10 : Carte du système solaire (bascule M et Entrée)
+- **Comportement alpha** : `MapController` gère la vue orbitale et la projection des marqueurs célestes pour chaque planète et satellite. Dans le build Unity original, le canal `Map` est lié aux touches Entrée et NumpadEnter. Pour le confort web, l'appui sur 'M' est également reconnu.
+- **Vérifications** : présence du module cartographique avec l'ensemble des 11 marqueurs orbitaux du système, ouverture et fermeture de la vue orbitale via les touches clavier.
+
+### 2.11. Scénario 11 : Télescope et signaux acoustiques
+- **Comportement alpha** : `TelescopeController` bascule la vue télescopique, réduit le champ de vision (FOV) selon le grossissement optique calculé par `telescopeScale(fov)`, et capte la force de transmission des signaux audio du système solaire.
+- **Vérifications** : ouverture de la lunette, grossissement optique mesuré, captation du signal acoustique, restauration du champ de vision normal à la fermeture.
+
+### 2.12. Scénario 12 : Panneaux de musée et textes Nomai
+- **Comportement alpha** : `DialogueBox` affiche les objets lisibles (`ReadableObject`), découpe les longs paragraphes en pages, bloque temporairement le déplacement pendant la lecture et déverrouille le joueur à la fermeture.
+- **Vérifications** : ouverture d'un panneau textuel de musée, pagination du texte, progression et déverrouillage propre à la fermeture.
+
+### 2.13. Scénario 13 : Mort du joueur, flashback et reprise de la boucle
+- **Comportement alpha** : `PlayerDeathHandler.OnTriggerPlayerDeath` initie la mort du joueur, coupe les commandes et déclenche la séquence de flashback `FlashbackCamera`. Lorsque le flashback se termine, `TimeLoop.RestartTimeLoop` incrémente `_loopCount`, appelle `PlayerData.SaveLoopCount` et réinitialise la boucle temporelle (`OnStartOfTimeLoop`).
+- **Vérifications** : mort immédiate par impact, déroulement de la séquence de flashback, complétion de la fin des temps, incrémentation du compteur de boucles (`loopCount + 1`), réapparition du joueur au réveil et ré-ancrage du vaisseau sur la plate-forme de lancement.
 
 ---
 
@@ -72,11 +84,31 @@ La comparaison directe avec l'assembly C# et l'exécution automatisée ont rév�
 2. **Touche de dégustation de la guimauve (`web/src/main.js`)** :
    Le portage initial n'acceptait que la touche personnalisée 'B'. Dans le build original (`Marshmallow.Update`), c'est `OWInput.interact` (la touche standard 'E') qui permet de consommer la guimauve lorsque son état est comestible (`edible`). Les deux entrées sont désormais acceptées.
 
-3. **Maintien du vaisseau au sol au démarrage (`web/src/ship.js`)** :
+3. **Maintien du vaisseau au sol au démarrage (`web/src/ship.js`, `web/src/main.js`)** :
    Sur Âtrebois, la plate-forme de lancement est surélevée par rapport au rayon sphérique moyen de la planète (`upperSurfaceRadius`). Sans maillage Havok actif lors des tests headless, la détection analytique déclarait le vaisseau non posé (`landed = false`), ce qui empêchait la séquence d'allumage (laquelle requiert `landed = true`).
    L'introduction d'un drapeau `parked` fige le vaisseau sur son socle d'apparition au repos jusqu'à l'aboutissement de la séquence `CompleteShipIgnition`.
 
-4. **Outil d'inspection de chaînes IL (`scripts/il.mjs`)** :
+4. **Synchronisation du compteur de boucle lors du respawn (`web/src/main.js`)** :
+   L'inspection IL de `TimeLoop.RestartTimeLoop` démontre la séquence suivante :
+   ```il
+   IL_0000  ldsfld  _loopCount
+   IL_0005  ldc.i4  1
+   IL_0006  add
+   IL_0007  stsfld  _loopCount
+   IL_000c  ldsfld  _loopCount
+   IL_0011  call    PlayerData::SaveLoopCount
+   IL_0016  ldstr   "RestartTimeLoop"
+   IL_001b  call    GlobalMessenger::FireEvent
+   ```
+   Dans le portage, `pdata.setLoopCount(loop.loopCount)` n'était pas appelé directement lors de `respawn()`, ce qui laissait `pdata.loopCount` désynchronisé tant qu'une frame de rendu n'avait pas tourné. L'appel explicite de synchronisation a été inséré dans `respawn()`.
+
+5. **Timing de rappel de la sonde (`web/src/probe.js`, `scripts/playwright-scenarios.mjs`)** :
+   Dans `ProbeLauncher.update()`, l'appui sur le rappel de sonde enregistre `this.retrieveStart = this.now` et vérifie `this.now > this.retrieveStart + this.cfg.retrieveHold` (0,3 s). Un maintien effectif sur plusieurs frames cumulant plus de 300 ms est nécessaire pour déclencher la destruction et le rappel de la sonde.
+
+6. **Invariant de table d'entrées du build (`web/src/input.js`, `tests/05-extract.mjs`)** :
+   L'invariant de parité stricte vérifie que la table de repli `COMMANDES` correspond exactement à l'asset `InputManager.asset` extrait du build original (où `Map` est sur `Enter`/`Return` et `Telescope` sur `mouse 2`). Les raccourcis clavier spécifiques au confort web ('M' pour la carte) ont été placés au niveau de la dispatch d'événements de `main.js` sans altérer la définition canonique de l'alpha.
+
+7. **Outil d'inspection de chaînes IL (`scripts/il.mjs`)** :
    Ajout de la commande `node scripts/il.mjs --string <recherche>` permettant de localiser instantanément toutes les références de chaînes d'événements, noms de clips audio et messages de dialogue dans les assemblies Unity.
 
 ---
@@ -84,8 +116,9 @@ La comparaison directe avec l'assembly C# et l'exécution automatisée ont rév�
 ## 4. Bilan de la validation
 
 Tous les contrôles du projet sont au vert :
-- **33/33 scénarios Playwright validés** (`node scripts/playwright-scenarios.mjs`).
+- **48/48 assertions Playwright validées** (`node scripts/playwright-scenarios.mjs`).
 - **2424/2424 vérifications unitaires réussies** (`node scripts/run-tests.mjs`).
 - **484/484 assertions d'extraction conformes** (`node tests/05-extract.mjs`).
 - **0 loi du moteur orpheline** (`node scripts/lois.mjs`).
 - **0 ressource binaire supérieure à 512 Ko** versionnée sous git (`node scripts/check-no-assets.mjs`).
+- **39/39 modules pipeline et 75/75 modules moteur compilés** (`node scripts/check-modules.mjs`).

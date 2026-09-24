@@ -2010,6 +2010,7 @@ async function boot() {
     // `TimeLoop.Start` recalcule `_preventSupernova` : tant qu'on ne connait
     // pas les codes de lancement, l'etoile n'explose pas.
     loop.restart(pdata.knows("knowsLaunchCodes"));
+    pdata.setLoopCount(loop.loopCount);
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
     if (starPCS) {
@@ -2032,7 +2033,7 @@ async function boot() {
     // §V L'INVULNERABILITE DU PREMIER TOUR. `OnStartOfTimeLoop` la recalcule a
     // chaque boucle : vraie a la PREMIERE, tant qu'on ne connait pas les codes
     // de lancement (docs/81-invulnerable.md).
-    pdata.startOfTimeLoop(pdata.loopCount + 1);
+    pdata.startOfTimeLoop(pdata.loopCount);
     resources.invulnerable = pdata.isInvulnerable;
     if (resources.invulnerable) console.log("premier tour : les degats ne portent pas");
     player.pos.x = spawn0.x; player.pos.y = spawn0.y; player.pos.z = spawn0.z;
@@ -2064,6 +2065,12 @@ async function boot() {
       // depart, coque comprise
       ship.damage.reset();
       ship.pos.x = shipStart[0]; ship.pos.y = shipStart[1]; ship.pos.z = shipStart[2];
+      ship.parked = true;
+      ship.landed = true;
+      ship.groundBody = "TimberHearth";
+      ship.onPad = false;
+      ship.igniting = false;
+      ship.ignitionTime = 0;
     }
     if (starEntry) starEntry.mesh.scaling.setAll(1);
     // La boucle rend le monde a son etat de depart : la musique de la fin des
@@ -2407,6 +2414,9 @@ async function boot() {
   window.__ship = !!ship;
   window.__shipRef = ship;   // sonde de verification
   window.__shipEvents = [];
+  window.__death = death;
+  window.__loop = loop;
+  window.__respawn = respawn;
   window.__particles = { field: particles, total: particleMap.length, live: () => particles.count,
                         active: () => particles.particles, failed: () => particles.failed };
   window.__audio = { total: audioMap.length, live: () => audio.count,
@@ -2573,7 +2583,7 @@ async function boot() {
     // `EnterMapView` / `ExitMapView` : ouvrir avec une cible visee vous CADRE
     // tous les deux, et le son d'ouverture a dix secondes de garde
     // (docs/117-carte.md).
-    if (est("Map")) {
+    if (est("Map") || code === "KeyM") {
       if (solarMap.open) solarMap.exitMapView();
       else {
         const cible = solarMap.selected;

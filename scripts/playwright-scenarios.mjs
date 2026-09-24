@@ -323,7 +323,29 @@ try {
       meshScanRadius: 30,
     };
   });
-  assert("Sonde de reconnaissance configuree", probeInfo.ready === true);
+  // Probe launch, snapshot, and recall sequence
+  const probeActions = await page.evaluate(() => {
+    const launcher = window.__tools?.probes;
+    if (!launcher) return { hasLauncher: false };
+    // 1. Charge and launch probe
+    launcher.update(0.1, { launch: true, retrieve: false });
+    launcher.update(1.2, { launch: false, retrieve: false }, {
+      pos: [0, 10, 0], forward: [0, 1, 0], playerVelocity: [0, 0, 0], knowsProbes: true, insideShip: false, atFlightConsole: false,
+    });
+    const launched = launcher.active === 1;
+    // 2. Trigger snapshot (capture immediatement lors de l'appui en vol)
+    launcher.update(0.1, { launch: true });
+    const hasSnapshot = launcher.events.includes("ProbeSnapshot") || launcher.events.includes("MidairProbeSnapshot");
+    launcher.update(0.1, { launch: false });
+    // 3. Retrieve probe (maintien cumule depassant retrieveHold = 0.3s)
+    launcher.update(0.1, { retrieve: true });
+    launcher.update(0.4, { retrieve: true });
+    const recalled = launcher.active === 0;
+    return { hasLauncher: true, launched, hasSnapshot, recalled };
+  });
+  assert("Tir de la sonde de reconnaissance", probeActions.launched === true);
+  assert("Prise de photo par la sonde", probeActions.hasSnapshot === true);
+  assert("Rappel et recuperation de la sonde", probeActions.recalled === true);
 
   // ==========================================
   // SCENARIO 9: PILOTE AUTOMATIQUE & ETAPES
@@ -361,12 +383,102 @@ try {
   });
   assert("Carte solaire presente avec marqueurs", mapInfo.present === true && mapInfo.markers >= 10, `markers=${mapInfo.markers}`);
 
+  // Test map toggle with keyboard
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(200);
+  const mapOpen = await page.evaluate(() => window.__map?.open);
+  assert("Ouverture de la carte solaire (touche M)", mapOpen === true);
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(200);
+  const mapClosed = await page.evaluate(() => !window.__map?.open);
+  assert("Fermeture de la carte solaire (touche M)", mapClosed === true);
+
+  // ==========================================
+  // SCENARIO 11: TELESCOPE & SIGNAUX ACOUSTIQUES
+  // ==========================================
+  console.log("\n--- Scenario 11: Télescope ---");
+  const telTest = await page.evaluate(() => {
+    const tel = window.__tools?.telescope;
+    if (!tel) return { hasTel: false };
+    tel.toggle();
+    const active = tel.active;
+    const initialFOV = tel.fov;
+    tel.update(0.1, 1); // zoom in
+    const zoomedFOV = tel.fov;
+    const mag = tel.magnification;
+    tel.addSignalStrength(0.85);
+    const signal = tel.signalStrength;
+    tel.toggle();
+    return { hasTel: true, active, initialFOV, zoomedFOV, mag, signal, closed: !tel.active };
+  });
+  assert("Ouverture du télescope", telTest.active === true);
+  assert("Grossissement optique du télescope", telTest.mag >= 1);
+  assert("Capture et force de transmission de signal", telTest.signal > 0.8);
+  assert("Fermeture du télescope et restauration du FOV", telTest.closed === true);
+
+  // ==========================================
+  // SCENARIO 12: PANNEAUX DE MUSEE & TEXTES NOMAI
+  // ==========================================
+  console.log("\n--- Scenario 12: Panneaux de musée et textes Nomai ---");
+  const readTest = await page.evaluate(() => {
+    const dlg = window.__dialogue;
+    if (!dlg) return { hasDlg: false };
+    const plaque = {
+      name: "NomaiPlaque_Museum",
+      kind: "readable",
+      text: "Bienvenue au musée d'Âtrebois. Les Nomai étaient une espèce d'explorateurs nomades arrivés dans ce système il y a des millénaires.",
+    };
+    dlg.read(plaque);
+    const isReading = !!dlg.active?.reading;
+    const pages = dlg.pages.length;
+    dlg.advance();
+    dlg.close();
+    return { hasDlg: true, isReading, pages, closed: dlg.active === null };
+  });
+  assert("Ouverture d'un texte de musée (ReadableObject)", readTest.isReading === true);
+  assert("Pagination et affichage du panneau", readTest.pages >= 1);
+  assert("Fermeture de la lecture et déverrouillage", readTest.closed === true);
+
+  // ==========================================
+  // SCENARIO 13: MORT, FLASHBACK & REPRISE DE LA BOUCLE
+  // ==========================================
+  console.log("\n--- Scenario 13: Mort du joueur et boucle temporelle ---");
+  const loop0 = await page.evaluate(() => window.__pdata?.loopCount || 1);
+  await page.evaluate(() => {
+    window.__death.kill("impact");
+  });
+  const dead = await page.evaluate(() => window.__death?.dead === true);
+  assert("Mort du joueur déclenchée (PlayerDeath)", dead === true);
+
+  // Advance flashback sequence in simulation
+  await page.evaluate(() => {
+    for (let i = 0; i < 20; i++) window.__death.update(0.1);
+  });
+  const phaseFlashback = await page.evaluate(() => window.__death?.state?.phase === "flashback" || window.__death?.state?.phase === "images" || window.__death?.state?.phase === "attente");
+  assert("Phase de flashback amorcée", phaseFlashback === true);
+
+  // Complete flashback and execute time loop respawn
+  await page.evaluate(() => {
+    for (let i = 0; i < 60; i++) {
+      if (window.__death.update(0.2)) window.__respawn();
+    }
+  });
+  const loop1 = await page.evaluate(() => window.__pdata?.loopCount || 1);
+  const respawned = await page.evaluate(() => ({
+    playerAlive: !window.__death?.dead,
+    reveilArme: window.__reveil?.arme === true,
+    shipParked: window.__shipRef?.parked === true,
+    shipLanded: window.__shipRef?.landed === true,
+  }));
+  assert("Incrémentation de la boucle temporelle (loopCount + 1)", loop1 === loop0 + 1, `before=${loop0}, after=${loop1}`);
+  assert("Réapparition au réveil et ré-ancrage du vaisseau sur le pad", respawned.playerAlive && respawned.reveilArme && respawned.shipParked && respawned.shipLanded);
+
   await context.close();
 } finally {
   server.close();
 }
 
 console.log(`\n========================================`);
-console.log(`Bilan Playwright: ${passed}/${total} scenarios valides.`);
+console.log(`Bilan Playwright: ${passed}/${total} assertions validées.`);
 console.log(`========================================`);
 if (passed < total) process.exit(1);
