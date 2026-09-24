@@ -147,3 +147,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`123-evenements-recensement.md`](123-evenements-recensement.md) — **recensement complet et événements globaux : 100 % des composants et événements raccordés**
 - [`124-comparaison-fixes.md`](124-comparaison-fixes.md) — **comparaison alpha Unity et moteur Web : six correctifs visuels et gameplay**
 - [`125-correctifs-mobiles.md`](125-correctifs-mobiles.md) — **correctifs mobiles : interactions, vaisseau, jetpack, crashs et shaders**
+- [`126-correctifs-ciel-feu-tactile.md`](126-correctifs-ciel-feu-tactile.md) — **correctifs visuels et tactiles : voûte céleste, feu de camp et boutons mobiles**

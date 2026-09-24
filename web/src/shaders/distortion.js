@@ -47,12 +47,13 @@ void main() {
   vec3 v = normalize(cameraPos - vWorldPos);
   // la distorsion se voit surtout en incidence rasante
   float edge = 1.0 - abs(dot(n, v));
-  float d = 1.0 - clamp(length(b.xy) * bumpAmt * edge, 0.0, 0.75);
-  gl_FragColor = vec4(clamp(tint * d, 0.0, 1.0), 1.0);
+  // Sans carte de normales valide, le maillage reste transparent pour eviter une sphere opaque
+  float a = hasBump > 0.5 ? clamp(pow(edge, 2.0) * 0.15 * bumpAmt * length(b.xy), 0.0, 0.25) : 0.0;
+  gl_FragColor = vec4(tint, a);
 }`;
 
 export function makeDistortion(BABYLON, scene, bumpTexture = null,
-                               amount = 1.0, tint = [1, 1, 1]) {
+                              amount = 1.0, tint = [1, 1, 1]) {
   const mat = new BABYLON.ShaderMaterial("distortion", scene,
     { vertexSource: VERTEX, fragmentSource: FRAGMENT },
     { attributes: ["position", "normal", "uv"],
@@ -69,12 +70,12 @@ export function makeDistortion(BABYLON, scene, bumpTexture = null,
     bumpTexture = new BABYLON.RawTexture(raw, 1, 1, BABYLON.Engine.TEXTUREFORMAT_RGBA, scene, false, false, BABYLON.Texture.NEAREST_SAMPLINGMODE);
   }
   if (bumpTexture) mat.setTexture("bumpMap", bumpTexture);
-  // Blend DstColor Zero : multiplication du fond en file transparente
-  mat.alphaMode = BABYLON.Engine.ALPHA_MULTIPLY;
+  // Fondu alpha standard (SrcAlpha OneMinusSrcAlpha) en file transparente
+  mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
   mat.alpha = 0.999;
   mat.needAlphaBlending = () => true;
   mat.needAlphaTesting = () => false;
-  mat.backFaceCulling = false;
+  mat.backFaceCulling = true;
   mat.disableDepthWrite = true;
   return mat;
 }

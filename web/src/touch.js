@@ -326,6 +326,7 @@ export class TouchControls {
                   probe: false, boost: false };
     this.held = { up: false, down: false, jump: false, probe: false };
     this.sprint = false;
+    this.suit = false;
     this.context = { menu: false, map: false };
     this.buttons = [];
     this.raf = null;
@@ -613,8 +614,15 @@ export class TouchControls {
   }
 
   updateSuitButtons() {
-    if (this.upBtn) this.upBtn.style.display = this.suit ? "" : "none";
-    if (this.downBtn) this.downBtn.style.display = this.suit ? "" : "none";
+    const show = !!this.suit;
+    if (this.upBtn) {
+      this.upBtn.style.display = show ? "" : "none";
+      this.upBtn.classList.toggle("tc-hidden", !show);
+    }
+    if (this.downBtn) {
+      this.downBtn.style.display = show ? "" : "none";
+      this.downBtn.classList.toggle("tc-hidden", !show);
+    }
   }
 
   /**

@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#05060a">
 <title>Outer Wilds alpha — moteur navigateur</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=126">
 </head>
 <body>
 
@@ -137,7 +137,7 @@
 <div id="rotate"><p>Tournez l'appareil<span>Ce portage se joue en paysage.</span></p></div>
 
 <script type="module">
-import { initGate } from "./src/gate.js";
+import { initGate } from "./src/gate.js?v=126";
 initGate().catch((e) => {
   const box = document.getElementById("gate-error");
   box.hidden = false;

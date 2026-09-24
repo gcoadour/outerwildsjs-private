@@ -442,7 +442,7 @@ body:not(.playing) #ui { display: none; }
    le repere de manette, qui est le petit. L'ordre du DOM est nom puis repere ;
    les gachettes le retournent pour mettre « L1 » au-dessus. */
 .tc-group { position: absolute; display: flex; gap: 8px; }
-.tc-group[hidden], .tc-pad[hidden] { display: none; }
+.tc-group[hidden], .tc-pad[hidden], .tc-hidden { display: none !important; pointer-events: none !important; }
 .tc-btn {
   pointer-events: auto;
   display: flex; flex-direction: column;

@@ -966,6 +966,7 @@ async function boot() {
       // Le repere du parent se lit UNE fois, au rattachement : il ne change pas
       // ensuite, et le lire chaque image couterait une matrice monde pour rien.
       sky.readBasis(sky.shell, BABYLON);
+      if (sky.shell) sky.shell.isPickable = false;
       console.log(`ciel : voute rattachee`);
     }
     // Les trois plans d'imposture : on les rattache par nom, et on leur donne
@@ -2797,7 +2798,10 @@ async function boot() {
   const touch = new TouchControls(
     document.getElementById("touch"), document.getElementById("touchui"),
     { onKey: command, onLook: (dx, dy) => look(dx, dy, 1) });
-  if (touchAvailable()) touch.enable();
+  if (touchAvailable()) {
+    touch.enable();
+    touch.setContext({ menu: false, map: false, suit: equipment.suit });
+  }
 
   // --- manette ---
   //

@@ -80,7 +80,12 @@ function applySelfIllum(BABYLON, mat) {
   if (tex) {
     if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
     tex.hasAlpha = true;
+    if (BABYLON.Texture) {
+      tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+      tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+    }
   }
+  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
   if ("emissiveColor" in mat) {
     mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
   }
@@ -110,7 +115,14 @@ function applyLitAlpha(BABYLON, mat) {
   mat.twoSidedLighting = true;
   mat.disableDepthWrite = true;
   const tex = mat.albedoTexture || mat.diffuseTexture;
-  if (tex) tex.hasAlpha = true;
+  if (tex) {
+    tex.hasAlpha = true;
+    if (BABYLON.Texture) {
+      tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+      tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+    }
+  }
+  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
   if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
   if ("disableLighting" in mat) mat.disableLighting = false;
   if ("unlit" in mat) mat.unlit = false;
@@ -138,13 +150,17 @@ function applyLitAlpha(BABYLON, mat) {
  * `atmosphere_blue` est en DXT5 et son alpha va de 0 a 255 : il y avait bien
  * un degrade a montrer, personne ne le regardait.
  */
-function applyAlphaBlend(BABYLON, mat, { cullOff = false } = {}) {
+function applyAlphaBlend(BABYLON, mat, { cullOff = true } = {}) {
   const tex = mat.albedoTexture || mat.diffuseTexture;
   if (tex) {
     tex.hasAlpha = true;
-    if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
+    if (BABYLON.Texture) {
+      tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+      tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+    }
   }
-  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
+  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
   if ("disableLighting" in mat) mat.disableLighting = true;
   if ("unlit" in mat) mat.unlit = true;
   if (cullOff) mat.backFaceCulling = false;
@@ -191,54 +207,55 @@ export function applyGameShaders(BABYLON, scene, meshes) {
     if (!mat) continue;
     const name = unityShaderOf(mat);
     if (!name) continue;
+    const base = name.split("/").pop();
 
-    if (name === "diamond shader") {
-      if (!cache.has(name)) cache.set(name, makeDiamond(BABYLON, scene));
-      mesh.material = cache.get(name);
-      bump(name);
-    } else if (name === "V-Fog") {
-      if (!cache.has(name)) {
+    if (base === "diamond shader" || name === "diamond shader") {
+      if (!cache.has(base)) cache.set(base, makeDiamond(BABYLON, scene));
+      mesh.material = cache.get(base);
+      bump("diamond shader");
+    } else if (base === "V-Fog" || /V-Fog/.test(name)) {
+      if (!cache.has("V-Fog")) {
         const tex = mat.albedoTexture || mat.diffuseTexture || null;
-        cache.set(name, makeVFog(BABYLON, scene, tex));
+        cache.set("V-Fog", makeVFog(BABYLON, scene, tex));
       }
-      mesh.material = cache.get(name);
-      bump(name);
+      mesh.material = cache.get("V-Fog");
+      bump("V-Fog");
     } else if (/DoubleSidedCutout|AlphaCutoff/.test(name)) {
       applyCutout(BABYLON, mat);
       bump(name);
-    } else if (name === "SelfIlluminAlpha") {
+    } else if (base === "SelfIlluminAlpha" || /SelfIlluminAlpha/.test(name)) {
       applyLitAlpha(BABYLON, mat);
-      bump(name);
+      bump("SelfIlluminAlpha");
     } else if (/SelfIllumin/.test(name)) {
       applySelfIllum(BABYLON, mat);
       bump(name);
-    } else if (name === "Atmosphere") {
-      applyAlphaBlend(BABYLON, mat);
-      bump(name);
-    } else if (/^Particle ?Add|ParticleAdditive/.test(name)) {
+    } else if (base === "Atmosphere" || /Atmosphere/.test(name)) {
+      applyAlphaBlend(BABYLON, mat, { cullOff: true });
+      bump("Atmosphere");
+    } else if (/^Particle ?Add|ParticleAdditive/.test(base) || /^Particle ?Add|ParticleAdditive/.test(name)) {
       applyParticleAdditive(BABYLON, mat);
       bump(name);
-    } else if (name === "RimShader") {
-      if (!cache.has(name)) {
-        cache.set(name, makeRim(BABYLON, scene,
+    } else if (base === "RimShader" || /RimShader/.test(name)) {
+      if (!cache.has("RimShader")) {
+        cache.set("RimShader", makeRim(BABYLON, scene,
           mat.albedoTexture || mat.diffuseTexture || null));
       }
-      mesh.material = cache.get(name);
-      bump(name);
-    } else if (name === "DistortionShader" || name === "FireBall") {
-      const key = name;
+      mesh.material = cache.get("RimShader");
+      bump("RimShader");
+    } else if (base === "DistortionShader" || base === "FireBall" || /DistortionShader|FireBall/.test(name)) {
+      const key = base === "FireBall" || /FireBall/.test(name) ? "FireBall" : "DistortionShader";
       if (!cache.has(key)) {
         cache.set(key, makeDistortion(BABYLON, scene,
-          mat.bumpTexture || null, name === "FireBall" ? 1.4 : 1.0,
-          name === "FireBall" ? [1.0, 0.72, 0.45] : [1, 1, 1]));
+          mat.bumpTexture || null, key === "FireBall" ? 1.4 : 1.0,
+          key === "FireBall" ? [1.0, 0.72, 0.45] : [1, 1, 1]));
       }
       mesh.material = cache.get(key);
-      bump(name);
-    } else if (name === "CrackShader") {
+      bump(key);
+    } else if (base === "CrackShader" || /CrackShader/.test(name)) {
       // surcouche transparente double face, file Transparent : meme traitement
       // que l'emissif, la texture portant les fissures lumineuses
       applySelfIllum(BABYLON, mat);
-      bump(name);
+      bump("CrackShader");
     }
   }
   return counts;

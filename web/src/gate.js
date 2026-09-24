@@ -99,7 +99,7 @@ async function startEngine() {
   }
   $("gate").hidden = true;
   document.body.classList.add("playing");
-  await import("./main.js");
+  await import("./main.js?v=126");
 }
 
 function runPipeline(file, options) {

@@ -142,7 +142,11 @@ class GltfBuilder {
 function alphaMode(shaderName) {
   const n = (shaderName || "").toLowerCase();
   if (n.includes("cutout")) return "MASK";
-  if (n.includes("alpha") || n.includes("transparent")) return "BLEND";
+  if (n.includes("alpha") || n.includes("transparent") ||
+      n.includes("atmosphere") || n.includes("fireball") ||
+      n.includes("distort") || n.includes("v-fog") ||
+      n.includes("diamond") || n.includes("crack") ||
+      n.includes("rim")) return "BLEND";
   return "OPAQUE";
 }
 
