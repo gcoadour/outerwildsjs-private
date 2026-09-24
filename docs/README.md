@@ -151,3 +151,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`127-mecanique-ascenseur-et-interactions.md`](127-mecanique-ascenseur-et-interactions.md) — **mécanique de la tour de lancement, ascenseur et interactions de début de partie**
 - [`128-effets-sonores-evenementiels-vaisseau-carte-guimauve.md`](128-effets-sonores-evenementiels-vaisseau-carte-guimauve.md) — **retours sensoriels et sonores événementiels : vaisseau, carte et guimauve**
 - [`129-audio-evenementiel-sonde-mort-turbulence-ordinateur.md`](129-audio-evenementiel-sonde-mort-turbulence-ordinateur.md) — **retours sonores et capteurs : mort, sonde, modèle, turbulence et supernova**
+- [`130-validation-playwright-scenarios-et-corrections-gameplay.md`](130-validation-playwright-scenarios-et-corrections-gameplay.md) — **validation automatisée Playwright et parité gameplay : 10 scénarios de bout en bout et correctifs du bytecode**
