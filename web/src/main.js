@@ -467,6 +467,7 @@ async function boot() {
   const dialogue = new DialogueSystem(await loadDialogue());
   const pdata = new PlayerData();
   window.__pdata = pdata;
+  window.__dialogue = dialogue;
   // §V La boucle qui commence est la suivante : `OnStartOfTimeLoop` la recoit
   // deja incrementee dans le build. Au tout premier demarrage, `loopCount`
   // vaut zero et la boucle qui s'ouvre est donc la premiere.
@@ -2405,6 +2406,7 @@ async function boot() {
   window.__autopilot = autopilot;
   window.__ship = !!ship;
   window.__shipRef = ship;   // sonde de verification
+  window.__shipEvents = [];
   window.__particles = { field: particles, total: particleMap.length, live: () => particles.count,
                         active: () => particles.particles, failed: () => particles.failed };
   window.__audio = { total: audioMap.length, live: () => audio.count,
@@ -2694,9 +2696,9 @@ async function boot() {
       console.log(c ? `console prise : ${c.name}` : "console lachee");
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
-    if (est("Marshmallow") && marshmallow.eat()) {
-      // `MarshmallowStick.Update` range le baton TOUT SEUL une fois la
-      // guimauve mangee : on lui passe le fait, pas l'ordre.
+    // Dans le build, c'est OWInput.interact (E) qui la mange ; le portage avait
+    // ajoute la touche B. Les deux sont permises.
+    if ((est("Marshmallow") || (est("Interact") && marshmallow.edible)) && marshmallow.eat()) {
       mangeCetteImage = true;
       const sonMastication = sonsUI.eatMarshmallow();
       if (sonMastication) audio.playOneShot(sonMastication.file, { volume: sonMastication.volume });
@@ -3425,6 +3427,7 @@ async function boot() {
       // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils
       // s'entendent par la meme voie que les autres sons d'evenement.
       for (const e of ship.events) {
+        window.__shipEvents.push(e);
         if (e === "StartShipIgnition") {
           console.log("allumage du vaisseau");
           const s = sonsUI.shipIgnition();
@@ -3981,6 +3984,15 @@ async function boot() {
         if (!murAnnonce) {
           console.log("il faut la combinaison pour aller par la");
           murAnnonce = true;
+          // TriggerSuitWarning : Coach avertit le joueur s'il tente de franchir sans combinaison
+          if (dialogue && !dialogue.active) {
+            const coachConvo = (dialogue.conversations || []).find(
+              (c) => c.controller && c.controller.kind === "CoachConvoController");
+            if (coachConvo && coachConvo.controller && coachConvo.controller.trees
+                && coachConvo.controller.trees._suitWarning) {
+              dialogue.open({ ...coachConvo, tree: coachConvo.controller.trees._suitWarning });
+            }
+          }
         }
       } else murAnnonce = false;
     }

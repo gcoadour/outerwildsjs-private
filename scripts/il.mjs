@@ -190,6 +190,30 @@ function principal() {
     for (const v of vals) console.log(`${String(v.valeur).padStart(4)}  ${v.nom}`);
     return;
   }
+  if (args[0] === "--string") {
+    const query = (args[1] || "").toLowerCase();
+    for (const { name: an, asm } of assemblies()) {
+      const n = asm.rows(TABLE.TypeDef);
+      for (let i = 1; i <= n; i++) {
+        const clsName = asm.str(asm.row(TABLE.TypeDef, i)[1]);
+        const methods = methodsOf(asm, i);
+        for (const m of methods) {
+          const body = methodBody(asm, m.index);
+          if (!body) continue;
+          const instrs = decodeIL(body);
+          for (const ins of instrs) {
+            if (ins.op === 0x72 && ins.operand) {
+              const s = userString(asm, ins.operand);
+              if (s && s.toLowerCase().includes(query)) {
+                console.log(`${clsName}.${m.name}: "${s}"`);
+              }
+            }
+          }
+        }
+      }
+    }
+    return;
+  }
   if (args[0] === "--grep") {
     const re = new RegExp(args[1], "i");
     for (const { name: an, asm } of assemblies()) {

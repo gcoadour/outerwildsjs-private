@@ -1,0 +1,10 @@
+{
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "test:playwright": "node scripts/playwright-scenarios.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

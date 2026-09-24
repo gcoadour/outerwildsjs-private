@@ -125,7 +125,10 @@ export class Ship {
     this.quat = [0, 0, 0, 1];               // orientation propre
     this.omega = [0, 0, 0];                 // vitesse angulaire, repere monde
     this.boarded = false;
-    this.landed = false;        // on touche le sol
+    this.landed = true;        // on touche le sol
+    this.parked = true;        // stationne au point de depart tant que le decollage n'a pas eu lieu
+    this.parkPos = { x: startPos[0], y: startPos[1], z: startPos[2] };
+    this.groundBody = "TimberHearth";
     this.onPad = false;         // `LandingPadManager.IsLanded` : gare sur la piste
     this.padBody = null;
     this.pads = new LandingPads();
@@ -302,7 +305,12 @@ export class Ship {
    */
   ignition(dt, up) {
     this.events = [];
-    if (!this.landed) { this.igniting = false; this.ignitionTime = 0; return up; }
+    if (!this.landed) {
+      this.igniting = false;
+      this.ignitionTime = 0;
+      this.parked = false;
+      return up;
+    }
     const y = up > 0 ? (up > 1 ? 1 : up) : 0;
     if (!this.igniting && y > 0) {
       this.igniting = true;
@@ -318,6 +326,8 @@ export class Ship {
     this.ignitionTime += dt;
     if (this.ignitionTime < this.ignitionDuration) return 0;
     this.igniting = false;
+    this.landed = false;
+    this.parked = false;
     this.events.push("CompleteShipIgnition");
     return y;
   }
@@ -540,6 +550,18 @@ export class Ship {
   }
 
   resolveGround(dt, bodies, basis) {
+    if (this.parked && this.landed) {
+      this.groundBody = "TimberHearth";
+      if (this.parkPos) {
+        this.pos.x = this.parkPos.x;
+        this.pos.y = this.parkPos.y;
+        this.pos.z = this.parkPos.z;
+      }
+      this.vel.x = 0;
+      this.vel.y = 0;
+      this.vel.z = 0;
+      return true;
+    }
     this.landed = false;
     this.groundBody = null;
     for (const b of bodies) {
