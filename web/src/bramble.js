@@ -17,8 +17,16 @@
 //   distance d'echappement 300, rayon d'habitat 1200,
 //   rayon de detection du bruit 200
 
-// @lit NoiseSensor, AnglerfishController
+// @lit NoiseSensor, AnglerfishController, AnglerfishAudioController, ShipNoiseMaker, ShipOnlyMusicVolume
 // Les predateurs et ce qu'ils entendent.
+
+/**
+ * Verification de l'etat de lecture de ShipOnlyMusicVolume (ShipOnlyMusicVolume.CheckPlayState).
+ * Le son de Dark Bramble s'active uniquement quand le joueur est a la fois dans le volume et dans le vaisseau.
+ */
+export function shipOnlyMusicState(inVolume, inShip) {
+  return !!(inVolume && inShip);
+}
 
 export const FISH = {
   acceleration: 2,
@@ -280,6 +288,7 @@ export class Anglerfish {
     const trouble = !!(percu && percu.kind === "trouble");
     this.heard = heard;
     this.trouble = trouble;
+    const stateAvant = this.state;
 
     // Ce qui echappe, c'est la SOURCE poursuivie : un joueur parti loin ne
     // ramene pas le predateur chez lui tant qu'une autre source l'appelle.
@@ -296,6 +305,9 @@ export class Anglerfish {
       this.state = "inspecte";        // dernier point connu
       this.disturbance = null;
     }
+
+    this.stateChanged = this.state !== stateAvant;
+    this.lastState = stateAvant;
 
     const target = this.state === "repos" ? this.home
                                           : (this.state === "poursuit" ? noise

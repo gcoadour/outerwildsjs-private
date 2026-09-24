@@ -25,6 +25,26 @@
 // et le nez devient visible, et c'est exactement la lourdeur que decrit
 // docs/07-gameplay.md.
 
+// @lit ShipNoiseMaker
+
+export const SHIP_NOISE = {
+  thrust: 10,
+  minImpact: 10,
+  impactFade: 1,
+};
+
+/**
+ * Bruit emis par le vaisseau (ShipNoiseMaker.Update et ShipNoiseMaker.OnImpact).
+ * Poussee continue : fractionDePoussee * 10.
+ * Impact violent (> 10 u/s) : decroissance lineaire sur 1 seconde depuis la vitesse du choc.
+ */
+export function shipNoise(thrustFraction, t, lastImpactTime = -100, lastImpactSpeed = 0, cfg = SHIP_NOISE) {
+  const pousse = Math.max(0, thrustFraction) * cfg.thrust;
+  const u = Math.max(0, Math.min(1, (t - lastImpactTime) / (cfg.impactFade || 1)));
+  const choc = lastImpactSpeed > cfg.minImpact ? (1 - u) * lastImpactSpeed : 0;
+  return pousse + choc;
+}
+
 import { limitOrbitThrust, orbitSpeed } from "./landing.js";
 import { dominantField, rotateByQuaternion } from "./gravity.js";
 import { ShipDamage } from "./shipdamage.js";
@@ -129,6 +149,15 @@ export class Ship {
     // sont la : (position, haut local, portee) -> { distance, point, normale },
     // ou null. Sans elle, on retombe sur la sphere analytique.
     this.probe = null;
+    this.thrustFraction = 0;
+    this.lastImpactTime = -100;
+    this.lastImpactSpeed = 0;
+    this.now = 0;
+  }
+
+  /** Bruit instantane genere par le vaisseau (ShipNoiseMaker). */
+  noise(t = this.now) {
+    return shipNoise(this.thrustFraction, t, this.lastImpactTime, this.lastImpactSpeed);
   }
 
   get integrity() { return this.damage.integrity; }
@@ -294,6 +323,9 @@ export class Ship {
   }
 
   update(dt, bodies, input, basis, world = null) {
+    this.now = (this.now || 0) + dt;
+    this.thrustFraction = (this.boarded && input)
+      ? Math.hypot(input.forward || 0, input.right || 0, input.up ? 1 : 0) : 0;
     const f = dominantField(bodies, this.pos, world);
     // Le pilote automatique en a besoin : la distance de freinage du build
     // compte la gravite le long de l'axe d'approche (docs/107-pilote.md).
@@ -560,6 +592,8 @@ export class Ship {
         rel[0] * basis.fwd.x + rel[1] * basis.fwd.y + rel[2] * basis.fwd.z,
       ] : null;
       this.lastHit = this.damage.impact(-vn, local, pLocal);
+      this.lastImpactSpeed = -vn;
+      this.lastImpactTime = this.now || 0;
       if (this.lastHit && this.lastHit.justExploded) this.justExploded = true;
       this.vel.x -= vn * n[0]; this.vel.y -= vn * n[1]; this.vel.z -= vn * n[2];
     }

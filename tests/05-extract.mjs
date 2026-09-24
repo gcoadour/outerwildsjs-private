@@ -510,10 +510,11 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   //   97 -> 110  ShipThrusterAudio (7 clips) et PlayerImpactAudio (10 clips,
   //              dont 4 partages) extraits pour la fidelite sensorielle (docs/124)
   //   110 -> 114 FlightConsole (2 clips) et ShipDamageController (2 clips) (docs/128)
-  check("clips exportes en tout", audioFiles.length, 114);
+  //   114 -> 133 Mort, sonde, ordinateur, coelacanthe, supernova, modele (docs/129)
+  check("clips exportes en tout", audioFiles.length, 133);
   check("clips en Ogg Vorbis", parExt.ogg ?? 0, 23);
-  // 90 RIFF, plus l'AIFF converti.
-  check("clips en WAV", parExt.wav ?? 0, 91);
+  // 109 RIFF, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 110);
   check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
   check("l'unique AIFF du build a ete converti",
         audio.stats["AIFF convertis en WAV"] ?? 0, 1);
@@ -585,7 +586,7 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 
   // Les sons d'evenement : qui les porte, et avec quelle loi.
   const ev = eventAudio(audio);
-  check("emetteurs de son d'evenement", ev.count, 26);
+  check("emetteurs de son d'evenement", ev.count, 39);
   check("six pas de marche", ev.family("PlayerMovementAudio", "_walk").length, 6);
   check("six pas de course", ev.family("PlayerMovementAudio", "_run").length, 6);
   check("trois sauts", ev.family("PlayerMovementAudio", "_jump").length, 3);
@@ -599,6 +600,20 @@ console.log("     sources avec courbe echantillonnee:", courbes,
         Object.keys(ev.of("FlightConsole").clips).length, 2);
   check("deux clips d'impact du vaisseau",
         Object.keys(ev.of("ShipDamageController").clips).length, 2);
+  check("trois clips de mort du joueur",
+        Object.keys(ev.of("PlayerDeathAudio").clips).length, 3);
+  check("trois clips de lancement et rappel de la sonde",
+        Object.keys(ev.of("ProbeLauncher").clips).length, 3);
+  check("un clip de demarrage de l'ordinateur de bord",
+        Object.keys(ev.of("ShipComputer").clips).length, 1);
+  check("un clip de crash du vaisseau miniature",
+        Object.keys(ev.of("ModelShipCrashBehavior").clips).length, 1);
+  check("un clip de reapparition du modele",
+        Object.keys(ev.of("RemoteFlightConsole").clips).length, 1);
+  check("trois clips de supernova",
+        Object.keys(ev.of("SupernovaVolume").clips).length, 3);
+  check("cinq clips de predateur coelacanthe",
+        Object.keys(ev.of("AnglerfishAudioController").clips).length, 5);
   check("et le vaisseau miniature a son propre propulseur",
         ev.of("ThrusterAudio", "ModelShip_Body").clips._translationalClip
           .startsWith("ModelRocketThruster"), true);

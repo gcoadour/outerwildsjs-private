@@ -75,7 +75,7 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
          Turbulence, THRUSTER_AUDIO, ThrusterSound, TravelMusic, TRAVEL_FADE,
          EndOfTimeMusic, END_OF_TIME, eventAudio, UISounds, UI_SOUNDS,
          UI_VOLUME, REPAIR_FADE, jumpSound, playerImpactSound,
-         IMPACT_AUDIO } from "../web/src/reactaudio.js";
+         IMPACT_AUDIO, shipTurbulence } from "../web/src/reactaudio.js";
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
@@ -113,7 +113,7 @@ import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
-         IGNITION_DURATION } from "../web/src/ship.js";
+         IGNITION_DURATION, shipNoise, SHIP_NOISE } from "../web/src/ship.js";
 import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
 import { playerConstants } from "../web/src/config.js";
@@ -139,7 +139,7 @@ import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
 import { QuantumMoon, orbitTilt, bodyOccluder,
          quantumHosts } from "../web/src/quantum.js";
 import { detachVelocity } from "../web/src/crust.js";
-import { Anglerfish, fromToAngular, fishStep, FISH } from "../web/src/bramble.js";
+import { Anglerfish, fromToAngular, fishStep, FISH, shipOnlyMusicState } from "../web/src/bramble.js";
 import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
          leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
@@ -7677,6 +7677,151 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("atterrissage annonce ShipTouchdown", s.lastLandingEvent, "ShipTouchdown");
     s.damage.impact(350);
     check("destruction instantanee declenche justExploded", s.damage.destroyed, true);
+  }
+
+  // 8. Retours sonores et sensoriels (mort, sonde, console, turbulence, supernova, coelacanthe) (docs/129)
+  {
+    const mockAudio2 = {
+      events: [
+        {
+          script: "PlayerDeathAudio",
+          clips: {
+            _asphyxiationClip: "Asphyxiation_Long_2150.wav",
+            _instantDeathClip: "InstantDeath2_Long_Ringing_2187.wav",
+            _energyDeathClip: "InstantDeath2_Long_Ringing_2187.wav",
+          }
+        },
+        {
+          script: "ProbeLauncher",
+          clips: {
+            _slowLaunchSound: "ProbeLaunch_LowPower_2139.wav",
+            _fastLaunchSound: "ProbeLaunch_HighPower_2258.wav",
+            _retrievalSound: "ProbeRetrieval_2235.wav",
+          }
+        },
+        {
+          script: "ProbeCamera",
+          clips: {
+            _snapshotSound: "cameraShutter01_2236.wav",
+          }
+        },
+        {
+          script: "ShipComputer",
+          clips: {
+            _bootClip: "Computer_Interface_Retro_2261.wav",
+          }
+        },
+        {
+          script: "ModelShipCrashBehavior",
+          clips: {
+            _crashSound: "ModelShipCrash_Explosion_2185.wav",
+          }
+        },
+        {
+          script: "RemoteFlightConsole",
+          clips: {
+            _respawnAudioClip: "ModelShipRespawn_2188.wav",
+          }
+        },
+        {
+          script: "SupernovaVolume",
+          clips: {
+            _coreCollapse: "Supernova_Start2_Longer_2206.wav",
+            _solarExplosion: "Supernova_Explosion3_2145.wav",
+            _energyWave: "Supernova_Wave4_2209.wav",
+          }
+        },
+        {
+          script: "AnglerfishAudioController",
+          clips: {
+            _lurkingLoop: "Angler_Lurking_Loop_2267.wav",
+            _detectDisturbance: "Angler_Growl_01_2276.wav",
+            _detectTarget: "Angler_Bellow_02_2282.wav",
+            _chasingLoop: "Angler_Chasing_Loop_2269.wav",
+            _crunchSound: "Angler_Crunch_01_2271.wav",
+          }
+        },
+        {
+          script: "ShipTurbulenceAudio",
+          name: "ShipRattleAudio",
+          clips: { _turbulenceClip: "Spaceship_RattleLoop_2147.wav" },
+          params: { _lowerSpeedLimit: 40, _upperSpeedLimit: 60, _easeRate: 0.1, _maxDensity: 5 }
+        },
+        {
+          script: "ShipTurbulenceAudio",
+          name: "TurbulenceAudio",
+          clips: { _turbulenceClip: "Atmosphere_High_Ship_2256.wav" },
+          params: { _lowerSpeedLimit: 20, _upperSpeedLimit: 80, _easeRate: 0.05, _maxDensity: 5 }
+        },
+      ],
+      sources: []
+    };
+    const evs2 = eventAudio(mockAudio2);
+    const ui2 = new UISounds(evs2);
+
+    // Mort
+    const mortAsphyxie = ui2.death("asphyxie");
+    check("mort asphyxie : clip Asphyxiation", mortAsphyxie.file, "Asphyxiation_Long_2150.wav");
+    check("mort asphyxie : fondu 1.5s", mortAsphyxie.fade, 1.5);
+    const mortImpact = ui2.death("impact");
+    check("mort impact : clip InstantDeath", mortImpact.file, "InstantDeath2_Long_Ringing_2187.wav");
+    check("mort impact : fondu 0.2s", mortImpact.fade, 0.2);
+
+    // Sonde et appareil photo
+    check("sonde tir basse puissance : slow launch", ui2.probeLaunch(false).file, "ProbeLaunch_LowPower_2139.wav");
+    check("sonde tir haute puissance : fast launch", ui2.probeLaunch(true).file, "ProbeLaunch_HighPower_2258.wav");
+    check("sonde rappel : retrieval sound", ui2.probeRetrieve().file, "ProbeRetrieval_2235.wav");
+    check("obturateur photo : camera shutter", ui2.cameraShutter().file, "cameraShutter01_2236.wav");
+
+    // Ordinateur de bord
+    check("ordinateur de bord boot : computer retro", ui2.shipComputerBoot().file, "Computer_Interface_Retro_2261.wav");
+
+    // Vaisseau miniature
+    check("crash modele reduit : explosion", ui2.modelShipCrash().file, "ModelShipCrash_Explosion_2185.wav");
+    const respawnModele = ui2.modelShipRespawn();
+    check("respawn modele reduit : respawn sound", respawnModele.file, "ModelShipRespawn_2188.wav");
+    check("respawn modele reduit : volume 0.5", respawnModele.volume, 0.5);
+
+    // Supernova
+    check("supernova effondrement noyau : core collapse", ui2.supernovaCollapse().file, "Supernova_Start2_Longer_2206.wav");
+    check("supernova explosion solaire : explosion", ui2.supernovaExplosion().file, "Supernova_Explosion3_2145.wav");
+    check("supernova onde d'energie : wave loop", ui2.supernovaWave().file, "Supernova_Wave4_2209.wav");
+
+    // Coelacanthe
+    check("coelacanthe repos : lurking loop", ui2.anglerLurking().file, "Angler_Lurking_Loop_2267.wav");
+    check("coelacanthe trouble : disturbance", ui2.anglerDisturbance().file, "Angler_Growl_01_2276.wav");
+    check("coelacanthe cible : detect target", ui2.anglerTarget().file, "Angler_Bellow_02_2282.wav");
+    check("coelacanthe poursuite : chasing loop", ui2.anglerChase().file, "Angler_Chasing_Loop_2269.wav");
+    check("coelacanthe morsure : crunch", ui2.anglerCrunch().file, "Angler_Crunch_01_2271.wav");
+
+    // shipTurbulence
+    const turb = shipTurbulence(evs2);
+    check("shipTurbulence rattle clip", turb.rattle.clip, "Spaceship_RattleLoop_2147.wav");
+    check("shipTurbulence rattle lower", turb.rattle.lower, 40);
+    check("shipTurbulence rattle upper", turb.rattle.upper, 60);
+    check("shipTurbulence rattle ease", turb.rattle.ease, 0.1);
+    check("shipTurbulence wind clip", turb.wind.clip, "Atmosphere_High_Ship_2256.wav");
+    check("shipTurbulence wind lower", turb.wind.lower, 20);
+    check("shipTurbulence wind upper", turb.wind.upper, 80);
+    check("shipTurbulence wind ease", turb.wind.ease, 0.05);
+
+    // shipNoise
+    check("shipNoise sans poussee ni impact est nul", shipNoise(0, 10, 0, 0), 0);
+    check("shipNoise demi poussee vaut 5", shipNoise(0.5, 10, 0, 0), 5);
+    check("shipNoise plein gaz vaut 10", shipNoise(1.0, 10, 0, 0), 10);
+    check("shipNoise impact sous le seuil de 10 u/s ne fait pas de bruit", shipNoise(0, 10, 9.8, 8), 0);
+    check("shipNoise impact a t=0.2s avec vitesse 20 u/s", Math.round(shipNoise(0, 10, 9.8, 20)), 16);
+    check("shipNoise impact apres 1s est amorti a 0", shipNoise(0, 10, 8.5, 20), 0);
+
+    // Ship.noise
+    const shipSensors = new Ship({}, null, [0, 0, 0]);
+    check("Ship.noise initial est 0", shipSensors.noise(0), 0);
+
+    // shipOnlyMusicState
+    check("shipOnlyMusicState dans le volume ET dans le vaisseau", shipOnlyMusicState(true, true), true);
+    check("shipOnlyMusicState dans le volume mais HORS du vaisseau", shipOnlyMusicState(true, false), false);
+    check("shipOnlyMusicState HORS du volume mais dans le vaisseau", shipOnlyMusicState(false, true), false);
+    check("shipOnlyMusicState ni l'un ni l'autre", shipOnlyMusicState(false, false), false);
   }
 }
 

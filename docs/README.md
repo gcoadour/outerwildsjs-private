@@ -150,3 +150,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`126-correctifs-ciel-feu-tactile.md`](126-correctifs-ciel-feu-tactile.md) — **correctifs visuels et tactiles : voûte céleste, feu de camp et boutons mobiles**
 - [`127-mecanique-ascenseur-et-interactions.md`](127-mecanique-ascenseur-et-interactions.md) — **mécanique de la tour de lancement, ascenseur et interactions de début de partie**
 - [`128-effets-sonores-evenementiels-vaisseau-carte-guimauve.md`](128-effets-sonores-evenementiels-vaisseau-carte-guimauve.md) — **retours sensoriels et sonores événementiels : vaisseau, carte et guimauve**
+- [`129-audio-evenementiel-sonde-mort-turbulence-ordinateur.md`](129-audio-evenementiel-sonde-mort-turbulence-ordinateur.md) — **retours sonores et capteurs : mort, sonde, modèle, turbulence et supernova**

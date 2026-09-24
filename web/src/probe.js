@@ -22,7 +22,7 @@
 // `tests/09-jeu.mjs` l'eprouve sans le jeu. `main.js` n'y branche que le rendu
 // (maillage, lumieres, camera embarquee) et le lancer de rayon.
 //
-// @lit ProbeLauncher, ProbeAnchor, ProbeCollider, ProbeLantern, ProbeScanner
+// @lit ProbeLauncher, ProbeAnchor, ProbeCollider, ProbeLantern, ProbeScanner, ProbeCamera
 // @lit ProbeHorizonTracker, ProbeGUI, ProbeDestructionMessenger, ProbeInfo
 // @lit HighSpeedCollisionSensor, SelfDestruct, HideInMapView
 

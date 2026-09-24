@@ -31,7 +31,7 @@
 // La musique de voyage et celle de la fin des temps sont les deux declencheurs
 // que docs/43-pnj-son-decollage.md avait releves et laisses ouverts.
 
-// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, ShipThrusterAudio, PlayerImpactAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController, PlayerAudioEffects
+// @lit PlayerMovementAudio, PlayerSubmergeAudio, ThrusterAudio, ShipThrusterAudio, PlayerImpactAudio, TurbulenceAudio, SpacesuitAudioController, RepairAudioController, UIAudioController, FlashbackAudioController, TravelMusicController, EndOfTimeMusicController, PlayerAudioEffects, PlayerDeathAudio, ShipTurbulenceAudio, ProbeLauncher, ModelShipCrashBehavior, RemoteFlightConsole, SatelliteSnapshotController, ShipComputer, AnglerfishAudioController, SupernovaVolume
 // Le son d'evenement : seize classes, et une couche entiere qui manquait
 // (docs/46-migration-lots.md, lot 5).
 
@@ -535,6 +535,145 @@ export class UISounds {
     const f = this.clip("FlightConsole", "_unbuckleSound");
     return f ? { file: f, volume: 0.85 } : null;
   }
+
+  /**
+   * Son de mort du joueur (PlayerDeathAudio.OnPlayerDeath).
+   * Asphyxie : clip long _asphyxiationClip, fondu a mi-chemin (1,5 s).
+   * Autres causes : clip _instantDeathClip ou _energyDeathClip, fondu 0,2 s.
+   */
+  death(cause) {
+    if (cause === "asphyxie") {
+      const f = this.clip("PlayerDeathAudio", "_asphyxiationClip");
+      return f ? { file: f, volume: 1, fade: 1.5 } : null;
+    }
+    const f = this.clip("PlayerDeathAudio", "_instantDeathClip")
+           || this.clip("PlayerDeathAudio", "_energyDeathClip");
+    return f ? { file: f, volume: 1, fade: 0.2 } : null;
+  }
+
+  /**
+   * Son de tir de la sonde (ProbeLauncher.LaunchProbe).
+   * Basse puissance : _slowLaunchSound. Haute puissance : _fastLaunchSound.
+   */
+  probeLaunch(highPower = false) {
+    const f = this.clip("ProbeLauncher", highPower ? "_fastLaunchSound" : "_slowLaunchSound");
+    return f ? { file: f, volume: 0.9 } : null;
+  }
+
+  /** Son de rappel de la sonde (ProbeLauncher.Update : _retrievalSound). */
+  probeRetrieve() {
+    const f = this.clip("ProbeLauncher", "_retrievalSound");
+    return f ? { file: f, volume: 0.85 } : null;
+  }
+
+  /**
+   * Son de declencheur photo (SatelliteSnapshotController.RenderSnapshot, ProbeCamera.Update).
+   */
+  cameraShutter() {
+    const f = this.clip("ProbeCamera", "_snapshotSound")
+           || this.clip("SatelliteSnapshotController", "_snapshotSound");
+    return f ? { file: f, volume: 0.8 } : null;
+  }
+
+  // @vide ProbeCamera._discoverySound est nul dans level0 et PointOfInterest.CaughtOnCamera est un bouchon vide
+  probeDiscovery() {
+    const f = this.clip("ProbeCamera", "_discoverySound");
+    return f ? { file: f, volume: 0.8 } : null;
+  }
+
+  /** Son de demarrage de l'ordinateur de bord (ShipComputer.EnterShipComputer : _bootClip). */
+  shipComputerBoot() {
+    const f = this.clip("ShipComputer", "_bootClip");
+    return f ? { file: f, volume: 0.85 } : null;
+  }
+
+  /** Son de crash du vaisseau miniature (ModelShipCrashBehavior.OnImpact : _crashSound). */
+  modelShipCrash() {
+    const f = this.clip("ModelShipCrashBehavior", "_crashSound");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Son de reinitialisation du modele (RemoteFlightConsole.RespawnModelShip : _respawnAudioClip). */
+  modelShipRespawn() {
+    const f = this.clip("RemoteFlightConsole", "_respawnAudioClip");
+    return f ? { file: f, volume: 0.5 } : null;
+  }
+
+  /** Son d'effondrement du noyau solaire (SupernovaVolume.OnTriggerSupernova : _coreCollapse). */
+  supernovaCollapse() {
+    const f = this.clip("SupernovaVolume", "_coreCollapse");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Son d'explosion solaire (SupernovaVolume.OnSunExploded : _solarExplosion). */
+  supernovaExplosion() {
+    const f = this.clip("SupernovaVolume", "_solarExplosion");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Onde de choc de supernova (SupernovaVolume.OnSunExploded : _energyWave). */
+  supernovaWave() {
+    const f = this.clip("SupernovaVolume", "_energyWave");
+    return f ? { file: f, volume: 0.9 } : null;
+  }
+
+  /** Boucle de sommeil/attente du cœlacanthe (AnglerfishAudioController.Awake : _lurkingLoop). */
+  anglerLurking() {
+    const f = this.clip("AnglerfishAudioController", "_lurkingLoop");
+    return f ? { file: f, volume: 0.9 } : null;
+  }
+
+  /** Cri de trouble du coelacanthe (AnglerfishAudioController.OnChangeAnglerState : _detectDisturbance). */
+  anglerDisturbance() {
+    const f = this.clip("AnglerfishAudioController", "_detectDisturbance");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Cri de cible detectee (AnglerfishAudioController.OnChangeAnglerState : _detectTarget). */
+  anglerTarget() {
+    const f = this.clip("AnglerfishAudioController", "_detectTarget");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Boucle de poursuite haletante (AnglerfishAudioController.OnChangeAnglerState : _chasingLoop). */
+  anglerChase() {
+    const f = this.clip("AnglerfishAudioController", "_chasingLoop");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Morsure croquante du predateur (AnglerfishAudioController._crunchSound). */
+  anglerCrunch() {
+    const f = this.clip("AnglerfishAudioController", "_crunchSound");
+    return f ? { file: f, volume: 1 } : null;
+  }
+}
+
+/**
+ * Reglages des deux composantes de ShipTurbulenceAudio :
+ * - ShipRattleAudio : vibration metallique de la coque
+ * - TurbulenceAudio sur Ship_Body : vent atmospherique autour du vaisseau
+ */
+export function shipTurbulence(ev) {
+  if (!ev) return null;
+  const all = ev.all || [];
+  const rattle = all.find((e) => e.script === "ShipTurbulenceAudio" && e.name === "ShipRattleAudio");
+  const wind = all.find((e) => e.script === "ShipTurbulenceAudio" && e.name === "TurbulenceAudio");
+  return {
+    rattle: rattle ? {
+      clip: rattle.clips._turbulenceClip,
+      lower: rattle.params._lowerSpeedLimit ?? 40,
+      upper: rattle.params._upperSpeedLimit ?? 60,
+      ease: rattle.params._easeRate ?? 0.1,
+      maxDensity: rattle.params._maxDensity ?? 5,
+    } : null,
+    wind: wind ? {
+      clip: wind.clips._turbulenceClip,
+      lower: wind.params._lowerSpeedLimit ?? 20,
+      upper: wind.params._upperSpeedLimit ?? 80,
+      ease: wind.params._easeRate ?? 0.05,
+      maxDensity: wind.params._maxDensity ?? 5,
+    } : null,
+  };
 }
 
 export const IMPACT_AUDIO = {

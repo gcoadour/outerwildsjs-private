@@ -56,7 +56,7 @@ import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
          QUANTIQUE } from "./quantumobj.js";
 import { BlackHole, DebrisField, WHITE_HOLE, leashBrake,
          growSteps } from "./blackhole.js";
-import { Anglerfish, Thorns, NoiseField, Corruption } from "./bramble.js";
+import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "./bramble.js";
 import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
@@ -161,7 +161,7 @@ import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          UpAligner, steadyPitch, steadyLook } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
-         UISounds, jumpSound } from "./reactaudio.js";
+         UISounds, jumpSound, shipTurbulence } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
@@ -804,6 +804,12 @@ async function boot() {
   const thrusterSound = new ThrusterSound();
   const travelMusic = new TravelMusic();
   const endMusic = new EndOfTimeMusic();
+  const turbShip = shipTurbulence(events);
+  let shipWindLevel = 0;
+  let shipRattleLevel = 0;
+  let dbMusicLevel = 0;
+  let supernovaCollapsePlayed = false;
+  let supernovaExplosionPlayed = false;
   // --- ce qui suit un autre corps, et ce qui clignote (docs/55, cable en 68) ---
   const alignes = alignedBodies(gameplay);
   const heritiers = fieldInheritors(gameplay);
@@ -2063,6 +2069,10 @@ async function boot() {
     // temps se tait, les reparations sont a refaire — celles du vaisseau comme
     // les trois noeuds du satellite — et l'entrainement se rejoue.
     endMusic.reset();
+    const sw = sonsUI.supernovaWave();
+    if (sw) audio.loopAt(sw.file, 0);
+    supernovaCollapsePlayed = false;
+    supernovaExplosionPlayed = false;
     for (const r of repairs) r.reset();
     training.reset();
     // Une boucle EST un rechargement de scene : `_isFirstFrame` redevient vrai,
@@ -2591,13 +2601,39 @@ async function boot() {
     // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
     // Le build n'a pas de canal pour lui : c'est un ajout, et `AJOUTS` le dit.
     if (est("Ship Computer") && ship && ship.boarded) {
+      const openAvant = computer.open;
       computer.open = !computer.open;
+      if (!openAvant && computer.open) {
+        const s = sonsUI.shipComputerBoot();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+      }
     }
     if (computer.open) {
-      if (code === "ArrowLeft") computer.move(-1);
-      if (code === "ArrowRight") computer.move(1);
-      if (code === "Enter" || code === "Space") computer.select();
+      if (code === "ArrowLeft") { computer.move(-1); bipUI("AdvanceText"); }
+      if (code === "ArrowRight") { computer.move(1); bipUI("AdvanceText"); }
+      if (code === "Enter" || code === "Space") {
+        const cur = computer.current;
+        computer.select();
+        if (cur && cur.revealed) bipUI("PlayAffirmativeUISound");
+        else bipUI("PlayNegativeUISound");
+      }
       if (code === "Backspace" || est("Cancel")) computer.cancel();
+    }
+    if (consoles.active && consoles.active.flight && est("Cancel")) {
+      const d = Math.hypot(modele.pos[0] - modele.repos[0],
+                           modele.pos[1] - modele.repos[1],
+                           modele.pos[2] - modele.repos[2]);
+      if (d > 1) {
+        modele.pos = modele.repos.slice();
+        modele.vel = [0, 0, 0];
+        const s = sonsUI.modelShipRespawn();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        console.log("annonce : RespawnModelShip");
+      } else {
+        consoles.toggle([player.pos.x + framePos[0],
+                         player.pos.y + framePos[1],
+                         player.pos.z + framePos[2]]);
+      }
     }
     // §Q LA LUNETTE FAIT TAIRE LE MONDE, et l'assise la laisse regarder.
     //
@@ -4373,10 +4409,47 @@ async function boot() {
       noise.add([playerWorld.x, playerWorld.y, playerWorld.z],
                 Math.min(1, bruit / NOISE.thrust), Infinity, bruit);
     }
+    // `ShipNoiseMaker` : le vaisseau fait son propre bruit (poussee et choc violent)
+    if (ship && ship.boarded) {
+      const bruitShip = ship.noise(now);
+      if (bruitShip > 0) {
+        const sp = [ship.pos.x + anchorPos[0], ship.pos.y + anchorPos[1], ship.pos.z + anchorPos[2]];
+        noise.add(sp, Math.min(1, bruitShip / 10), Infinity, bruitShip);
+      }
+    }
     if (audioMap.length) {
       for (const e of audio.emitters()) noise.add(e.position, e.level, e.radius);
     }
-    for (const f of fish) f.update(dt, playerWorld, noise);
+    for (const f of fish) {
+      f.update(dt, playerWorld, noise);
+      if (f.stateChanged) {
+        if (f.state === "repos") {
+          const sl = sonsUI.anglerLurking();
+          if (sl) audio.loopAt(sl.file, sl.volume);
+          const sc = sonsUI.anglerChase();
+          if (sc) audio.loopAt(sc.file, 0);
+        } else if (f.state === "inspecte") {
+          const s = sonsUI.anglerDisturbance();
+          if (s) audio.playOneShot(s.file, { volume: s.volume });
+          const sl = sonsUI.anglerLurking();
+          if (sl) audio.loopAt(sl.file, 0);
+          const sc = sonsUI.anglerChase();
+          if (sc) audio.loopAt(sc.file, 0);
+        } else if (f.state === "poursuit") {
+          const s = sonsUI.anglerTarget();
+          if (s) audio.playOneShot(s.file, { volume: s.volume });
+          const sl = sonsUI.anglerLurking();
+          if (sl) audio.loopAt(sl.file, 0);
+          const sc = sonsUI.anglerChase();
+          if (sc) audio.loopAt(sc.file, sc.volume);
+        }
+      }
+      if (f.caught && !death.dead) {
+        const s = sonsUI.anglerCrunch();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        death.kill("digestion");
+      }
+    }
     thorns.update(loop.fraction);
     // Le seuil de decoupe des materiaux corrompus suit la fraction de boucle.
     if (corruption.items.length) corruption.update(loop.fraction);
@@ -4393,6 +4466,20 @@ async function boot() {
         console.log(inside ? "EnterDerelictZone" : "ExitDerelictZone");
       }
     }
+    // `ShipOnlyMusicVolume` : musique de l'espace dans Dark Bramble (clip 2249),
+    // active uniquement quand le joueur est a la fois dans le volume et dans le vaisseau.
+    const dbBody = bodies.find((b) => /bramble/i.test(b.name));
+    const inDarkBramble = dansEpave || (dbBody && Math.hypot(
+      dbBody.position[0] - playerWorld.x,
+      dbBody.position[1] - playerWorld.y,
+      dbBody.position[2] - playerWorld.z) < 1200);
+    const playDbMusic = shipOnlyMusicState(inDarkBramble, !!(ship && ship.boarded));
+    if (playDbMusic) {
+      dbMusicLevel = Math.min(0.6, dbMusicLevel + dt / 5.0);
+    } else {
+      dbMusicLevel = Math.max(0, dbMusicLevel - dt / 5.0);
+    }
+    audio.loopAt("OW Space - Into The Unknown 100912 AP_2249.ogg", dbMusicLevel);
 
     // --- trou noir : capture puis ejection au trou blanc ---
     if (blackHole) {
@@ -4716,6 +4803,9 @@ async function boot() {
         // `PlayerNoiseMaker.OnLaunchProbe` : le lancement fait du BRUIT, cinq
         // d'un coup, qui retombe en une seconde.
         dernierLancement = now;
+        const high = probes.events.includes("ProbeLaunch_HighPower");
+        const s = sonsUI.probeLaunch(high);
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
         // §Q `DestroyAllProbePromptTriggers` : lancer une sonde depuis une
         // invite les DETRUIT TOUTES — pas seulement celle-la. Les quatre
         // invites sont un tutoriel a usage unique : une fois qu'on a compris,
@@ -4729,6 +4819,14 @@ async function boot() {
           window.__invites.detruites = true;
           console.log("annonce : DestroyAllProbePromptTriggers");
         }
+      }
+      if (e === "RetrieveProbe") {
+        const s = sonsUI.probeRetrieve();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+      }
+      if (e === "ProbeSnapshot") {
+        const s = sonsUI.cameraShutter();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
       }
       // §V LE TUTORIEL DE LA SONDE NE S'ACQUIERT PAS AU LANCEMENT.
       //
@@ -5076,6 +5174,12 @@ async function boot() {
       // — et laissait celui-la a faux pour toujours. C'est le seul des quatre
       // qui ne se defait pas seul, et le seul que rien ne posait.
       etatJoueur.die();
+      const sMort = sonsUI.death(death.cause);
+      if (sMort) {
+        audio.playOneShot(sMort.file, { volume: sMort.volume });
+        mixer.mixDeath(sMort.fade);
+        mixedDeath = true;
+      }
     } else if (!death.dead && fxMort) {
       fxMort = false;
       // Le reveil : le glow blanc a 3 qui retombe au noir en trois secondes.
@@ -5220,6 +5324,18 @@ async function boot() {
 
     // --- le spectacle de la supernova ---
     const sunState = sunStage.update(loop);
+    if (!supernovaCollapsePlayed && sunState.phase === "contraction") {
+      supernovaCollapsePlayed = true;
+      const s = sonsUI.supernovaCollapse();
+      if (s) audio.playOneShot(s.file, { volume: s.volume });
+    }
+    if (!supernovaExplosionPlayed && loop.supernova) {
+      supernovaExplosionPlayed = true;
+      const se = sonsUI.supernovaExplosion();
+      if (se) audio.playOneShot(se.file, { volume: se.volume });
+      const sw = sonsUI.supernovaWave();
+      if (sw) audio.loopAt(sw.file, sw.volume);
+    }
     if (starEntry) starEntry.mesh.scaling.setAll(sunState.scale);
     if (supernovaView && starBody) supernovaView.update(sunState, starBody.position);
 
@@ -5873,7 +5989,9 @@ async function boot() {
           if (crashes(impact)) {
             compteurEnfant.crashed();
             console.log(`annonce : CrashedModelShip (${impact.toFixed(1)} u/s)`);
-            if (modele.crashSound) audio.playOneShot(modele.crashSound);
+            const sc = sonsUI.modelShipCrash();
+            if (sc) audio.playOneShot(sc.file, { volume: sc.volume });
+            else if (modele.crashSound) audio.playOneShot(modele.crashSound);
             // Il repart de sa place : le build l'y remet par son support.
             modele.pos = modele.repos.slice();
             modele.vel = [0, 0, 0];
@@ -6065,6 +6183,39 @@ async function boot() {
       // Les propulseurs : fondu court a l'allumage, un peu plus long a l'arret.
       // (le detail des buses est plus bas, avec les particules)
       const shipEnVol = !!(ship && ship.boarded);
+      // Turbulence atmospherique du vaisseau (ShipTurbulenceAudio) :
+      // ShipRattleAudio (vibrations de la coque) et TurbulenceAudio (vent).
+      if (turbShip) {
+        if (!shipEnVol) {
+          if (shipWindLevel > 0 && turbShip.wind && turbShip.wind.clip) {
+            audio.loopAt(turbShip.wind.clip, 0);
+            shipWindLevel = 0;
+          }
+          if (shipRattleLevel > 0 && turbShip.rattle && turbShip.rattle.clip) {
+            audio.loopAt(turbShip.rattle.clip, 0);
+            shipRattleLevel = 0;
+          }
+        } else {
+          const vitShip = Math.hypot(ship.vel.x, ship.vel.y, ship.vel.z);
+          const densShip = player.fluid ? (player.fluid.density ?? 0) : 0;
+          if (turbShip.wind && turbShip.wind.clip) {
+            const cible = (densShip <= turbShip.wind.maxDensity && vitShip >= turbShip.wind.lower)
+              ? Math.min(1, Math.max(0, (vitShip - turbShip.wind.lower) / (turbShip.wind.upper - turbShip.wind.lower)))
+              : 0;
+            shipWindLevel += (cible - shipWindLevel) * Math.min(1, Math.max(0, turbShip.wind.ease * (dt * 60)));
+            if (shipWindLevel < 1e-3 && cible === 0) shipWindLevel = 0;
+            audio.loopAt(turbShip.wind.clip, shipWindLevel);
+          }
+          if (turbShip.rattle && turbShip.rattle.clip) {
+            const cible = (densShip <= turbShip.rattle.maxDensity && vitShip >= turbShip.rattle.lower)
+              ? Math.min(1, Math.max(0, (vitShip - turbShip.rattle.lower) / (turbShip.rattle.upper - turbShip.rattle.lower)))
+              : 0;
+            shipRattleLevel += (cible - shipRattleLevel) * Math.min(1, Math.max(0, turbShip.rattle.ease * (dt * 60)));
+            if (shipRattleLevel < 1e-3 && cible === 0) shipRattleLevel = 0;
+            audio.loopAt(turbShip.rattle.clip, shipRattleLevel);
+          }
+        }
+      }
       const pousseeShip = shipEnVol
         ? Math.hypot(input.forward || 0, input.right || 0, input.up || 0)
         : 0;
