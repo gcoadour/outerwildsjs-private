@@ -44,6 +44,15 @@ export class Interactables {
         body: x.body || null,
       });
     }
+    for (const x of placed.LaunchTerminal || []) {
+      this.items.push({
+        kind: "terminal", name: x.name, world: x.position,
+        range: 2.5, prompt: null,
+        body: x.body || null,
+        volume: x.volume || null,
+        rotation: x.rotation || null,
+      });
+    }
     for (const x of placed.InteractReceiver || []) {
       this.items.push({
         kind: "interact", name: x.name, world: x.position,
@@ -102,6 +111,7 @@ export class Interactables {
   focus(origin, frameOffset, fwd, shiftOf = null) {
     let best = null, bestD = Infinity;
     for (const it of this.items) {
+      if (it.disabled) continue;
       // Les positions extraites sont celles de la scene AU REPOS ; `shiftOf`
       // rend le deplacement du corps porteur depuis. Sans lui, une zone posee
       // dans le vaisseau reste sur l'aire de lancement quand le vaisseau part.

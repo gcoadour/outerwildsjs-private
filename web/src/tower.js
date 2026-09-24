@@ -72,6 +72,7 @@ export function elevators(gameplay) {
       liftDuration: f._liftDuration ?? ELEVATOR.liftDuration,
       startClip: (f._elevatorStartClip && f._elevatorStartClip.name) || null,
       stopClip: (f._elevatorStopClip && f._elevatorStopClip.name) || null,
+      loopClip: "elevatorloop",
     };
   });
 }

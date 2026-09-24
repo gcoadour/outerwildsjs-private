@@ -35,7 +35,7 @@ import { shipRecords, ShipComputer, Flashlight, Marshmallow,
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust, detachVelocity } from "./crust.js";
-import { Interactables } from "./interact.js";
+import { Interactables, OBSERVATORY_EVENTS } from "./interact.js";
 import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
 import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT,
          REVEIL, Reveil } from "./start.js";
@@ -2168,6 +2168,13 @@ async function boot() {
   const ciblesVerrou = lockOnTargets(gameplay);
   window.__assise = { points: pointsAttache, verrou: verrouCamera,
                       cibles: ciblesVerrou };
+  const zoneAscenseur = interactables.items.find((it) => it.prompt === "Activate Lift"
+    || (it.kind === "zone" && it.name === "AttachPoint" && it.body === "TimberHearth_Body")) || null;
+  const terminalItem = interactables.items.find((it) => it.kind === "terminal" || it.name === "LaunchTerminal") || null;
+  const elAttach = pointsAttache.points.find((p) => p.name === "AttachPoint" && p.body === "TimberHearth_Body") || null;
+  const zoneAscRestPos = zoneAscenseur ? [...zoneAscenseur.world] : [1.6731, -38.8395, -8720.9674];
+  const elAttachRestPos = elAttach ? [...elAttach.position] : [1.6731, -38.8395, -8720.9674];
+  const zoneGearUp = interactables.items.find((it) => it.prompt === "Gear Up") || null;
 
   /**
    * Le repere du poste de pilotage, en coordonnees monde, cette image.
@@ -3695,11 +3702,41 @@ async function boot() {
           interactPressed = false;
         }
       } else if (interactPressed && !dialogue.active && focus
-                 && (focus.kind === "zone" || focus.kind === "interact")) {
-        // `HatchController.OnPressInteract` : la zone « Open Hatch » ne pose
-        // pas de point d'accrochage, elle RETIRE un collider. C'est la seule
-        // des sept zones qui fasse autre chose que s'asseoir.
-        if (/hatch/i.test(focus.prompt || "") && trappe.pressInteract()) {
+                 && (focus.kind === "zone" || focus.kind === "interact" || focus.kind === "terminal" || focus.kind === "observatoryMap")) {
+        // La borne de lancement : actionne la tour ou refuse selon les codes
+        if (focus.kind === "terminal") {
+          const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
+          if (r === "activate") {
+            for (const a of ascenseurs) a.activateControls();
+            bipUI("PlayAffirmativeUISound");
+            console.log("tour de lancement actionnee");
+            interactPressed = false;
+          } else if (r === "refuse") {
+            bipUI("PlayNegativeUISound");
+            console.log("tour de lancement : codes inconnus");
+            interactPressed = false;
+          }
+        } else if (focus.kind === "observatoryMap") {
+          // La maquette du systeme solaire a l'observatoire ouvre la carte
+          events.fire(OBSERVATORY_EVENTS.triggerMap);
+          solarMap.ouvre();
+          interactPressed = false;
+        } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
+          // La console de projection du satellite
+          const c = consoles.toggle([player.pos.x + framePos[0],
+                                     player.pos.y + framePos[1],
+                                     player.pos.z + framePos[2]]);
+          if (fadeLight && fadeCible) {
+            const t = performance.now() / 1000;
+            const vise = (c && !c.flight) ? 0 : (fadeCible.intensity ?? 1);
+            fadeLight.fadeIntensity(vise, SATELLITE_FADE, t);
+          }
+          console.log(c ? `console prise : ${c.name}` : "console lachee");
+          interactPressed = false;
+        } else if (/hatch/i.test(focus.prompt || "") && trappe.pressInteract()) {
+          // `HatchController.OnPressInteract` : la zone « Open Hatch » ne pose
+          // pas de point d'accrochage, elle RETIRE un collider. C'est la seule
+          // des sept zones qui fasse autre chose que s'asseoir.
           for (const c of trappe.drain()) {
             const clip = (events.of("HatchController") || { clips: {} })
               .clips._openHatchClip;
@@ -3708,7 +3745,7 @@ async function boot() {
           }
           interactPressed = false;
         }
-        const point = pointsAttache.at(focus.world);
+        const point = pointsAttache.at(focus.world, 2);
         if (point && point !== siegePilotage) {
           lacetSiege = yaw;
           const demande = pointsAttache.attach(point, {
@@ -3728,8 +3765,9 @@ async function boot() {
             const dec2 = decalageDuCorps(a.data.body, anchorPos) || [0, 0, 0];
             const dd = Math.hypot(a.data.position[0] + dec2[0] - playerW[0],
                                   a.data.position[1] + dec2[1] - playerW[1],
-                                  a.data.position[2] + dec2[2] - playerW[2]);
+                                  a.data.position[2] - a.height + dec2[2] - playerW[2]);
             if (dd < 12 && a.pressInteract(now)) {
+              if (a.data.startClip) audio.playOneShot(a.data.startClip);
               console.log(a.goingToTheEnd ? "ascenseur : en haut" : "ascenseur : en bas");
             }
           }
@@ -5666,6 +5704,22 @@ async function boot() {
 
     // --- LA TOUR DE LANCEMENT, de bout en bout (docs/92-tour.md) ---
     //
+    // Mise a jour dynamique de l'invite de la borne et du verrou de combinaison
+    if (terminalItem) {
+      if (terminal.used) {
+        terminalItem.disabled = true;
+      } else if (pdata.knows("knowsLaunchCodes")) {
+        terminalItem.prompt = " Enter Launch Codes";
+        terminalItem.disabled = false;
+      } else {
+        terminalItem.prompt = null;
+        terminalItem.disabled = false;
+      }
+    }
+    if (zoneGearUp) {
+      zoneGearUp.disabled = equipment.suit;
+    }
+
     // `LaunchTerminal.OnPressInteract` : avec les codes, un son affirmatif et
     // `ActivateLaunchTower` ; sans, un son negatif et la borne se remet a
     // disposition. Elle ne sert qu'UNE fois — le build desactive son volume
@@ -5699,11 +5753,45 @@ async function boot() {
       const dec = decalageDuCorps(dcl.body, anchorPos);
       if (!insideVolume(dcl, restingPoint(playerW, dec))) continue;
       for (const a of ascenseurs) {
-        if (a.fraction > RETURN_ABOVE && !a.moving) a.returnToStart(now);
+        if (a.fraction > RETURN_ABOVE && !a.moving) {
+          a.returnToStart(now);
+          if (a.data.startClip) audio.playOneShot(a.data.startClip);
+        }
       }
     }
     // L'ascenseur de la tour : il ne s'ouvre qu'une fois la tour actionnee.
-    for (const a of ascenseurs) a.update(now);
+    for (const a of ascenseurs) {
+      if (a.node === undefined) {
+        a.node = null;
+        for (const e of geo) {
+          const n = e.nodes.get("Elevator");
+          if (n) { a.node = n; break; }
+        }
+      }
+      a.update(now);
+      if (a.node) {
+        a.node.position.y = a.height;
+      }
+      if (zoneAscenseur) {
+        zoneAscenseur.disabled = !a.unlocked;
+        zoneAscenseur.world[0] = zoneAscRestPos[0];
+        zoneAscenseur.world[1] = zoneAscRestPos[1];
+        zoneAscenseur.world[2] = zoneAscRestPos[2] - a.height;
+      }
+      if (elAttach) {
+        const decTH = decalageDuCorps(a.data.body, anchorPos) || [0, 0, 0];
+        elAttach.follow({
+          position: [elAttachRestPos[0] + decTH[0], elAttachRestPos[1] + decTH[1], elAttachRestPos[2] - a.height + decTH[2]],
+          rotation: elAttach.rotation,
+        });
+      }
+      if (a.arrived) {
+        if (pointsAttache.current === elAttach) {
+          pointsAttache.detach([0, 0, 0]);
+        }
+        if (a.data.stopClip) audio.playOneShot(a.data.stopClip);
+      }
+    }
 
     // §S LE VAISSEAU MINIATURE VOLE.
     //

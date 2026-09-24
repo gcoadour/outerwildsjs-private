@@ -4737,6 +4737,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   cabTour.pressInteract(10);
   check("la pression suivante remonte", cabTour.goingToTheEnd, true);
 
+  // Le point d'attache de l'ascenseur suit la cabine en hauteur.
+  const ptsAsc = new AttachPoints([{ name: "AttachPoint", position: [1.67, -38.84, -8720.97], body: "TimberHearth_Body" }]);
+  check("trouve le point d'accroche au repos", ptsAsc.at([1.67, -38.84, -8720.97]) !== null, true);
+  check("ne le trouve pas en haut quand au repos", ptsAsc.at([1.67, -38.84, -8752.47]) === null, true);
+  ptsAsc.points[0].follow({ position: [1.67, -38.84, -8752.47], rotation: [0, 0, 0, 1] });
+  check("le trouve en haut une fois deplace", ptsAsc.at([1.67, -38.84, -8752.47]) !== null, true);
+
+  // La borne de lancement entre au catalogue et supporte d'etre desactivee.
+  const catTour = new Interactables({ placed: {
+    LaunchTerminal: [{ name: "LaunchTerminal", position: [0, 0, 0], body: "TH_Body" }],
+  } });
+  check("la borne entre au catalogue", catTour.items.some((i) => i.kind === "terminal"), true);
+  const termItem = catTour.items.find((i) => i.kind === "terminal");
+  check("le focus la voit devant", catTour.focus({ x: 0, y: 0, z: -1 }, [0, 0, 0], { x: 0, y: 0, z: 1 }) !== null, true);
+  termItem.disabled = true;
+  check("desactivee, le focus l'ignore", catTour.focus({ x: 0, y: 0, z: -1 }, [0, 0, 0], { x: 0, y: 0, z: 1 }), null);
+
   const pads = landingPadSensors({ placed: { LandingPadSensor: [
     { name: "SurfaceSensor", position: [0, 0, 0], body: "Ship_Body",
       volume: { shape: "sphere", radius: 0.5, center: [0, 0, 0] },

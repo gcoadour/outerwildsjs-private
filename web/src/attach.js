@@ -342,9 +342,10 @@ export class AttachPoints {
   at(position, tolerance = 0.5) {
     let best = null, bestD = tolerance * tolerance;
     for (const p of this.points) {
-      const d = (p.position[0] - position[0]) ** 2
-              + (p.position[1] - position[1]) ** 2
-              + (p.position[2] - position[2]) ** 2;
+      const pos = (p.live && p.live.position) || p.position;
+      const d = (pos[0] - position[0]) ** 2
+              + (pos[1] - position[1]) ** 2
+              + (pos[2] - position[2]) ** 2;
       if (d <= bestD) { best = p; bestD = d; }
     }
     return best;

@@ -148,3 +148,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`124-comparaison-fixes.md`](124-comparaison-fixes.md) — **comparaison alpha Unity et moteur Web : six correctifs visuels et gameplay**
 - [`125-correctifs-mobiles.md`](125-correctifs-mobiles.md) — **correctifs mobiles : interactions, vaisseau, jetpack, crashs et shaders**
 - [`126-correctifs-ciel-feu-tactile.md`](126-correctifs-ciel-feu-tactile.md) — **correctifs visuels et tactiles : voûte céleste, feu de camp et boutons mobiles**
+- [`127-mecanique-ascenseur-et-interactions.md`](127-mecanique-ascenseur-et-interactions.md) — **mécanique de la tour de lancement, ascenseur et interactions de début de partie**
