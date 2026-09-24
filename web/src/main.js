@@ -2573,8 +2573,8 @@ async function boot() {
         // clip d'interface : s'il n'est pas extrait, la garde de dix secondes
         // reste vraie et rien ne joue.
         if (r.sonne) {
-          const clip = (events.of("MapController") || { clips: {} }).clips._mapClip;
-          if (clip) audio.playOneShot(clip);
+          const s = sonsUI.mapZoom();
+          if (s) audio.playOneShot(s.file, { volume: s.volume });
         }
       }
     }
@@ -2662,6 +2662,8 @@ async function boot() {
       // `MarshmallowStick.Update` range le baton TOUT SEUL une fois la
       // guimauve mangee : on lui passe le fait, pas l'ordre.
       mangeCetteImage = true;
+      const sonMastication = sonsUI.eatMarshmallow();
+      if (sonMastication) audio.playOneShot(sonMastication.file, { volume: sonMastication.volume });
       // `PlayerResources.OnEatMarshmallow` : la sante repart au MAXIMUM. Deux
       // lignes d'IL, et le soin du jeu — le portage comptait les guimauves
       // sans rien en faire (docs/67-annonces.md).
@@ -3404,6 +3406,21 @@ async function boot() {
         }
       }
       ship.sync(BABYLON);
+      if (ship.lastLandingEvent === "ShipTouchdown") {
+        const s = sonsUI.touchdown();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        ship.lastLandingEvent = null;
+      }
+      if (ship.lastHit && ship.lastHit.damage > 0) {
+        const s = sonsUI.shipImpact(ship.lastHit.damage);
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        ship.lastHit = null;
+      }
+      if (ship.justExploded) {
+        const s = sonsUI.shipExplosion();
+        if (s) audio.playOneShot(s.file, { volume: s.volume });
+        ship.justExploded = false;
+      }
       if (ship.boarded) {
         // Le joueur voyage avec le vaisseau — et depuis docs/69, il s'ASSIED :
         // le poste de pilotage est un `PlayerAttachPoint`, et le portage se
@@ -3491,6 +3508,8 @@ async function boot() {
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
+          const sonDeboucle = sonsUI.unbuckle();
+          if (sonDeboucle) audio.playOneShot(sonDeboucle.file, { volume: sonDeboucle.volume });
           // `ExitFlightConsole` : la vue d'atterrissage tombe en se levant, et
           // une bascule en cours est annulee. Le regard se recentre comme le
           // fait `CenterCamera(140)`, au meme rythme que le reste.
@@ -3519,6 +3538,8 @@ async function boot() {
         } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
                    pdata.knowsLaunchCodes) {
           ship.boarded = true;
+          const sonBoucle = sonsUI.buckleUp();
+          if (sonBoucle) audio.playOneShot(sonBoucle.file, { volume: sonBoucle.volume });
           // `OnPressInteract` appelle `ResetRollSettings` : c'est le SEUL
           // endroit du build qui remet le roulis a plat, et il fallait bien
           // qu'il y en ait un — se lever en vue d'atterrissage laisse le

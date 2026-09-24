@@ -509,10 +509,11 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   //              (docs/46, lot 5)
   //   97 -> 110  ShipThrusterAudio (7 clips) et PlayerImpactAudio (10 clips,
   //              dont 4 partages) extraits pour la fidelite sensorielle (docs/124)
-  check("clips exportes en tout", audioFiles.length, 110);
+  //   110 -> 114 FlightConsole (2 clips) et ShipDamageController (2 clips) (docs/128)
+  check("clips exportes en tout", audioFiles.length, 114);
   check("clips en Ogg Vorbis", parExt.ogg ?? 0, 23);
-  // 86 RIFF, plus l'AIFF converti.
-  check("clips en WAV", parExt.wav ?? 0, 87);
+  // 90 RIFF, plus l'AIFF converti.
+  check("clips en WAV", parExt.wav ?? 0, 91);
   check("plus aucun AIFF, qu'aucun navigateur ne decode", parExt.aiff ?? 0, 0);
   check("l'unique AIFF du build a ete converti",
         audio.stats["AIFF convertis en WAV"] ?? 0, 1);
@@ -584,7 +585,7 @@ console.log("     sources avec courbe echantillonnee:", courbes,
 
   // Les sons d'evenement : qui les porte, et avec quelle loi.
   const ev = eventAudio(audio);
-  check("emetteurs de son d'evenement", ev.count, 24);
+  check("emetteurs de son d'evenement", ev.count, 26);
   check("six pas de marche", ev.family("PlayerMovementAudio", "_walk").length, 6);
   check("six pas de course", ev.family("PlayerMovementAudio", "_run").length, 6);
   check("trois sauts", ev.family("PlayerMovementAudio", "_jump").length, 3);
@@ -594,6 +595,10 @@ console.log("     sources avec courbe echantillonnee:", courbes,
         Object.keys(ev.of("ShipThrusterAudio").clips).length, 7);
   check("dix clips d'impact du joueur",
         Object.keys(ev.of("PlayerImpactAudio").clips).length, 10);
+  check("deux clips d'attache au poste de pilotage",
+        Object.keys(ev.of("FlightConsole").clips).length, 2);
+  check("deux clips d'impact du vaisseau",
+        Object.keys(ev.of("ShipDamageController").clips).length, 2);
   check("et le vaisseau miniature a son propre propulseur",
         ev.of("ThrusterAudio", "ModelShip_Body").clips._translationalClip
           .startsWith("ModelRocketThruster"), true);

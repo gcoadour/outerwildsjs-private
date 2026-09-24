@@ -282,6 +282,7 @@ export async function loadEventAudio() {
  */
 export function eventAudio(audio) {
   const events = (audio && audio.events) || [];
+  const sources = (audio && audio.sources) || [];
   const byScript = new Map();
   for (const e of events) {
     if (!byScript.has(e.script)) byScript.set(e.script, []);
@@ -289,12 +290,18 @@ export function eventAudio(audio) {
   }
   return {
     all: events,
+    sources,
     get count() { return events.length; },
     /** Les instances d'un script, la premiere d'abord. */
     of(script, body = null) {
       const list = byScript.get(script) || [];
       if (!body) return list[0] || null;
       return list.find((e) => e.body === body) || list[0] || null;
+    },
+    /** Fichier d'une source placee resolu par son nom d'objet. */
+    source(name) {
+      const s = sources.find((x) => x.name === name);
+      return (s && s.file) || null;
     },
     /**
      * Les fichiers d'une famille de champs, dans l'ordre : `_walk1`, `_walk2`…
@@ -473,6 +480,60 @@ export class UISounds {
     if (!champ) return null;
     const f = this.clip("PlayerImpactAudio", champ);
     return f ? { file: f, volume: Math.min(1, Math.max(0.2, speed / 30)) } : null;
+  }
+
+  /** Son de degustation de guimauve (Marshmallow: chomp). */
+  eatMarshmallow() {
+    const f = (this.events && this.events.source && this.events.source("Marshmallow"))
+           || this.clip("Marshmallow", "_eatClip");
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Son d'ouverture de la carte du systeme (MapCamera: MapZoomOut_Tone). */
+  mapZoom() {
+    const f = (this.events && this.events.source && this.events.source("MapCamera"))
+           || this.clip("MapController", "_mapClip");
+    return f ? { file: f, volume: 0.8 } : null;
+  }
+
+  /** Son d'atterrissage sur un pad (LandingPadSensor._touchdownSound). */
+  touchdown() {
+    const f = this.clip("LandingPadSensor", "_touchdownSound");
+    return f ? { file: f, volume: 0.8 } : null;
+  }
+
+  /**
+   * Son d'impact de la coque du vaisseau (ShipDamageController).
+   * Niveau 1: choc leger (_lightImpactClip), niveau 2: choc moyen (_mediumImpactClip).
+   */
+  shipImpact(level) {
+    if (level === 2) {
+      const f = this.clip("ShipDamageController", "_mediumImpactClip");
+      return f ? { file: f, volume: 0.9 } : null;
+    }
+    if (level === 1) {
+      const f = this.clip("ShipDamageController", "_lightImpactClip");
+      return f ? { file: f, volume: 0.7 } : null;
+    }
+    return null;
+  }
+
+  /** Son d'explosion du vaisseau (ShipExplosion: HullImpact_Explosion_Fiery). */
+  shipExplosion() {
+    const f = (this.events && this.events.source && this.events.source("ShipExplosion"));
+    return f ? { file: f, volume: 1 } : null;
+  }
+
+  /** Son d'attache au poste de pilotage (FlightConsole._buckleUpSound). */
+  buckleUp() {
+    const f = this.clip("FlightConsole", "_buckleUpSound");
+    return f ? { file: f, volume: 0.85 } : null;
+  }
+
+  /** Son de detachement du poste de pilotage (FlightConsole._unbuckleSound). */
+  unbuckle() {
+    const f = this.clip("FlightConsole", "_unbuckleSound");
+    return f ? { file: f, volume: 0.85 } : null;
   }
 }
 

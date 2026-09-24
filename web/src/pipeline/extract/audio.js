@@ -123,7 +123,8 @@ const EVENT_AUDIO = ["PlayerMovementAudio", "PlayerSubmergeAudio", "ThrusterAudi
                      "TurbulenceAudio", "SpacesuitAudioController", "PlayerAudioEffects",
                      "UIAudioController", "RepairAudioController",
                      "FlashbackAudioController", "AncientTeleporter", "Elevator",
-                     "HatchController", "LandingPadSensor", "ZeroGTrainingManager"];
+                     "HatchController", "LandingPadSensor", "ZeroGTrainingManager",
+                     "FlightConsole", "ShipDamageController"];
 
 /**
  * @param {ExtractContext} ctx

@@ -109,6 +109,8 @@ export class Ship {
     this.onPad = false;         // `LandingPadManager.IsLanded` : gare sur la piste
     this.padBody = null;
     this.pads = new LandingPads();
+    this.lastLandingEvent = null;
+    this.justExploded = false;
     // `_ignitionDuration`, du constructeur de `ShipThrusterController`.
     this.igniting = false;
     this.ignitionTime = 0;
@@ -358,7 +360,7 @@ export class Ship {
     this.pos.z += this.vel.z * dt;
 
     this.resolveGround(dt, bodies, basis);
-    this.updateLanding(bodies, basis);
+    this.lastLandingEvent = this.updateLanding(bodies, basis);
 
     // Fluides : ce qui vaut pour le joueur vaut pour le vaisseau. Poser un
     // vaisseau sur Giant's Deep sans que rien ne freine n'avait pas de sens.
@@ -558,6 +560,7 @@ export class Ship {
         rel[0] * basis.fwd.x + rel[1] * basis.fwd.y + rel[2] * basis.fwd.z,
       ] : null;
       this.lastHit = this.damage.impact(-vn, local, pLocal);
+      if (this.lastHit && this.lastHit.justExploded) this.justExploded = true;
       this.vel.x -= vn * n[0]; this.vel.y -= vn * n[1]; this.vel.z -= vn * n[2];
     }
     // Le frottement au sol etait applique PAR IMAGE : a 30 im/s le vaisseau

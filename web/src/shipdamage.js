@@ -329,6 +329,7 @@ export class ShipDamage {
     const seuil = this.seuilPiece;
     const abimees = Object.values(this.parts).filter((p) => p.totalDamage > 0);
 
+    const wasDestroyed = this.destroyed;
     if (abimees.length < 3) {
       // TANT QU'IL Y A MOINS DE TROIS PIECES ABIMEES, le choc en cherche une
       // nouvelle : la plus proche du point, et elle seule.
@@ -364,8 +365,9 @@ export class ShipDamage {
     // `_totalDamage`, recalcule par `RecalculateShipDamge`. Il n'y a pas de
     // troisieme condition, et pas d'integrite de coque.
     if (this.cumul > this.shipTotalHealth) this.destroyed = true;
+    const justExploded = !wasDestroyed && this.destroyed;
     return { damage: this.soundLevel(speed), location: loc, part,
-             destroyed: this.destroyed };
+             destroyed: this.destroyed, justExploded };
   }
 
   /**

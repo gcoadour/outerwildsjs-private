@@ -7638,6 +7638,46 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     const vise = cat.focus({ x: 2101, y: 0, z: 0 }, [0, 0, 0], { x: -1, y: 0, z: 0 }, shift);
     check("InteractReceiver atteignable avec shift", vise ? vise.name : null, "Terminal");
   }
+
+  // 7. Sons evenementiels et fidelite sensorielle (docs/128)
+  {
+    const mockAudio = {
+      events: [
+        { script: "LandingPadSensor", clips: { _touchdownSound: "podland_thud_hiss_2194.wav" } },
+        { script: "ShipDamageController", clips: { _lightImpactClip: "HullImpact_Light2_2137.wav", _mediumImpactClip: "HullImpact_Medium2_2151.wav" } },
+        { script: "FlightConsole", clips: { _buckleUpSound: "BuckleUp_Beefy_2159.wav", _unbuckleSound: "Unbuckle_Beefy_2214.wav" } },
+      ],
+      sources: [
+        { name: "Marshmallow", file: "chomp_2234.ogg" },
+        { name: "MapCamera", file: "MapZoomOut_Tone_2265.wav" },
+        { name: "ShipExplosion", file: "HullImpact_Explosion_Fiery_2213.wav" },
+      ]
+    };
+    const evs = eventAudio(mockAudio);
+    check("eventAudio retrouve Marshmallow par son nom", evs.source("Marshmallow"), "chomp_2234.ogg");
+    check("eventAudio retrouve MapCamera par son nom", evs.source("MapCamera"), "MapZoomOut_Tone_2265.wav");
+    check("eventAudio retrouve ShipExplosion par son nom", evs.source("ShipExplosion"), "HullImpact_Explosion_Fiery_2213.wav");
+    check("eventAudio source inconnue rend null", evs.source("Inconnu"), null);
+
+    const ui = new UISounds(evs);
+    check("degustation de guimauve : chomp", ui.eatMarshmallow().file, "chomp_2234.ogg");
+    check("ouverture de carte : zoom tone", ui.mapZoom().file, "MapZoomOut_Tone_2265.wav");
+    check("touchdown sur pad : thud hiss", ui.touchdown().file, "podland_thud_hiss_2194.wav");
+    check("impact vaisseau leger : light impact", ui.shipImpact(1).file, "HullImpact_Light2_2137.wav");
+    check("impact vaisseau moyen : medium impact", ui.shipImpact(2).file, "HullImpact_Medium2_2151.wav");
+    check("impact vaisseau nul : aucun son", ui.shipImpact(0), null);
+    check("explosion du vaisseau : fiery explosion", ui.shipExplosion().file, "HullImpact_Explosion_Fiery_2213.wav");
+    check("attache poste pilotage : buckle up", ui.buckleUp().file, "BuckleUp_Beefy_2159.wav");
+    check("detachement poste pilotage : unbuckle", ui.unbuckle().file, "Unbuckle_Beefy_2214.wav");
+
+    // Vaisseau : lastLandingEvent et justExploded
+    const s = new Ship({}, null, [0, 0, 0]);
+    s.landed = true;
+    s.lastLandingEvent = s.updateLanding([], { right: { x: 1, y: 0, z: 0 }, up: { x: 0, y: 1, z: 0 }, fwd: { x: 0, y: 0, z: 1 } });
+    check("atterrissage annonce ShipTouchdown", s.lastLandingEvent, "ShipTouchdown");
+    s.damage.impact(350);
+    check("destruction instantanee declenche justExploded", s.damage.destroyed, true);
+  }
 }
 
 report();
