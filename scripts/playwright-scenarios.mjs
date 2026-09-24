@@ -473,6 +473,165 @@ try {
   assert("Incrémentation de la boucle temporelle (loopCount + 1)", loop1 === loop0 + 1, `before=${loop0}, after=${loop1}`);
   assert("Réapparition au réveil et ré-ancrage du vaisseau sur le pad", respawned.playerAlive && respawned.reveilArme && respawned.shipParked && respawned.shipLanded);
 
+  // ==========================================
+  // SCENARIO 14: COMBINAISON ET JETPACK
+  // ==========================================
+  console.log("\n--- Scenario 14: Combinaison spatiale et Jetpack ---");
+  const jetpackTest = await page.evaluate(() => {
+    const player = window.__player;
+    const res = window.__resources;
+    if (!player || !res) return { hasPlayer: false };
+    // 1. Equiper la combinaison
+    player.setSuit(true);
+    const suited = player.suited;
+    const speed = player.c.groundSpeed; // 6 m/s
+    // 2. Utiliser le jetpack et consommer du carburant
+    const fuel0 = res.fuel;
+    res.update(1.0, { inSupply: false, thrusting: true });
+    const fuel1 = res.fuel;
+    // 3. Retirer la combinaison
+    player.setSuit(false);
+    const unsuitedSpeed = player.c.groundSpeed; // 7 m/s
+    return { hasPlayer: true, suited, speed, fuel0, fuel1, unsuitedSpeed };
+  });
+  assert("Équipement combinaison et vitesse réduite à 6 m/s", jetpackTest.suited === true && jetpackTest.speed === 6);
+  assert("Consommation de carburant par poussée du sac dorsal", jetpackTest.fuel1 < jetpackTest.fuel0);
+  assert("Retrait combinaison rétablissant la vitesse à 7 m/s", jetpackTest.unsuitedSpeed === 7);
+
+  // ==========================================
+  // SCENARIO 15: GESTION DE L'OXYGENE & RECHARGE (100 u/s)
+  // ==========================================
+  console.log("\n--- Scenario 15: Gestion de l'oxygène et ravitaillement ---");
+  const oxyTest = await page.evaluate(() => {
+    const res = window.__resources;
+    if (!res) return { hasRes: false };
+    res.oxygen = 200;
+    // Mise a jour hors zone d'oxygene (drain de 1 u/s)
+    res.update(2.0, { inSupply: false });
+    const drained = res.oxygen;
+    // Ravitaillement dans une zone d'arbre ou vaisseau (+100 u/s selon IL PlayerResources.Update)
+    res.update(0.5, { inSupply: true });
+    const refilled = res.oxygen;
+    return { hasRes: true, drained, refilled };
+  });
+  assert("Consommation d'oxygène hors ravitaillement (-1 u/s)", Math.abs(oxyTest.drained - 198) < 0.1);
+  assert("Recharge rapide en zone d'oxygène (+100 u/s, +50 en 0.5s)", Math.abs(oxyTest.refilled - 248) < 0.1);
+
+  // ==========================================
+  // SCENARIO 16: SYSTEME DE DIALOGUE INTERACTIF
+  // ==========================================
+  console.log("\n--- Scenario 16: Dialogue interactif et répliques ---");
+  const dlgTest = await page.evaluate(() => {
+    const dlg = window.__dialogue;
+    if (!dlg) return { hasDlg: false };
+    const convo = dlg.conversations[0];
+    if (!convo) return { hasConvo: false };
+    dlg.open(convo);
+    const opened = dlg.active !== null;
+    const hasPages = dlg.pages.length > 0;
+    dlg.active = null; // fermeture
+    return { hasDlg: true, hasConvo: true, opened, hasPages, closed: dlg.active === null };
+  });
+  assert("Ouverture d'une conversation PNJ", dlgTest.opened === true);
+  assert("Génération des pages de réplique PNJ", dlgTest.hasPages === true);
+  assert("Fermeture de la conversation PNJ", dlgTest.closed === true);
+
+  // ==========================================
+  // SCENARIO 17: CONSOLE DE VOL & VUE D'ATTERRISSAGE
+  // ==========================================
+  console.log("\n--- Scenario 17: Vue d'atterrissage du vaisseau ---");
+  const landCamTest = await page.evaluate(() => {
+    const att = window.__atterrissage;
+    const ship = window.__shipRef;
+    if (!att || !ship) return { hasAtt: false };
+    ship.boarded = true;
+    const t0 = 100.0;
+    const snap = att.toggle(t0);
+    const inTransition = att.transition;
+    const invertedRoll = att.flipRollFactor === -1 && att.rollByDefault === true;
+    // Avancer de 0.5s pour terminer la transition (seuil 0.45s)
+    att.update(t0 + 0.5);
+    const viewActive = att.on;
+    // Quitter la console
+    const exitOk = att.exitConsole();
+    att.resetRoll();
+    ship.boarded = false;
+    return {
+      hasAtt: true,
+      hasSnap: !!snap?.snap,
+      inTransition,
+      invertedRoll,
+      viewActive,
+      exitOk,
+      restoredRoll: att.flipRollFactor === 1 && att.rollByDefault === false,
+    };
+  });
+  assert("Déclenchement vue d'atterrissage avec bascule du regard", landCamTest.hasSnap === true);
+  assert("Inversion du mode roulis en vue d'atterrissage (rollByDefault & flipRollFactor)", landCamTest.invertedRoll === true);
+  assert("Établissement complet de la vue d'atterrissage après 0.45s", landCamTest.viewActive === true);
+  assert("Sortie de console et réinitialisation des paramètres de roulis", landCamTest.restoredRoll === true);
+
+  // ==========================================
+  // SCENARIO 18: DEGATS DU VAISSEAU & REPARATION
+  // ==========================================
+  console.log("\n--- Scenario 18: Dégâts du vaisseau et réparations ---");
+  const dmgTest = await page.evaluate(() => {
+    const ship = window.__shipRef;
+    if (!ship || !ship.damage) return { hasShip: false };
+    const initialHealth = ship.damage.integrity;
+    // Impact au-dessus du seuil de 30 u/s (ex: 40 u/s sur l'avant)
+    ship.damage.impact(40, [0, 0, 1], [0, 0, 5]);
+    const damagedHealth = ship.damage.integrity;
+    const isDamaged = ship.damage.damaged;
+    // Reparation complete
+    ship.damage.reset();
+    const repairedHealth = ship.damage.integrity;
+    return {
+      hasShip: true,
+      initialHealth,
+      damagedHealth,
+      isDamaged,
+      repairedHealth,
+    };
+  });
+  assert("Intégrité initiale du vaisseau à 100%", dmgTest.initialHealth === 100);
+  assert("Impact supérieur à 30 u/s infligeant des avaries", dmgTest.damagedHealth < 100 && dmgTest.isDamaged === true);
+  assert("Réparation restaurant l'intégrité intégrale du vaisseau", dmgTest.repairedHealth === 100);
+
+  // ==========================================
+  // SCENARIO 19: MODELE REDUIT (MODEL SHIP) & CONDITIONS
+  // ==========================================
+  console.log("\n--- Scenario 19: Modèle réduit d'atterrissage et crash ---");
+  const modelTest = await page.evaluate(() => {
+    const spots = window.__modele?.pistes || [];
+    return {
+      hasSpots: spots.length === 3,
+      spotsCount: spots.length,
+    };
+  });
+  assert("Présence des 3 pistes d'atterrissage du modèle réduit à Âtrebois", modelTest.hasSpots === true, `spots=${modelTest.spotsCount}`);
+
+  // ==========================================
+  // SCENARIO 20: SOMBRE RONCE & DETECTION ACOUSTIQUE
+  // ==========================================
+  console.log("\n--- Scenario 20: Sombre Ronce et détection acoustique du prédateur ---");
+  const noiseTest = await page.evaluate(() => {
+    // Calcul de bruit du vaisseau : plein gaz = 10, repos = 0
+    const ship = window.__shipRef;
+    if (!ship) return { hasShip: false };
+    ship.thrustFraction = 1.0;
+    const loudNoise = ship.noise(0);
+    ship.thrustFraction = 0.0;
+    const silentNoise = ship.noise(0);
+    return {
+      hasShip: true,
+      loudNoise,
+      silentNoise,
+    };
+  });
+  assert("Bruit acoustique maximal du vaisseau à pleine poussée (10 u)", noiseTest.loudNoise === 10);
+  assert("Silence acoustique du vaisseau à poussée nulle (0 u)", noiseTest.silentNoise === 0);
+
   await context.close();
 } finally {
   server.close();

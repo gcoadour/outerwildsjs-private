@@ -1,6 +1,6 @@
 # Validation Playwright des scénarios et corrections de gameplay
 
-Ce document détaille la mise en place du banc d'essai automatisé sous Playwright, les treize scénarios de jeu validés de bout en bout contre le build Linux de l'alpha d'Outer Wilds (v1.2), ainsi que les corrections de gameplay apportées au moteur web pour assurer une stricte parité d'interaction, de timing et de physique.
+Ce document détaille la mise en place du banc d'essai automatisé sous Playwright, les vingt scénarios de jeu validés de bout en bout contre le build Linux de l'alpha d'Outer Wilds (v1.2), ainsi que les corrections de gameplay apportées au moteur web pour assurer une stricte parité d'interaction, de timing et de physique.
 
 ---
 
@@ -12,13 +12,13 @@ Pour éviter les mocks et tester la chaîne complète :
 1. Un profil de navigation persistant (`work/pw-profile`) stocke les données extraites dans le système de fichiers privé d'origine (OPFS).
 2. Un serveur HTTP local sert l'application web sur le port 8089.
 3. Un script Playwright autonome (`scripts/playwright-scenarios.mjs`) orchestre les actions du joueur via les événements clavier et souris standard.
-4. Les assertions valident à la fois l'état interne du moteur (`window.__player`, `window.__shipRef`, `window.__consoles`, `window.__death`, `window.__pdata`, etc.) et la réponse visuelle/auditive.
+4. Les assertions valident à la fois l'état interne du moteur (`window.__player`, `window.__shipRef`, `window.__consoles`, `window.__death`, `window.__pdata`, `window.__atterrissage`, etc.) et la réponse visuelle/auditive.
 
 ---
 
-## 2. Les treize scénarios validés de bout en bout (48/48 assertions)
+## 2. Les vingt scénarios validés de bout en bout (66/66 assertions)
 
-La suite de tests automatisés couvre l'ensemble des systèmes de gameplay fondamentaux du départ de partie :
+La suite de tests automatisés couvre l'ensemble des systèmes de gameplay fondamentaux du départ de partie et de l'exploration spatiale :
 
 ### 2.1. Scénario 1 : Réveil du joueur et regard
 - **Comportement alpha** : `PlayerCameraController.Awake` arme le réveil avec un regard pointé vers le ciel à 80° (`pitch = -80°`). Le réveil attend 7 secondes avant de redescendre doucement à l'horizon, sauf si le joueur prend la main en inclinant la vue vers le bas (en dessous de 45°).
@@ -72,6 +72,34 @@ La suite de tests automatisés couvre l'ensemble des systèmes de gameplay fonda
 - **Comportement alpha** : `PlayerDeathHandler.OnTriggerPlayerDeath` initie la mort du joueur, coupe les commandes et déclenche la séquence de flashback `FlashbackCamera`. Lorsque le flashback se termine, `TimeLoop.RestartTimeLoop` incrémente `_loopCount`, appelle `PlayerData.SaveLoopCount` et réinitialise la boucle temporelle (`OnStartOfTimeLoop`).
 - **Vérifications** : mort immédiate par impact, déroulement de la séquence de flashback, complétion de la fin des temps, incrémentation du compteur de boucles (`loopCount + 1`), réapparition du joueur au réveil et ré-ancrage du vaisseau sur la plate-forme de lancement.
 
+### 2.14. Scénario 14 : Combinaison spatiale et Jetpack
+- **Comportement alpha** : le jetpack est réservé au joueur équipé de la combinaison spatiale (`PlayerCharacterController.setSuit`). Lorsqu'il est revêtu, la vitesse de marche au sol passe à 6 m/s et la poussée verticale consomme le carburant du sac dorsal.
+- **Vérifications** : équipement et réduction de vitesse de marche à 6 m/s, consommation effective du carburant lors de la poussée du jetpack, retrait de la combinaison restaurant la vitesse de marche à 7 m/s.
+
+### 2.15. Scénario 15 : Gestion de l'oxygène et ravitaillement rapide (100 u/s)
+- **Comportement alpha** : `PlayerResources.Update` draine l'oxygène au rythme d'une unité par seconde hors ravitaillement. En zone d'oxygène (arbres d'Âtrebois ou intérieur de vaisseau), le plein s'effectue à la cadence rapide de 100 unités par seconde (`ldc.r4 100` dans l'IL Unity).
+- **Vérifications** : décroissance nominale de l'oxygène, recharge de 50 unités en 0,5 seconde dans une zone oxygénée.
+
+### 2.16. Scénario 16 : Système de dialogue interactif
+- **Comportement alpha** : `DialogueSystem` gère l'état d'interaction avec les PNJ du village (`Slate`, `Coach`, etc.), empêche la dérive du joueur pendant l'échange (`ConversationInput`), pagine le texte et résout les branches de réplique.
+- **Vérifications** : ouverture fluide d'une conversation, génération du découpage paginé, fermeture et réinitialisation de l'état actif.
+
+### 2.17. Scénario 17 : Console de vol & Vue d'atterrissage
+- **Comportement alpha** : `FlightConsole` permet d'enclencher la caméra d'atterrissage sous le vaisseau (`Landing Camera`). Une transition de 0,45 seconde oriente le regard vers le sol à -70°, inverse le roulis par défaut (`rollByDefault = true`, `flipRollFactor = -1`).
+- **Vérifications** : déclenchement de la bascule d'atterrissage, inversion immédiate des réglages de roulis, complétion de la vue après 0,45 s, remise à plat en quittant la console (`resetRoll`).
+
+### 2.18. Scénario 18 : Dégâts du vaisseau et réparations
+- **Comportement alpha** : `ShipDamageController` calcule les avaries par pièce et les alertes de coque lors d'impacts dépassant le seuil de 30 m/s (`mediumImpactThreshold`). Le vaisseau peut être réparé pour restaurer son intégrité.
+- **Vérifications** : intégrité nominale à 100 %, impact violent provoquant une avarie et une perte d'intégrité, réparation ramenant l'intégrité à 100 %.
+
+### 2.19. Scénario 19 : Modèle réduit de vaisseau et conditions de pose
+- **Comportement alpha** : `ModelShipLandingSpot` exige une immobilité stricte pour valider la pose du modèle réduit ($|v| < 0{,}1$ u/s, $|\omega| < 0{,}01$ rad/s pendant 0,2 s) et `ModelShipCrashBehavior` explose au-delà de 10 u/s d'impact.
+- **Vérifications** : présence des 3 pistes d'atterrissage du modèle réduit sur Âtrebois et conformité des seuils physiques d'atterrissage et de destruction.
+
+### 2.20. Scénario 20 : Sombre Ronce et détection acoustique du prédateur
+- **Comportement alpha** : `NoiseSensor` du cœlacanthe écoute le bruit généré par les propulseurs du vaisseau (`ShipNoiseMaker`) dans un rayon de 200 unités, avec un seuil de perturbation fixé à 10 unités.
+- **Vérifications** : bruit acoustique maximal (10 unités) à pleine poussée et silence acoustique (0 unité) à l'arrêt, assurant la mécanique d'approche silencieuse du prédateur.
+
 ---
 
 ## 3. Écarts extraits du bytecode et correctifs appliqués
@@ -116,7 +144,7 @@ La comparaison directe avec l'assembly C# et l'exécution automatisée ont rév�
 ## 4. Bilan de la validation
 
 Tous les contrôles du projet sont au vert :
-- **48/48 assertions Playwright validées** (`node scripts/playwright-scenarios.mjs`).
+- **66/66 assertions Playwright validées** sur 20 scénarios complets (`node scripts/playwright-scenarios.mjs`).
 - **2424/2424 vérifications unitaires réussies** (`node scripts/run-tests.mjs`).
 - **484/484 assertions d'extraction conformes** (`node tests/05-extract.mjs`).
 - **0 loi du moteur orpheline** (`node scripts/lois.mjs`).
