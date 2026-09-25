@@ -149,6 +149,12 @@ export class Sectors {
     this.entryFor = entryFor;
     this.active = new Set();
     this.current = null;
+    // LA VUE LOINTAINE. L'alpha ne diffuse rien en flux : toute la geometrie
+    // du systeme est dans `level0`, et Giant's Deep se voit pour de vrai depuis
+    // Timber Hearth, sa lune et son halo compris. Quand ce drapeau est leve,
+    // un lot charge reste affiche hors de portee ; `active` garde son sens —
+    // a portee — et c'est lui que le reste du moteur consulte (docs/132).
+    this.lointain = false;
   }
 
   /** Secteur dont le centre est le plus proche d'un corps donne. */
@@ -245,7 +251,7 @@ export class Sectors {
     for (const [file, on] of veut) {
       const entry = lots.get(file);
       if (!entry) continue;
-      if (entry.container.setEnabled) entry.container.setEnabled(on);
+      if (entry.container.setEnabled) entry.container.setEnabled(on || this.lointain);
       this.active[on ? "add" : "delete"](file);
     }
     // `actifs` compte les DEMANDEURS servis, pas les fichiers : c'est ce que

@@ -39,6 +39,38 @@ const SKY_FACES = { _RightTex: "nx", _LeftTex: "px", _UpTex: "py",
                     _DownTex: "ny", _FrontTex: "pz", _BackTex: "nz" };
 
 
+/**
+ * La voute d'une scene : le materiau `Skybox` de son `RenderSettings`.
+ *
+ * Servie a l'ecran-titre (`mainData`) et a la partie (`level0`), qui ont
+ * chacune la leur. Les images sortent nommees `sky_<face>.png`.
+ */
+export function extractSkybox(ctx, emitImage) {
+  let rs = null;
+  for (const o of ctx.env.objects({ type: "RenderSettings", file: ctx.sceneFile })) {
+    const v = ctx.readEngine(o);
+    if (v) { rs = { o, v }; break; }
+  }
+  if (!rs || !rs.v.m_SkyboxMaterial || !emitImage) return null;
+  const mo = ctx.env.deref(rs.v.m_SkyboxMaterial, rs.o.file);
+  const m = mo ? ctx.readEngine(mo) : null;
+  if (!m) return null;
+  const faces = {};
+  for (const { first, second } of m.m_SavedProperties.m_TexEnvs) {
+    const face = SKY_FACES[first.name];
+    const t = face && second.m_Texture && second.m_Texture.pathId
+      ? ctx.env.deref(second.m_Texture, mo.file) : null;
+    const img = t ? decodeTexture2D(ctx.readEngine(t)) : null;
+    if (img) faces[face] = emitImage(`sky_${face}.png`, img);
+  }
+  const tint = (m.m_SavedProperties.m_Colors.find((c) => c.first.name === "_Tint") || {}).second;
+  return {
+    material: m.m_Name, faces,
+    // `RenderFX/Skybox` : couleur = texture x _Tint x 2.
+    tint: tint ? [tint.r, tint.g, tint.b].map((x) => round(x, 5)) : [0.5, 0.5, 0.5],
+  };
+}
+
 /** Rotation d'un vecteur par un quaternion (x, y, z, w). */
 function qrot(q, v) {
   const [x, y, z, w] = q;
@@ -179,25 +211,8 @@ export function extractTitre(ctx, emitImage) {
   }
 
   // --- la voute : le `RenderSettings` de la scene ---
-  let skybox = null;
   const rs = engine("RenderSettings")[0];
-  if (rs && rs.v.m_SkyboxMaterial) {
-    const mo = ctx.env.deref(rs.v.m_SkyboxMaterial, rs.o.file);
-    const m = mo ? ctx.readEngine(mo) : null;
-    if (m) {
-      const faces = {};
-      for (const { first, second } of m.m_SavedProperties.m_TexEnvs) {
-        const face = SKY_FACES[first.name];
-        if (face && second.m_Texture) faces[face] = image(second.m_Texture, mo.file, `sky_${face}`);
-      }
-      const tint = (m.m_SavedProperties.m_Colors.find((c) => c.first.name === "_Tint") || {}).second;
-      skybox = {
-        material: m.m_Name, faces,
-        // `RenderFX/Skybox` : couleur = texture x _Tint x 2.
-        tint: tint ? [tint.r, tint.g, tint.b].map((x) => round(x, 5)) : [0.5, 0.5, 0.5],
-      };
-    }
-  }
+  const skybox = extractSkybox(ctx, emitImage);
 
   return {
     source: "mainData",

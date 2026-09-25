@@ -153,6 +153,8 @@ export class Sky {
   attachClouds(nodes, tolerance = 1) {
     if (!this.data || !nodes || !nodes.length) return 0;
     const libres = nodes.filter((m) => m.name === CLOUD_NAME);
+    // Un lot sans nuage ne defait pas ceux d'un autre (voir `attach`).
+    if (!libres.length) return 0;
     const pris = new Set();
     this.clouds = [];
     for (const c of this.data.clouds || []) {
@@ -172,12 +174,21 @@ export class Sky {
     return this.clouds.length;
   }
 
-  /** Retrouve la voute dans un lot de maillages charge. */
+  /**
+   * Retrouve la voute dans un lot de maillages charge.
+   *
+   * Un lot qui ne la porte pas ne la retire pas : `attach` est appele pour
+   * CHAQUE lot, et depuis que le systeme entier se charge au depart, le
+   * dernier arrive — Dark Bramble — remettait la voute a rien et le ciel de
+   * Timber Hearth restait fige, disque de jour compris (docs/132).
+   */
   attach(meshes) {
     if (!this.data) return 0;
     const nom = this.data.shell.name || "SkyShell";
-    this.shell = (meshes || []).find((m) => m.name === nom) || null;
-    return this.shell ? 1 : 0;
+    const trouve = (meshes || []).find((m) => m.name === nom) || null;
+    if (!trouve) return 0;
+    this.shell = trouve;
+    return 1;
   }
 
   /**
@@ -194,6 +205,11 @@ export class Sky {
   readBasis(mesh, B) {
     if (!mesh || !B) return null;
     const parent = mesh.parent;
+    // La matrice monde de Babylon est paresseuse : lue au rattachement, elle
+    // ne portait pas encore le demi-tour du conteneur glTF (geometry.js). Le
+    // repere lu avait x et z inverses, et le disque de jour visait l'ANTI-
+    // soleil — une voute bleue pleine sur la nuit du reveil (docs/132).
+    if (parent && parent.computeWorldMatrix) parent.computeWorldMatrix(true);
     const axe = (v) => {
       const w = parent
         ? B.Vector3.TransformNormal(v, parent.getWorldMatrix()).normalize()

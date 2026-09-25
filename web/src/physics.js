@@ -105,6 +105,29 @@ export function hideUnrendered(meshes) {
   return n;
 }
 
+/** Le renderer de ce maillage est-il eteint dans la scene (`m_Enabled` a 0) ? */
+export function rendererOff(mesh) {
+  const m = mesh && mesh.metadata;
+  const e = m && m.gltf && m.gltf.extras;
+  return !!(e && e.rendererOff);
+}
+
+/**
+ * Cache ce que le build pose avec un renderer eteint.
+ *
+ * Distinct de `hideUnrendered` : un renderer eteint se RALLUME (`Renderer
+ * .enabled`, a la longue-vue, au rayon tracteur, aux paupieres qui clignent),
+ * et les objets tenus en main que le moteur allume lui-meme ne passent pas
+ * par ici — seulement le decor charge par `geometry.js`.
+ */
+export function hideDisabledRenderers(meshes) {
+  let n = 0;
+  for (const m of meshes || []) {
+    if (rendererOff(m)) { m.isVisible = false; m.__lodPinned = true; n++; }
+  }
+  return n;
+}
+
 export function noCollide(mesh) {
   const m = mesh && mesh.metadata;
   const e = m && m.gltf && m.gltf.extras;

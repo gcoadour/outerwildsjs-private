@@ -15,7 +15,7 @@ import { loadSolarSystem, playerConstants } from "./config.js";
 import { buildBodies, syncBodies } from "./bodies.js";
 import { Player } from "./player.js";
 import { FloatingOrigin } from "./origin.js";
-import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
+import { GeometryStore, bootFiles, BODY_TO_FILE, BODY_FILES, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
 import { buildOrbits, advance, currentPosition, period,
          frameVelocity } from "./orbits.js";
@@ -134,8 +134,10 @@ import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
          SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap,
-         patchAttenuationUnity, falloffUnity, layerMaskFor, applyLayers } from "./lights.js";
+         patchAttenuationUnity, falloffUnity, layerMaskFor, applyLayers,
+         masqueCamera, CALQUE_SONDE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
+import { champEtoiles, creerVoute } from "./etoiles.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels, markCrushing,
          funnelActive } from "./sand.js";
@@ -365,15 +367,28 @@ async function boot() {
   window.__commandes = cmds;
   const reglagesCam = reglagesDuJoueur(camerasDuBuild);
   camera.fov = (reglagesCam.fov || 70) * Math.PI / 180;
-  // Calque des billes de sonde : visible du joueur, pas de la sonde elle-meme.
-  camera.layerMask = 0x2FFFFFFF;
+  // Le masque de la `PlayerCamera` du build : tout sauf `HeadsUpDisplay` (23),
+  // que la camera du casque dessine seule, et deux calques de volumes. Il
+  // contient le bit 29, celui des billes de sonde : visibles du joueur, pas de
+  // la sonde elle-meme. Sans lui, les objets du calque 23 flottaient dans le
+  // decor (docs/132).
+  camera.layerMask = masqueCamera(reglagesCam.cullingMask);
   scene.activeCamera = camera;
 
-  // Une lumiere ponctuelle s'attenuerait a 8 500 unites du soleil. Pour une
-  // etoile aussi lointaine, une directionnelle reorientee chaque frame donne
-  // le bon eclairage sans probleme de portee.
-  const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(0, -1, 0), scene);
-  sun.intensity = 1.15;
+  // LE SOLEIL EST UNE PONCTUELLE. `SunLight` : posee sur l'etoile, portee
+  // 20 000, intensite 3, et l'attenuation d'Unity 4 (lights.js). Le portage
+  // tenait une directionnelle d'intensite 1,15 partout — la force du soleil a
+  // la distance de Timber Hearth, appliquee a tout le systeme. Or a 16 458
+  // unites, Giant's Deep n'en recoit que le vingtieme : l'alpha la montre
+  // presque noire, auréolée de son seul liseré, et Dark Bramble et la comete,
+  // au-dela de la portee, ne sont pas eclaires du tout (docs/132). Les
+  // reglages definitifs viennent du build plus bas, une fois `lighting` lu.
+  const sun = new BABYLON.PointLight("sun", new BABYLON.Vector3(0, 0, 0), scene);
+  sun.range = 20000;
+  sun.intensity = 3;
+  // La direction de la lumiere au point de vue, que lisent les materiaux du
+  // jeu (atmospheres, liseres) : de l'etoile vers la camera.
+  const sunDir = new BABYLON.Vector3(0, -1, 0);
   // L'ambiance n'est pas une constante : chaque secteur porte sa propre portee
   // d'eclairage ambiant (`_ambientLightRange`), de 750 sur Giant's Deep a 0 sur
   // la comete. On garde la lumiere sous la main pour la suivre.
@@ -635,28 +650,29 @@ async function boot() {
   if (starField.ready) {
     // Un nuage de points plutot qu'un systeme de particules : les etoiles ne
     // naissent ni ne meurent — le build MET SON SYSTEME EN PAUSE des la
-    // premiere image — et un nuage de points se met a jour par indice, ce dont
-    // l'extinction a besoin. La taille est en pixels et non en unites monde :
-    // c'est l'approximation assumee du portage, et la seule.
-    const pcs = new BABYLON.PointsCloudSystem("etoiles", 3, scene);
-    const pos = starField.positions(1);
-    const [cr, cg, cb] = starField.color;
-    pcs.addPoints(starField.count, (p, i) => {
-      p.position = new BABYLON.Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
-      p.color = new BABYLON.Color4(cr, cg, cb, 1);
-    });
-    pcs.buildMeshAsync().then((mesh) => {
-      // Rendu additif et sans profondeur : une etoile est derriere tout, et
-      // n'a pas a se disputer le tampon de profondeur avec une planete.
-      mesh.material.disableDepthWrite = true;
-      mesh.alwaysSelectAsActiveMesh = true;
-      mesh.isPickable = false;
-      mesh.infiniteDistance = true;
-      starPCS = pcs;
-      console.log(`ciel : ${starField.count} etoiles`);
-    }).catch((e) => console.warn("champ d'etoiles :", e.message));
+    // premiere image — et un nuage se met a jour par indice, ce dont
+    // l'extinction a besoin. Chaque point est un sprite a la taille MONDE du
+    // build, texture comprise (etoiles.js).
+    const sys = particleMap.find((s) => s.name === "DistantStars");
+    starPCS = champEtoiles(BABYLON, scene, starField,
+      sys && sys.texture ? `data/particles/${sys.texture}` : null);
+    console.log(`ciel : ${starField.count} etoiles`);
+  }
+  // La voute de fond : `PlainStarscape_BiggerStars`, le materiau `Skybox` du
+  // `RenderSettings` de `level0`. Elle porte les etoiles fines qu'on voit
+  // derriere tout le reste ; le portage effacait l'ecran d'un bleu nuit de sa
+  // facon (docs/132). Un demi-tour sur Y, comme la geometrie (geometry.js) :
+  // le monde du portage est celui d'Unity tourne de 180 degres.
+  let voute = null;
+  try {
+    voute = skyData && creerVoute(BABYLON, scene, skyData.skybox, "data/sky/",
+                                  camera.maxZ);
+    if (voute) voute.rotation.y = Math.PI;
+  } catch (e) {
+    console.warn("voute indisponible :", e.message);
   }
   window.__sky = sky;
+  window.__voute = voute;
   // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
   const scrollers = new TextureScrollers(await loadTextureAnimators());
   window.__texanim = scrollers;
@@ -984,13 +1000,17 @@ async function boot() {
     `${events.count} emetteurs de son d'evenement`);
 
   // `SunLight` est le soleil du build : une ponctuelle de portee 20 000 posee
-  // sur l'etoile. Le portage le tient par sa directionnelle `sun`, reorientee a
-  // chaque image ; les garder toutes deux, maintenant que l'attenuation
-  // d'Unity rend sa force a la ponctuelle, comptait le soleil deux fois. La
-  // directionnelle en prend le MASQUE : le calque `IgnoreSun` reste dans
-  // l'ombre (docs/132).
+  // sur l'etoile. Le portage le tient par sa lumiere `sun`, qu'il deplace avec
+  // l'etoile ; le garder aussi parmi les lumieres posees compterait le soleil
+  // deux fois. `sun` en prend la portee, la force, la couleur et le MASQUE : le
+  // calque `IgnoreSun` reste dans l'ombre (docs/132).
   const soleilDuBuild = (lighting.lights || []).find((l) => l.name === "SunLight");
-  if (soleilDuBuild) sun.includeOnlyWithLayerMask = layerMaskFor(soleilDuBuild.cullingMask);
+  if (soleilDuBuild) {
+    sun.includeOnlyWithLayerMask = layerMaskFor(soleilDuBuild.cullingMask);
+    if (soleilDuBuild.range > 0) sun.range = soleilDuBuild.range;
+    if (typeof soleilDuBuild.intensity === "number") sun.intensity = soleilDuBuild.intensity;
+    if (soleilDuBuild.color) sun.diffuse = new BABYLON.Color3(...soleilDuBuild.color.slice(0, 3));
+  }
   const placedLights = new LightField(BABYLON, scene,
     (lighting.lights || []).filter((l) => l !== soleilDuBuild));
   // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
@@ -1097,8 +1117,8 @@ async function boot() {
     }
     syncGeometry([entry], origin);
     if (sky.attach(entry.meshes)) {
-      // Le repere du parent se lit UNE fois, au rattachement : il ne change pas
-      // ensuite, et le lire chaque image couterait une matrice monde pour rien.
+      // Le repere du parent se relit a chaque image (plus bas) : le conteneur
+      // se retourne apres le rattachement, et le corps tourne sur lui-meme.
       sky.readBasis(sky.shell, BABYLON);
       if (sky.shell) sky.shell.isPickable = false;
       console.log(`ciel : voute rattachee`);
@@ -1154,7 +1174,10 @@ async function boot() {
         tex.hasAlpha = true;
         mat.diffuseTexture = tex;
         if ("albedoTexture" in mat) mat.albedoTexture = tex;
-        if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
+        // Seulement si le materiau en avait une : `SelfIlluminAlpha` est
+        // ECLAIRE (shaders/index.js), et une texture emissive sur chaque nuage
+        // les faisait briller en pleine nuit (docs/132).
+        if (mat.emissiveTexture) mat.emissiveTexture = tex;
         noeud.material = mat;
         peints += 1;
       }
@@ -1508,8 +1531,6 @@ async function boot() {
   window.__resources = resources;   // sonde de verification
 
   // Modes d'affichage, messages du pilote automatique et minicarte.
-  // borne de casteurs d'ombre par lot : une planete entiere serait injouable
-  const SHADOW_CASTERS = 120;
   const AUTOPILOT_KEYS = new Set(["alignement", "vol", "approche", "egalisation"]);
   const guiMode = new GuiMode();
   // Le reticule de `DebugHUD` : une croix de treize pixels, blanche a 50 %,
@@ -1725,24 +1746,10 @@ async function boot() {
     ip.toneMappingEnabled = v.brightness;
     ip.exposure = v.brightness ? 1.3 : 1.0;
     // QualitySettings.shadowDistance : le jeu ne fait qu'annuler la distance,
-    // il ne demonte pas la passe d'ombres. On construit donc le generateur une
-    // seule fois, a la premiere activation, puis on l'allume ou on l'eteint.
+    // il ne demonte pas la passe d'ombres. Et le soleil n'en a pas : `SunLight`
+    // porte `m_Shadows` a 0. Le portage lui avait donne un generateur d'ombres
+    // de son cru ; l'option ne fait plus que ce que fait celle du build.
     scene.shadowsEnabled = v.shadows;
-    if (v.shadows && !shadowGen) {
-      try {
-        shadowGen = new BABYLON.ShadowGenerator(1024, sun);
-        shadowGen.usePoissonSampling = true;
-        for (const e of geo) {
-          for (const m of e.meshes.slice(0, SHADOW_CASTERS)) {
-            shadowGen.addShadowCaster(m);
-            m.receiveShadows = true;
-          }
-        }
-      } catch (e) {
-        console.warn("ombres indisponibles :", e.message);
-        settings.values.shadows = false;
-      }
-    }
   }
   applySettings();
 
@@ -2508,7 +2515,7 @@ async function boot() {
   // `ProbeMesh`, mais la geometrie de la sonde n'est pas dans `level0` et le
   // portage ne charge que ce qui y est. Elle n'est jamais recreee : il n'y en a
   // qu'UNE, et c'est le fait de jeu de docs/60.
-  const PROBE_LAYER = 0x20000000;
+  const PROBE_LAYER = CALQUE_SONDE;
   const probeMat = new BABYLON.StandardMaterial("probeMat", scene);
   probeMat.emissiveColor = new BABYLON.Color3(0.6, 0.9, 1.0);
   probeMat.disableLighting = true;
@@ -2587,6 +2594,15 @@ async function boot() {
   // toiles et les regards poses dans la scene — une collision de nom qui a
   // fait tomber un controle sans rapport.
   window.__regardCam = () => ({ yaw, pitch });
+  // Tout le systeme, derriere le titre qui tourne encore : l'alpha charge
+  // `level0` en entier avant de l'activer, et ses planetes se voient de loin
+  // telles qu'elles sont (la vue lointaine de `Sectors`). Quarante-sept Mo de
+  // geometrie mesures pour les huit lots, pas les deux cents que ce code
+  // craignait.
+  if (sectors) {
+    sectors.lointain = true;
+    await Promise.all(BODY_FILES.map((f) => store.request(f)));
+  }
   // Le niveau 1 est pret : `AsyncOperation.allowSceneActivation`. Le titre
   // s'efface, la partie prend l'ecran.
   if (titre) {
@@ -3631,7 +3647,8 @@ async function boot() {
     if (star) {
       const p = star.data.position;
       const d = camera.position.subtract(new BABYLON.Vector3(p[0], p[1], p[2]));
-      if (d.lengthSquared() > 0) sun.direction = d.normalize();
+      if (d.lengthSquared() > 0) sunDir.copyFrom(d.normalize());
+      sun.position.set(p[0], p[1], p[2]);
     }
 
     // --- vaisseau, ressources, interaction ---
@@ -4564,7 +4581,7 @@ async function boot() {
       for (const e of entries) {
         if (e.isStar) continue;
         const ent = entryForBody(geo, e.data.name);
-        e.mesh.isVisible = !ent || !sectors.active.has(ent.file);
+        e.mesh.isVisible = !ent || (!sectors.lointain && !sectors.active.has(ent.file));
       }
       // La limite de poussee du secteur s'applique enfin au vaisseau : 20
       // partout, 200 sur la premiere jumelle, illimitee sur Giant's Deep.
@@ -4628,10 +4645,12 @@ async function boot() {
       ambient.groundColor.set(teinte[0], teinte[1], teinte[2]);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
-      meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));
+      meshLOD.update(geo, camera.position,
+                     (f) => sectors.lointain || sectors.active.has(f));
 
       // eviction : ce qui est hors de portee depuis assez longtemps est rendu
-      for (const e of geo) evictor.see(e.file, sectors.inRange.has(e.file));
+      // En vue lointaine, rien ne se libere : ce qu'on voit au loin reste la.
+      for (const e of geo) evictor.see(e.file, sectors.lointain || sectors.inRange.has(e.file));
       const freed = evictor.update(dt, evictFile);
       for (const f of freed) console.log("geometrie liberee :", f);
     }
@@ -5621,10 +5640,18 @@ async function boot() {
         * (a.mesh.scaling ? a.mesh.scaling.x : 1);
       a.mesh.setEnabled(Math.hypot(dx, dy, dz) > rayon);
     }
-    updateMaterials(BABYLON, mats, camera.position, sun.direction,
+    updateMaterials(BABYLON, mats, camera.position, sunDir,
                     performance.now() / 1000, loop.fraction);
-    updateGameShaders(BABYLON, scene, camera.position, performance.now() / 1000,
-                      sun.direction);
+    {
+      const k = sun.intensity, a = ambient.intensity;
+      updateGameShaders(BABYLON, scene, camera.position, performance.now() / 1000, {
+        position: sun.position,
+        couleur: new BABYLON.Vector3(sun.diffuse.r * k, sun.diffuse.g * k, sun.diffuse.b * k),
+        portee: sun.range,
+        ambiante: new BABYLON.Vector3(ambient.diffuse.r * a, ambient.diffuse.g * a,
+                                      ambient.diffuse.b * a),
+      });
+    }
     // Le ciel du build : ce qu'il calcule, on le calcule. Ce qu'il n'applique
     // pas, on ne l'applique pas non plus (docs/41-ciel.md).
     //
@@ -5675,6 +5702,7 @@ async function boot() {
         const v = [p[0] - c.x, p[1] - c.y, p[2] - c.z];
         const n = Math.hypot(v[0], v[1], v[2]);
         if (n > 0) {
+          sky.readBasis(sky.shell, BABYLON);
           const q = sky.lookAtSun([v[0] / n, v[1] / n, v[2] / n]);
           if (!sky.shell.rotationQuaternion) {
             sky.shell.rotationQuaternion = new BABYLON.Quaternion(q[0], q[1], q[2], q[3]);

@@ -98,6 +98,7 @@ export function reglagesDuJoueur(camera) {
     bloom: bloom || REGLAGES_JOUEUR.bloom,
     twirl: twirl || REGLAGES_JOUEUR.twirl,
     fov: c.fov ?? REGLAGES_JOUEUR.fov,
+    cullingMask: c.cullingMask ?? null,
   };
 }
 

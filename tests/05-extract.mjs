@@ -995,8 +995,15 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   // serialise sur le materiau partage.
   const vues = [];
   const skyImg = extractSky(ctx, (nom, img) => { vues.push([nom, img.width]); return nom; });
-  check("dix images de nuage ecrites", vues.length, 10);
-  check("toutes en 256 pixels", vues.every(([, w]) => w === 256), true);
+  const nuages = vues.filter(([nom]) => !nom.startsWith("sky_"));
+  check("dix images de nuage ecrites", nuages.length, 10);
+  check("toutes en 256 pixels", nuages.every(([, w]) => w === 256), true);
+  // La voute de fond de la partie : le `RenderSettings` de `level0` pose un
+  // materiau `Skybox`, que le portage remplacait par un bleu nuit invente.
+  check("la partie a sa voute", skyImg.skybox && skyImg.skybox.material,
+        "PlainStarscape_BiggerStars");
+  check("six faces de voute en jeu", vues.filter(([nom]) => nom.startsWith("sky_")).length, 6);
+  check("sa teinte", skyImg.skybox.tint[0], 0.47059);
   check("et chaque nuage sait laquelle est la sienne",
         skyImg.clouds.every((c) => !!c.image), true);
   check("les vingt-quatre portent le meme nom",

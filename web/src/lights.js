@@ -96,6 +96,22 @@ export function layerMaskFor(cullingMask) {
   return m === 0xFFFFFFFF ? 0 : m;
 }
 
+/** Bit des billes de sonde, que la camera de la sonde ne voit pas. */
+export const CALQUE_SONDE = 0x20000000;
+
+/**
+ * Le masque d'une camera du build, pour Babylon.
+ *
+ * Un maillage cree par le portage garde le masque par defaut de Babylon
+ * (0x0FFFFFFF) et reste donc visible sous n'importe quel masque qui touche aux
+ * bits 0 a 27. Le bit des billes de sonde est ajoute, quel que soit le masque :
+ * le build le contient, un repli doit le contenir aussi.
+ */
+export function masqueCamera(cullingMask) {
+  const m = cullingMask == null ? 0x0FFFFFFF : (cullingMask >>> 0);
+  return (m | CALQUE_SONDE) >>> 0;
+}
+
 /**
  * Pose, sur chaque maillage importe, le bit de son calque Unity.
  *

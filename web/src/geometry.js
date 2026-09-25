@@ -21,7 +21,7 @@
 // inverse. Surtout pas par une mise a l'echelle negative : celle-ci inverserait
 // l'orientation des faces.
 
-import { hideUnrendered, disableInactive } from "./physics.js";
+import { hideUnrendered, hideDisabledRenderers, disableInactive } from "./physics.js";
 import { falloffUnity, applyLayers } from "./lights.js";
 import { toLegacyMaterials } from "./shaders/index.js";
 
@@ -65,6 +65,8 @@ async function loadFile(BABYLON, scene, file) {
   const res = await BABYLON.SceneLoader.ImportMeshAsync("", "data/gltf/", file, scene);
   // Ce que le build ne dessine pas — un MeshFilter sans renderer allume.
   hideUnrendered(res.meshes);
+  // ... ni ce dont le renderer est eteint au depart.
+  hideDisabledRenderers(res.meshes);
   disableInactive(res);
   // L'eclairage d'Unity 4 : en espace gamma, pas en PBR (shaders/index.js).
   toLegacyMaterials(BABYLON, scene, res.meshes);
@@ -116,6 +118,12 @@ async function loadFile(BABYLON, scene, file) {
  * pour une geometrie dont les secteurs eteignent deja les sept dixiemes (voir
  * `sectors.js`). Ce magasin branche le TELECHARGEMENT sur cette meme mesure de
  * distance : un corps se charge quand on s'en approche, pas avant.
+ *
+ * Mesure depuis : les huit lots font 47 Mo de tampons, et l'ecran-titre tourne
+ * pendant qu'ils arrivent. main.js les demande donc tous avant d'activer la
+ * partie — l'alpha charge `level0` en entier, et c'est ce qui lui fait voir ses
+ * planetes de loin (`Sectors.lointain`, docs/132). Le chargement a la demande
+ * reste le chemin de repli, et celui des volumes sans puits.
  *
  * `entries` est le meme tableau du debut a la fin de la partie ; il se remplit
  * au fil des chargements. Les lecteurs — `entryForBody`, `syncGeometry`, les

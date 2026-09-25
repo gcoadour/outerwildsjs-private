@@ -204,3 +204,84 @@ une seule tenait à un réglage.
    éteint. Les matériaux glTF sont convertis en `StandardMaterial`
    (`toLegacyMaterials`), qui calcule comme Unity, et son atténuation reçoit
    la même correction.
+
+## Le ciel de nuit, côte à côte
+
+Le réveil corrigé, restait le ciel. L'alpha, en levant les yeux : la lune
+presque pleine, Giant's Deep en disque sombre cerclé de bleu-vert, une poussière
+d'étoiles d'un pixel, des nuages à peine visibles. Le portage : du noir, un
+cercle vert pâle, rien d'autre. Une caméra de test pointée sur la lune et sur
+Giant's Deep les montrait noires toutes les deux — et un rayon lancé vers la
+planète touchait d'abord `SkyShell`, à 121 unités. Dix causes, en cascade.
+
+1. **La voûte bouchait le ciel.** Depuis la conversion en `StandardMaterial`,
+   `applyAlphaBlend` posait `useAlphaFromAlbedoTexture` — une propriété du PBR
+   — et coupait l'éclairage avec un émissif noir : la voûte était opaque et
+   noire. `alphaDeTexture` et `sansEclairage` (shaders/index.js) valent pour les
+   deux familles de matériaux.
+2. **Et elle regardait à l'envers.** Visible, elle était bleue de jour en
+   pleine nuit : le disque clair (`-Z` local) visait exactement l'anti-soleil
+   (produit scalaire −1). `readBasis` lisait la matrice monde du parent au
+   rattachement, avant que Babylon y ait composé le demi-tour du conteneur
+   glTF ; le repère est maintenant recalculé, et relu à chaque image.
+3. **Il manquait une voûte.** Le `RenderSettings` de `level0` pose un matériau
+   `Skybox`, `PlainStarscape_BiggerStars` : six faces d'étoiles fines. Le
+   portage effaçait l'écran d'un bleu nuit de sa façon. L'extracteur du ciel
+   sort ces faces (`extractSkybox`, partagé avec l'écran-titre) et le moteur
+   les pose derrière tout (`creerVoute`, etoiles.js).
+4. **Des étoiles en confettis.** `DistantStars` : mille particules de 200 à 400
+   unités à 30 000, texture `Default-Particle`, en additif. Le portage dessinait
+   des carrés pleins de trois pixels. Mesurées sur l'alpha, ce sont des points
+   d'un pixel à 0,2–0,3 de gris : sous quatre pixels, chaque étoile est rendue
+   en point d'un pixel qui garde l'énergie du sprite (aire × moyenne mesurée de
+   la texture) ; au-dessus — à la longue-vue —, en sprite texturé.
+5. **Les planètes de loin étaient des sphères de couleur inventée.** Le
+   portage chargeait la géométrie par secteur et montrait, hors de portée, une
+   sphère tirée d'une palette arbitraire — Giant's Deep en lavande. L'alpha
+   ne diffuse rien : `level0` est chargé en entier. Les huit lots pèsent
+   47 Mo de tampons, pas les 200 que le code craignait ; ils sont tous chargés
+   derrière l'écran-titre, et `Sectors.lointain` les laisse affichés hors de
+   portée, le niveau de détail par maillage éteignant ce qui est petit à
+   l'écran.
+6. **Le chargement d'un lot défaisait les autres.** `Sky.attach` et
+   `attachClouds` remettaient la voûte et les nuages à rien quand un lot ne
+   les portait pas : tant que Timber Hearth était le dernier arrivé, cela ne
+   se voyait pas.
+7. **Le soleil est une ponctuelle.** `SunLight` : portée 20 000, intensité 3,
+   atténuation d'Unity, et **pas d'ombres** (`m_Shadows` à 0). Le portage le
+   remplaçait par une directionnelle d'intensité 1,15 partout — la force du
+   soleil à la distance de Timber Hearth — munie d'un générateur d'ombres de
+   son cru. À 16 458 unités, Giant's Deep reçoit vingt fois moins : l'alpha
+   la montre presque noire (≈ 25/255), et Dark Bramble et la comète, au-delà
+   de la portée, ne sont pas éclairées du tout.
+8. **Le liseré de Giant's Deep était inventé.** `rim.js` se disait
+   « implémentation originale » ; le programme de fragment du build dit
+   `albedo × (2 N·L × lumière + ambiante) + spéculaire + _RimColor × (1 − N·V)^_RimPower`.
+   Les propriétés de `TornadoGiantOuterSurface` passent par les extras glTF
+   (`unityProps`). Et la couche externe, `TornadoClouds`, est un additif teinté
+   par `_TintColor` — un bleu-vert à 5 % que le portage ignorait : la planète
+   sortait blanche.
+9. **Les nuages.** `SelfIlluminAlpha` a bien une émission,
+   `albedo × lightStrength` (2 sur `CloudMat`), et ne découpe que l'alpha nul
+   (`AlphaTest Greater 0`) ; le portage coupait à 0,4 et reposait chaque
+   texture de nuage en émissive. Surtout, les quatre anneaux porteurs
+   (`CloudRingBot`…) ont leur renderer **éteint** : l'exporteur ne regardait
+   que l'existence d'un renderer, pas `m_Enabled`, et 42 maillages éteints
+   du build se dessinaient — dont ces anneaux, qui voilaient la nuit d'un gris
+   uni. Ils portent maintenant `rendererOff`.
+10. **Le masque de la caméra.** La `PlayerCamera` ne dessine pas le calque 23
+    (`HeadsUpDisplay`) ni le 24 ; le portage dessinait tout. Il prend le masque
+    du build (`masqueCamera`).
+
+Ce qui reste : la lune n'est pas au même endroit du ciel dans les deux
+captures — une question de phase orbitale au moment de la prise de vue, que
+le minutage du réveil doit trancher — et l'émetteur `Explosion_Fiery_Med`,
+visible au même endroit dans les deux, est orangé dans le portage et rose
+dans l'alpha.
+
+Le vérificateur suit le build sur ce que `actifsSeulement` a retiré :
+`DarkBrambleShortcut` est inactif et aucun `SetActive` ne le rallume — l'alpha
+n'a pas de raccourci depuis Timber Hearth ; `KillVolume`, `OribitingIsland`,
+deux émetteurs de signal et un lisible sont inactifs aussi. Les deux icônes
+clignotantes de l'ordinateur de bord, elles, sont rallumées par
+`ShipComputer` (`RALLUMES`).

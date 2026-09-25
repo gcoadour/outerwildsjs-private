@@ -153,4 +153,4 @@ contenu du jeu : ce sont des mesures, des relevés et des explications.
 - [`129-audio-evenementiel-sonde-mort-turbulence-ordinateur.md`](129-audio-evenementiel-sonde-mort-turbulence-ordinateur.md) — **retours sonores et capteurs : mort, sonde, modèle, turbulence et supernova**
 - [`130-validation-playwright-scenarios-et-corrections-gameplay.md`](130-validation-playwright-scenarios-et-corrections-gameplay.md) — **validation automatisée Playwright et parité gameplay : 10 scénarios de bout en bout et correctifs du bytecode**
 - [`131-ecran-titre.md`](131-ecran-titre.md) — **l'écran-titre porté : la scène de `mainData`, le menu lu dans l'IL, et quatre corrections trouvées image par image**
-- [`132-comparaison-native.md`](132-comparaison-native.md) — **l'alpha native lancée à côté du portage : le temps qui ralentissait, les shaders qui échouaient, les touches qui traînaient**
+- [`132-comparaison-native.md`](132-comparaison-native.md) — **l'alpha native lancée à côté du portage : le temps qui ralentissait, les shaders qui échouaient, les touches qui traînaient, le réveil de nuit, le ciel étoilé**

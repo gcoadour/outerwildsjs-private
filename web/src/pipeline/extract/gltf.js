@@ -341,12 +341,19 @@ export function exportSubtree(ctx, rootGid, label, {
   // anneaux de nuages, les plans de LOD), et le moteur les bascule deja. Seule
   // l'absence de renderer compte ici.
   const rendus = new Set();
+  // Les renderers ETEINTS (`m_Enabled` a 0) : 42 dans `level0`. Les quatre
+  // anneaux porteurs des nuages de Timber Hearth en sont — rendus, ils
+  // voilaient le ciel de nuit d'un gris uni —, avec les paupieres des
+  // villageois, la vitre de la longue-vue, le rayon tracteur… Un script en
+  // rallume certains ; au depart, aucun ne se voit (docs/132).
+  const eteints = new Set();
   for (const type of ["MeshRenderer", "SkinnedMeshRenderer"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
       const v = ctx.readEngine(o);
       if (!v || !v.m_GameObject) continue;
       const gid = v.m_GameObject.pathId;
       rendus.add(gid);
+      if (!v.m_Enabled) eteints.add(gid);
       if (v.m_Materials && v.m_Materials.length) matOf.set(gid, v.m_Materials[0]);
       if (type === "SkinnedMeshRenderer") {
         skinOf.set(gid, v);
@@ -475,6 +482,29 @@ export function exportSubtree(ctx, rootGid, label, {
       // equivalent (voir web/src/shaders/).
       extras: { unityShader: shaderName },
     };
+    // `Custom/SelfIlluminAlpha` ajoute `albedo x lightStrength` a l'eclairage :
+    // c'est son emission, et elle vaut 2 sur les nuages (docs/132).
+    const floats = (mat.m_SavedProperties && mat.m_SavedProperties.m_Floats) || [];
+    const ls = floats.find((f) => f.first && f.first.name === "lightStrength");
+    if (ls && typeof ls.second === "number") entry.extras.lightStrength = ls.second;
+    // `_TintColor` : la teinte des shaders de particules, que `_Color` ne dit
+    // pas. Celle de `TornadoClouds`, la couche externe de Giant's Deep, est un
+    // bleu-vert a 5 % : sans elle, la planete sortait blanche (docs/132).
+    const tint = colors.find((c) => c.first && c.first.name === "_TintColor" && c.second);
+    if (tint) {
+      entry.extras.tintColor = [tint.second.r, tint.second.g, tint.second.b, tint.second.a];
+    }
+    // Les shaders que le moteur REECRIT lisent leurs proprietes nommees : le
+    // liseré de Giant's Deep a ses couleurs et sa puissance, pas celles qu'un
+    // module aurait choisies (shaders/rim.js).
+    if (/Rim/.test(shaderName)) {
+      const couleurs = {}, nombres = {};
+      for (const c of colors) {
+        if (c.first && c.second) couleurs[c.first.name] = [c.second.r, c.second.g, c.second.b, c.second.a];
+      }
+      for (const f of floats) if (f.first && typeof f.second === "number") nombres[f.first.name] = f.second;
+      entry.extras.unityProps = { couleurs, nombres };
+    }
     if (normal !== null) entry.normalTexture = { index: normal };
     if (entry.alphaMode === "MASK") entry.alphaCutoff = 0.5;
 
@@ -593,6 +623,9 @@ export function exportSubtree(ctx, rootGid, label, {
         if (!rendus.has(gid)) {
           node.extras = { ...(node.extras || {}), hidden: true };
           stats.hidden = (stats.hidden || 0) + 1;
+        } else if (eteints.has(gid)) {
+          node.extras = { ...(node.extras || {}), rendererOff: true };
+          stats.rendererOff = (stats.rendererOff || 0) + 1;
         }
         // Ce que le build ne rend pas solide ne doit pas le devenir ici.
         if (!colliderGids.has(gid)) {

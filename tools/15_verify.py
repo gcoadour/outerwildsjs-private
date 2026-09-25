@@ -683,7 +683,9 @@ def _run(url, heavy, profil=None, zip_path=None):
           m.reset();
           return out;
         }""")
-        rep.eq("emetteurs de signal", audio["emetteurs"], 9)
+        # Neuf dans la scene, dont deux sur des objets INACTIFS que rien ne
+        # rallume : sept emettent dans l'alpha (`actifsSeulement`, docs/132).
+        rep.eq("emetteurs de signal", audio["emetteurs"], 7)
         rep.eq("signal plein dans le point chaud", audio["centre"], 1)
         rep.near("decroissance quadratique a mi-chemin", audio["moitie"], 0.287, 0.002)
         rep.eq("signal nul au rayon de coupure", audio["bord"], 0)
@@ -1101,7 +1103,9 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("et sa distance d'arrivee vient du build", lots["arrivee"], 1000)
             rep.at_least("decors vivants rattaches", lots["decors"], 1)
             rep.eq("passages anciens suivis", lots["passages"], 6)
-            rep.eq("volumes qui blessent", lots["dangers"], 1)
+            # Le seul `HazardVolume` de la scene, `KillVolume`, est INACTIF :
+            # il ne blesse personne dans l'alpha (docs/132).
+            rep.eq("volumes qui blessent", lots["dangers"], 0)
             rep.eq("objets a ramasser", lots["ramassages"], 2)
             # 22 a l'origine ; les docs 124, 128 et 129 en ont porte dix-sept
             # de plus (`EVENT_AUDIO`, extract/audio.js) sans relever ce compte.
@@ -1385,7 +1389,8 @@ def _run(url, heavy, profil=None, zip_path=None):
                    noeuds: a.noeudsCasses.length, remous: a.remous.length,
                    lanceurs: window.__meteores.launchers.length };
         }""")
-        rep.eq("quatorze alignements sur un corps designe", att["alignes"], 14)
+        # Quatorze poses, dont `OribitingIsland`, inactive et jamais rallumee.
+        rep.eq("treize alignements sur un corps designe", att["alignes"], 13)
         rep.eq("neuf heritiers de champ", att["heritiers"], 9)
         rep.eq("deux clignotants", att["clignotants"], 2)
         rep.eq("trois noeuds casses", att["noeuds"], 3)
@@ -1679,15 +1684,18 @@ def _run(url, heavy, profil=None, zip_path=None):
                    surSortie: e.warps.filter(w => w.data.onExit).length,
                    jumeaux: e.warps.filter(w => w.jumeau).length };
         }""")
-        rep.eq("trois passages de Dark Bramble", ep["n"], 3)
-        rep.eq("dont le raccourci depuis Timber Hearth",
-               "DarkBrambleShortcut" in ep["noms"], True)
+        # `DarkBrambleShortcut` est INACTIF dans le build, et aucun `SetActive`
+        # ne le rallume (`il.mjs --appel SetActive`) : l'alpha n'a pas de
+        # raccourci depuis Timber Hearth (docs/132).
+        rep.eq("deux passages de Dark Bramble", ep["n"], 2)
+        rep.eq("pas de raccourci depuis Timber Hearth",
+               "DarkBrambleShortcut" in ep["noms"], False)
         rep.eq("un seul part sur la SORTIE", ep["surSortie"], 1)
-        rep.eq("et les trois connaissent leur jumeau", ep["jumeaux"], 3)
+        rep.eq("et les deux connaissent leur jumeau", ep["jumeaux"], 2)
         # Trois secondes, pas a l'instant : la moitie de `_warpDuration`.
         saut = page.evaluate("""() => {
           const e = window.__epaves;
-          const w = e.warps.find(x => x.data.name === "DarkBrambleShortcut");
+          const w = e.warps.find(x => !x.data.onExit);
           const p = w.data.position;
           const a = e.update(0.1, 1000, p);
           const b = e.update(0.1, 1002, p);
@@ -1700,7 +1708,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("entrer ne suffit pas", saut["a"], False)
         rep.eq("ni deux secondes", saut["b"], False)
         rep.eq("a trois secondes, on part", saut["c"], True)
-        rep.eq("vers Dark Bramble", saut["vers"], "DarkBramble_Body")
+        rep.eq("de Dark Bramble vers l'epave", saut["vers"], "DerelictDimension_Body")
         rep.eq("et en mouvement", saut["vitesse"], 10)
         # Les coquilles sonores, appariees a leur source par position.
         coq = page.evaluate("""() => {
@@ -2375,8 +2383,9 @@ def _run(url, heavy, profil=None, zip_path=None):
         # --- lire un panneau (docs/105-lire.md) -------------------------------
         lect = tactile["lecture"]
         if lect:
-            rep.eq("trente-quatre objets lisibles, tous avec leur texte",
-                   lect["lisibles"], 34)
+            # Trente-quatre poses, dont un sur un objet inactif (docs/132).
+            rep.eq("trente-trois objets lisibles, tous avec leur texte",
+                   lect["lisibles"], 33)
             rep.eq("aucun objet lisible sans texte", lect["sansTexte"], 0)
             rep.eq("le plus long se lit en plusieurs fois", lect["pages"] > 1, True)
             # Cinq lignes AU PLUS : le plus long des trente-quatre commence par

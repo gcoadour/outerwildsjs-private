@@ -31,6 +31,7 @@ import { decodeMesh } from "../unity/mesh.js";
 import { TextureExporter } from "./materials.js";
 import { envelope } from "./particles.js";
 import { unpackColor32 } from "../unity/texture.js";
+import { extractSkybox } from "./titre.js";
 
 /** Rayon de ciel par defaut : le `_skyRadius` du constructeur de SkyBehavior. */
 export const SKY_RADIUS = 320;
@@ -241,13 +242,19 @@ export function extractSky(ctx, emitImage = null) {
     }
   }
 
+  // La voute de fond de la partie : `PlainStarscape_BiggerStars`, six faces
+  // d'etoiles fines derriere tout le reste. Le portage effacait l'ecran d'un
+  // bleu nuit invente (docs/132).
+  const skybox = extractSkybox(ctx, emitImage);
+
   const textures = [...new Set(clouds.map((c) => c.texture).filter(Boolean))].sort();
   return {
-    shell, clouds, stars,
+    shell, clouds, stars, skybox,
     stats: { voute: shell ? 1 : 0, nuages: clouds.length,
              "textures de nuage": textures.length,
              "images de nuage": textureExport ? textureExport.count : 0,
-             "champs d'etoiles": stars.length },
+             "champs d'etoiles": stars.length,
+             "faces de voute": skybox ? Object.keys(skybox.faces).length : 0 },
     textures,
   };
 }

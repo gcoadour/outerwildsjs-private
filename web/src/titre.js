@@ -17,6 +17,7 @@
 import { MENU } from "./settings.js";
 import { flicker, patchAttenuationUnity, falloffUnity } from "./lights.js";
 import { hideUnrendered, disableInactive } from "./physics.js";
+import { creerVoute } from "./etoiles.js";
 
 /**
  * `TitleScreenMenu.ToggleOption(0)`, option par option.
@@ -270,35 +271,16 @@ export class TitleScreen {
     this.camera = cam;
     this.camera0 = { p: c.position.slice(), q: c.rotation.slice() };
 
-    // La voute : six faces, teinte x 2 (`RenderFX/Skybox`).
-    if (d.skybox && d.skybox.faces && Object.keys(d.skybox.faces).length === 6) {
-      const f = d.skybox.faces, dir = "data/titre/";
-      try {
-        const cube = B.CubeTexture.CreateFromImages(
-          ["px", "py", "pz", "nx", "ny", "nz"].map((k) => dir + f[k]), scene);
-        // Le cube doit tenir DANS le plan lointain, coins compris : a 1,5 fois
-        // la portee, ses coins sortaient du tronc de vue et le fond bleu de
-        // la camera passait par le trou, en triangle.
-        const box = B.MeshBuilder.CreateBox("titre_voute", { size: c.far }, scene);
-        const mat = new B.StandardMaterial("titre_voute", scene);
-        mat.backFaceCulling = false;
-        mat.disableLighting = true;
-        mat.reflectionTexture = cube;
-        mat.reflectionTexture.coordinatesMode = B.Texture.SKYBOX_MODE;
-        const t = d.skybox.tint || [0.5, 0.5, 0.5];
-        mat.reflectionTexture.level = 1;
-        mat.diffuseColor = new B.Color3(0, 0, 0);
-        mat.specularColor = new B.Color3(0, 0, 0);
-        mat.emissiveColor = new B.Color3(0, 0, 0);
-        // Babylon multiplie le reflet par `reflectionColor` : c'est la teinte.
-        mat.reflectionColor = new B.Color3(...t.map((v) => Math.min(1, v * 2)));
-        box.material = mat;
-        box.infiniteDistance = true;
+    // La voute : six faces, teinte x 2 (`RenderFX/Skybox`, etoiles.js).
+    try {
+      const box = creerVoute(B, scene, d.skybox, "data/titre/", c.far);
+      if (box) {
+        box.name = "titre_voute";
         box.rotationQuaternion = B.Quaternion.Identity();
         this.voute = box;
-      } catch (e) {
-        console.warn("titre : voute indisponible —", e.message);
       }
+    } catch (e) {
+      console.warn("titre : voute indisponible —", e.message);
     }
 
     // Les deux lumieres de la scene, a la conversion du monde.

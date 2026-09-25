@@ -40,10 +40,13 @@ export async function loadSolarSystem() {
  */
 /**
  * Les scripts que le build RALLUME en cours de partie (`GameObject.SetActive`,
- * lu dans l'IL : `ShipDamageController`, `BrokenNode`). Leurs instances
- * inactives sont un etat de depart, pas une absence.
+ * lu dans l'IL : `ShipDamageController`, `BrokenNode`, et `ShipComputer`, qui
+ * allume `_staticElementsRoot` en s'asseyant et `_updateElementsRoot` en
+ * entrant dans un secteur — les deux icones clignotantes de l'ordinateur de
+ * bord vivent dessous). Leurs instances inactives sont un etat de depart, pas
+ * une absence.
  */
-export const RALLUMES = new Set(["ShipComponent", "RepairVolume"]);
+export const RALLUMES = new Set(["ShipComponent", "RepairVolume", "BlinkingRenderer"]);
 
 /**
  * Retire des composants places ceux dont le GameObject est inactif dans la

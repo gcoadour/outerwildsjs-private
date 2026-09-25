@@ -92,7 +92,9 @@ import { crosshairPixels, CROSSHAIR } from "../web/src/hud.js";
 import { actifsSeulement } from "../web/src/config.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
-import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres } from "../web/src/lights.js";
+import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres,
+         masqueCamera, CALQUE_SONDE } from "../web/src/lights.js";
+import { taillesEtoiles, pixelsParRadian, gainPoint, moyenneTache, SEUIL_POINT } from "../web/src/etoiles.js";
 import { prewarmCycles, sizeGradients, emitterRotation } from "../web/src/particles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
@@ -139,7 +141,7 @@ import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
 import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep, noCollide } from "../web/src/physics.js";
+import { underAsleep, noCollide, rendererOff, hideDisabledRenderers } from "../web/src/physics.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
@@ -961,6 +963,15 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   parti.update({ x: 0, y: 0, z: 20000 });
   check("loin de la planete comme de sa lune, le lot s'eteint",
         loin.container.enabled, false);
+
+  // LA VUE LOINTAINE : l'alpha ne diffuse rien, et Giant's Deep se voit de
+  // Timber Hearth. Le lot reste affiche, mais n'est pas « a portee ».
+  const vu = lot();
+  const lointaine = new Sectors(secteurs, corps(), () => vu, () => FICHIER);
+  lointaine.lointain = true;
+  lointaine.update({ x: 0, y: 0, z: 20000 });
+  check("en vue lointaine, le lot lointain reste affiche", vu.container.enabled, true);
+  check("... sans compter comme actif", lointaine.active.has(FICHIER), false);
 
   // Meme regle par-dessus les deux boucles : `darkbramble_pivot.gltf` est
   // reclame par un corps ET par un volume sans puits de gravite, qui n'ont ni
@@ -8021,6 +8032,50 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
 }
 
 // L'ambiance du build, doublee comme dans les shaders d'Unity 4 (docs/132).
+// Le ciel de nuit, cote a cote avec l'alpha (docs/132).
+{
+  // Un lot sans voute ne retire pas celle d'un autre : le systeme entier se
+  // charge au depart, et le dernier lot arrive remettait la voute a rien.
+  const ciel = new Sky({ shell: { name: "SkyShell" }, clouds: [
+    { name: "PieceOfRing", position: [0, 0, 0] }] });
+  const voute = { name: "SkyShell" };
+  check("la voute se rattache", ciel.attach([voute]), 1);
+  check("un autre lot ne la trouve pas...", ciel.attach([{ name: "Rocher" }]), 0);
+  check("... et ne la retire pas", ciel.shell, voute);
+  const nuage = { name: "PieceOfRing", position: { x: 0, y: 0, z: 0 } };
+  check("le nuage se rattache", ciel.attachClouds([nuage]), 1);
+  check("un lot sans nuage ne defait rien", ciel.attachClouds([{ name: "Rocher" }]), 0);
+  check("... le nuage reste", ciel.clouds.length, 1);
+
+  // Les etoiles : taille MONDE, 200 a 400 unites a 30 000 ; en 640 x 360 a
+  // 70 degres, 1,7 a 3,4 pixels — des points d'un pixel dans l'alpha.
+  const k = pixelsParRadian(360, 70 * Math.PI / 180) / 30000;
+  check("une etoile de 300 u fait 2,6 pixels", +(300 * k).toFixed(1), 2.6);
+  const t = taillesEtoiles(1000, [200, 400]);
+  check("mille tailles tirees", t.length, 1000);
+  check("toutes entre 200 et 400", t.every((x) => x >= 200 && x <= 400), true);
+  check("et pas toutes pareilles", new Set(t).size > 900, true);
+  check("sous le seuil, l'etoile est un point d'un pixel", 300 * k < SEUIL_POINT, true);
+  check("qui garde l'energie du sprite", +gainPoint(2, 0.0765).toFixed(3), 0.306);
+  // La tache du build : rgb et alpha decroissent ensemble.
+  const px = new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0]);
+  check("moyenne de rgb x a sur deux pixels", moyenneTache(px), 0.5);
+
+  // Le masque de la camera du build garde le bit des billes de sonde.
+  check("la PlayerCamera exclut le HUD", (masqueCamera(0xBE7FFFFF) >>> 23) & 1, 0);
+  check("et voit les billes de sonde", (masqueCamera(0xBE7FFFFF) & CALQUE_SONDE) !== 0, true);
+  check("un repli voit tout ce que Babylon pose", masqueCamera(null), 0x2FFFFFFF);
+
+  // Un renderer eteint ne se dessine pas.
+  const eteint = { metadata: { gltf: { extras: { rendererOff: true } } }, isVisible: true };
+  const allume = { metadata: { gltf: { extras: {} } }, isVisible: true };
+  check("un renderer eteint est reconnu", rendererOff(eteint), true);
+  check("un maillage ordinaire ne l'est pas", rendererOff(allume), false);
+  check("on cache le premier seul", hideDisabledRenderers([eteint, allume]), 1);
+  check("... et le LOD ne le rallume pas", eteint.__lodPinned, true);
+  check("l'autre reste visible", allume.isVisible, true);
+}
+
 check("Timber Hearth : un bleu de nuit a 0,12",
       ambientLight(1).map((x) => x.toFixed(3)).join(), "0.090,0.090,0.118");
 check("la comete : le noir", ambientLight(0).join(), "0,0,0");
