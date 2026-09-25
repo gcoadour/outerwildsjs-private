@@ -3122,6 +3122,7 @@ async function boot() {
   // FIXE de 1/60 : sous 60 images par seconde la gravite faiblissait d'autant,
   // pendant que le monde, lui, avancait du temps reel. Les deux horloges ne
   // s'accordaient qu'a 60 images par seconde.
+  let horlogeImage = 0;
   const physique = plugin ? scene.getPhysicsEngine() : null;
   if (physique) scene.physicsEnabled = false;
   scene.registerBeforeRender(() => {
@@ -3130,6 +3131,9 @@ async function boot() {
       (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
       cmds.maxTimestep);
     const now = performance.now() / 1000;
+    // `Time.time` : l'horloge de l'image, avancee une fois pour toutes AVANT
+    // les sous-pas. Les minuteries des scripts `Update` s'y lisent.
+    horlogeImage += n * h;
     for (let i = 0; i < n; i++) {
       if (physique && h > 0) {
         // La force posee au pas precedent se paie sur CE pas : meme duree.
@@ -3140,11 +3144,13 @@ async function boot() {
       // Un appui est un FRONT : il appartient au premier sous-pas de l'image,
       // comme `GetButtonDown` n'est vrai que dans un seul `Update`.
       interactPressed = false;
+      // Et une frappe plus courte qu'une image vaut UN pas, pas l'image
+      // entiere : relachee apres le premier sous-pas. Tenue jusqu'a la fin de
+      // l'image, une pichenette de 120 ms durait une seconde de jeu sans GPU,
+      // passait le seuil de rappel de la sonde (0,3 s) et la rappelait au
+      // lieu de la photographier.
+      appliquerRelachements();
     }
-    // Les touches relachees pendant l'image le deviennent maintenant : une
-    // frappe plus courte qu'une image compte pour une image entiere.
-    interactPressed = false;
-    appliquerRelachements();
   });
 
   function pasDeJeu(dt, now) {
@@ -4993,6 +4999,7 @@ async function boot() {
         playerVelocity: [player.vel.x, player.vel.y, player.vel.z],
         playerPos: [player.pos.x, player.pos.y, player.pos.z],
         knowsProbes: pdata.knows("knowsHowProbesWork"),
+        horloge: horlogeImage,
         insideShip: etatJoueur.insideShip,
         atFlightConsole: etatJoueur.atFlightConsole,
         raycast: rayonSonde,

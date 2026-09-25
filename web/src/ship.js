@@ -550,6 +550,15 @@ export class Ship {
   }
 
   resolveGround(dt, bodies, basis) {
+    // Stationne ne veut pas dire cloue. Le repos tient le vaisseau contre la
+    // DERIVE — l'appui analytique ne connait pas la piste surelevee —, pas
+    // contre un choc : au-dela de la vitesse ou les capteurs de piste cessent
+    // de le compter pose (`LANDED_SPEED`), il glisse, et il n'est plus
+    // stationne. Le fixer quoi qu'il arrive le rendait inamovible jusqu'a
+    // l'allumage (docs/132).
+    if (this.parked && Math.hypot(this.vel.x, this.vel.y, this.vel.z) > LANDED_SPEED) {
+      this.parked = false;
+    }
     if (this.parked && this.landed) {
       this.groundBody = "TimberHearth";
       if (this.parkPos) {

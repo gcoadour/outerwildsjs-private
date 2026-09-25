@@ -1103,7 +1103,9 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("passages anciens suivis", lots["passages"], 6)
             rep.eq("volumes qui blessent", lots["dangers"], 1)
             rep.eq("objets a ramasser", lots["ramassages"], 2)
-            rep.eq("emetteurs de son d'evenement", lots["evenements"], 22)
+            # 22 a l'origine ; les docs 124, 128 et 129 en ont porte dix-sept
+            # de plus (`EVENT_AUDIO`, extract/audio.js) sans relever ce compte.
+            rep.eq("emetteurs de son d'evenement", lots["evenements"], 39)
             # Le volume de destruction du soleil est une sphere de 2 000 unites
             # centree sur l'origine du MONDE : teste avec une position du repere
             # ancre, il tuait le joueur des la premiere image.
@@ -1619,7 +1621,9 @@ def _run(url, heavy, profil=None, zip_path=None):
         ch = page.evaluate("""() => {
           const c = window.__chaleur;
           if (!c) return null;
-          return { sources: c.sources.length,
+          // Neuf emetteurs de rayonnement, dont HUIT feux (`radiationType` 1) :
+          // compter le tout mesurait autre chose que ce que le controle nomme.
+          return { sources: c.sources.filter((e) => e.type === 1).length,
                    surLeFeu: c.sur ? Math.round(c.sur) : 0 };
         }""")
         if ch:
@@ -2141,6 +2145,20 @@ def _run(url, heavy, profil=None, zip_path=None):
           // manche gauche pousse a fond vers l'avant : axe sature, et le cran
           // de course MONTE, depuis que l'accelerateur a disparu : le build
           // n'en a pas, et la majuscule y est `Move Up` (docs/61-commandes.md)
+          //
+          // SANS COMBINAISON, RIEN NE MONTE : le sac dorsal est inerte tant
+          // qu'on ne l'a pas revetue (`PlayerJetpackController.enabled`,
+          // docs/124), et les boutons Monter/Descendre sont masques. Le cran
+          // de course se mesure donc les deux fois.
+          const suitAvant = t.suit;
+          t.setContext({menu: false, map: false, suit: false});
+          send('.tc-zone-move', 'pointerdown', 200, 500, 1);
+          send('.tc-zone-move', 'pointermove', 200, 400, 1);
+          const courseSansCombi = t.axes.up;
+          send('.tc-zone-move', 'pointerup', 200, 400, 1);
+          const enVolSansCombi = [...document.querySelectorAll('#touchui .tc-btn')]
+            .filter(b => b.offsetParent).map(b => b.getAttribute('aria-label'));
+          t.setContext({menu: false, map: false, suit: true});
           send('.tc-zone-move', 'pointerdown', 200, 500, 1);
           send('.tc-zone-move', 'pointermove', 200, 400, 1);
           const avant = +t.axes.forward.toFixed(2);
@@ -2289,13 +2307,20 @@ def _run(url, heavy, profil=None, zip_path=None):
           const empreintes = document.querySelectorAll('#touch .tc-home').length;
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
-          return {avant, course, relache, apresCourse, glisse, vitesse, arret,
+          t.setContext({menu: false, map: false, suit: !!suitAvant});
+          return {courseSansCombi, enVolSansCombi,
+                  avant, course, relache, apresCourse, glisse, vitesse, arret,
                   vus, apresGigue, apresGlissement, dlg, lecture,
                   suspendu, manches, empreintes, boutons, enVol, enMenu,
                   pouceGauche, pouceDroit};
         }""")
         rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
-        rep.eq("a fond devant : le cran de course fait MONTER", tactile["course"], True)
+        rep.eq("sans combinaison, le cran de course ne monte pas",
+               tactile["courseSansCombi"], False)
+        rep.eq("sans combinaison, ni Monter ni Descendre",
+               [b for b in tactile["enVolSansCombi"] if b in ("Monter", "Descendre")], [])
+        rep.eq("a fond devant, en combinaison : le cran de course fait MONTER",
+               tactile["course"], True)
         rep.eq("manche relache : axe a zero", tactile["relache"], 0)
         rep.eq("manche relache : la montee s'arrete", tactile["apresCourse"], False)
         rep.eq("un manche par pouce", tactile["manches"], 2)
@@ -2322,7 +2347,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         # La disposition suit les canaux du build : plus d'accelerateur (il
         # n'existe pas), une DESCENTE au sac dorsal (elle existe et manquait),
         # et le saut a sa propre place — `Jump` et `Move Up` sont deux canaux.
-        rep.eq("la manette en vol", tactile["enVol"],
+        rep.eq("la manette en vol, en combinaison", tactile["enVol"],
                ["Telescope", "Sonde", "Carte du systeme", "Lampe",
                 "Ordinateur de bord", "Affichage", "Menu",
                 "Monter", "Descendre", "Sauter", "Interagir, parler"])
@@ -2650,9 +2675,26 @@ def _run(url, heavy, profil=None, zip_path=None):
               s.vel.x += 40;
               return true;
             }""")
-            page.wait_for_timeout(700)
+            # Une image sans GPU dure souvent plus que les 700 ms d'autrefois :
+            # on attend que les capteurs aient vu une image, pas une duree.
+            try:
+                page.wait_for_function("() => !window.__shipRef.onPad", timeout=15000)
+            except Exception:
+                pass
             apres = page.evaluate("() => ({ pose: window.__shipRef.onPad,"
                                  " annonces: window.__shipRef.pads.events.slice(-1) })")
+            if apres["pose"]:
+                # Ce qui a pu le retenir : une mort et une boucle qui repart
+                # reposent le vaisseau, un menu fige le temps.
+                print("    diagnostic du lancer :", page.evaluate("""() => {
+                  const s = window.__shipRef;
+                  return { parked: s.parked, landed: s.landed, boarded: s.boarded,
+                           vitesse: Math.round(s.speed * 10) / 10,
+                           mort: !!(window.__death && window.__death.dead),
+                           boucles: window.__pdata && window.__pdata.loopCount,
+                           reglages: !!(window.__ui && document.querySelector('.ow-settings:not([hidden])')),
+                           dialogue: !!(window.__dialogue && window.__dialogue.active) };
+                }"""))
             rep.eq("lance a quarante unites, il ne l'est plus", apres["pose"], False)
             rep.eq("et le decollage s'annonce", apres["annonces"], ["ShipTakeoff"])
 
@@ -2831,6 +2873,17 @@ def _run(url, heavy, profil=None, zip_path=None):
             avant = page.evaluate(lecture)
             if avant:
                 break
+        if avant is None:
+            print("    diagnostic de l'assise :", page.evaluate("""() => {
+              const s = window.__shipRef, p = window.__player;
+              return { boarded: s && s.boarded,
+                       distance: s && p ? Math.round(Math.hypot(p.pos.x - s.pos.x,
+                         p.pos.y - s.pos.y, p.pos.z - s.pos.z) * 10) / 10 : null,
+                       mort: !!(window.__death && window.__death.dead),
+                       mode: window.__modes && window.__modes.mode,
+                       dialogue: !!(window.__dialogue && window.__dialogue.active),
+                       reglages: !!document.querySelector('.ow-settings:not([hidden])') };
+            }"""))
         rep.eq("la touche d'interaction assied pour de vrai",
                avant is not None, True)
         if avant:

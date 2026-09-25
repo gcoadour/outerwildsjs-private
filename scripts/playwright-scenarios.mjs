@@ -393,6 +393,39 @@ try {
   assert("Prise de photo par la sonde", probeActions.hasSnapshot === true);
   assert("Rappel et recuperation de la sonde", probeActions.recalled === true);
 
+  // La meme sequence AU BOUTON, comme un joueur : une pichenette sur une sonde
+  // en vol la PHOTOGRAPHIE, elle ne la rappelle pas. Une frappe plus courte
+  // qu'une image vaut un sous-pas ; tenue toute l'image, elle durait jusqu'a
+  // une seconde de jeu et passait le seuil de rappel de 0,3 s (docs/132).
+  const sondeReelle = await (async () => {
+    await page.evaluate(() => {
+      const l = window.__lots;
+      if (!l.equipment.probe) l.equipment.pickUp(l.pickups.find((p) => p.probe));
+      window.__pdata.learn("knowsHowProbesWork");
+      window.__tools.probes.probe = null;
+      window.__look(0, -1.4);
+    });
+    const clic = async (ms) => {
+      await page.mouse.down({ button: "right" });
+      await page.waitForTimeout(ms);
+      await page.mouse.up({ button: "right" });
+    };
+    const lances0 = await page.evaluate(() => window.__tools.probes.launched);
+    await clic(120);
+    await page.waitForFunction((n) => window.__tools.probes.launched > n, lances0,
+                               { timeout: 20000 }).catch(() => {});
+    const partie = await page.evaluate(() => window.__tools.probes.active);
+    await clic(120);
+    await page.waitForTimeout(3000);
+    const apresTape = await page.evaluate(() => ({
+      active: window.__tools.probes.active,
+      lances: window.__tools.probes.launched }));
+    return { partie, apresTape, lances0 };
+  })();
+  assert("Au bouton, la sonde part", sondeReelle.partie === 1, JSON.stringify(sondeReelle));
+  assert("Une pichenette en vol ne la rappelle pas", sondeReelle.apresTape.active === 1
+    && sondeReelle.apresTape.lances === sondeReelle.lances0 + 1, JSON.stringify(sondeReelle.apresTape));
+
   // ==========================================
   // SCENARIO 9: PILOTE AUTOMATIQUE & ETAPES
   // ==========================================

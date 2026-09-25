@@ -107,3 +107,42 @@ Deux de ces sons n'avaient d'ailleurs **aucun** contrôleur dans le portage :
   rentre — `SuitAmbience` ;
 - le **grésillement de la lunette** (`Telescope`) : lancé à `EnterTelescope`,
   réglé chaque image sur `_signalStrength`, coupé à `ExitTelescope`.
+
+### 7. Ce que la vérification complète a dit ensuite
+
+`tools/15_verify.py` a été lancé sur ce lot **et** sur le commit de départ,
+chacun dans son profil : 395/405 contre 402/408. Les écarts se rangent en
+trois familles.
+
+**Deux régressions de ce lot, corrigées.**
+
+- *Une pichenette tenait une seconde.* Une frappe plus courte qu'une image
+  restait tenue jusqu'à la fin de l'image ; or une image couvre maintenant
+  jusqu'à une seconde de jeu, en sous-pas. Un clic de 120 ms sur une sonde en
+  vol passait le seuil de rappel (0,3 s) et **rappelait** la sonde au lieu de
+  la photographier — puis le clic suivant en relançait une. Deux corrections :
+  une frappe vaut désormais **un** sous-pas (les relâchements retenus
+  s'appliquent après le premier) ; et surtout, les minuteries de
+  `ProbeLauncher` — un `Update` — se lisent sur **l'horloge de l'image**
+  (`Time.time`, avancée une fois avant les sous-pas) et non sur celle des
+  sous-pas. Dans le build, le bouton est lu une fois par image et le délai
+  de 0,3 s se compare d'une image à l'autre : un appui qui ne tient qu'une
+  image ne rappelle jamais rien, si longue soit-elle. (L'assise par E
+  échouait en cascade : la vue de sonde restait ouverte.)
+- *Un vaisseau inamovible.* Le drapeau `parked`, qui tient le vaisseau au repos
+  sur sa piste surélevée jusqu'à l'allumage, le tenait contre tout — lancé à
+  40 u/s, il ne bougeait pas. Il ne tient plus que sous `LANDED_SPEED`
+  (5 u/s), la vitesse où les capteurs de piste cessent de le compter posé.
+  Sur le commit de départ, ce contrôle passait **par accident** : le vaisseau
+  y dérivait déjà à 23 u/s au démarrage, ce que les pas de temps de ce lot ont
+  réglé (« au démarrage, le vaisseau est posé » échouait là-bas, passe ici).
+
+**Quatre attentes périmées, préexistantes**, que le départ échouait aussi :
+
+- « émetteurs de son d'événement » : 22 à l'origine, 39 depuis que les docs
+  124, 128 et 129 ont étendu `EVENT_AUDIO` sans relever ce compte ;
+- « huit feux de camp » comptait les **neuf** émetteurs de rayonnement ; les
+  feux sont ceux de `radiationType` 1, et il y en a bien huit ;
+- le cran de course tactile et les boutons Monter/Descendre : masqués sans
+  combinaison depuis la doc 126 — le sac dorsal y est inerte. Le contrôle
+  mesure maintenant les deux états.

@@ -5382,6 +5382,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         Math.round(orbitalSpeed(12, 300, 0)));
   check("et le son est celui de la faible puissance",
         orbital.events.includes("ProbeLaunch_LowPower"), true);
+  // L'HORLOGE DE L'IMAGE (docs/132). Vingt sous-pas d'une MEME image, bouton
+  // tenu : une seconde de jeu, mais une seule lecture du bouton dans le build.
+  // Le rappel ne part pas ; il part a l'image suivante si le bouton tient.
+  {
+    const l = new Lanceur();
+    l.update(0.016, { launch: true }, { ...monde, horloge: 0 });
+    l.update(0.016, { launch: false }, { ...monde, horloge: 0.5 });
+    check("(horloge) la sonde part", l.active, 1);
+    for (let i = 0; i < 20; i++) l.update(0.05, { retrieve: true }, { ...monde, horloge: 2 });
+    check("vingt sous-pas d'une meme image ne la rappellent pas", l.active, 1);
+    l.update(0.05, { retrieve: true }, { ...monde, horloge: 3 });
+    check("l'image d'apres, toujours tenu, si", l.active, 0);
+  }
   // Un mur devant : le tir est refuse, et une seule fois.
   const bloque = new Lanceur();
   const mur = { ...monde, raycast: () => ({ point: [0, 0, 3], normal: [0, 0, -1] }) };

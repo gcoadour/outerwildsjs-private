@@ -523,12 +523,15 @@ export class ProbeLauncher {
     // La derniere photo prise : sa definition et le cote vise.
     this.lastSnapshot = null;
     this.now = 0;
+    // L'horloge des MINUTERIES : `Time.time` d'un `Update`, qui ne bouge
+    // qu'une fois par image. Voir `update`.
+    this.horloge = 0;
     // ce que le dernier pas a produit, pour que l'appelant le sonorise
     this.events = [];
   }
 
   get charge() {
-    return this.charging ? chargeFraction(this.now - this.chargeStart, this.cfg) : 0;
+    return this.charging ? chargeFraction(this.horloge - this.chargeStart, this.cfg) : 0;
   }
 
   get active() { return this.probe ? 1 : 0; }
@@ -559,6 +562,14 @@ export class ProbeLauncher {
    */
   update(dt, input = {}, monde = {}) {
     this.now += dt;
+    // `ProbeLauncher` est un `Update` : le bouton y est lu une fois par image,
+    // et la charge comme le rappel se mesurent en `Time.time` d'une image a
+    // l'autre. Un appui qui ne tient qu'UNE image ne rappelle donc jamais
+    // rien. Le moteur avance par sous-pas ; il passe l'horloge de l'image
+    // (`monde.horloge`) pour que la minuterie ne compte pas les sous-pas d'une
+    // meme image — sans quoi une pichenette tombee dans une image d'une
+    // seconde rappelait la sonde (docs/132).
+    this.horloge = Number.isFinite(monde.horloge) ? monde.horloge : this.now;
     this.events = [];
     const launchDown = !!input.launch && !this.launchWasDown;
     const launchUp = !input.launch && this.launchWasDown;
@@ -580,11 +591,11 @@ export class ProbeLauncher {
       // fait rien — ce qui laisse la touche libre pour autre chose.
       if (input.retrieve && !this.retrievePressed) {
         this.retrievePressed = true;
-        this.retrieveStart = this.now;
+        this.retrieveStart = this.horloge;
       } else if (!input.retrieve) {
         this.retrievePressed = false;
       }
-      if (this.retrievePressed && this.now > this.retrieveStart + this.cfg.retrieveHold) {
+      if (this.retrievePressed && this.horloge > this.retrieveStart + this.cfg.retrieveHold) {
         this.retrievePressed = false;
         this.probe = null;
         this.events.push("RetrieveProbe", "ProbeDestroyed");
@@ -599,7 +610,7 @@ export class ProbeLauncher {
           this.events.push("ProbeLaunchAborted");
         } else {
           this.charging = true;
-          this.chargeStart = this.now;
+          this.chargeStart = this.horloge;
         }
       }
     } else if (!input.launch) {
