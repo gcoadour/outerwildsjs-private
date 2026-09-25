@@ -54,6 +54,10 @@ CLASSES = {
     # capsule du joueur en porte un, qui dit s'il glisse sur une pente
     # (docs/132).
     134: "PhysicMaterial",
+    # 129 PlayerSettings : l'espace colorimetrique (`m_ActiveColorSpace`) et le
+    # chemin de rendu par defaut. Le premier decide si la lumiere s'additionne
+    # en gamma, comme les shaders « legacy », ou en lineaire (docs/132).
+    129: "PlayerSettings",
 }
 
 

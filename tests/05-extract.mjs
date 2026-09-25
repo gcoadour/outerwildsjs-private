@@ -1510,6 +1510,18 @@ check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
     check("PhysicMaterial lus au bit pres", exacts === n && n > 0, true);
     check("la capsule du joueur ne frotte pas", perso && perso.dynamicFriction, 0);
   }
+  // `PlayerSettings` : le projet est en GAMMA — l'eclairage s'additionne comme
+  // le calculent les shaders « legacy », ce que `toLegacyMaterials` reproduit —
+  // et en Deferred Lighting par defaut (docs/132).
+  {
+    const o = [...env.objects({ type: "PlayerSettings", file: "mainData" })][0];
+    const r = o.file.reader(o);
+    readTypeTree(r, engineTypes.classes.PlayerSettings, o.file);
+    check("PlayerSettings lu au bit pres", r.pos, o.byteSize);
+    const ps = inputCtx.readEngine(o);
+    check("espace colorimetrique : gamma", ps.m_ActiveColorSpace, 0);
+    check("chemin de rendu : Deferred Lighting", ps.m_RenderingPath, 2);
+  }
   const { extractTitre } = await import("../web/src/pipeline/extract/titre.js");
   const t = extractTitre(inputCtx, (nom) => nom);
   check("cinq options au menu-titre", t.menu.options.length, 5);

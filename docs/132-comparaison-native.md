@@ -361,3 +361,23 @@ la sonde, créé `hidden` mais dont la classe pose `display: flex` — une règl
 d'auteur l'emporte sur l'attribut. `#ui [hidden]` rend la main à l'attribut,
 et le vérificateur contrôle qu'aucun élément caché de l'interface ne se
 dessine.
+
+### La lumière qui reste, mesurée
+
+`PlayerSettings` (classe 129, lue au bit près) tranche une question que la
+conversion en `StandardMaterial` supposait : le projet est en **gamma**
+(`m_ActiveColorSpace` 0), et le chemin de rendu par défaut est le **Deferred
+Lighting** (`m_RenderingPath` 2). L'éclairage s'additionne donc bien comme
+le calcule le matériau standard.
+
+Il reste un écart, mesuré sur la scène fixe du réveil, recentrée : la tour
+sort à (48, 33, 17) dans l'alpha et à (37, 21, 8) dans le portage, un surplus
+presque neutre d'une dizaine de niveaux. Ce n'est pas le glow (le portage a
+le réveil du build, glow blanc à 3 qui retombe, puis `Awake` l'éteint), et
+doubler l'ambiance du secteur n'en rend que le tiers, sans la bonne teinte.
+Le passage du forward au Deferred Lighting d'Unity 4 (tampon de lumière,
+encodage, ambiance ajoutée en passe finale) est la piste ; elle ne se tranche
+pas sans le shader interne du moteur. Même écart sur l'écran-titre, où la
+planète sort plus sombre qu'avec les matériaux PBR d'avant — 6,9 de moyenne
+sur la zone du feu, 13,6 en PBR, 11,2 dans l'alpha, à un instant de rotation
+qui n'est pas exactement le même.
