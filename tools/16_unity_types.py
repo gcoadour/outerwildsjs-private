@@ -45,6 +45,11 @@ CLASSES = {
     # en hauteur relative a l'ecran -- l'unite que web/src/lod.js calcule deja.
     205: "LODGroup",
     199: "ParticleSystemRenderer", 212: "SpriteRenderer", 213: "Sprite",
+    # 131 GUITexture et 132 GUIText : l'ecran-titre de `mainData` n'est fait
+    # que de ca -- le logo, les cinq options du menu, et le menu des reglages.
+    # Sans elles, leur texte, leur ancre et leur decalage en pixels restaient
+    # a recopier a la main (docs/131-ecran-titre.md).
+    131: "GUITexture", 132: "GUIText",
 }
 
 

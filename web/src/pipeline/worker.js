@@ -29,6 +29,7 @@ import { extractCameras } from "./extract/camera.js";
 import { extractPrefabs, mergePrefabs } from "./extract/prefabs.js";
 import { extractInput } from "./extract/input.js";
 import { exportSubtree, findRoots, HELD_ROOTS } from "./extract/gltf.js";
+import { extractTitre } from "./extract/titre.js";
 import { encodeImage, imageExtension } from "./imaging.js";
 import { encodeOpus, opusAvailable } from "./audioenc.js";
 
@@ -369,6 +370,39 @@ async function run(blob, options) {
     await writeFile("data/components/maindata.json", JSON.stringify(mcomps));
     summary["objets de mainData"] = mscene.node_count;
     summary["monobehaviour de mainData"] = mcomps.count;
+
+    // L'ECRAN-TITRE, que le portage n'avait pas (docs/131-ecran-titre.md).
+    // Tout sort sous `data/titre/` : la scene a ses propres textures, sa
+    // propre musique, et des noms (« Light », « Flame ») qui heurteraient ceux
+    // du monde s'ils partageaient un dossier.
+    phase("titre", "Ecran-titre…");
+    try {
+      const titre = extractTitre(mctx, emitImage);
+      await drainImages("data/titre");
+      const tAudio = [];
+      titre.audio = extractAudio(mctx, (name, bytes) => tAudio.push({ name, bytes })).sources;
+      for (const { name, bytes } of tAudio) await writeFile(`data/titre/${name}`, bytes);
+      titre.lighting = extractLighting(mctx);
+      titre.particles = extractParticles(mctx, emitImage).systems;
+      await drainImages("data/titre");
+      if (options.geometry !== false) {
+        const [racine] = findRoots(mctx, titre.roots);
+        const res = racine && exportSubtree(mctx, racine.gid, "titre", {
+          emitImage, maxTexture: options.maxTexture || 512,
+        });
+        if (res) {
+          await writeFile("data/titre/titre.gltf", JSON.stringify(res.gltf));
+          await writeFile("data/titre/titre.bin", res.bin);
+          await drainImages("data/titre");
+          titre.gltf = "titre.gltf";
+        }
+      }
+      await writeFile("data/titre/titre.json", JSON.stringify(titre));
+      summary["options du menu-titre"] = titre.menu ? titre.menu.options.length : 0;
+    } catch (e) {
+      // Sans ecran-titre, le moteur part droit dans la partie, comme avant.
+      console.warn("ecran-titre non extrait :", e && e.message);
+    }
   } catch (e) {
     // Un fichier de demarrage illisible ne doit pas emporter l'extraction du
     // monde jouable, qui est deja ecrite a ce stade.

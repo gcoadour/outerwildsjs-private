@@ -73,6 +73,7 @@ export async function demarrer(page) {
     await page.waitForSelector("#gate-summary table", { timeout: 300000 });
   }
   await page.click("#gate-play");
+  await traverserTitre(page);
   await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
 }
 
@@ -102,4 +103,17 @@ export async function prechauffer(page, { seuilMs = 1000, suite = 5, maxMs = 240
     });
     return { ms: performance.now() - t0, stable: bonnes >= suite };
   }, { seuilMs, suite, maxMs });
+}
+
+/**
+ * Traverse l'ecran-titre comme un joueur : « New Expedition » est la ligne
+ * choisie a l'ouverture, et `Interact` (E) la valide. Sans titre extrait, le
+ * moteur part droit dans la partie et il n'y a rien a faire.
+ */
+export async function traverserTitre(page, touche = "KeyE") {
+  await page.waitForFunction(() => window.__titre || window.__ready === true,
+                             { timeout: 120000 });
+  if (await page.evaluate(() => window.__ready === true)) return false;
+  await page.keyboard.press(touche);
+  return true;
 }

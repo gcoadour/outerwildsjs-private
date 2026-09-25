@@ -10,6 +10,10 @@
 //
 //   node scripts/composants.mjs <Classe> [<Classe>...]
 //   node scripts/composants.mjs --regex <motif>
+//   node scripts/composants.mjs --scene mainData --regex .
+//
+// `--scene` lit une autre scene que `level0` : l'ecran-titre, par exemple, vit
+// dans `mainData` (le niveau 0 du jeu), avec les reglages du projet.
 
 import { readFileSync } from "node:fs";
 import { BUILD, haveBuild, loadEnv } from "../tests/run.mjs";
@@ -47,11 +51,14 @@ export async function instances(filtre, scene = "level0") {
 
 if (!haveBuild()) console.log("ignore : OW_BUILD ne pointe pas sur un build extrait.");
 else if (process.argv[1] && process.argv[1].endsWith("composants.mjs")) {
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
+  let scene = "level0";
+  const is = args.indexOf("--scene");
+  if (is >= 0) { scene = args[is + 1]; args = args.filter((_, i) => i !== is && i !== is + 1); }
   const filtre = args[0] === "--regex"
     ? ((cls) => new RegExp(args[1], "i").test(cls))
     : args;
-  const { ctx, out } = await instances(filtre);
+  const { ctx, out } = await instances(filtre, scene);
   for (const i of out) {
     console.log(`\n=== ${i.cls}  sur "${i.nom}" (go ${i.gid})`);
     console.log(JSON.stringify(ctx.plain(i.champs), null, 2));

@@ -68,7 +68,7 @@ const CROPS = {
 };
 
 /** Meme conversion que ColorHSV.ToColorRGB : teinte en degres, s et v en 0-1. */
-function hsvToHex(h, s, v) {
+export function hsvToHex(h, s, v) {
   const i = Math.floor((h % 360) / 60);
   const f = (h % 360) / 60 - i;
   const p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
@@ -214,9 +214,9 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
         { key: "flightSensitivity", label: "Flight Sensitivity: %d" },
         { key: "brightness", label: "Screen Brightness: %s", states: ["Normal", "Bright"] },
         { key: "shadows", label: "Shadows: %s", states: ["Off", "On"] },
-        // Verrouillee au menu principal dans le jeu ; ce portage n'en a pas,
-        // elle l'est donc toujours.
-        { key: "exit", label: "Exit to Main Menu", locked: true },
+        // Vide au menu-titre, « Exit to Main Menu » en partie : le moteur en
+        // decide selon le niveau (settings.js).
+        { key: "exit", label: "Exit to Main Menu" },
       ],
     },
     // MapMarker : l'icone n'est pas une texture mais un dessin —

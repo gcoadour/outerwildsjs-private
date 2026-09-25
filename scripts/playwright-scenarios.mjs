@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
-import { prechauffer } from "./pw-commun.mjs";
+import { prechauffer, traverserTitre } from "./pw-commun.mjs";
 
 const WEB_DIR = path.resolve("web");
 const ZIP_PATH = path.resolve("work/downloads/OuterWilds_Alpha_1_2_Linux.zip");
@@ -104,6 +104,7 @@ try {
   }
 
   await page.click("#gate-play");
+  await traverserTitre(page);
   await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
   // Le reveil se mesure A LA PREMIERE IMAGE : il se deroule en sept secondes,
   // et le prechauffage des shaders en dure bien plus sans GPU.
@@ -162,12 +163,30 @@ try {
   const distWalk = Math.hypot(pos1.x - pos0.x, pos1.y - pos0.y, pos1.z - pos0.z);
   assert("Le joueur se deplace en marchant (Z/W)", distWalk > 0.5, `dist=${distWalk.toFixed(2)}m`);
 
-  // Jump with Space
-  const vy0 = await page.evaluate(() => window.__player.vel.y);
-  await page.keyboard.press("Space");
-  await page.waitForTimeout(50);
-  const vy1 = await page.evaluate(() => window.__player.vel.y);
-  assert("Le saut applique une impulsion", vy1 > vy0 || Math.abs(vy1 - vy0) > 0.1);
+  // Saut : la plus forte vitesse le long de la verticale LOCALE (l'oppose du
+  // champ), relevee a CHAQUE pas du joueur — une image dure ici pres d'une
+  // seconde, et l'arc du saut tient dans deux ou trois.
+  await page.waitForFunction(() => window.__player.grounded, { timeout: 15000 }).catch(() => {});
+  await page.evaluate(() => {
+    const p = window.__player;
+    window.__vMax = -Infinity;
+    const orig = p.update.bind(p);
+    p.update = (...a) => {
+      const r = orig(...a);
+      const d = p.field && p.field.dir;
+      if (d) window.__vMax = Math.max(window.__vMax, -(p.vel.x * d.x + p.vel.y * d.y + p.vel.z * d.z));
+      return r;
+    };
+  });
+  await page.keyboard.down("Space");
+  await page.evaluate(() => new Promise((r) => {
+    const sc = BABYLON.EngineStore.LastCreatedScene; let n = 0;
+    const o = sc.onAfterRenderObservable.add(() => { if (++n >= 2) { sc.onAfterRenderObservable.remove(o); r(); } });
+  }));
+  await page.keyboard.up("Space");
+  const vSaut = await page.evaluate(() => window.__vMax);
+  const jumpSpeed = await page.evaluate(() => window.__player.c.jumpSpeed);
+  assert("Le saut applique une impulsion", vSaut > jumpSpeed * 0.8, `v=${vSaut.toFixed(2)} jumpSpeed=${jumpSpeed}`);
 
   // ==========================================
   // SCENARIO 4: BATON DE GUIMAUVE & SOIN
@@ -187,11 +206,16 @@ try {
   assert("Baton resorti", stickBack === true);
 
   // Marshmallow heat & toast
-  await page.evaluate(() => {
-    window.__consoles.marshmallow.held = true;
-    window.__consoles.marshmallow.update(0.5, 50); // heat 50 for 0.5s
+  // Une guimauve NEUVE : au reveil, baton sorti pres du feu, elle grille
+  // toute seule, et pendant le prechauffage des shaders elle a eu le temps de
+  // bruler et de revenir. On mesure dans la meme image que la remise a zero.
+  const toastLevel = await page.evaluate(() => {
+    const m = window.__consoles.marshmallow;
+    m.gone = false; m.goneFor = 0; m.toast = 0;
+    m.held = true;
+    m.update(0.5, 50); // heat 50 for 0.5s
+    return m.toast;
   });
-  const toastLevel = await page.evaluate(() => window.__consoles.marshmallow.toast);
   assert("La guimauve grille a la chaleur", toastLevel > 0, `toast=${toastLevel.toFixed(2)}`);
 
   // Hurt player slightly and eat marshmallow to heal (tested with E/Interact key)

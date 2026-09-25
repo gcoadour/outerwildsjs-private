@@ -23,6 +23,39 @@ export async function loadParticleMap() {
   }
 }
 
+/**
+ * Le prechauffage d'Unity, en cycles de Babylon.
+ *
+ * `ParticleSystem.prewarm` : un systeme EN BOUCLE demarre « comme s'il avait
+ * deja accompli un cycle entier » — donc `duration` secondes de simulation,
+ * pas une duree de vie. Babylon prechauffe par pas de
+ * `updateSpeed x preWarmStepOffset` ; on en compte assez pour couvrir la
+ * duree. Rien pour un systeme qui ne boucle pas, comme dans Unity.
+ */
+export function prewarmCycles(s, updateSpeed = 0.016, stepOffset = 5) {
+  if (!s || !s.prewarm || !s.looping || !(s.duration > 0)) return 0;
+  return Math.ceil(s.duration / (updateSpeed * stepOffset));
+}
+
+/**
+ * `SizeModule` d'Unity en gradients de Babylon.
+ *
+ * LA COURBE D'UNITY MULTIPLIE, LE GRADIENT DE BABYLON REMPLACE. Dans Unity la
+ * taille d'une particule vaut `startSize x courbe(age)` ; dans Babylon, des
+ * qu'un gradient de taille existe, c'est LUI qui donne la taille, et
+ * `minSize`/`maxSize` ne comptent plus. Le portage passait la courbe telle
+ * quelle : la colonne de fumee de l'ecran-titre — 30 a 60 unites au depart,
+ * courbe de 0,12 a 0,58 — sortait a trois dixiemes d'unite, et toutes les
+ * fumees, flammes et poussieres du monde a la meme echelle. Mesure dans le
+ * navigateur (docs/131-ecran-titre.md).
+ *
+ * @returns [[t, taille basse, taille haute]]
+ */
+export function sizeGradients(s, smin, smax) {
+  if (!s || !s.sizeOverLife || s.sizeOverLife.length < 2) return [];
+  return s.sizeOverLife.map(([t, v]) => [t, v * smin, v * smax]);
+}
+
 /** Rayon d'influence approximatif : de quoi decider quand instancier. */
 function reach(s) {
   const shape = (s.shape && s.shape.radius) || 0;
@@ -31,8 +64,10 @@ function reach(s) {
 }
 
 export class ParticleField {
-  constructor(BABYLON, scene, systems) {
+  /** @param dir le dossier des textures : l'ecran-titre a le sien */
+  constructor(BABYLON, scene, systems, dir = "data/particles/") {
     this.B = BABYLON;
+    this.dir = dir;
     this.scene = scene;
     this.systems = systems;
     this.live = new Map();
@@ -45,7 +80,7 @@ export class ParticleField {
     if (!this.textures.has(file)) {
       try {
         this.textures.set(file,
-          new this.B.Texture(`data/particles/${file}`, this.scene));
+          new this.B.Texture(`${this.dir}${file}`, this.scene));
       } catch (e) {
         this.textures.set(file, null);
       }
@@ -205,9 +240,7 @@ export class ParticleField {
     };
     const [smin, smax] = range(s.sizeRange, s.size || 1, 0.01);
     ps.minSize = smin; ps.maxSize = smax;
-    if (s.sizeOverLife && s.sizeOverLife.length > 1) {
-      for (const [t, v] of s.sizeOverLife) ps.addSizeGradient(t, v, v);
-    }
+    for (const [t, lo, hi] of sizeGradients(s, smin, smax)) ps.addSizeGradient(t, lo, hi);
     if (s.rotationSpeed) {
       ps.minAngularSpeed = -s.rotationSpeed;
       ps.maxAngularSpeed = s.rotationSpeed;
@@ -251,6 +284,8 @@ export class ParticleField {
     const [vmin, vmax] = range(s.speedRange, s.startSpeed || 0, 0);
     ps.minEmitPower = vmin; ps.maxEmitPower = vmax;
     ps.updateSpeed = 0.016 * (s.speedScale || 1);
+    const cycles = prewarmCycles(s, 0.016);
+    if (cycles) { ps.preWarmStepOffset = 5; ps.preWarmCycles = cycles; }
 
     const sh = s.shape || { type: "sphere", radius: 1 };
     const r2 = Math.max(0.01, sh.radius || 1);

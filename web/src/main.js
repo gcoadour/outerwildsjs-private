@@ -28,6 +28,7 @@ import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI, MenuInput } from "./settings.js";
+import { loadTitre, TitleScreen, SKIP_INTRO_FLAGS } from "./titre.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
@@ -169,8 +170,105 @@ function setStatus(msg) {
   if (el) el.textContent = msg;
 }
 
+/**
+ * `SettingsMenu.ToggleOption`, septieme option en partie : `LoadLevel(0)`.
+ *
+ * Recharger la page EST recharger le niveau 0 : tout ce qui doit survivre —
+ * la sauvegarde, les reglages — est deja dans le stockage du navigateur. La
+ * marque de session dit a la page de repartir droit sur l'ecran-titre, sans
+ * repasser par l'accueil (gate.js).
+ */
+function retourAuTitre() {
+  try { sessionStorage.setItem("outerwildsjs.titre", "1"); } catch (e) { /* */ }
+  location.reload();
+}
+
+/**
+ * L'ecran-titre, jusqu'au choix du joueur.
+ *
+ * @returns { ecran, choix } — ou null sans donnees de titre
+ */
+async function ecranTitre(BABYLON, engine, cmds) {
+  const donnees = await loadTitre();
+  if (!donnees || !donnees.menu) return null;
+  const ecran = new TitleScreen(BABYLON, engine, donnees, {
+    cmds,
+    // `PlayerData.LoadLoopCount` : ce que dit le DISQUE, avant tout choix.
+    loopCount: new PlayerData().loopCount,
+  });
+  window.__titre = ecran;
+  ecran.scene.registerBeforeRender(() => ecran.avancer());
+  engine.runRenderLoop(ecran.rendu);
+  ecran.jouerMusique();
+  ecran.chargerGeometrie(ParticleField, applyGameShaders);
+
+  // Les reglages ouverts DEPUIS le titre : le meme `SettingsMenu`, au niveau 0.
+  const iface = await loadInterface();
+  const uiRoot = document.getElementById("ui");
+  const reglages = new Settings(iface || {}, { niveau: 0 });
+  const retour = () => { if (!reglages.open) ecran.rouvrir(); };
+  const reglagesUI = uiRoot
+    ? new SettingsUI(uiRoot, reglages, "data/interface/", { onPick: () => retour() })
+    : null;
+  const menuInput = new MenuInput();
+  ecran.onSettings = () => {
+    reglages.ouvre();
+    menuInput.reouvre(true);
+    if (reglagesUI) reglagesUI.render();
+  };
+  const clavier = (e) => {
+    if (!reglages.open) return;
+    const canal = (nom) => {
+      const c = cmds.get(nom);
+      return c ? { pos: c.pos.codes.includes(e.code), neg: c.neg.codes.includes(e.code) } : {};
+    };
+    if (canal("Cancel").pos || e.code === "Escape") {
+      // `Menu.Update` : `cancel` ferme, et rouvre le parent.
+      reglages.ferme();
+    } else {
+      const z = canal("Move Z"), x = canal("Move X");
+      const dz = z.pos || e.code === "ArrowUp" ? 1 : z.neg || e.code === "ArrowDown" ? -1 : 0;
+      const dx = x.pos || e.code === "ArrowRight" ? 1 : x.neg || e.code === "ArrowLeft" ? -1 : 0;
+      const verrou = !!(reglages.options[reglages.index] || {}).locked;
+      const g = menuInput.axes(performance.now() / 1000, dz, dx, verrou);
+      if (g.move) reglages.move(g.move);
+      if (g.toggle) reglages.toggle(g.toggle);
+      if (!e.repeat && (canal("Interact").pos || canal("Jump").pos)) reglages.toggle(0);
+    }
+    if (reglagesUI) reglagesUI.render();
+    retour();
+  };
+  addEventListener("keydown", clavier);
+
+  const choix = await ecran.choix;
+  removeEventListener("keydown", clavier);
+  if (reglagesUI) reglagesUI.el.remove();
+  if (choix.quit) {
+    // `Application.Quit` : une page ne se ferme pas elle-meme. On revient a
+    // l'accueil, qui est ce qu'il y a « hors du jeu » ici.
+    location.reload();
+    return new Promise(() => {});
+  }
+  return { ecran, choix };
+}
+
 async function boot() {
   const BABYLON = window.BABYLON;
+  const canvas = document.getElementById("view");
+  // audioEngine: true est indispensable — depuis Babylon 8 le moteur audio
+  // herite n'est plus cree automatiquement, et BABYLON.Sound ne telecharge
+  // alors aucun fichier, sans lever d'erreur.
+  const engine = new BABYLON.Engine(canvas, true,
+    { stencil: true, audioEngine: true }, true);
+  addEventListener("resize", () => engine.resize());
+  // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
+  // prend le relais — et elle se sait repli, comme `config.js`.
+  const cmds = await loadCommandes();
+  // LE NIVEAU 0 AVANT LE NIVEAU 1. L'ecran-titre tourne, on choisit, et la
+  // partie se charge DERRIERE lui — `LoadLevelAsync` — pendant que « Loading... »
+  // reste affiche (docs/131-ecran-titre.md). Sans `data/titre/`, on entre droit
+  // dans la partie, comme le portage l'a toujours fait.
+  const titre = await ecranTitre(BABYLON, engine, cmds);
   const data = await loadSolarSystem();
   // charge avant le calcul du point d'apparition, qui s'appuie dessus
   const gameplay = await loadGameplay();
@@ -185,12 +283,6 @@ async function boot() {
   const bodies = data.bodies;
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
-  const canvas = document.getElementById("view");
-  // audioEngine: true est indispensable — depuis Babylon 8 le moteur audio
-  // herite n'est plus cree automatiquement, et BABYLON.Sound ne telecharge
-  // alors aucun fichier, sans lever d'erreur.
-  const engine = new BABYLON.Engine(canvas, true,
-    { stencil: true, audioEngine: true }, true);
   const scene = new BABYLON.Scene(canvas ? engine : engine);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
 
@@ -259,9 +351,6 @@ async function boot() {
   // simplement pas au jeu — c'est le genre d'ecart qu'une capture ne trahit
   // pas, faute de point de comparaison dans l'image.
   const camerasDuBuild = await loadCameras();
-  // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
-  // prend le relais — et elle se sait repli, comme `config.js`.
-  const cmds = await loadCommandes();
   // §K Le jeu de commandes actif. `OWInput` en echange l'ensemble a chaque
   // changement de mode, et tout ce qui lit une touche passe par lui
   // (docs/70-modes.md).
@@ -472,17 +561,23 @@ async function boot() {
     console.warn("Contexte WebGL restaure");
   }, false);
   engine.runRenderLoop(() => {
+    // Tant que la partie se charge, c'est l'ecran-titre qu'on voit.
+    if (titre && !titre.ecran.fini) return;
     try {
       scene.render();
     } catch (e) {
       console.warn("Erreur render loop interceptee :", e);
     }
   });
-  addEventListener("resize", () => engine.resize());
 
   // --- geometrie reelle et physique ---
   const dialogue = new DialogueSystem(await loadDialogue());
   const pdata = new PlayerData();
+  // `TriggerLoad(newSave, skipIntro)` : New Expedition et Skip Intro repartent
+  // d'une sauvegarde neuve ; Resume Expedition garde celle du disque.
+  if (titre && titre.choix.newSave) {
+    pdata.nouvelleSauvegarde(titre.choix.skipIntro, SKIP_INTRO_FLAGS);
+  }
   window.__pdata = pdata;
   window.__dialogue = dialogue;
   // §V La boucle qui commence est la suivante : `OnStartOfTimeLoop` la recoit
@@ -1418,7 +1513,8 @@ async function boot() {
   const menuInput = new MenuInput();
   const settingsUI = uiRoot
     ? new SettingsUI(uiRoot, settings, "data/interface/",
-                     { onPick: () => applySettings() }) : null;
+                     { onPick: (r) => { applySettings(); if (r === "exit") retourAuTitre(); } })
+    : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   const flashlight = new Flashlight(BABYLON, scene);
@@ -2448,6 +2544,12 @@ async function boot() {
   // toiles et les regards poses dans la scene — une collision de nom qui a
   // fait tomber un controle sans rapport.
   window.__regardCam = () => ({ yaw, pitch });
+  // Le niveau 1 est pret : `AsyncOperation.allowSceneActivation`. Le titre
+  // s'efface, la partie prend l'ecran.
+  if (titre) {
+    engine.stopRenderLoop(titre.ecran.rendu);
+    titre.ecran.dispose();
+  }
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal
@@ -2817,7 +2919,9 @@ async function boot() {
         // puis recharge la scene. Ici la scene ne se recharge pas — on la
         // remet a son etat de depart, ce que la boucle sait deja faire — mais
         // `PlayerData` repart bien de zero, savoirs et exploration compris.
-        if (settings.toggle(0) === "newGame") {
+        const choisi = settings.toggle(0);
+        if (choisi === "exit") retourAuTitre();
+        if (choisi === "newGame") {
           pdata.wipe();
           respawn();
           // `ResetSimulation` en DERNIER : `respawn` fait un `restart`, qui

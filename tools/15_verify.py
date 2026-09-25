@@ -496,6 +496,16 @@ def _run(url, heavy, profil=None, zip_path=None):
                       "  Sans build, il n'y a pas de moteur a verifier.")
                 browser.close()
                 sys.exit(2)
+        # L'ecran-titre d'abord (docs/131-ecran-titre.md) : « New Expedition »
+        # est la ligne choisie a l'ouverture, `Interact` (E) la valide. Sans
+        # titre extrait, le moteur part droit dans la partie.
+        page.wait_for_function("window.__titre || window.__ready===true", timeout=300000)
+        if not page.evaluate("window.__ready===true"):
+            titre = page.evaluate("""() => ({
+              options: window.__titre.lignes.map((l) => l.textContent),
+              verrous: window.__titre.menu.locked })""")
+            rep.eq("cinq lignes au menu-titre", len(titre["options"]), 5)
+            page.keyboard.press("KeyE")
         page.wait_for_function("window.__ready===true", timeout=300000)
         page.wait_for_timeout(3000)
 

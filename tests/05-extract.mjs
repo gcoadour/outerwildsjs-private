@@ -1434,6 +1434,41 @@ check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
 // `decoupeImage` (input.js) prend pour borne, et le repli doit la dire aussi.
 check("le pas maximal d'une image", inp.maxTimestep, 1);
 check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
+
+// A12 : L'ECRAN-TITRE, dans la scene de `mainData` (docs/131-ecran-titre.md).
+// `GUIText` et `GUITexture` n'avaient pas de structure : l'oracle d'abord.
+{
+  const { readTypeTree } = await import("../web/src/pipeline/unity/typetree.js");
+  for (const type of ["GUIText", "GUITexture"]) {
+    let n = 0, exacts = 0;
+    for (const o of env.objects({ type, file: "mainData" })) {
+      n++;
+      const r = o.file.reader(o);
+      readTypeTree(r, engineTypes.classes[type], o.file);
+      if (r.pos === o.byteSize) exacts++;
+    }
+    check(`${type} de mainData lus au bit pres`, `${exacts}/${n}`,
+          type === "GUIText" ? "13/13" : "2/2");
+  }
+  const { extractTitre } = await import("../web/src/pipeline/extract/titre.js");
+  const t = extractTitre(inputCtx, (nom) => nom);
+  check("cinq options au menu-titre", t.menu.options.length, 5);
+  check("dans l'ordre de `_menuOptions`", t.menu.options.map((o) => o.text).join("|"),
+        "New Expedition|Resume Expedition|Skip Intro|Settings|Exit Game");
+  check("ancrees en bas a gauche", t.menu.options.every((o) => o.anchor === "LowerLeft"), true);
+  check("par pas de 60 pixels", t.menu.options.map((o) => o.pixelOffset[1]).join(","),
+        "240,180,120,60,0");
+  check("en corps 40", t.menu.options.every((o) => o.fontSize === 40), true);
+  check("au point d'ecran (0,05 ; 0,09)", t.menu.options[0].position.join(","), "0.05,0.09");
+  check("Loading... en HSV(104 ; 0,7 ; 0,7)", t.menu.colors.loading, "#57B336");
+  check("la camera du titre voit a 70 degres", t.camera.fov, 70);
+  check("sur la voute", t.camera.clear, "skybox");
+  check("deux RotateTransform", t.rotations.length, 2);
+  check("le logo : un encart de 385,73 x 212 pixels",
+        t.logo.pixelInset.slice(2).join("x"), "385.73x212");
+  check("six faces de voute", Object.keys(t.skybox.faces).length, 6);
+  check("la teinte de la voute", t.skybox.tint[0], 0.47059);
+}
 // Zero, et ce n'est pas un oubli : chaque corps porte son champ.
 check("la gravite de Unity est nulle", (inp.gravity || []).join(","), "0,0,0");
 check("sept iterations de solveur", inp.solverIterations, 7);

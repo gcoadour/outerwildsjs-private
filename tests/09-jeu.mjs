@@ -87,6 +87,9 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
+import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
+         placeGuiText, placeGuiTexture, guiTint, attenuationUnity } from "../web/src/titre.js";
+import { prewarmCycles, sizeGradients } from "../web/src/particles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
@@ -7852,5 +7855,83 @@ check("SwiftShader (14 blocs) : dix lumieres", lightCap(14), 10);
 check("ANGLE sur Direct3D 11 (12 blocs) : huit", lightCap(12), 8);
 check("sans mesure, la valeur par defaut de Babylon", lightCap(0), 4);
 check("jamais sous quatre", lightCap(6), 4);
+
+// L'ECRAN-TITRE (titre.js, docs/131-ecran-titre.md).
+{
+  // `TitleScreenMenu.Start` : « Resume » verrouillee sous deux boucles.
+  const neuf = new TitleMenu(5, 0);
+  check("partie neuve : Resume Expedition verrouillee", neuf.locked[1], true);
+  check("une boucle ne suffit pas", new TitleMenu(5, 1).locked[1], true);
+  check("deux boucles la deverrouillent", new TitleMenu(5, 2).locked[1], false);
+  // `Menu.Update` : la navigation saute la ligne verrouillee.
+  neuf.move(1);
+  check("descendre depuis New Expedition saute Resume", neuf.index, 2);
+  neuf.move(-1);
+  check("et remonter la saute aussi", neuf.index, 0);
+  neuf.move(-1);
+  check("en anneau : au-dessus de la premiere, la derniere", neuf.index, 4);
+  // Le survol pose l'index sans regarder le verrou ; valider, non.
+  neuf.hover(1);
+  check("la souris peut viser Resume grisee", neuf.index, 1);
+  check("mais pas la valider", neuf.validate(), null);
+  check("la ligne visee et verrouillee se peint verrouillee", neuf.state(1), "locked");
+  neuf.hover(2);
+  const skip = neuf.validate();
+  check("Skip Intro : nouvelle sauvegarde", skip.newSave, true);
+  check("et l'introduction sautee", skip.skipIntro, true);
+  check("apres le choix, plus rien ne bouge", (neuf.move(1), neuf.index), 2);
+  check("New Expedition ne saute rien", TITLE_ACTIONS[0].skipIntro, false);
+  check("Resume garde la sauvegarde", TITLE_ACTIONS[1].newSave, false);
+  check("Settings ouvre les reglages", TITLE_ACTIONS[3].settings, true);
+  check("cinq savoirs accordes par Skip Intro", SKIP_INTRO_FLAGS.length, 5);
+  // Les quatre horloges de `Menu` : 0,2 s entre deux pas du meme sens.
+  const h = { haut: -Infinity, bas: -Infinity };
+  check("premier pas vers le bas", titleStep(h, 10, -1), 1);
+  check("un second trop tot ne passe pas", titleStep(h, 10.1, -1), 0);
+  check("il passe apres 0,2 s", titleStep(h, 10.25, -1), 1);
+  check("sous le seuil de 0,2, rien", titleStep(h, 20, 0.1), 0);
+  // Les deux `RotateTransform` de la scene, tels que le build les pose.
+  const r = repereDuTitre([
+    { name: "PlanetPivot", worldAxis: [0, -1, 0], degreesPerSecond: -1, ancestors: ["Root"] },
+    { name: "Root", worldAxis: [0, 1, 0], degreesPerSecond: 1, ancestors: [] },
+  ]);
+  check("les deux axes sont paralleles", r.parallel, true);
+  check("dans le repere de la planete, la camera tourne a -1 deg/s", r.camera, -1);
+  check("et la voute a -2 deg/s", r.sky, -2);
+  // Placement des GUIText (LowerLeft) et de la GUITexture du logo, 1280 x 720.
+  const ne = placeGuiText({ position: [0.05, 0.09], pixelOffset: [0, 240],
+                            anchor: "LowerLeft" }, 1280, 720);
+  check("New Expedition a 64 px du bord gauche", ne.left, 64);
+  check("et son bas a 415,2 px du haut", Math.abs(ne.top - 415.2) < 1e-9, true);
+  check("ancre LowerLeft : le texte monte au-dessus du point", ne.ty, -100);
+  const lg = placeGuiTexture({ position: [0, 0.98], pixelInset: [41.33, -235.3, 385.73, 212] },
+                             1280, 720);
+  check("le logo a 41,33 px du bord", lg.left, 41.33);
+  check("et a 37,7 px du haut", Math.abs(lg.top - 37.7) < 1e-9, true);
+  check("teinte de GUITexture : deux fois m_Color",
+        guiTint([0.12208, 0.24314, 0.07914, 1]).map((v) => v.toFixed(4)).join(","),
+        "0.2442,0.4863,0.1583");
+  // Le prechauffage : un cycle de `duration`, pour un systeme en boucle seul.
+  check("TallSmoke prechauffe cinq secondes", prewarmCycles(
+    { prewarm: true, looping: true, duration: 5 }) * 0.016 * 5 >= 5, true);
+  check("pas de prechauffage sans le drapeau", prewarmCycles(
+    { prewarm: false, looping: true, duration: 5 }), 0);
+  check("ni pour un systeme qui ne boucle pas", prewarmCycles(
+    { prewarm: true, looping: false, duration: 5 }), 0);
+}
+
+// `SizeModule` : la courbe MULTIPLIE la taille initiale (particles.js).
+{
+  const g = sizeGradients({ sizeOverLife: [[0, 0.12121], [1, 0.57944]] }, 30, 60);
+  check("TallSmoke nait entre 3,6 et 7,3 unites",
+        g[0].slice(1).map((v) => v.toFixed(1)).join("-"), "3.6-7.3");
+  check("et finit entre 17 et 35", g[1].slice(1).map((v) => v.toFixed(0)).join("-"), "17-35");
+  check("sans courbe, pas de gradient", sizeGradients({ sizeOverLife: null }, 1, 2).length, 0);
+}
+
+// L'attenuation d'Unity 4 et le x2 des shaders legacy (titre.js).
+check("au pied de la lumiere, deux fois sa couleur", attenuationUnity(0, 10), 2);
+check("a la moitie de la portee, 2/7,25", attenuationUnity(5, 10).toFixed(4), "0.2759");
+check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
 
 report();

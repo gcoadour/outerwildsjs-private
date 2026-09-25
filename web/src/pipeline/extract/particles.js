@@ -180,6 +180,10 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
       name: ctx.name(gid),
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
       looping: !!d.looping,
+      // `prewarm` : un systeme en boucle part comme s'il avait deja fait un
+      // cycle entier. C'est ce qui fait qu'une colonne de fumee est la des la
+      // premiere image, et non trente secondes plus tard.
+      prewarm: !!d.prewarm,
       playOnAwake: !!d.playOnAwake,
       duration: round(d.lengthInSec ?? 5, 3),
       speedScale: round(d.speed ?? 1, 3),

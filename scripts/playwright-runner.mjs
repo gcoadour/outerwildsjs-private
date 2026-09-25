@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
+import { traverserTitre } from "./pw-commun.mjs";
 
 const WEB_DIR = path.resolve("web");
 const ZIP_PATH = path.resolve("work/downloads/OuterWilds_Alpha_1_2_Linux.zip");
@@ -102,6 +103,7 @@ try {
   // Click play button
   console.log("Clicking play button...");
   await page.click("#gate-play");
+  await traverserTitre(page);
 
   // Wait for game to initialize (window.__ready === true)
   console.log("Waiting for window.__ready...");

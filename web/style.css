@@ -689,3 +689,21 @@ body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
   border-bottom: 5px solid transparent;
   transform: translateY(50%);
 }
+
+/* Ecran-titre : le logo (une GUITexture teintee) et les cinq GUIText du menu.
+   Les positions sont calculees en pixels par titre.js, depuis le build. */
+.ow-titre {
+  position: fixed; inset: 0; z-index: 8; pointer-events: none;
+  font-family: "OW Menu", "OW Dialogue", serif;
+}
+.ow-titre-logo {
+  position: absolute;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+.ow-titre-option {
+  position: absolute; white-space: nowrap; line-height: 1;
+  pointer-events: auto; cursor: pointer; user-select: none;
+}
+/* Pendant le titre, rien de la partie : ni l'aide, ni les commandes tactiles. */
+body.titre #hud, body.titre #touch, body.titre #touchui { display: none; }
