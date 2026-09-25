@@ -396,3 +396,25 @@ glTF n'en disait rien. L'exporteur écrit maintenant `KHR_texture_transform`
 sur la texture de base et la carte de normales (`textureTransform`, dans le
 repère aux UV retournées : décalage `1 − s − o`), que le chargeur de Babylon
 lit.
+
+## Parler, en regardant
+
+Dans l'alpha, un pas de côté pour mettre le réticule sur le Rocket Scientist,
+près du feu, puis la touche E : rien. Ni invite, ni conversation. Dans le
+portage non plus — mais pour une autre raison, et c'est elle qui comptait.
+
+`FirstPersonManipulator.LateUpdate` lance un rayon de **dix unités** depuis
+la caméra, sur le masque d'interaction ; le collider touché passe son
+`RaycastHit` à `InteractReceiver.Observe`, qui n'accepte que si
+`hit.distance <= _interactRange` — **deux unités** pour les personnages, dont
+la capsule fait 0,5 de rayon. On parle à quelqu'un en le regardant, à deux pas.
+L'alpha refusait parce qu'on était à quatre mètres.
+
+Le portage, lui, ouvrait la conversation la plus proche à six mètres du centre
+de la zone, de dos s'il le fallait, et prenait les autres récepteurs par
+proximité dans un cône. L'extracteur sort maintenant le collider des
+`InteractReceiver` (`volume`, `rotation`), `rayonVolume` (interact.js) touche
+sphère, capsule et boîte orientée, et le focus d'un récepteur vise depuis
+l'œil. Mesuré dans la page : placé à 2,2 m, la conversation ne s'ouvre que
+dans une direction sur trente-deux, celle du personnage ; à 4,5 m, jamais. La
+proximité reste le repli d'une extraction ancienne, sans colliders.

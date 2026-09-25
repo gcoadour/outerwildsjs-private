@@ -190,7 +190,10 @@ const WANT_VOLUME = new RegExp([
   // `HatchController.OnEntry` est un declencheur, et son rayon est celui du
   // collider de « HatchControls » : c'est lui qui dit quand la trappe se
   // referme derriere vous (docs/116-trappe.md).
-  "|LaunchTerminal|LaunchElevatorController|HatchController)$",
+  "|LaunchTerminal|LaunchElevatorController|HatchController",
+  // `FirstPersonManipulator` vise le collider de l'`InteractReceiver` : c'est
+  // la capsule d'un personnage qu'on regarde pour lui parler (docs/132).
+  "|InteractReceiver)$",
 ].join(""), "i");
 
 /**

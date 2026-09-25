@@ -79,7 +79,7 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
-import { Interactables } from "../web/src/interact.js";
+import { Interactables, rayonVolume, RAYON_VISEE } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
          ALIGN, slerpRate, steadyPitch, steadyLook, UpAligner,
@@ -8075,6 +8075,30 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("on cache le premier seul", hideDisabledRenderers([eteint, allume]), 1);
   check("... et le LOD ne le rallume pas", eteint.__lodPinned, true);
   check("l'autre reste visible", allume.isVisible, true);
+}
+
+// On parle a qui l'on regarde : rayon de dix unites, puis `_interactRange`
+// du point touche (docs/132).
+{
+  const capsule = { shape: "capsule", radius: 0.5, height: 2, axis: 1, center: [0, 0, 0] };
+  const o = [0, 0, -3], d = [0, 0, 1];
+  check("la capsule en face est touchee a 2,5", +rayonVolume(o, d, [0, 0, 0], null, capsule).toFixed(2), 2.5);
+  check("a cote, rien", rayonVolume([2, 0, -3], d, [0, 0, 0], null, capsule), null);
+  check("le haut de la capsule se touche aussi (3 - racine de 0,09)", +rayonVolume([0, 0.9, -3], d, [0, 0, 0], null, capsule).toFixed(2), 2.7);
+  check("une sphere", +rayonVolume(o, d, [0, 0, 0], null, { shape: "sphere", radius: 1 }).toFixed(2), 2);
+  check("une boite tournee de 90 degres sur Y",
+        +rayonVolume(o, d, [0, 0, 0], [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+                     { shape: "box", size: [4, 1, 1] }).toFixed(2), 1);
+  check("derriere l'oeil, rien", rayonVolume([0, 0, 3], d, [0, 0, 0], null, capsule), null);
+  check("la portee du rayon du build", RAYON_VISEE, 10);
+  const gp = { placed: { InteractReceiver: [
+    { name: "ConversationZone", position: [0, 0, 0], fields: { _prompt: "Talk", _interactRange: 2 },
+      volume: capsule } ] } };
+  const it = new Interactables(gp);
+  const regard = (z, x = 0) => it.focus({ x, y: 0, z }, [0, 0, 0], { x: 0, y: 0, z: 1 }, null, { x, y: 0, z });
+  check("a deux pas, en le regardant : on lui parle", regard(-2.4) && regard(-2.4).prompt, "Talk");
+  check("a quatre metres, non : `_interactRange` vaut 2", regard(-4), null);
+  check("a cote de lui, sans le regarder, non plus", regard(-2, 1.5), null);
 }
 
 // La repetition des textures, dans le repere retourne du glTF (docs/132).

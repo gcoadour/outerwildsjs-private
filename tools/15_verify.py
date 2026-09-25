@@ -2123,7 +2123,12 @@ def _run(url, heavy, profil=None, zip_path=None):
         # dans la carte, et les trois canaux de vol du build ne pilotaient rien.
         page.mouse.move(640, 360)
         page.mouse.down(button="left"); page.mouse.up(button="left")
-        page.wait_for_timeout(600)
+        try:
+            page.wait_for_function(
+                "() => window.__visee.current !== null && Math.round(window.__visee.bracket * 100) === 0",
+                timeout=5000)
+        except Exception:
+            pass
         visee = page.evaluate("""() => { const l = window.__visee;
           return { cible: l.current ? l.current.name : null,
                    crochets: Math.round(l.bracket * 100) / 100,
@@ -2134,7 +2139,16 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("et la carte tient la meme cible", visee["carte"], visee["cible"])
         rep.eq("les crochets se sont fermes", visee["crochets"], 0)
         page.mouse.down(button="left"); page.mouse.up(button="left")
-        page.wait_for_timeout(600)
+        # On ATTEND l'etat, au lieu de six dixiemes fixes : depuis que le
+        # systeme entier est charge (docs/132), une image logicielle peut
+        # depasser ce delai, et le controle echouait une fois sur trois sans
+        # rien mesurer. Les crochets se rouvrent en fondu : on laisse le temps.
+        try:
+            page.wait_for_function(
+                "() => window.__visee.current === null && Math.round(window.__visee.bracket) === 1",
+                timeout=5000)
+        except Exception:
+            pass
         rep.eq("un second clic la relache",
                page.evaluate("() => window.__visee.current"), None)
         rep.eq("et les crochets se rouvrent",

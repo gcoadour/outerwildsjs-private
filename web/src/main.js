@@ -284,6 +284,12 @@ async function boot() {
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
   window.__interactables = interactables;   // sonde : les trente-quatre lisibles
+  // Les recepteurs se visent au rayon quand l'extraction porte leurs colliders.
+  const visesParRayon = interactables.items.some((it) => it.kind === "interact" && it.volume);
+  // Sonde de verification : ce que le rayon vise, et ou est un recepteur dans
+  // le repere courant (le corps porteur tourne et se deplace).
+  const sondeInteraction = { vise: null, repere: null };
+  window.__interaction = sondeInteraction;
   const bodies = data.bodies;
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
@@ -3881,9 +3887,35 @@ async function boot() {
     }
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
+    sondeInteraction.repere = (it) => {
+      const sh = decalageDuCorps(it.body, anchorPos) || [0, 0, 0];
+      return [it.world[0] + sh[0] - anchorPos[0], it.world[1] + sh[1] - anchorPos[1],
+              it.world[2] + sh[2] - anchorPos[2]];
+    };
     // --- dialogue ---
-    const convo = (!ship || !ship.boarded)
-      ? dialogue.nearest(playerW, (b) => decalageDuCorps(typeof b === "string" ? b : (b && b.body) || "TimberHearth_Body", anchorPos)) : null;
+    //
+    // On parle a qui l'on REGARDE : le rayon de `FirstPersonManipulator`
+    // touche la capsule du personnage, et `Observe` exige deux unites au plus
+    // du point touche (interact.js, `RAYON_VISEE`). Le portage ouvrait la
+    // conversation la plus proche a six metres, de dos s'il le fallait —
+    // l'alpha, elle, ne repond qu'au regard (docs/132). La proximite reste le
+    // repli d'une extraction qui n'a pas les colliders des recepteurs.
+    const decalConvo = (b) => decalageDuCorps(typeof b === "string" ? b : (b && b.body) || "TimberHearth_Body", anchorPos);
+    let convo = null;
+    if (!ship || !ship.boarded) {
+      if (visesParRayon) {
+        const vise = interactables.focus(player.pos, anchorPos, fwd,
+                                         (it) => decalageDuCorps(it.body, anchorPos), camera.position);
+        sondeInteraction.vise = vise;
+        if (vise && vise.kind === "interact") {
+          convo = (dialogue.conversations || []).find((c) => c.position
+            && Math.hypot(c.position[0] - vise.world[0], c.position[1] - vise.world[1],
+                          c.position[2] - vise.world[2]) < 0.05) || null;
+        }
+      } else {
+        convo = dialogue.nearest(playerW, decalConvo);
+      }
+    }
     if (interactPressed) {
       if (dialogue.active) {
         const avant = dialogue.active;
@@ -3925,7 +3957,8 @@ async function boot() {
       // Les objets suivent leur corps : un paquetage pose dans la cabine part
       // avec le vaisseau, et une zone du village tourne avec sa planete.
       focus = interactables.focus(player.pos, anchorPos, fwd,
-                                  (it) => decalageDuCorps(it.body, anchorPos));
+                                  (it) => decalageDuCorps(it.body, anchorPos),
+                                  visesParRayon ? camera.position : null);
     }
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
