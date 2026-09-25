@@ -354,7 +354,9 @@ glissade à l'arrêt : la capsule porte `Character`, sans frottement, mais
 en course ou en l'air. `PhysicMaterial` (classe 134) se lit maintenant au bit
 près. L'éblouissement
 blanc, lui, n'est ni le tonemapping (éteint par `TonemappingManager`) ni le
-flashback ; il n'est pas encore attribué.
+flashback : c'est le `StartOfTimeLoop` de `PlayerCameraEffectController`,
+glow blanc à 3 en teinte 0-255, que le portage normalisait et lançait à
+l'instant zéro — attribué et corrigé dans « La fin des temps, côte à côte ».
 
 Et le cercle en haut à gauche de l'écran, absent de l'alpha : le marqueur de
 la sonde, créé `hidden` mais dont la classe pose `display: flex` — une règle
