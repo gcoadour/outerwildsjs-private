@@ -221,6 +221,9 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
         radius: round(shape.radius ?? 1, 4),
         angle: round(shape.angle ?? 0, 4),
         randomDirection: !!shape.randomDirection,
+        // La boite a ses TROIS aretes (`boxX`, `boxY`, `boxZ`) : la flamme
+        // du feu de camp n'a rien d'un cube de rayon 1 (docs/132).
+        box: [shape.boxX ?? 1, shape.boxY ?? 1, shape.boxZ ?? 1].map((v) => round(v, 4)),
       } : null,
       // Modules secondaires. Mesure d'usage sur les 135 systemes du build :
       // ColorModule (110) et SizeModule (80) dominent, RotationModule (28) et

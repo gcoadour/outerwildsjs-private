@@ -5,6 +5,7 @@
 #   scripts/alpha.sh start            lance l'alpha sur :99 (1280x720)
 #   scripts/alpha.sh shot <fichier>   capture l'ecran
 #   scripts/alpha.sh key <touche...>  envoie des touches (noms xdotool)
+#   scripts/alpha.sh clic <x> <y>     clic gauche tenu
 #   scripts/alpha.sh stop
 #
 # Prerequis (Ubuntu) : dpkg --add-architecture i386, puis libc6:i386
@@ -27,10 +28,24 @@ case "${1:-}" in
   shot) import -window root "${2:-work/alpha.png}" ;;
   key)
     shift
-    WID=$(xdotool search --name "OuterWilds" | head -1 || true)
-    [ -n "$WID" ] && xdotool windowactivate --sync "$WID" 2>/dev/null || true
-    for k in "$@"; do xdotool key "$k"; sleep 0.3; done
+    WID=$(xdotool search --name "Outer Wilds" | head -1 || true)
+    # SANS donner le focus : focalisee, l'alpha verrouille le curseur en jeu
+    # et lit un premier delta de souris qui envoie la camera en NaN (ecran
+    # noir). Un envoi a la fenetre, puis la touche TENUE : sous llvmpipe
+    # l'alpha tourne a quelques images par seconde, et un appui instantane
+    # tombe entre deux `Input.GetKeyDown`.
+    for k in "$@"; do
+      [ -n "$WID" ] && xdotool key --window "$WID" "$k"
+      xdotool keydown "$k"; sleep "${ALPHA_TENUE:-0.4}"; xdotool keyup "$k"; sleep 0.3
+    done
+    ;;
+  clic)
+    # clic gauche tenu en (x, y) : le menu-titre valide au clic (docs/131)
+    WID=$(xdotool search --name "Outer Wilds" | head -1 || true)
+    [ -n "$WID" ] && xdotool windowfocus "$WID" 2>/dev/null || true
+    xdotool mousemove "$2" "$3"; sleep 1
+    xdotool mousedown 1; sleep "${ALPHA_TENUE:-0.4}"; xdotool mouseup 1
     ;;
   stop) [ -f work/alpha.pid ] && kill "$(cat work/alpha.pid)" 2>/dev/null; rm -f work/alpha.pid ;;
-  *) sed -n 2,14p "$0"; exit 1 ;;
+  *) sed -n 2,15p "$0"; exit 1 ;;
 esac

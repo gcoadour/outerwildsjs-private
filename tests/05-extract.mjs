@@ -1281,6 +1281,10 @@ check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
   const explo = parts.systems.find((s) => s.name === "Explosion_Fiery_Med");
   check("l'explosion du vaisseau ne part pas seule", explo.playOnAwake, false);
   check("sa teinte est a 0,22", explo.tint && explo.tint[0], 0.2239);
+  // La flamme du feu de camp emet dans une boite de 0,8, pas de 2 (docs/132).
+  const flamme = parts.systems.find((s) => s.name === "Flame" && s.body === "TimberHearth_Body");
+  check("la flamme du feu emet dans une boite", flamme.shape.type, "box");
+  check("de 0,8 d'arete", flamme.shape.box.join(), "0.8,0.8,0.8");
   // `scalar` est en RADIANS dans le build : 0,349 rad/s font vingt degres.
   check("de vingt degres par seconde",
         avec("rotationBySpeed")[0].rotationBySpeed.degreesPerSecond, 20);

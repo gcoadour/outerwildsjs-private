@@ -95,7 +95,7 @@ import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
 import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres,
          masqueCamera, CALQUE_SONDE } from "../web/src/lights.js";
 import { taillesEtoiles, pixelsParRadian, gainPoint, moyenneTache, SEUIL_POINT } from "../web/src/etoiles.js";
-import { prewarmCycles, sizeGradients, emitterRotation, teinteParticules } from "../web/src/particles.js";
+import { prewarmCycles, sizeGradients, emitterRotation, teinteParticules, boiteEmetteur } from "../web/src/particles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
@@ -8084,6 +8084,11 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("la teinte par defaut est neutre",
         teinteParticules([0.3, 0.6, 0.9, 1], [0.5, 0.5, 0.5, 0.5]).join(), "0.3,0.6,0.9,1");
   check("sans teinte, la couleur telle quelle", teinteParticules([0.2, 0.4, 0.6, 1], null).join(), "0.2,0.4,0.6,1");
+  // La boite d'emission : demi-aretes, Z d'Unity sur l'Y de l'emetteur.
+  check("la flamme du feu : 0,8 d'arete, 0,4 de demi-arete",
+        boiteEmetteur({ type: "box", box: [0.8, 0.8, 0.8] }).join(), "0.4,0.4,0.4");
+  check("l'Y et le Z s'echangent", boiteEmetteur({ box: [0.1, 0.1, 0.2] }).join(), "0.05,0.1,0.05");
+  check("sans aretes, le rayon", boiteEmetteur({ radius: 2 }).join(), "2,2,2");
   check("Particles/Multiply n'a pas de teinte",
         teinteParticules([1, 1, 1, 1], [0.1, 0.1, 0.1, 0.1], "multiply").join(), "1,1,1,1");
 }

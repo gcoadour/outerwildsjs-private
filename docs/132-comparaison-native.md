@@ -313,3 +313,40 @@ Et la **teinte** : les shaders `Particles/*` rendent `2 × _TintColor × couleur
 texture`. L'extracteur ne lisait que la texture ; la teinte des flammes du
 build vaut 0,22 — le portage les montrait deux fois trop vives —, celle des
 nuages de Giant's Deep un bleu-vert à 5 %.
+
+## Le réveil, horodaté
+
+`scripts/alpha-reveil.sh` lance l'alpha, valide « New Expedition » et capture
+l'écran toutes les demi-secondes en notant l'instant. Deux pièges pour y
+arriver, consignés dans les scripts :
+
+- la fenêtre s'appelle « Outer Wilds », avec une espace ;
+- **il ne faut pas lui donner le focus** (`windowfocus`) : focalisée, l'alpha
+  verrouille le curseur en jeu, lit un premier delta de souris démesuré et la
+  caméra part en NaN — écran noir et des milliers de « Invalid parameter
+  because it was infinity or nan ». Ce n'était pas la charge du processeur,
+  comme on l'avait cru. La touche s'envoie à la fenêtre, puis se **tient** :
+  à quelques images par seconde, un appui instantané tombe entre deux
+  `Input.GetKeyDown`.
+
+Ce que dit la séquence : environ seize secondes de chargement, deux secondes
+d'éblouissement blanc qui se dissipe, puis le ciel. La lune entre par le haut à
+droite et glisse vers le centre ; le recentrage descend sur le feu entre la
+sixième et la septième seconde, ce que le portage fait aussi
+(`PlayerSpawner`, docs/108). Côte à côte au même instant, Giant's Deep, la
+tour et le feu tombent aux mêmes endroits de l'image.
+
+Ce que la séquence a encore corrigé : **la flamme**. Le feu de camp émet dans
+une boîte de 0,8 d'arête (`boxX`, `boxY`, `boxZ`) ; l'extracteur n'en gardait
+que le « rayon », et le portage émettait dans un cube de deux unités. Ses
+soixante particules par seconde s'éparpillaient en taches rouges au lieu de
+s'empiler, en additif, en une langue orange.
+
+Ce qui reste ouvert : l'alpha voit les bûches de plus près que le portage,
+alors que les positions du build (point d'apparition, caméra à 0,9 au-dessus
+du centre du corps et 0,15 devant, feu) placent l'œil à 4,5 m de la flamme, et
+le portage à 4,7 m. L'écart vient sans doute de ce que la physique fait du
+corps dans les premières images — la capsule de l'alpha est posée par son
+centre sur le point d'apparition —, et reste à mesurer. L'éblouissement
+blanc, lui, n'est ni le tonemapping (éteint par `TonemappingManager`) ni le
+flashback ; il n'est pas encore attribué.

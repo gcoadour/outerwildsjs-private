@@ -70,6 +70,25 @@ export function sizeGradients(s, smin, smax) {
 }
 
 /**
+ * Les demi-aretes de la boite d'emission, dans le repere de l'emetteur.
+ *
+ * Unity donne les aretes `boxX`, `boxY`, `boxZ` du repere du systeme ;
+ * l'emetteur de Babylon est tourne d'un quart de tour (`emitterRotation`) qui
+ * porte son +Y sur le +Z d'Unity, et son Z sur l'Y. Le portage emettait dans
+ * un cube de deux unites quel que soit le systeme : la flamme du feu de camp,
+ * soixante particules par seconde, s'eparpillait en taches rouges au lieu de
+ * s'empiler en une langue orange (docs/132).
+ */
+export function boiteEmetteur(shape) {
+  const b = (shape && shape.box) || null;
+  if (!b) {
+    const r = Math.max(0.01, (shape && shape.radius) || 1);
+    return [r, r, r];
+  }
+  return [b[0] / 2, b[2] / 2, b[1] / 2];
+}
+
+/**
  * La rotation d'un emetteur Babylon pour un systeme Unity d'orientation `q`.
  *
  * Unity emet le long du +Z local du systeme ; les emetteurs de Babylon (cone,
@@ -335,9 +354,11 @@ export class ParticleField {
 
     const sh = s.shape || { type: "sphere", radius: 1 };
     const r2 = Math.max(0.01, sh.radius || 1);
-    if (sh.type === "box") ps.createBoxEmitter(
-      new B.Vector3(0, 1, 0), new B.Vector3(0, 1, 0),
-      new B.Vector3(-r2, -r2, -r2), new B.Vector3(r2, r2, r2));
+    if (sh.type === "box") {
+      const [bx, by, bz] = boiteEmetteur(sh);
+      ps.createBoxEmitter(new B.Vector3(0, 1, 0), new B.Vector3(0, 1, 0),
+        new B.Vector3(-bx, -by, -bz), new B.Vector3(bx, by, bz));
+    }
     else if (sh.type.startsWith("cone")) ps.createConeEmitter(
       r2, Math.min(Math.PI / 2, (sh.angle || 30) * Math.PI / 180));
     else if (sh.type.startsWith("hemisphere")) ps.createHemisphericEmitter(r2);

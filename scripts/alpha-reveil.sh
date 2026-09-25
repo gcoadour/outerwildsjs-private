@@ -15,11 +15,21 @@ ATTENTE="${1:-25}"; DUREE="${2:-45}"; PAS="${3:-0.5}"
 OUT=work/alpha-rv
 rm -rf "$OUT"; mkdir -p "$OUT"
 export DISPLAY="${ALPHA_DISPLAY:-:99}"
+# Le pointeur AU CENTRE de la fenetre : ailleurs, le verrouillage du curseur
+# en jeu lit un premier delta de souris qui envoie la camera en NaN (ecran
+# noir, « Invalid parameter because it was infinity or nan »).
 ALPHA_W=640 ALPHA_H=360 scripts/alpha.sh start
 sleep "$ATTENTE"
 scripts/alpha.sh shot "$OUT/titre.png"
+xdotool mousemove 320 180
 T0=$(date +%s.%N)
-scripts/alpha.sh key e
+# « New Expedition » par la touche, et SANS donner le focus a la fenetre :
+# focalisee, l'alpha verrouille le curseur en jeu et lit un premier delta de
+# souris qui envoie la camera en NaN — ecran noir, « Invalid parameter
+# because it was infinity or nan ». La sequence est celle qui a marche.
+W=$(xdotool search --name "Outer Wilds" | head -1)
+xdotool key --window "$W" e; sleep 1
+xdotool keydown e; sleep 0.3; xdotool keyup e
 i=0
 while :; do
   T=$(date +%s.%N)
