@@ -342,7 +342,8 @@ que le « rayon », et le portage émettait dans un cube de deux unités. Ses
 soixante particules par seconde s'éparpillaient en taches rouges au lieu de
 s'empiler, en additif, en une langue orange.
 
-Ce qui reste ouvert : l'alpha voit les bûches de plus près que le portage,
+**Fermé depuis** (« Le cratère de Timber Hearth », plus bas). Ce qu'on en
+disait alors : l'alpha voit les bûches de plus près que le portage,
 alors que les positions du build (point d'apparition, caméra à 0,9 au-dessus
 du centre du corps et 0,15 devant, feu) placent l'œil à 4,5 m de la flamme, et
 le portage à 4,7 m. L'écart vient sans doute de ce que la physique fait du
@@ -641,3 +642,36 @@ La durée du défilement, elle, ne se compare pas sur cette capture : elle
 dépend du nombre de photos, deux cent seize après dix-huit minutes dans
 l'alpha (≈ 17 s), cinq dans le portage avancé à la fin de la boucle. La loi
 est celle de `OnTriggerFlashback` depuis [`98`](98-flashback.md).
+
+## Le cratère de Timber Hearth
+
+L'écart de cadrage au réveil — l'alpha voit le feu et Slate une fois et demie
+plus grands — n'était ni une distance ni un champ de vision. Le terminal de
+lancement, à dix mètres, a la même taille dans les deux images, et l'écart
+angulaire entre lui et le feu est le même (18,5° contre 16,5°) : tout est
+décalé d'environ quatorze degrés, le portage regarde vers le sol.
+
+Le « haut » du point d'apparition vaut exactement (0, 0, −1), à 11,7° de la
+verticale du lieu. C'est celui de **`CraterField`**, un
+`DirectionalForceField` sphérique de 111 unités posé sur Timber Hearth
+(12 u/s², bas (0, 0, 1) une fois la rotation de la planète appliquée) : le
+village est dans un cratère dont la gravité est **droite**, pas radiale.
+Le portage lisait ce champ, mais le testait à sa place **de départ** alors
+que la planète orbite à une cinquantaine d'unités par seconde : le joueur en
+sortait avant la fin du réveil, le champ radial (7,8 u/s²) reprenait la
+main, le corps se redressait de 11,7° de trop — et glissait d'un mètre en
+vingt secondes sur une pente qui n'en était pas une.
+
+Les champs directionnels et polaires se testent maintenant au repos de leur
+corps (`shiftOf`, le même décalage que les zones). Le joueur ne dérive plus,
+et le cadrage du réveil est celui de l'alpha : le feu, Slate, la tour et le
+terminal tombent aux mêmes endroits de l'image. Le vaisseau posé et le
+modèle réduit, dans le même cratère, suivent le même champ. Invariant :
+`tests/09-jeu.mjs` (un champ sur une planète qui a avancé de 600 unités
+contient toujours son village, et donne le bas).
+
+Le vérificateur y a gagné une correction de mesure : sous 12 u/s², le saut
+ne tient que 0,5 s en l'air, et une image rendue sous SwiftShader peut
+couvrir plusieurs sous-pas — le saut monte et retombe entre deux images.
+Le contrôle lit donc la vitesse que `tryJump` donne au corps : 6 u/s, celle
+du build.

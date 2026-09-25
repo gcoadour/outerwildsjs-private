@@ -3524,6 +3524,9 @@ async function boot() {
     }
     const world = { directional: dirFields, polar: polFields,
                     framePos: anchorPos, fluids, zeroG,
+                    // Les champs sont au repos de leur corps : on y ramene le
+                    // point, comme pour les zones (docs/132).
+                    shiftOf: decale,
                     // Le referentiel du mode atterrissage, s'il y en a un :
                     // c'est lui qui donne l'axe radial de l'ecretage.
                     landing: atterrissageCorps
@@ -6330,9 +6333,13 @@ async function boot() {
           (a.right[2] * ax + a.fwd[2] * az + a.up[2] * mu) * p,
         ];
       }
+      // Le modele vole dans le cratere : `CraterField` le tient comme il tient
+      // le joueur, au repos de Timber Hearth (docs/132).
       const g = dominantField(bodies, {
         x: modele.pos[0] - anchorPos[0], y: modele.pos[1] - anchorPos[1],
-        z: modele.pos[2] - anchorPos[2] });
+        z: modele.pos[2] - anchorPos[2] },
+        { directional: dirFields, polar: polFields, framePos: anchorPos,
+          shiftOf: (v) => decalageDuCorps(v.body, anchorPos) });
       const avant = modele.vel.slice();
       for (let i = 0; i < 3; i++) {
         const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;

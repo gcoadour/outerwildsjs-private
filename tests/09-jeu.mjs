@@ -570,6 +570,25 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("... et apres, oui", fx.flashbackDemande, true);
 }
 
+// Un champ directionnel se teste au REPOS de son corps : `CraterField` sur
+// une planete qui a bouge de 600 unites contient toujours le village (docs/132).
+{
+  const cratere = { name: "CraterField", position: [0, 0, -8693], rotation: null,
+                    direction: [0, 0, 1], magnitude: 12, priority: 0,
+                    volume: { shape: "sphere", radius: 111, center: [0, 0, 0] },
+                    body: "TimberHearth_Body" };
+  const village = [-1.4, -25.7 + 600, -8720];      // la planete a avance de 600 en y
+  check("sans decalage, le village est hors du champ",
+        strongestDirectional([cratere], village), null);
+  const decale = (f) => (f.body === "TimberHearth_Body" ? [0, 600, 0] : null);
+  check("ramene au repos, il y est", strongestDirectional([cratere], village, decale), cratere);
+  const g = dominantField([{ position: [0, 600, 100], gravity: { surfaceAcceleration: 12,
+      falloff: "linear", upperSurfaceRadius: 130, cutoffRadius: 0 } }],
+    { x: village[0], y: village[1], z: village[2] },
+    { directional: [cratere], shiftOf: decale });
+  check("et c'est lui qui donne le bas", g && [g.dir.x, g.dir.y, g.dir.z].join(","), "0,0,1");
+}
+
 // Le halo du `GlowEffect` recoit la teinte BRUTE : (255, 100, 100) a la mort
 // par supernova sature l'ecran, comme dans l'alpha (docs/132).
 {

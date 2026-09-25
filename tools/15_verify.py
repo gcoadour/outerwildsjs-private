@@ -1061,10 +1061,40 @@ def _run(url, heavy, profil=None, zip_path=None):
             # Saut : l'espace saute (`Jump`), la majuscule pousse (`Move Up`).
             # Ce sont DEUX canaux du build, et le portage les avait sur une
             # seule touche (docs/61-commandes.md).
-            page.keyboard.press("Space")
-            page.wait_for_timeout(120)
-            rep.eq("le saut quitte le sol",
-                   page.evaluate("() => window.__player.grounded"), False)
+            # Sous SwiftShader une image dure ~200 ms, et dans le cratere
+            # (`CraterField`, 12 u/s2) le saut ne tient que 0,6 s en l'air :
+            # un echantillon fixe a 120 ms tombait avant la premiere image.
+            # On attend le decollage, une seconde au plus.
+            # Et une image rendue peut couvrir plusieurs sous-pas : le saut du
+            # cratere (0,5 s en l'air sous 12 u/s2) monte et retombe entre deux
+            # images, et ni `grounded` ni la vitesse ne s'y lisent. On le
+            # mesure donc la ou il nait : la vitesse le long du haut local que
+            # `tryJump` laisse au corps.
+            page.evaluate("""() => {
+              const p = window.__player;
+              window.__saut = null;
+              const orig = p.tryJump.bind(p);
+              p.tryJump = (i, u) => {
+                const r = orig(i, u);
+                if (r && !window.__saut) {
+                  window.__saut = p.vel.x * u.x + p.vel.y * u.y + p.vel.z * u.z;
+                }
+                return r;
+              };
+            }""")
+            page.keyboard.down("Space")
+            page.wait_for_timeout(300)
+            page.keyboard.up("Space")
+            try:
+                page.wait_for_function("() => window.__saut !== null", timeout=4000)
+            except Exception:
+                pass
+            saut = page.evaluate("() => window.__saut")
+            decolle = saut is not None and saut > 1
+            rep.eq("le saut quitte le sol", decolle, True)
+            if saut is not None:
+                rep.near("vers le haut, a la vitesse de saut du build", round(saut, 2),
+                         (pc or {}).get("jumpSpeed", 4), 1.5)
 
         # --- inertie de rotation du vaisseau ------------------------------------
         #

@@ -42,7 +42,7 @@ portage.
 | géométrie des 7 corps | complète, 69 Mo en glTF |
 | matériaux et textures | 251 matériaux, 200 textures, normales désentrelacées |
 | collision | Havok, colliders trimesh du corps ancré |
-| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
+| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
 | ressources | oxygène, carburant, santé, intégrité |
 | vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
 | détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ([`132`](132-comparaison-native.md)) |

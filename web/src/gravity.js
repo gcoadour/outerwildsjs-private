@@ -100,9 +100,10 @@ export function dominantField(bodies, point, opts = null) {
 function localField(opts, world) {
   const dirs = (opts && opts.directional) || [];
   const pol = (opts && opts.polar) || [];
-  let best = dirs.length ? strongestDirectional(dirs, world) : null;
+  const shiftOf = (opts && opts.shiftOf) || null;
+  let best = dirs.length ? strongestDirectional(dirs, world, shiftOf) : null;
   if (!pol.length) return best;
-  const p = strongestPolar(pol, world);
+  const p = strongestPolar(pol, world, shiftOf);
   if (!p) return best;
   if (!best) return p;
   const a = p.priority ?? 0, b = best.priority ?? 0;
@@ -278,13 +279,31 @@ export function localPoint(field, worldPoint) {
  * le jeu consulte quand deux volumes se recouvrent, et il va de 0 a 5 dans le
  * build. A priorite egale, l'intensite departage.
  */
-export function strongestDirectional(fields, worldPoint) {
+/**
+ * Le point ramene au REPOS du corps qui porte le champ.
+ *
+ * Les volumes sont extraits a l'arret ; les corps orbitent. `CraterField`, le
+ * champ du cratere de Timber Hearth (rayon 111, bas (0, 0, 1)), etait teste a
+ * sa place de depart : la planete parcourt une cinquantaine d'unites par
+ * seconde, et le joueur en sortait avant la fin du reveil. Le champ radial
+ * prenait la main, le corps se redressait de 11,7 degres de trop, et la vue
+ * de l'alpha — le feu et Slate droit devant, a hauteur d'yeux — devenait une
+ * vue plongee sur le sol (docs/132). `shiftOf(champ)` est le meme decalage
+ * que celui des zones : il lit `champ.body` (`decalageDuCorps`).
+ */
+function auRepos(f, worldPoint, shiftOf) {
+  const d = shiftOf && f.body ? shiftOf(f) : null;
+  return d ? [worldPoint[0] - d[0], worldPoint[1] - d[1], worldPoint[2] - d[2]]
+    : worldPoint;
+}
+
+export function strongestDirectional(fields, worldPoint, shiftOf = null) {
   let best = null;
   for (const f of fields) {
     // `present` est pose par l'appelant pour un champ commande par des SEUILS :
     // sa forme n'est pas une contenance, et aucun test de point ne pourrait la
     // rendre. Les autres se testent comme avant.
-    if (!f.present && !insideVolume(f, worldPoint)) continue;
+    if (!f.present && !insideVolume(f, auRepos(f, worldPoint, shiftOf))) continue;
     if (!best) { best = f; continue; }
     const p = f.priority ?? 0, bp = best.priority ?? 0;
     if (p > bp || (p === bp && f.magnitude > best.magnitude)) best = f;
@@ -347,11 +366,12 @@ export function polarDirection(field, worldPoint) {
 }
 
 /** Le champ polaire qui l'emporte en un point, direction comprise. */
-export function strongestPolar(fields, worldPoint) {
+export function strongestPolar(fields, worldPoint, shiftOf = null) {
   let best = null;
   for (const f of fields) {
-    if (!insideVolume(f, worldPoint)) continue;
-    const dir = polarDirection(f, worldPoint);
+    const q = auRepos(f, worldPoint, shiftOf);
+    if (!insideVolume(f, q)) continue;
+    const dir = polarDirection(f, q);
     if (!dir) continue;
     const cand = { ...f, direction: dir };
     if (!best) { best = cand; continue; }
