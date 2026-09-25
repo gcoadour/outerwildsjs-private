@@ -418,3 +418,41 @@ sphère, capsule et boîte orientée, et le focus d'un récepteur vise depuis
 l'œil. Mesuré dans la page : placé à 2,2 m, la conversation ne s'ouvre que
 dans une direction sur trente-deux, celle du personnage ; à 4,5 m, jamais. La
 proximité reste le repli d'une extraction ancienne, sans colliders.
+
+Le vérificateur le garde par trois essais, le regard tourné par la sonde
+`__interaction.viser` dans le repère d'horizon de la caméra : face au Rocket
+Scientist à 2,2 m, on lui parle ; dos tourné, non ; à 4,5 m, non plus. (Un
+premier contrôle balayait le lacet par pas fixes : selon l'état laissé par les
+contrôles précédents, le pas enjambait la capsule, et il mesurait le pas plutôt
+que la règle.)
+
+## Viser un référentiel : le vide relâche
+
+Le vérificateur échouait une fois sur deux sur « un second clic la relâche » :
+le second clic ne relâchait pas, il **re-visait** un autre corps. Ce n'était
+pas du minutage. `ReferenceFrameTracker.UpdateTargeting`, lu dans l'IL :
+
+```
+possible = rayon de 1 000 sur le masque physique -> son référentiel
+sinon      RaycastAll de 100 000 sur le CALQUE ReferenceFrameVolume (19),
+           et parmi les sphères TOUCHÉES, la mieux centrée
+au clic :  possible nul ou identique -> Untarget ; sinon -> Target
+```
+
+Le portage prenait au second temps le corps le mieux centré du ciel entier,
+qu'on le regarde ou non : viser le vide gardait toujours une cible, et la
+dérive du regard sur une planète qui tourne suffisait à en changer entre deux
+clics. Le calque 19 porte onze sphères « RFVolume », une par corps — 600 pour
+Timber Hearth, 1 000 pour Giant's Deep, 1 500 pour Dark Bramble, 167,3 pour
+l'Attlerock —, dont six n'ont même pas le composant `ReferenceFrameVolume` :
+c'est le calque que le rayon interroge, pas la classe. L'extracteur les sort
+(`ReferenceFrameSphere`), et `aimedFrame` n'accepte plus au second temps
+qu'une sphère que le rayon traverse, en partant de dehors — un rayon d'Unity
+ne touche pas le collider dont il part.
+
+Et cette règle en a découvert une autre, plus grave : les positions que la
+visée comparait au regard étaient celles de **l'instant zéro** (`position0`).
+Au bout d'une minute d'orbite, on visait des planètes restées où elles étaient
+au réveil ; le « mieux centré du ciel entier » masquait l'erreur. La visée lit
+maintenant les positions courantes, et le vérificateur regarde un corps avant
+de cliquer — viser le vide ne vise plus rien.

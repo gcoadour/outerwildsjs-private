@@ -8101,6 +8101,22 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("a cote de lui, sans le regarder, non plus", regard(-2, 1.5), null);
 }
 
+// Viser un referentiel : au second temps, le rayon doit TRAVERSER la sphere
+// de visee du corps, et en partant de dehors (docs/132).
+{
+  const gd = { name: "GD", position: [0, 0, 10000], radius: 500, rf: 1000 };
+  const th = { name: "TH", position: [0, 0, -400], radius: 250, rf: 600 };
+  check("face a Giant's Deep, on le vise", aimedFrame([gd, th], [0, 0, 0], [0, 0, 1]), gd);
+  check("vers le vide, rien : le clic relachera",
+        aimedFrame([gd, th], [0, 0, 0], [1, 0, 0]), null);
+  check("une sphere dont on part n'est pas touchee",
+        aimedFrame([{ ...th, radius: 0 }], [0, 0, 0], [0, 0, -1]), null);
+  check("a peine a cote du bord de la sphere, rien",
+        aimedFrame([gd], [0, 0, 0], [0.11, 0, 1]), null);
+  check("sans spheres de visee (extraction ancienne), le mieux centre",
+        aimedFrame([{ name: "X", position: [0, 0, 10000], radius: 0 }], [0, 0, 0], [1, 0, 0.2]).name, "X");
+}
+
 // La repetition des textures, dans le repere retourne du glTF (docs/132).
 {
   const mat = (sx, sy, ox, oy) => ({ m_SavedProperties: { m_TexEnvs: [{ first: { name: "_MainTex" },
