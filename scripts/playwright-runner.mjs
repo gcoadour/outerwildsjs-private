@@ -107,7 +107,7 @@ try {
 
   // Wait for game to initialize (window.__ready === true)
   console.log("Waiting for window.__ready...");
-  await page.waitForFunction(() => window.__ready === true, { timeout: 60000 });
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
   console.log("Game initialized! window.__ready is true!");
 
   // Inspect state

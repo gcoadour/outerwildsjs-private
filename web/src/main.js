@@ -44,7 +44,7 @@ import { loadAudioMap, AudioField, AudioMixer, signalStrength,
          audioShells, AudioShells } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
-import { TimeLoop, ResetTrigger } from "./timeloop.js";
+import { TimeLoop, ResetTrigger, effondrementsDuBuild } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
 import { PlayerDeathHandler, FlashbackOverlay, deathCamera, SnapshotTimer,
          FLASHBACK, DEATH_SOUNDS } from "./death.js";
@@ -2028,6 +2028,9 @@ async function boot() {
   const loop = new TimeLoop(
     ((gameplay.singletons || {}).TimeLoop || {}).fields
       ?._loopDurationInMinutes ?? undefined);
+  // L'effondrement de l'etoile a l'echelle de la scene : c'est elle qui fixe
+  // le temps entre `TriggerSupernova` et `SunExploded` (docs/132).
+  Object.assign(loop, effondrementsDuBuild(gameplay));
   // `TimeLoop.Start` : la statique `_startTimeLoopOnReload` nait a VRAI, donc
   // le tout premier chargement annonce deja `StartOfTimeLoop` et calcule la
   // prevention. Sur une partie neuve, l'etoile n'explose donc pas tant qu'on
@@ -2097,9 +2100,14 @@ async function boot() {
     return d;
   })() : null;
   let fxMort = false, fxEau = false;
+  // `StartOfTimeLoop` part aussi au PREMIER chargement : le reveil de la
+  // partie eblouit comme celui qui suit une mort.
+  let fxReveil = false;
 
   // Mort et flashback : une seule porte d'entree pour toutes les causes.
   const death = new PlayerDeathHandler();
+  // Le flashback attend `TriggerFlashback`, que la fin de l'effet de mort annonce.
+  death.attendreEffet = true;
   const flashOverlay = uiRoot ? new FlashbackOverlay(uiRoot) : null;
 
   // §R LA MEMOIRE DU FLASHBACK (docs/98-flashback.md).
@@ -2110,11 +2118,10 @@ async function boot() {
   // build ne porte pas de memoire a rejouer » — et c'est la plus visible des
   // choses que le portage ne faisait pas.
   //
-  // Une cible de rendu de 256 par 256 coute 256 Ko de lecture toutes les cinq
-  // secondes : a l'echelle de la boucle, deux cent seize photos et cinquante
-  // megaoctets. Le build en garde autant, et sans plafond : mourir tard donne
+  // Une photo de 256 par 256 coute 256 Ko toutes les cinq secondes : a
+  // l'echelle de la boucle, deux cent seize photos et cinquante megaoctets. Le build en garde autant, et sans plafond : mourir tard donne
   // un long flashback, c'est le principe.
-  const pellicule = { timer: new SnapshotTimer(), cible: null, photos: [],
+  const pellicule = { timer: new SnapshotTimer(), photos: [],
                       enCours: false, t0: performance.now() / 1000 };
   // `_finalImage` — `FinalFlashbackImage` —, posee sur le plan pendant que le
   // blanc monte. Sans le build, elle manque et le fondu reste nu : c'est un
@@ -2128,58 +2135,39 @@ async function boot() {
   window.__death = death;
   window.__pellicule = pellicule;
 
-  /** La cible de rendu, creee a la premiere photo et jamais avant. */
-  function cibleFlashback() {
-    if (pellicule.cible) return pellicule.cible;
-    try {
-      const n = FLASHBACK.snapshotSize;
-      const rtt = new BABYLON.RenderTargetTexture("flashback", n, scene, false);
-      // `refreshRate = 0` : Babylon ne la dessine jamais tout seul, on appelle
-      // `render()` a la main — une fois toutes les cinq secondes, et pas une
-      // image de plus.
-      rtt.refreshRate = 0;
-      rtt.renderList = null;           // toute la scene, comme la camera
-      rtt.clearColor = new BABYLON.Color4(0, 0, 0, 1);
-      pellicule.cible = rtt;
-    } catch (e) {
-      console.warn("flashback : pas de cible de rendu —", e.message);
-      pellicule.cible = null;
-      pellicule.timer.due = () => false;   // on n'essaiera plus
-    }
-    return pellicule.cible;
-  }
-
   /**
-   * Une photo. La lecture des pixels est asynchrone : on ne bloque pas l'image
-   * pour elle, et une photo qui n'arrive pas est une photo de moins, rien de
-   * plus.
+   * Une photo : l'image que le joueur vient de VOIR, prise juste apres son
+   * rendu.
    *
-   * WebGL rend ses lignes de bas en haut ; `ImageData` les attend de haut en
-   * bas. D'ou le retournement, sans quoi tout le flashback serait a l'envers.
+   * Le portage rendait une seconde fois la scene dans une `RenderTargetTexture`
+   * de 256 par 256 : sous SwiftShader comme ailleurs, elle sortait NOIRE — le
+   * flashback de l'alpha montre le feu, la tour, le ciel, celui du portage
+   * montrait des rectangles noirs (docs/132). Le build rend la camera du
+   * joueur, effets d'image compris, dans une `RenderTexture` carree ; une
+   * camera Unity rendue dans une cible carree garde son champ VERTICAL, et
+   * c'est donc le carre central de l'image affichee. On le copie dans le
+   * `onAfterRender` : a ce moment le tampon de dessin est encore lisible,
+   * sans `preserveDrawingBuffer`.
    */
-  async function photographier() {
-    const rtt = cibleFlashback();
-    if (!rtt || pellicule.enCours) return;
+  function photographier() {
+    if (pellicule.enCours) return;
     pellicule.enCours = true;
-    try {
-      rtt.activeCamera = scene.activeCamera;
-      rtt.render();
-      const n = FLASHBACK.snapshotSize;
-      const brut = await rtt.readPixels();
-      if (!brut) return;
-      const px = new Uint8ClampedArray(n * n * 4);
-      for (let y = 0; y < n; y++) {
-        const src = (n - 1 - y) * n * 4;
-        px.set(brut.subarray(src, src + n * 4), y * n * 4);
+    const obs = scene.onAfterRenderObservable.addOnce(() => {
+      try {
+        const src = engine.getRenderingCanvas();
+        const n = FLASHBACK.snapshotSize;
+        const w = src.width, h = src.height, cote = Math.min(w, h);
+        const toile = new OffscreenCanvas(n, n);
+        toile.getContext("2d").drawImage(src, (w - cote) / 2, (h - cote) / 2,
+                                         cote, cote, 0, 0, n, n);
+        pellicule.photos.push(toile.transferToImageBitmap());
+      } catch (e) {
+        // Un contexte perdu, une copie refusee : la partie continue.
+      } finally {
+        pellicule.enCours = false;
       }
-      const toile = new OffscreenCanvas(n, n);
-      toile.getContext("2d").putImageData(new ImageData(px, n, n), 0, 0);
-      pellicule.photos.push(toile.transferToImageBitmap());
-    } catch (e) {
-      // Un contexte perdu, un `readPixels` refuse : la partie continue.
-    } finally {
-      pellicule.enCours = false;
-    }
+    });
+    if (!obs) pellicule.enCours = false;
   }
 
   function respawn() {
@@ -5514,6 +5502,10 @@ async function boot() {
     // `death.kill()` est appele sept fois dans cette boucle et ne retient que
     // la premiere cause, et un volume mortel qu'on ne quitte pas le rappelle a
     // chaque image. Guetter le passage de vivant a mort ne se trompe pas.
+    if (!fxReveil) {
+      fxReveil = true;
+      fx.startOfTimeLoop(now);
+    }
     if (death.dead && !fxMort) {
       fxMort = true;
       fx.playerDeath(deathTypeOf(death.cause), now);
@@ -5531,7 +5523,7 @@ async function boot() {
     } else if (!death.dead && fxMort) {
       fxMort = false;
       // Le reveil : le glow blanc a 3 qui retombe au noir en trois secondes.
-      fx.startOfTimeLoop();
+      fx.startOfTimeLoop(now);
       etatJoueur.dead = false;
     }
     // L'immersion : `OnEnterWaterZone` / `OnExitWaterZone`. Le portage sait
@@ -5643,6 +5635,11 @@ async function boot() {
         if (n) console.log(`son de mort demande (${death.cause}) : ${n} source(s)`);
       }
       // la sequence de flashback tient l'ecran, puis la boucle repart
+      // `TriggerFlashback` : la fin de l'effet de mort, pas la mort.
+      if (fx.flashbackDemande) {
+        fx.flashbackDemande = false;
+        death.declencherFlashback();
+      }
       const phaseAvant = death.state.phase;
       if (death.update(dt)) respawn();
       if (phaseAvant === "attente" && death.state.phase !== "attente") {

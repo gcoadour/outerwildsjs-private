@@ -134,6 +134,12 @@ check("chaque recepteur porte son collider",
     && Math.abs(x.position[0] - 4.37) < 0.1 && Math.abs(x.position[2] + 8720.98) < 0.1);
   check("le Rocket Scientist se vise sur une capsule", savant && savant.volume.shape, "capsule");
 }
+// L'effondrement de l'etoile : ses deux comportements visent 3 % de leur
+// echelle locale, et c'est elle qui fait la duree (docs/132).
+check("la surface de l'etoile a l'echelle 4000",
+      (gp.placed.SunExplosionBehavior || [])[0]?.localScale, 4000);
+check("la couronne a 362,2121",
+      (gp.placed.ShrinkSunBehavior || [])[0]?.localScale, 362.2121);
 check("onze spheres de visee de referentiel", n("ReferenceFrameSphere"), 11);
 check("celle de Giant's Deep fait mille",
       (gp.placed.ReferenceFrameSphere.find((x) => x.body === "GiantsDeep_Body") || {}).volume.radius, 1000);

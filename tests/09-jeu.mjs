@@ -13,7 +13,7 @@
 import { check, report } from "./run.mjs";
 import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
-         reglagesDe } from "../web/src/cameraeffects.js";
+         reglagesDe, multiplicateurGlow } from "../web/src/cameraeffects.js";
 import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
@@ -118,7 +118,8 @@ import { Flashback, PlayerDeathHandler, FLASHBACK, SnapshotTimer,
          frameLengths, displayTimes } from "../web/src/death.js";
 import { Settings, MenuInput } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
-         SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
+         SHOCKWAVE_RADIUS, shockwaveRadius, Effondrement, EFFONDREMENT_SURFACE,
+         EFFONDREMENT_COURONNE, effondrementsDuBuild } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
@@ -519,30 +520,105 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("elle s'est desarmee", sphere.armed, false);
 }
 
-// --- mise en scene de la supernova --------------------------------------
+// --- mise en scene de la supernova ---
 {
   const stage = new SunStage(2000);
-  const at = (f, left, nova, r) => stage.update(
-    { fraction: f, secondsRemaining: left, supernova: nova, shockwaveRadius: r });
+  const at = (f, left, nova, r, extra = {}) => stage.update(
+    { fraction: f, secondsRemaining: left, supernova: nova, shockwaveRadius: r, ...extra });
 
-  const debut = at(0, 1200, false, 0);
-  const tard = at(0.9, 120, false, 0);
-  check("l'etoile enfle au fil de la boucle", tard.scale > debut.scale, true);
+  const debut = at(0, 1080, false, 0);
+  const tard = at(0.9, 108, false, 0);
+  // `SunSurfaceProgressionBehavior` ne touche qu'a la couleur.
+  check("l'etoile ne grossit pas au fil de la boucle", tard.scale, debut.scale);
   check("phase au fil de la boucle", tard.phase, "progression");
+  check("pas de contraction avant l'annonce", at(1, 0.5, false, 0).scale, 1);
 
-  const creux = at(1, 0, false, 0);
-  check("ShrinkSunBehavior : elle se contracte avant d'exploser",
-        round(creux.scale), 0.62);
+  const eff = new Effondrement();
+  eff.update(0.5);
+  const creux = at(1, 0, false, 0, { collapsing: true, effondrement: eff });
   check("phase de contraction", creux.phase, "contraction");
-  check("la contraction passe sous la taille de depart", creux.scale < 1, true);
+  check("l'echelle est celle de l'effondrement", creux.scale, eff.fraction);
 
   const boum = at(1, 0, true, 20000);
-  check("l'explosion suit l'onde", round(boum.scale), 10.62);
+  check("l'explosion : la sphere de mort, au rayon de l'onde", round(boum.scale), 10);
   check("phase d'explosion", boum.phase, "explosion");
   check("l'onde palit en s'etendant", at(1, 0, true, 29000).shock.alpha < boum.shock.alpha, true);
   check("l'eclair ne dure pas", at(1, 0, true, 20000).flash, 0);
   check("... mais il est plein au declenchement", at(1, 0, true, 0).flash, 1);
   check("echelle bornee", at(1, 0, true, 1e9).scale, 40);
+}
+
+// `TriggerFlashback` part a la FIN de l'effet de mort, pas a la mort
+// (`PlayerCameraEffectController.Update`, docs/132).
+{
+  const d = new PlayerDeathHandler();
+  d.attendreEffet = true;
+  d.kill("supernova", 5);
+  d.update(1);
+  check("pendant l'effet, pas de flashback", d.state.phase, "effet");
+  check("... et rien ne finit", d.update(10), false);
+  check("TriggerFlashback lance la sequence", d.declencherFlashback(), true);
+  check("avec les photos retenues a la mort", d.flashback.count, 5);
+  d.update(0.1);
+  check("puis l'attente du build", d.state.phase, "attente");
+  check("on ne declenche qu'une fois", d.declencherFlashback(), false);
+  const fx = new CameraEffects();
+  fx.playerDeath(DEATH_TYPE.Supernova, 10);
+  fx.update(12.9);
+  check("la supernova : pas avant trois secondes", fx.flashbackDemande, false);
+  fx.update(13.1);
+  check("... et apres, oui", fx.flashbackDemande, true);
+}
+
+// Le halo du `GlowEffect` recoit la teinte BRUTE : (255, 100, 100) a la mort
+// par supernova sature l'ecran, comme dans l'alpha (docs/132).
+{
+  check("l'eclair de mort n'est pas normalise",
+        multiplicateurGlow({ tint: [255, 100, 100], intensity: 3 }).join(","), "765,300,300");
+  check("le reveil non plus", multiplicateurGlow({ tint: [255, 255, 255], intensity: 3 })[0], 765);
+  check("une teinte d'eau reste une fraction",
+        multiplicateurGlow({ tint: [0.3216, 0.6588, 1], intensity: 1 })[2], 1);
+  check("une intensite negative ne retire rien",
+        multiplicateurGlow({ tint: [1, 1, 1], intensity: -2 }).join(","), "0,0,0");
+}
+
+// L'effondrement du build : `SunExplosionBehavior` et `ShrinkSunBehavior`.
+{
+  const duree = (p, dt) => {
+    const e = new Effondrement(p);
+    let n = 1;
+    while (!e.update(dt) && n < 10000) n++;
+    return round(n * dt, 2);
+  };
+  check("la surface explose en 1,6 s a 60 images", duree(EFFONDREMENT_SURFACE, 1 / 60), 1.58);
+  check("... en 1,4 s a 10 images : la cadence compte, comme dans le build",
+        duree(EFFONDREMENT_SURFACE, 0.1), 1.4);
+  check("la couronne disparait en 2,2 s", duree(EFFONDREMENT_COURONNE, 1 / 60), 2.18);
+  check("vers 3 % de l'echelle", EFFONDREMENT_SURFACE.taux, 0.03);
+  const e = new Effondrement();
+  e.update(1 / 60);
+  check("apres une image, 3 dt du chemin", round(e.echelle, 1),
+        round(4000 + (120 - 4000) * 0.05, 1));
+  const lent = new Effondrement();
+  lent.update(10);
+  check("Lerp borne son facteur a 1 : une image de 10 s va au bout", lent.fini, true);
+  check("l'echelle de la scene prime",
+        effondrementsDuBuild({ placed: { SunExplosionBehavior: [{ localScale: 2000 }] } })
+          .surface.echelle, 2000);
+  check("repli explicite sans la scene", effondrementsDuBuild(null).corona.echelle, 362.2121);
+
+  // La boucle : `TriggerSupernova` d'abord, `SunExploded` a la fin de
+  // l'effondrement, et l'onde part de LA.
+  const l = new TimeLoop(18);
+  l.elapsed = l.duration - 0.01;
+  l.update(1 / 60, 1e9);
+  check("TriggerSupernova seul", l.events.slice(-1)[0], "TriggerSupernova");
+  check("l'etoile s'effondre", l.collapsing && !l.supernova, true);
+  check("l'onde ne part pas encore", l.shockwaveRadius, 0);
+  let n = 0;
+  while (!l.supernova && n < 1000) { l.update(1 / 60, 1e9); n++; }
+  check("SunExploded suit, 1,6 s plus tard", round(l.supernovaAt - l.triggerAt, 1), 1.6);
+  check("dans l'ordre", l.events.slice(-2).join(","), "TriggerSupernova,SunExploded");
 }
 
 // --- degats du vaisseau -------------------------------------------------
@@ -4151,12 +4227,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         fx.sousLEau.intensity, REGLAGES_JOUEUR.glow.intensity);
 
   // Le reveil : blanc a 3, puis retour au noir en trois secondes.
-  fx.startOfTimeLoop();
+  fx.startOfTimeLoop(100);
   check("le reveil dure trois secondes", WAKE_DURATION, 3);
   check("il part du blanc", fx.glow.tint.join(","), "255,255,255");
-  fx.update(0);
+  fx.update(100);
   check("et le glow est allume", fx.glow.enabled, true);
-  fx.update(WAKE_DURATION);
+  // L'eclair part de l'heure donnee : une seconde apres, il eblouit encore.
+  fx.update(101);
+  // teinte 255 x 0,2, intensite 1,4 : le halo pese encore soixante-dix
+  // fois l'image — un pixel a 1,4 % de blanc sature.
+  check("une seconde apres, le halo pese encore 70 fois l'image",
+        Math.round(multiplicateurGlow(fx.glow)[0]), 70);
+  fx.update(100 + WAKE_DURATION);
   check("au bout, il s'eteint", fx.glow.enabled, false);
 
   // L'adoucissement n'est pas symetrique, et c'est LUI qui donne sa brutalite a

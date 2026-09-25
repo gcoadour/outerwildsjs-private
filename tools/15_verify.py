@@ -765,13 +765,19 @@ def _run(url, heavy, profil=None, zip_path=None):
           fb.start(garde.count); fb.running = garde.running; fb.t = garde.t;
           return {vingtDeux, trois,
                   progression: at(0.5, 600, false, 0).phase,
-                  contraction: +at(1, 0, false, 0).scale.toFixed(2),
+                  avantAnnonce: +at(1, 0, false, 0).scale.toFixed(2),
+                  effondrement: [window.__loop.surface && window.__loop.surface.echelle,
+                                 window.__loop.corona && window.__loop.corona.echelle],
                   explosion: at(1, 0, true, 5000).phase,
                   causes: Object.keys(window.__death.byCause).length};
         }""")
         rep.eq("vingt-deux photos : dix secondes deux", fin["vingtDeux"], 10.209)
         rep.eq("trois photos : six secondes quatre", fin["trois"], 6.426)
-        rep.eq("l'etoile se contracte avant d'exploser", fin["contraction"], 0.62)
+        # `SunExplosionBehavior` : l'etoile ne se contracte qu'apres
+        # `TriggerSupernova`, vers 3 % de l'echelle que la scene lui donne.
+        rep.eq("l'etoile ne se contracte pas avant l'annonce", fin["avantAnnonce"], 1)
+        rep.eq("l'effondrement part des echelles de la scene", fin["effondrement"],
+               [4000, 362.2121])
         rep.eq("phase d'explosion", fin["explosion"], "explosion")
         rep.eq("aucune mort au demarrage", fin["causes"], 0)
 

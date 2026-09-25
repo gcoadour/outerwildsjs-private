@@ -51,6 +51,22 @@ export const TWIRL_DURATION = 2;
 /** DeathType, lu dans la table Constant de l'assembly (scripts/il.mjs --enum). */
 export const DEATH_TYPE = { Default: 0, Impact: 1, Asphyxiation: 2, Energy: 3, Supernova: 4 };
 
+/**
+ * Ce que le halo du `GlowEffect` recoit, teinte par intensite, SANS
+ * normaliser.
+ *
+ * Le rendu divisait les teintes au-dessus de 1 par 255 et bornait l'intensite
+ * a 2 : l'eclair de mort (255, 100, 100) et le reveil (255, 255, 255, a 3)
+ * devenaient un halo discret. Dans l'alpha, ce debordement multiplie le flou
+ * par des centaines, et le moindre pixel non noir sature : l'ecran passe au
+ * BLANC une seconde et demie a la mort par supernova, et c'est aussi
+ * l'eblouissement du reveil qu'on n'avait pas attribue (docs/132).
+ */
+export function multiplicateurGlow(glow) {
+  const k = Math.max(0, glow.intensity || 0);
+  return (glow.tint || [0, 0, 0]).slice(0, 3).map((c) => Math.max(0, c) * k);
+}
+
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -161,7 +177,7 @@ export class CameraEffects {
    * besoin — il RECHARGE la scene — mais ce portage, lui, garde ses objets : la
    * remise a zero est le prix de ne pas recharger.
    */
-  startOfTimeLoop() {
+  startOfTimeLoop(t = 0) {
     this.grayscale = { enabled: false, amount: 0 };
     this.vignette = { ...this.vignette, enabled: false, intensity: 0, chromaticAberration: 0, blur: 0 };
     this.twirl = { enabled: false, angle: 0 };
@@ -171,7 +187,11 @@ export class CameraEffects {
 
     this.glow.intensity = 3;
     this.glow.tint = [255, 255, 255];
-    this.flashScreen(1, [0, 0, 0], WAKE_DURATION, 0);
+    // L'HEURE est indispensable : sans elle l'eclair partait de t = 0, se
+    // croyait fini a la premiere image, et le reveil n'eblouissait jamais —
+    // l'eblouissement blanc de l'alpha, deux secondes qui se dissipent, restait
+    // « non attribue » (docs/132).
+    this.flashScreen(1, [0, 0, 0], WAKE_DURATION, 0, t);
   }
 
   /**

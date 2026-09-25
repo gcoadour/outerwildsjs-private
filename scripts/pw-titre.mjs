@@ -28,7 +28,7 @@ if (!extrait) {
   await page.waitForSelector("#gate-summary table", { timeout: 600000 });
 }
 await page.click("#gate-play");
-await page.waitForFunction(() => window.__titre || window.__ready, { timeout: 120000 });
+await page.waitForFunction(() => window.__titre || window.__ready, null, { timeout: 120000 });
 await page.waitForTimeout(+attente);
 if (tTitre !== "") {
   await page.evaluate((t) => { if (window.__titre) window.__titre.t0 = performance.now() / 1000 - t; }, +tTitre);

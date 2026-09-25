@@ -49,7 +49,7 @@ portage.
 | audio spatial | 92 sources, 31 clips, instanciation à la volée |
 | particules | 135 systèmes, 15 textures, budget de 14 simultanés |
 | atmosphères et soleil | shaders maison, 122 shaders classés |
-| boucle temporelle | 20 min, supernova, onde de choc, mort, redémarrage |
+| boucle temporelle | 18 min, effondrement de l'étoile lu dans l'IL (1,6 s), onde cubique, mort, effet de mort puis flashback, réveil ébloui — mesurés côte à côte avec l'alpha ([`132`](132-comparaison-native.md)) |
 | dialogues et mémoire | 26 arbres, 72 branches, connaissance persistante |
 | contrôleurs de conversation | 5 règles lues dans l'IL, **14 conversations sur 14 joignables** |
 | codes de lancement | accordés **à la fin** de la conversation du Conservateur |
@@ -80,7 +80,7 @@ portage.
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
 | mort et flashback | 5 causes, commandes coupées, et les **photos de la partie** rejouées à rebours — autant qu'on a survécu de fois cinq secondes ([`98`](98-flashback.md)) |
-| supernova | progression, contraction, explosion, onde de choc |
+| supernova | progression (couleur seule), effondrement `SunExplosionBehavior` / `ShrinkSunBehavior`, explosion, onde de choc ([`132`](132-comparaison-native.md)) |
 | dégâts du vaisseau | pièces, propulseurs coupés, destruction |
 | LOD par maillage | hauteur relative à l'écran, parcours tournant |
 | éviction | un corps quitté depuis 45 s est libéré |

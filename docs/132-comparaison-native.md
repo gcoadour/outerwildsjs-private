@@ -558,3 +558,84 @@ fixe et par axe**, pas une fraction de l'écart — quatorze pas, 0,28 s, pour
 atteindre 7 — ; et debout, le matériau frotte, ce qui arrête en 0,59 m sur
 Timber Hearth (`pasAuSol`). La glissade après une touche lâchée, que
 l'alpha montrait et que le portage n'avait pas, en vient.
+
+## La fin des temps, côte à côte
+
+Une nouvelle expédition n'explose jamais : `TimeLoop.Start` suspend la
+supernova tant qu'on ignore les codes de lancement, et seul « Skip Intro »
+les donne d'emblée (`PlayerData.CreateNewPlayerSave(true)`). Les deux
+versions passent donc le titre par « Skip Intro » — `CHOIX=s` pour
+`scripts/alpha-reveil.sh`, `demarrer(page, { avant: 2 })` pour le
+portage — et la boucle de l'alpha dure **dix-huit** minutes, pas vingt.
+
+### L'effondrement, lu dans l'IL
+
+Le portage faisait partir `TriggerSupernova` et `SunExploded` ensemble,
+« faute de connaître la durée de l'effondrement », et contractait l'étoile
+pendant les **douze dernières secondes** de la boucle, avant même l'annonce,
+vers 62 % de sa taille — des valeurs déclarées « les miennes ». Il la faisait
+aussi enfler de 35 % au fil de la boucle. L'IL dit autre chose :
+
+- `SunSurfaceProgressionBehavior` et `SunCoronaProgressBehavior` ne touchent
+  qu'à la **couleur** (`SunColorCurve`) : l'étoile ne grossit pas.
+- `SunExplosionBehavior.Start` vise `localScale × 0,03` ; à partir de
+  `TriggerSupernova`, `Update` fait `Lerp(localScale, fin, 3 × deltaTime)`
+  et, sous 150 en x, met l'échelle à zéro, fait exploser le `Detonator` et
+  annonce `SunExploded`. La surface est à 4 000 dans `level0` : l'explosion
+  vient **1,58 s** après l'annonce à soixante images par seconde (1,4 s à
+  dix — la cadence compte, comme dans le build).
+- `ShrinkSunBehavior` fait de même pour la couronne (362,2), à `deltaTime`
+  seul, et l'éteint sous 50 : 2,18 s.
+- `SunSphereOfDeathBehavior.OnSunExploded` prend l'heure : l'onde part de
+  l'explosion, pas de l'annonce, et son rayon vaut `D × (t / T)³`
+  (30 000 u, 15 s), ce que le portage faisait déjà.
+
+`Effondrement` (`timeloop.js`) rejoue cette loi image par image ; l'échelle
+de départ est lue dans la scène (`localScale`, extrait pour ces deux
+classes), les constantes sont celles de l'IL. `SunStage` suit
+l'effondrement au lieu de sa courbe en cosinus, et, l'explosion passée, ne
+montre plus que la sphère de mort au rayon de l'onde.
+
+### Mesuré côte à côte
+
+`CHOIX=s scripts/alpha-reveil.sh 25 130 0.5 1075 work/alpha-fin` puis
+`node scripts/pw-fin.mjs work/web-fin/ 1080 36 0.5` (la boucle du portage est
+avancée à 1 080 s plutôt qu'attendue). Luminance moyenne de l'image :
+
+| étape | alpha | portage |
+|---|---|---|
+| de l'annonce à la mort (onde à Timber Hearth) | ≈ 11,5 s (1,6 + 9,9) | 11,4 s |
+| effet de mort : l'écran monte au blanc | 39 → 255, ≈ 1,5 s | 15 → 123 → 249 |
+| noir, puis photos à rebours sur fond noir | ≈ 3 s de noir | `attente` 3 s, noir |
+| blanc final, puis réveil ébloui | 255 → 175 → 23 → 11 | 255 → 210 → 27 → 11 |
+
+Cinq écarts corrigés en chemin, tous visibles sur la planche :
+
+- **L'éclair de mort ne blanchissait pas.** `FlashScreen(3, (255, 100, 100))`
+  : le build écrit des composantes de 0 à 255 là où Unity attend 0 à 1, et le
+  `GlowEffect` multiplie son halo par elles — le moindre pixel non noir
+  sature. Le rendu du portage divisait par 255 et bornait l'intensité à 2
+  (`multiplicateurGlow`, `cameraeffects.js`).
+- **Le réveil n'éblouissait pas**, pour deux raisons : la même
+  normalisation, et `startOfTimeLoop()` qui lançait son éclair à l'instant
+  zéro, de sorte qu'il se croyait fini à la première image. C'est
+  l'« éblouissement blanc non attribué » du réveil horodaté : c'est le
+  `StartOfTimeLoop` du build, glow blanc à 3 qui retombe en trois secondes.
+  Il part désormais aussi au premier chargement.
+- **Le flashback partait à la mort.** `PlayerCameraEffectController.Update`
+  n'annonce `TriggerFlashback` qu'à la fin de l'effet de mort (0,3, 3 ou
+  5 s selon la cause). Le portage calculait cet instant (`flashbackDemande`)
+  et ne le lisait nulle part ; `PlayerDeathHandler.attendreEffet` le fait
+  attendre, en phase `effet`.
+- **La scène restait visible autour des photos.** La caméra du flashback
+  efface en noir (`clearFlags` 2) ; le calque du portage a maintenant son
+  fond noir.
+- **Les photos étaient noires.** La `RenderTargetTexture` de 256 × 256
+  rendait du noir ; la photo est maintenant copiée de l'image affichée, dans
+  le `onAfterRender`, en carré central — ce que donne une caméra d'Unity
+  rendue dans une cible carrée, qui garde son champ vertical.
+
+La durée du défilement, elle, ne se compare pas sur cette capture : elle
+dépend du nombre de photos, deux cent seize après dix-huit minutes dans
+l'alpha (≈ 17 s), cinq dans le portage avancé à la fin de la boucle. La loi
+est celle de `OnTriggerFlashback` depuis [`98`](98-flashback.md).

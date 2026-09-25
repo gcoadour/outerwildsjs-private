@@ -43,6 +43,73 @@ export function shockwaveRadius(elapsed) {
 }
 
 /**
+ * L'effondrement de l'etoile, entre `TriggerSupernova` et `SunExploded`.
+ *
+ * Le portage faisait partir les deux annonces ensemble, « faute de connaitre
+ * la duree de l'effondrement », et contractait l'etoile pendant les douze
+ * DERNIERES secondes de la boucle, avant meme l'annonce. L'IL la donne :
+ *
+ *   Start              : _endScale = localScale x 0,03, et l'ecoute
+ *                        de `TriggerSupernova` (que `OnDestroy` retire)
+ *   OnTriggerSupernova : _superNovaTriggered = vrai
+ *   Update             : localScale = Lerp(localScale, _endScale, 3 x dt)
+ *                        si x < 150 : echelle nulle, Detonator.Explode,
+ *                        `SunExploded`
+ *
+ * La surface est a 4 000 : a soixante images par seconde, elle passe sous 150
+ * en 1,6 s. `ShrinkSunBehavior` fait de meme pour la couronne (362,2) a
+ * `deltaTime` seul, et s'arrete sous 50 — en 2,2 s. Le pas est celui de
+ * l'image, comme dans le build : l'effondrement depend de la cadence, et
+ * `Vector3.Lerp` borne son facteur a 1.
+ */
+// @lit SunExplosionBehavior
+// @lit ShrinkSunBehavior
+export const EFFONDREMENT_SURFACE = { taux: 0.03, vitesse: 3, seuil: 150, echelle: 4000 };
+export const EFFONDREMENT_COURONNE = { taux: 0.03, vitesse: 1, seuil: 50, echelle: 362.2121 };
+
+export class Effondrement {
+  /** @param p `{ taux, vitesse, seuil, echelle }` ; `echelle` vient du build */
+  constructor(p = EFFONDREMENT_SURFACE) {
+    this.p = p;
+    this.echelle = p.echelle;
+    this.fin = p.echelle * p.taux;
+    this.fini = false;
+  }
+
+  /** L'echelle rapportee a celle du depart : 1, puis vers 0,03, puis 0. */
+  get fraction() { return this.echelle / this.p.echelle; }
+
+  /** @returns vrai a l'image ou l'echelle passe sous le seuil */
+  update(dt) {
+    if (this.fini) return false;
+    const t = Math.min(1, Math.max(0, dt * this.p.vitesse));
+    this.echelle += (this.fin - this.echelle) * t;
+    if (this.echelle < this.p.seuil) {
+      this.echelle = 0;
+      this.fini = true;
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Les deux effondrements, a l'echelle que la scene leur donne.
+ *
+ * L'echelle de depart est lue dans `level0` (`localScale` du GameObject) ; le
+ * taux, la vitesse et le seuil sont des constantes d'IL.
+ */
+export function effondrementsDuBuild(gameplay) {
+  const p = (gameplay && gameplay.placed) || {};
+  const lire = (cls, repli) => {
+    const e = (p[cls] || [])[0];
+    return e && e.localScale > 0 ? { ...repli, echelle: e.localScale } : repli;
+  };
+  return { surface: lire("SunExplosionBehavior", EFFONDREMENT_SURFACE),
+           corona: lire("ShrinkSunBehavior", EFFONDREMENT_COURONNE) };
+}
+
+/**
  * La sphere de l'observatoire qui remet la simulation a zero.
  *
  * @lit ResetSimulationTrigger
@@ -107,7 +174,10 @@ export class TimeLoop {
 
   reset() {
     this.elapsed = 0;
-    this.supernovaAt = null;     // instant du declenchement, en temps de boucle
+    this.triggerAt = null;       // `TriggerSupernova`, en temps de boucle
+    this.effondrement = null;    // la surface qui s'effondre, entre les deux
+    this.couronne = null;        // et la couronne, qui la suit
+    this.supernovaAt = null;     // `SunExploded` : l'onde part de la
     this.dead = false;
     this.deathCause = null;
   }
@@ -155,6 +225,8 @@ export class TimeLoop {
   get secondsRemaining() { return Math.max(0, this.duration - this.elapsed); }
   get fraction() { return Math.min(1, this.elapsed / this.duration); }
   get supernova() { return this.supernovaAt !== null; }
+  /** Entre `TriggerSupernova` et `SunExploded` : l'etoile s'effondre. */
+  get collapsing() { return this.triggerAt !== null && this.supernovaAt === null; }
   /**
    * `EndOfTimeMusicController.Update`, dans l'ordre exact ou il teste.
    *
@@ -182,14 +254,21 @@ export class TimeLoop {
     this.elapsed += dt * this.timeScale;
 
     // `TimeLoop.Update` : l'annonce part UNE fois, et le composant se coupe.
-    if (!this.supernova && this.elapsed >= this.duration && !this.preventSupernova) {
+    if (this.triggerAt === null && this.elapsed >= this.duration && !this.preventSupernova) {
+      this.triggerAt = this.elapsed;
+      this.effondrement = new Effondrement(this.surface || EFFONDREMENT_SURFACE);
+      this.couronne = new Effondrement(this.corona || EFFONDREMENT_COURONNE);
+      this.events.push("TriggerSupernova");
+    }
+    // `ShrinkSunBehavior.Update` : la couronne, a son propre pas, qui survit
+    // a l'explosion de la surface d'une demi-seconde.
+    if (this.couronne) this.couronne.update(dt * this.timeScale);
+    // `SunExplosionBehavior.Update` : la surface s'effondre au pas de l'image,
+    // et c'est son passage sous le seuil qui annonce `SunExploded` — lui qui
+    // lance l'onde (`SunSphereOfDeathBehavior.OnSunExploded`).
+    if (this.collapsing && this.effondrement.update(dt * this.timeScale)) {
       this.supernovaAt = this.elapsed;
-      // `TriggerSupernova` fait s'effondrer le coeur ; `SunExploded` suit, et
-      // c'est LUI qui lance l'onde. Le portage ne connait pas encore la duree
-      // de l'effondrement — le build la tire de la mise a l'echelle de la
-      // surface, dont l'instance ne serialise ni le taux ni l'echelle finale —
-      // donc les deux partent ensemble, et c'est dit plutot que tu.
-      this.events.push("TriggerSupernova", "SunExploded");
+      this.events.push("SunExploded");
     }
     if (this.supernova && sunDistance != null &&
         this.shockwaveRadius >= sunDistance) {
