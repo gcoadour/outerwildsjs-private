@@ -285,3 +285,31 @@ n'a pas de raccourci depuis Timber Hearth ; `KillVolume`, `OribitingIsland`,
 deux émetteurs de signal et un lisible sont inactifs aussi. Les deux icônes
 clignotantes de l'ordinateur de bord, elles, sont rallumées par
 `ShipComputer` (`RALLUMES`).
+
+## Les particules : qui les joue, et de quelle couleur
+
+La tache orange au-dessus de la tour, dans le ciel du portage, était
+`Explosion_Fiery_Med` — l'explosion du vaisseau, qui brûlait dès le réveil.
+Le build pose `playOnAwake` à faux sur **53 des 135 systèmes** : buses,
+éruptions, passages, explosions, étoiles qui se dispersent. C'est un script qui
+les joue (`il.mjs --appel "ParticleSystem::Play"` en nomme dix-sept), et le
+portage les démarrait tous. `ParticleField.spawn` respecte maintenant le
+drapeau, et cinq déclencheurs du build sont portés :
+
+| script du build | systèmes | dans le portage |
+|---|---|---|
+| `ShipDamageController.ExplodeShip` | `Explosion_Fiery_Med` | à la destruction de la coque, éteint à sa remise en état |
+| `ModelShipCrashBehavior.OnImpact` | `Explosion_Fiery_Small` | au crash de la maquette |
+| `AncientTeleporter.FireTeleporter` | `TeleportParticles` (le plus proche) | au départ d'un passage |
+| `MeteorLauncher.LaunchMeteor` / `Update` | `EruptionParticles` (le plus proche) | au tir, arrêté après `_particleEmitDuration` |
+| `DissipatingParticlesBehavior.OnSunExploded` | `DissapatingStars`, `DissapatingParticles` | à l'explosion de l'étoile |
+
+Les buses (`ThrusterParticlesBehavior`) et les étincelles
+(`RandomParticleBursts`) l'étaient déjà. Restent sans déclencheur la tempête de
+sable (`ScreenEffectController.OnEnterSandstorm`) et l'entonnoir
+(`SandFunnelController.ActivateFunnel`).
+
+Et la **teinte** : les shaders `Particles/*` rendent `2 × _TintColor × couleur ×
+texture`. L'extracteur ne lisait que la texture ; la teinte des flammes du
+build vaut 0,22 — le portage les montrait deux fois trop vives —, celle des
+nuages de Giant's Deep un bleu-vert à 5 %.

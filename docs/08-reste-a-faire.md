@@ -57,8 +57,8 @@ portage.
 | lune quantique | 4 orbites hôtes, effondrement à la perte de vue |
 | trou noir / trou blanc | capture, éjection en cône, effondrement de croûte |
 | Dark Bramble | prédateurs sensibles au bruit, croissance des ronces |
-| secteurs | bascule géométrie/substitution **et téléchargement**, 3 corps sur 12 ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md)) |
-| poids au démarrage | 60,0 Mo pour la première image, contre 199,6 avant |
+| secteurs | **tout le système chargé derrière le titre** et visible de loin, comme `level0` ; « à portée » par secteur ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md), [`132`](132-comparaison-native.md)) |
+| poids au démarrage | 47 Mo de tampons pour les huit lots, chargés pendant que le titre tourne |
 | pilote auto et dégâts | 4 phases, seuils d'impact 15/30/300 |
 | carte du système | orbites, marqueurs, sélection de cible |
 | shaders du jeu | **203 affectations**, tous les shaders utilisés couverts |
@@ -74,6 +74,8 @@ portage.
 | réglages | 7 options, sauvegarde distincte de la partie ; « Exit to Main Menu » ramène au titre |
 | écran-titre | la scène de `mainData` : planète, feu, fumées, voyageurs, cinq lignes lues dans l'IL ([`131`](131-ecran-titre.md)) |
 | temps | l'image découpée comme Unity : pas maximal de 1 s, Havok au même pas ([`132`](132-comparaison-native.md)) |
+| ciel et lumière | voûte `Skybox` du build, étoiles à leur taille, `SunLight` ponctuelle de portée 20 000 sans ombres, liseré de Giant's Deep d'après son programme, renderers éteints respectés ([`132`](132-comparaison-native.md)) |
+| particules | `playOnAwake` respecté (53 sur 135 attendent un script), `_TintColor` appliquée, cinq déclencheurs du build portés ([`132`](132-comparaison-native.md)) |
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
