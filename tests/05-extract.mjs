@@ -40,7 +40,7 @@ import { extractParticles } from "../web/src/pipeline/extract/particles.js";
 import { extractTextureAnimators } from "../web/src/pipeline/extract/texanim.js";
 import { extractPrefabs, mergePrefabs } from "../web/src/pipeline/extract/prefabs.js";
 import { extractInput } from "../web/src/pipeline/extract/input.js";
-import { clipLoops, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
+import { clipLoops, HELD_ROOTS, exportSubtree, findRoots } from "../web/src/pipeline/extract/gltf.js";
 import { STICK_LIGHTS, THERM_HEAT_SPAN } from "../web/src/held.js";
 import { Commandes, COMMANDES } from "../web/src/input.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
@@ -125,6 +125,18 @@ const gp = extractGameplay(ctx);
 console.timeEnd("gameplay");
 const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
+// Ce que vise le rayon de `FirstPersonManipulator` : le collider du recepteur,
+// et ce que vise `ReferenceFrameTracker` : les spheres du calque 19 (docs/132).
+check("chaque recepteur porte son collider",
+      gp.placed.InteractReceiver.filter((x) => x.volume).length, 39);
+{
+  const savant = gp.placed.InteractReceiver.find((x) => x.name === "ConversationZone"
+    && Math.abs(x.position[0] - 4.37) < 0.1 && Math.abs(x.position[2] + 8720.98) < 0.1);
+  check("le Rocket Scientist se vise sur une capsule", savant && savant.volume.shape, "capsule");
+}
+check("onze spheres de visee de referentiel", n("ReferenceFrameSphere"), 11);
+check("celle de Giant's Deep fait mille",
+      (gp.placed.ReferenceFrameSphere.find((x) => x.body === "GiantsDeep_Body") || {}).volume.radius, 1000);
 check("objets lisibles", n("ReadableObject"), 34);
 // Ce que ces trente-quatre textes DEMANDENT, et que rien n'affichait : leur
 // longueur. Vingt et un depassent une page de panneau, vingt-deux portent au
@@ -328,6 +340,11 @@ console.timeEnd("lumieres");
 // A3/A4 : le moteur n'avait que deux lumieres inventees, et fog.js portait des
 // RenderSettings recopies a la main.
 check("des lumieres sont posees dans la scene", lighting.lights.length > 0, true);
+// La force de l'ombre : le coeur de l'etoile n'assombrit qu'a 70 % (docs/132).
+check("CoreLight : une ombre a 0,7",
+      (lighting.lights.find((l) => l.name === "CoreLight") || {}).ombre?.force, 0.7);
+check("quatre lumieres du monde portent une ombre",
+      lighting.lights.filter((l) => l.ombre).length, 4);
 check("les RenderSettings de la scene sont lus", !!lighting.settings, true);
 // Ce qui fait VIVRE ces lumieres : trois comportements que le portage ne lisait
 // pas (docs/42-lumieres.md). Une lumiere sans eux garde l'intensite serialisee.
@@ -1555,6 +1572,21 @@ check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
         t.logo.pixelInset.slice(2).join("x"), "385.73x212");
   check("six faces de voute", Object.keys(t.skybox.faces).length, 6);
   check("la teinte de la voute", t.skybox.tint[0], 0.47059);
+  // Les ombres du titre, telles que le build les regle (docs/132) : deux
+  // ponctuelles a ombre pleine, et les branches des pins qui n'en recoivent pas.
+  const tl = extractLighting(inputCtx);
+  check("deux lumieres du titre portent une ombre",
+        tl.lights.filter((l) => l.ombre).map((l) => l.name).sort().join(","), "Light,MoonLight");
+  check("a pleine force", tl.lights.every((l) => !l.ombre || l.ombre.force === 1), true);
+  const [rt] = findRoots(inputCtx, t.roots);
+  const tg = exportSubtree(inputCtx, rt.gid, "titre", { emitImage: () => {}, maxTexture: 16 });
+  const tn = tg.gltf.nodes.filter((n) => n.mesh !== undefined);
+  check("au titre, tout renderer porte l'ombre",
+        tn.filter((n) => n.extras && n.extras.noCastShadows).length, 0);
+  check("dix-huit n'en recoivent pas", tg.stats.noReceiveShadows, 18);
+  check("... et ce sont des branches",
+        [...new Set(tn.filter((n) => n.extras && n.extras.noReceiveShadows).map((n) => n.name))].join(","),
+        "branches");
 }
 // Zero, et ce n'est pas un oubli : chaque corps porte son champ.
 check("la gravite de Unity est nulle", (inp.gravity || []).join(","), "0,0,0");

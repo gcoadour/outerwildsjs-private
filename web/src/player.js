@@ -7,7 +7,8 @@
 // rangees dans `this.c` et jamais lues.
 //
 //   au sol   v_cible = _groundSpeed (7) en avant, _strafeSpeed (5) de cote
-//            v approche v_cible a _groundAcceleration (0,5) — voir `approach`
+//            v rejoint v_cible, borne de _groundAcceleration (0,5) par pas
+//            fixe et par axe — voir `pasAuSol`
 //            saut : v += haut x _jumpSpeed (6), sur front de touche
 //            appui : sphere de rayon _sphereCastRadius (0,46) lancee sur
 //                    _sphereCastLength (0,6), et pente sous
@@ -17,7 +18,7 @@
 //            d'une surface
 //
 // La vitesse de regime au sol vaut exactement `_groundSpeed`, et la mise en
-// vitesse ne depend pas de la frequence d'images : voir `approach`, ou se joue
+// vitesse ne depend pas de la frequence d'images : voir `pasAuSol`, ou se joue
 // la seule vraie question d'interpretation de cette serie.
 //
 // Deux moteurs interchangeables :
@@ -30,8 +31,8 @@ import { dominantField } from "./gravity.js";
 /**
  * Valeurs de repli, employees seulement si le build n'est pas la.
  *
- * `_tumbleThreshold` n'a pas ete releve sur le build : la valeur ci-dessous est
- * un repli assume, pas une mesure — d'ou son nom.
+ * `_tumbleThreshold` n'est pas serialise : c'est le 15 du constructeur de
+ * `CharacterMovementModel`, lu dans l'IL (docs/132).
  */
 export const PLAYER_FALLBACK = {
   groundSpeed: 7, strafeSpeed: 5, jumpSpeed: 6, acceleration: 0.5,
@@ -69,15 +70,21 @@ export function walkable(normal, up, maxAngle = PLAYER_FALLBACK.maxAngleToBeGrou
 /**
  * Vitesse visee au sol, dans le plan tangent.
  *
- * L'avant et le cote n'ont PAS la meme vitesse : 7 contre 5. Les composer
- * naivement donnerait 8,6 en diagonale — on borne donc l'ellipse a 1.
+ * `CharacterMovementModel.UpdateMovement`, lu dans l'IL :
+ *
+ *     vitesse = _groundSpeed;  si (commande.z < 0) vitesse = _strafeSpeed;
+ *     cible = (commande.x x _strafeSpeed, 0, commande.z x vitesse)
+ *
+ * On RECULE a la vitesse de cote, 5, et non a celle de la marche : le portage
+ * reculait a 7. Et la commande n'est pas bornee (`GetMoveInput` rend l'axe X
+ * et l'axe Z tels quels) : en diagonale, on va a 8,6. Le portage bornait
+ * l'ellipse pour eviter ce qu'il prenait pour un defaut ; c'est le jeu
+ * (docs/132).
  */
 export function groundTarget(input, basis, c) {
   const fwd = Math.max(-1, Math.min(1, input.forward || 0));
   const rgt = Math.max(-1, Math.min(1, input.right || 0));
-  const n = Math.hypot(fwd, rgt);
-  const k = n > 1 ? 1 / n : 1;
-  const vf = fwd * k * c.groundSpeed, vr = rgt * k * c.strafeSpeed;
+  const vf = fwd * (fwd < 0 ? c.strafeSpeed : c.groundSpeed), vr = rgt * c.strafeSpeed;
   return { x: basis.fwd.x * vf + basis.right.x * vr,
            y: basis.fwd.y * vf + basis.right.y * vr,
            z: basis.fwd.z * vf + basis.right.z * vr };
@@ -87,23 +94,56 @@ export function groundTarget(input, basis, c) {
 export const FIXED_STEP = 0.02;
 
 /**
- * Un pas d'approche vers la vitesse visee.
+ * Un pas de marche au sol, comme `UpdateMovement` le fait.
  *
- * `_groundAcceleration` (0,5) est la fraction de l'ecart rattrapee a chaque
- * PAS FIXE d'Unity, pas par seconde : `AddLocalVelocityChange` s'appelle dans
- * `FixedUpdate`, a 50 Hz. La lire comme une fraction par seconde donnerait une
- * mise en vitesse asymptotique de neuf secondes pour atteindre 99 % de
- * `_groundSpeed` — ce n'est pas de la marche, c'est un tapis roulant.
+ *     ecart = cible - vitesse           (repere du joueur, y mis a zero)
+ *     si |ecart| > _tumbleThreshold     culbute, et rien d'autre
+ *     ecart.x = Clamp(ecart.x, -a, a);  ecart.z = Clamp(ecart.z, -a, a)
+ *     AddVelocityChange(ecart projete sur le sol)
  *
- * On ramene donc la fraction au temps ecoule, ce qui rend le resultat
- * independant de la frequence d'images (le principe du §2.5) tout en gardant
- * exactement le comportement d'Unity a 50 Hz : la vitesse de regime reste
- * `_groundSpeed`, et elle est atteinte en une fraction de seconde.
+ * `_groundAcceleration` (0,5) n'est pas une FRACTION de l'ecart, comme le
+ * portage le lisait : c'est une BORNE, en unites par seconde, par pas fixe
+ * et par axe. Arriver a 7 prend quatorze pas — 0,28 s — et s'arreter autant :
+ * on glisse d'un metre apres avoir lache la touche. L'alpha le montre, cote a
+ * cote ; le portage s'arretait en vingt centimetres (docs/132).
+ *
+ * La borne se rapporte au temps ecoule (`dt / FIXED_STEP` pas), ce qui rend le
+ * regime independant de la frequence d'images et exact a 50 Hz.
+ *
+ * ET LE FROTTEMENT. `Awake` cree trois materiaux physiques, et `UpdateMovement`
+ * pose sur la capsule celui du moment : en course (commande non nulle),
+ * frottement 0 ; DEBOUT, frottement 1, combine au MAXIMUM avec le sol. Sans
+ * commande, PhysX freine donc aussi de mu x g — douze unites par seconde^2 sur
+ * Timber Hearth — en plus de la borne : l'arret prend 0,19 s et non 0,28.
+ *
+ * @param tan    vitesse dans le plan tangent {x, y, z}
+ * @param cible  vitesse visee (`groundTarget`)
+ * @param basis  {fwd, right} du joueur
+ * @param g      pesanteur le long de la normale du sol (frottement debout)
+ * @returns { vel, culbute }
  */
-export function approach(v, target, accel, dt, step = FIXED_STEP) {
-  const a = Math.max(0, Math.min(1, accel));
-  const k = a >= 1 ? 1 : 1 - Math.pow(1 - a, dt / step);
-  return v + (target - v) * k;
+export const FROTTEMENT_DEBOUT = 1;
+
+export function pasAuSol(tan, cible, basis, c, dt, step = FIXED_STEP, g = 0) {
+  const e = { x: cible.x - tan.x, y: cible.y - tan.y, z: cible.z - tan.z };
+  const ex = e.x * basis.right.x + e.y * basis.right.y + e.z * basis.right.z;
+  const ez = e.x * basis.fwd.x + e.y * basis.fwd.y + e.z * basis.fwd.z;
+  if (Math.hypot(ex, ez) > (c.tumbleThreshold ?? Infinity)) {
+    return { vel: { ...tan }, culbute: true };
+  }
+  const a = (c.acceleration ?? 0.5) * (dt / step);
+  const cx = Math.max(-a, Math.min(a, ex)), cz = Math.max(-a, Math.min(a, ez));
+  const v = { x: tan.x + basis.right.x * cx + basis.fwd.x * cz,
+              y: tan.y + basis.right.y * cx + basis.fwd.y * cz,
+              z: tan.z + basis.right.z * cx + basis.fwd.z * cz };
+  // Debout (cible nulle) : le frottement du materiau, oppose au glissement.
+  const debout = Math.hypot(cible.x, cible.y, cible.z) < 1e-6;
+  if (debout && g > 0) {
+    const n = Math.hypot(v.x, v.y, v.z);
+    const f = Math.min(n, FROTTEMENT_DEBOUT * g * dt);
+    if (n > 0) { v.x -= v.x / n * f; v.y -= v.y / n * f; v.z -= v.z / n * f; }
+  }
+  return { vel: v, culbute: false };
 }
 
 /** Hauteur d'un saut, pour l'invariant : v^2 / 2g. */
@@ -455,11 +495,11 @@ export class Player {
       const vn = this.vel.x * up.x + this.vel.y * up.y + this.vel.z * up.z;
       const tan = { x: this.vel.x - vn * up.x, y: this.vel.y - vn * up.y,
                     z: this.vel.z - vn * up.z };
-      const nx = approach(tan.x, t.x, this.c.acceleration, dt);
-      const ny = approach(tan.y, t.y, this.c.acceleration, dt);
-      const nz = approach(tan.z, t.z, this.c.acceleration, dt);
-      this.vel.x = nx + vn * up.x; this.vel.y = ny + vn * up.y;
-      this.vel.z = nz + vn * up.z;
+      const pas = pasAuSol(tan, t, basis, this.c, dt, FIXED_STEP,
+                           f ? f.magnitude : 0);
+      if (pas.culbute && !(this.tumble > 0)) this.tumble = this.c.tumbleDuration;
+      this.vel.x = pas.vel.x + vn * up.x; this.vel.y = pas.vel.y + vn * up.y;
+      this.vel.z = pas.vel.z + vn * up.z;
       this.tryJump(input, up);
       body.setLinearVelocity(new B.Vector3(this.vel.x, this.vel.y, this.vel.z));
     } else if (this.suited) {
@@ -527,11 +567,11 @@ export class Player {
       const vn = this.vel.x * up.x + this.vel.y * up.y + this.vel.z * up.z;
       const tx = this.vel.x - vn * up.x, ty = this.vel.y - vn * up.y,
             tz = this.vel.z - vn * up.z;
-      const nx = approach(tx, t.x, this.c.acceleration, dt);
-      const ny = approach(ty, t.y, this.c.acceleration, dt);
-      const nz = approach(tz, t.z, this.c.acceleration, dt);
-      this.vel.x = nx + vn * up.x; this.vel.y = ny + vn * up.y;
-      this.vel.z = nz + vn * up.z;
+      const pas = pasAuSol({ x: tx, y: ty, z: tz }, t, basis, this.c, dt, FIXED_STEP,
+                           this.field ? this.field.magnitude : 0);
+      if (pas.culbute && !(this.tumble > 0)) this.tumble = this.c.tumbleDuration;
+      this.vel.x = pas.vel.x + vn * up.x; this.vel.y = pas.vel.y + vn * up.y;
+      this.vel.z = pas.vel.z + vn * up.z;
       this.tryJump(input, up);
     } else if (this.suited) {
       const a = this.jetpackAccel(input, basis, up);

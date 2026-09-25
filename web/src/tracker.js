@@ -241,13 +241,16 @@ export function angleTo(a, b) {
  *    proche EN ANGLE gagne — pas le plus proche en distance. Viser une planete
  *    lointaine mais bien centree l'emporte donc sur une lune du coin de l'oeil.
  *
- * Le portage n'a pas de volumes de referentiel a lancer un rayon dessus : il a
- * la liste des corps et leur rayon d'arrivee declare (`frames.js`). Le premier
- * temps devient donc « le corps dont on perce la sphere a moins de mille », le
- * second « le mieux centre ». La regle du build est conservee, sa mise en
- * oeuvre non — et c'est dit.
+ * Le premier temps devient « le corps dont on perce la sphere a moins de
+ * mille ». Le second exige maintenant, comme le `RaycastAll` du build, que le
+ * rayon TRAVERSE la sphere de visee du corps (`rf`, les onze « RFVolume » du
+ * calque 19) — en partant de dehors : un rayon d'Unity ne touche pas le
+ * collider dont il part. Le portage prenait le mieux centre du ciel entier ;
+ * viser le vide gardait donc toujours une cible, et le clic qui devait
+ * relacher re-visait (docs/132). Sans `rf` (extraction ancienne), on garde
+ * cette ancienne regle en repli.
  *
- * @param corps  [{ name, position, radius }]
+ * @param corps  [{ name, position, radius, rf }]
  * @returns le corps vise, ou null
  */
 export function aimedFrame(corps, origine, avant,
@@ -266,8 +269,18 @@ export function aimedFrame(corps, origine, avant,
       const demi = Math.asin(Math.min(1, r / Math.max(dist, r))) * 180 / Math.PI;
       if (angle <= demi && dist < procheDist) { proche = b; procheDist = dist; }
     }
-    // Temps 2 : le mieux centre, a portee du rayon lointain.
-    if (dist <= far && angle < meilleurAngle) { meilleurAngle = angle; centre = b; }
+    // Temps 2 : le mieux centre parmi les spheres de visee que le rayon
+    // traverse, a portee du rayon lointain.
+    if (dist <= far && angle < meilleurAngle) {
+      if (b.rf > 0) {
+        const n = _len(avant) || 1;
+        const t = (d[0] * avant[0] + d[1] * avant[1] + d[2] * avant[2]) / n;
+        const perp = Math.sqrt(Math.max(0, dist * dist - t * t));
+        if (dist > b.rf && t > 0 && perp <= b.rf) { meilleurAngle = angle; centre = b; }
+      } else if (!(corps || []).some((x) => x && x.rf > 0)) {
+        meilleurAngle = angle; centre = b;
+      }
+    }
   }
   return proche || centre;
 }

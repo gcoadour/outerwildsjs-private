@@ -124,7 +124,7 @@ import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION, shipNoise, SHIP_NOISE } from "../web/src/ship.js";
-import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
+import { Player, PLAYER_FALLBACK, groundTarget, pasAuSol, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
 import { playerConstants } from "../web/src/config.js";
 import { buildOrbits, advance, frameVelocity } from "../web/src/orbits.js";
@@ -142,7 +142,8 @@ import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
 import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep, noCollide, rendererOff, hideDisabledRenderers } from "../web/src/physics.js";
+import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer } from "../web/src/physics.js";
+import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE } from "../web/src/lights.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
@@ -489,29 +490,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("et le menu est bien ferme", b.open, false);
   }
 
-  // LA NOUVELLE PARTIE. `TitleScreenMenu.ToggleOption` appelle
-  // `TriggerLoad(true, ...)` sur deux de ses cinq options, et `TriggerLoad`
-  // appelle `CreateNewPlayerSave` : une partie neuve EFFACE la sauvegarde. Le
-  // portage n'a pas de menu-titre et `PlayerData.wipe` n'etait donc appelee de
-  // nulle part. C'est un AJOUT au menu des reglages, et il demande DEUX
-  // validations la ou le build n'en demande aucune : une nouvelle partie est
-  // ici a une touche d'une partie en cours.
+  // LA NOUVELLE PARTIE se choisit au menu-titre, comme dans le build : le
+  // menu des reglages n'a que ses sept lignes (docs/131, docs/132).
   {
-    const m = new Settings(null);
-    const i = m.options.findIndex((o) => o.key === "newGame");
-    check("la nouvelle partie est au menu", i >= 0, true);
-    m.index = i;
-    check("le premier appui ne fait rien", m.toggle(0), null);
-    check("mais il arme", m.confirmNewGame, true);
-    check("et le libelle le dit", m.label(m.options[i]).includes("confirmer"), true);
-    check("le second appui la declenche", m.toggle(0), "newGame");
-    check("et ferme le menu", m.open, false);
-    check("l'armement retombe", m.confirmNewGame, false);
-    // Quitter la ligne desarme : on ne laisse pas un effacement arme derriere.
-    m.index = i;
-    m.toggle(0);
-    m.move(1);
-    check("changer de ligne desarme", m.confirmNewGame, false);
+    const m = new Settings(null, { niveau: 1 });
+    check("pas de nouvelle partie aux reglages",
+          m.options.some((o) => o.key === "newGame"), false);
   }
 
   // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------
@@ -2217,32 +2201,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(groundTarget({ forward: 1, right: 0 }, basis, c).z, 3), 7);
   check("de cote, on vise _strafeSpeed",
         round(groundTarget({ forward: 0, right: 1 }, basis, c).x, 3), 5);
-  // Composer 7 et 5 sans borner donnerait 8,6 en diagonale : plus vite en
-  // biais qu'en ligne droite, ce qui est le defaut classique.
+  // `UpdateMovement` : on recule a la vitesse de COTE, et la diagonale n'est
+  // pas bornee — 8,6 en biais, comme dans le jeu (docs/132).
+  check("en arriere, on vise _strafeSpeed",
+        round(groundTarget({ forward: -1, right: 0 }, basis, c).z, 3), -5);
   const diag = groundTarget({ forward: 1, right: 1 }, basis, c);
-  check("en diagonale, on ne va pas plus vite qu'en avant",
-        Math.hypot(diag.x, diag.z) <= 7 + 1e-9, true);
+  check("en diagonale, 7 et 5 se composent : 8,6", round(Math.hypot(diag.x, diag.z), 2), 8.6);
 
-  // Regime etabli : v -> _groundSpeed a 1 % pres. `_groundAcceleration` est
-  // une fraction par PAS FIXE (50 Hz), pas par seconde : la mise en vitesse se
-  // compte en dixiemes de seconde, pas en dizaines.
-  let v = 0;
-  for (let i = 0; i < 60; i++) v = approach(v, 7, c.acceleration, 1 / 60);
-  check("la vitesse de regime est _groundSpeed a 1 % pres",
-        Math.abs(v - 7) / 7 < 0.01, true);
-  let court = 0;
-  for (let i = 0; i < 12; i++) court = approach(court, 7, c.acceleration, 1 / 60);
-  check("... et elle est atteinte en un cinquieme de seconde",
-        Math.abs(court - 7) / 7 < 0.01, true);
-  // Meme mise en vitesse quelle que soit la cadence (le principe du §2.5).
-  const apres1s = (fps) => {
-    let u = 0;
-    for (let i = 0; i < fps; i++) u = approach(u, 7, c.acceleration, 1 / fps);
-    return u;
+  // `_groundAcceleration` est une BORNE par pas fixe et par axe, pas une
+  // fraction : quatorze pas pour atteindre 7, autant pour s'arreter.
+  const marche = (v0, cible, pas, dt = 0.02) => {
+    let v = { x: 0, y: 0, z: v0 }, n = 0;
+    while (n < pas) { v = pasAuSol(v, { x: 0, y: 0, z: cible }, basis, c, dt).vel; n++; }
+    return v.z;
   };
-  check("la mise en vitesse ne depend pas de la frequence d'images",
-        Math.abs(apres1s(30) - apres1s(144)) < 1e-9, true);
-  check("l'approche ne depasse jamais sa cible", approach(0, 7, 1, 1), 7);
+  check("au bout de sept pas, on est a mi-vitesse", round(marche(0, 7, 7), 3), 3.5);
+  check("il faut quatorze pas (0,28 s) pour atteindre 7", round(marche(0, 7, 14), 3), 7);
+  check("et on ne la depasse pas", round(marche(0, 7, 20), 3), 7);
+  let glisse = 0, v = 7;
+  while (v > 0) { v = pasAuSol({ x: 0, y: 0, z: v }, { x: 0, y: 0, z: 0 }, basis, c, 0.02).vel.z; glisse += v * 0.02; }
+  check("lacher la touche : on glisse encore pres d'un metre", round(glisse, 2), 0.91);
+  // Debout, le materiau frotte (1, au maximum avec le sol) : sous les douze de
+  // Timber Hearth, l'arret est plus court.
+  let glisseDebout = 0, vd = 7;
+  while (vd > 1e-9) {
+    vd = pasAuSol({ x: 0, y: 0, z: vd }, { x: 0, y: 0, z: 0 }, basis, c, 0.02, 0.02, 12).vel.z;
+    glisseDebout += vd * 0.02;
+  }
+  check("debout sur Timber Hearth, on glisse six dixiemes de metre", round(glisseDebout, 2), 0.59);
+  check("en marchant, pas de frottement : la cible seule borne",
+        round(pasAuSol({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 7 }, basis, c, 0.02, 0.02, 12).vel.z, 3), 0.5);
+  check("la meme mise en vitesse a 30 et a 60 images par seconde",
+        round(marche(0, 7, 6, 1 / 30), 3), round(marche(0, 7, 12, 1 / 60), 3));
+  check("un ecart de plus de quinze fait culbuter",
+        pasAuSol({ x: 0, y: 0, z: 20 }, { x: 0, y: 0, z: 0 }, basis, c, 0.02).culbute, true);
+  check("a chaque axe sa borne : le cote n'attend pas l'avant",
+        round(pasAuSol({ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 7 }, basis, c, 0.02).vel.x, 3), 0.5);
 
   // Pente praticable : _maxAngleToBeGrounded vaut 45 degres. Le portage
   // n'avait aucun seuil, et on tenait sur une paroi verticale.
@@ -3076,7 +3070,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 // scene : c'est son controleur qui le pose au demarrage de la conversation.
 {
   const data = new PlayerData();
-  data.wipe();
+  data.nouvelleSauvegarde(); data.save();
   const curator = { index: 0, character: "Curator", position: [0, 0, 0],
                     tree: null,
                     controller: { kind: "CuratorConvoController",
@@ -7267,7 +7261,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // --- L'INVULNERABILITE DU PREMIER TOUR (docs/81-invulnerable.md) ---
 
   const d = new PlayerData();
-  d.wipe();
+  d.nouvelleSauvegarde(); d.save();
   check("premiere boucle, sans les codes : invulnerable",
         d.startOfTimeLoop(1), true);
   check("et le savoir d'entrainement retombe", d.completedZeroGTraining, false);
@@ -8077,6 +8071,40 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("l'autre reste visible", allume.isVisible, true);
 }
 
+// L'ombre ponctuelle d'Unity 4 : biais multiplicatif de 0,97, lu dans
+// `Internal-PrePassLighting` (docs/132).
+{
+  check("le biais du build", BIAIS_OMBRE_PONCTUELLE, 0.97);
+  const plan = "float computeShadow(vec4 v){return depth>shadow ? darkness : 1.0;}";
+  const cube = "float computeShadowCube(vec3 w){float depth=1.;return depth>shadow ? darkness : 1.0;}";
+  const B = { Effect: { IncludesShadersStore: { shadowsFragmentFunctions: plan + cube } } };
+  check("le test cubique se patche", patchOmbresUnity(B), true);
+  const f = B.Effect.IncludesShadersStore.shadowsFragmentFunctions;
+  check("... le test plan reste celui de Babylon", f.startsWith(plan), true);
+  check("... le cubique compare 0,97 d", f.includes("return 0.97*depth>shadow"), true);
+  patchOmbresUnity(B);
+  check("patcher deux fois ne double rien",
+        B.Effect.IncludesShadersStore.shadowsFragmentFunctions, f);
+  check("sans Babylon, rien", patchOmbresUnity(null), false);
+
+  let sombre = null;
+  const g = { usePoissonSampling: true, bias: 0.0005, normalBias: 1,
+              setDarkness(d) { sombre = d; } };
+  const l = { range: 170, shadowMinZ: 1 };
+  ombreUnity({ ShadowGenerator: { FILTER_NONE: 0 } }, g, l, { force: 0.7 });
+  check("un seul echantillon", g.usePoissonSampling === false && g.filter === 0, true);
+  check("aucun biais additif", g.bias + g.normalBias, 0);
+  check("l'obscurite vaut 1 - force", Math.round(sombre * 100) / 100, 0.3);
+  check("la profondeur part de la lumiere", l.shadowMinZ, 0);
+  check("et finit a sa portee", l.shadowMaxZ, 170);
+
+  const branche = { metadata: { gltf: { extras: { noReceiveShadows: true } } } };
+  check("une branche porte l'ombre", ombresDuRenderer(branche).porte, true);
+  check("mais ne la recoit pas", ombresDuRenderer(branche).recoit, false);
+  check("un maillage nu fait les deux",
+        JSON.stringify(ombresDuRenderer({})), '{"porte":true,"recoit":true}');
+}
+
 // On parle a qui l'on regarde : rayon de dix unites, puis `_interactRange`
 // du point touche (docs/132).
 {
@@ -8099,6 +8127,22 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("a deux pas, en le regardant : on lui parle", regard(-2.4) && regard(-2.4).prompt, "Talk");
   check("a quatre metres, non : `_interactRange` vaut 2", regard(-4), null);
   check("a cote de lui, sans le regarder, non plus", regard(-2, 1.5), null);
+}
+
+// Viser un referentiel : au second temps, le rayon doit TRAVERSER la sphere
+// de visee du corps, et en partant de dehors (docs/132).
+{
+  const gd = { name: "GD", position: [0, 0, 10000], radius: 500, rf: 1000 };
+  const th = { name: "TH", position: [0, 0, -400], radius: 250, rf: 600 };
+  check("face a Giant's Deep, on le vise", aimedFrame([gd, th], [0, 0, 0], [0, 0, 1]), gd);
+  check("vers le vide, rien : le clic relachera",
+        aimedFrame([gd, th], [0, 0, 0], [1, 0, 0]), null);
+  check("une sphere dont on part n'est pas touchee",
+        aimedFrame([{ ...th, radius: 0 }], [0, 0, 0], [0, 0, -1]), null);
+  check("a peine a cote du bord de la sphere, rien",
+        aimedFrame([gd], [0, 0, 0], [0.11, 0, 1]), null);
+  check("sans spheres de visee (extraction ancienne), le mieux centre",
+        aimedFrame([{ name: "X", position: [0, 0, 10000], radius: 0 }], [0, 0, 0], [1, 0, 0.2]).name, "X");
 }
 
 // La repetition des textures, dans le repere retourne du glTF (docs/132).

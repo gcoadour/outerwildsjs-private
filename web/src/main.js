@@ -1586,7 +1586,8 @@ async function boot() {
     : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
-  const flashlight = new Flashlight(BABYLON, scene);
+  const flashlight = new Flashlight(BABYLON, scene,
+    (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
   // L'etat du baton : sorti ou range, ce qui se joue, ou en est l'aiguille.
   const baton = new BatonGuimauve();
@@ -2578,9 +2579,13 @@ async function boot() {
   // symptome est le meme : une erreur au premier usage, muette jusque-la.
   const visables = [];
   for (const b of bodies) {
+    // La sphere de visee du corps : le « RFVolume » du calque 19 (tracker.js).
+    const sphere = ((gameplay.placed || {}).ReferenceFrameSphere || [])
+      .find((x) => x.body && x.body === b.bodyName);
     visables.push({ body: b, name: b.name,
                     position: [b.position0[0], b.position0[1], b.position0[2]],
-                    radius: (b.gravity && b.gravity.upperSurfaceRadius) || 0 });
+                    radius: (b.gravity && b.gravity.upperSurfaceRadius) || 0,
+                    rf: sphere && sphere.volume ? sphere.volume.radius : 0 });
   }
   if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
   window.__dlgUI = dlgUI;   // sonde de verification : le dialogue au doigt
@@ -2970,8 +2975,18 @@ async function boot() {
       // de seconde.
       const tReel = performance.now() / 1000;
       const verrou = !!(settings.options[settings.index] || {}).locked;
-      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1 : 0;
-      const x = code === "ArrowRight" ? 1 : code === "ArrowLeft" ? -1 : 0;
+      // Les touches du build d'abord : `Menu.Update` lit `moveZ` et `moveX`,
+      // soit W/S et I/K, A/D et J/L. Le portage ne lisait que les fleches,
+      // qu'aucun canal ne lie — dans l'alpha, S descend d'une ligne ; ici,
+      // rien (docs/132). Les fleches restent : ce sont les codes que la croix
+      // de la manette et le pave tactile envoient.
+      const signe = (canal) => {
+        const c = cmds.get(canal);
+        if (!c) return 0;
+        return c.pos.codes.includes(code) ? 1 : c.neg.codes.includes(code) ? -1 : 0;
+      };
+      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1 : signe("Move Z");
+      const x = code === "ArrowRight" ? 1 : code === "ArrowLeft" ? -1 : signe("Move X");
       const g = menuInput.axes(tReel, z, x, verrou);
       if (g.move) settings.move(g.move);
       if (g.toggle) settings.toggle(g.toggle);
@@ -2990,14 +3005,6 @@ async function boot() {
         // `PlayerData` repart bien de zero, savoirs et exploration compris.
         const choisi = settings.toggle(0);
         if (choisi === "exit") retourAuTitre();
-        if (choisi === "newGame") {
-          pdata.wipe();
-          respawn();
-          // `ResetSimulation` en DERNIER : `respawn` fait un `restart`, qui
-          // incremente le compte de boucles. Une partie neuve est au tour zero.
-          loop.resetSimulation();
-          console.log("nouvelle partie : la sauvegarde est effacee");
-        }
       }
       applySettings();
       settingsUI.render();
@@ -3309,6 +3316,16 @@ async function boot() {
     // le lacet de la camera doivent se mesurer dans le MEME repere, sinon
     // l'orientation du build arrive juste et la tete est tournee de travers.
     const hb = horizonBasis([up.x, up.y, up.z]);
+    // Sonde : tourner le regard vers un point du repere, dans ce meme repere
+    // d'horizon (les controles de la visee s'en servent).
+    sondeInteraction.viser = (cible) => {
+      const d = [cible[0] - camera.position.x, cible[1] - camera.position.y,
+                 cible[2] - camera.position.z];
+      const n = Math.hypot(d[0], d[1], d[2]) || 1;
+      const y = yawFor(d, [up.x, up.y, up.z]);
+      if (y !== null) yaw = y;
+      pitch = -Math.asin(Math.max(-1, Math.min(1, (d[0] * up.x + d[1] * up.y + d[2] * up.z) / n)));
+    };
     const east = new BABYLON.Vector3(hb.east[0], hb.east[1], hb.east[2]);
     const north = new BABYLON.Vector3(hb.north[0], hb.north[1], hb.north[2]);
     // `CenterCamera(_rotationRate)` : le regard revient au centre du siege sur
@@ -6105,10 +6122,16 @@ async function boot() {
       // `LockOn` compare par identite — comme le build compare deux
       // `ReferenceFrame` : re-viser la meme cible ne la relachait donc jamais,
       // parce que ce n'etait jamais « la meme ».
+      //
+      // Et ce sont les positions COURANTES : `position0` est celle de l'instant
+      // zero, et la visee comparait le regard a des planetes restees ou elles
+      // etaient au reveil. La regle du « mieux centre du ciel entier » le
+      // cachait ; celle du build, qui exige de traverser la sphere de visee,
+      // l'a montre (docs/132).
       for (const v of visables) {
-        v.position[0] = v.body.position0[0];
-        v.position[1] = v.body.position0[1];
-        v.position[2] = v.body.position0[2];
+        v.position[0] = v.body.position[0] + anchorPos[0];
+        v.position[1] = v.body.position[1] + anchorPos[1];
+        v.position[2] = v.body.position[2] + anchorPos[2];
       }
       const vise = solarMap.open ? null : aimedFrame(visables, moi, [fwd.x, fwd.y, fwd.z]);
       const avant = lockOn.current;

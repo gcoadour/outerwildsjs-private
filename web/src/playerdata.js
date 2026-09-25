@@ -77,13 +77,6 @@ export class PlayerData {
     this.save();
   }
 
-  wipe() {
-    this.explored.clear();
-    this.loopCount = 0;
-    for (const f of FLAGS) this[f] = false;
-    this.save();
-  }
-
   // --- exploration ---
 
   hasExplored(sector) { return this.explored.has(sector); }

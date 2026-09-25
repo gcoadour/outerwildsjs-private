@@ -376,11 +376,52 @@ presque neutre d'une dizaine de niveaux. Ce n'est pas le glow (le portage a
 le réveil du build, glow blanc à 3 qui retombe, puis `Awake` l'éteint), et
 doubler l'ambiance du secteur n'en rend que le tiers, sans la bonne teinte.
 Le passage du forward au Deferred Lighting d'Unity 4 (tampon de lumière,
-encodage, ambiance ajoutée en passe finale) est la piste ; elle ne se tranche
-pas sans le shader interne du moteur. Même écart sur l'écran-titre, où la
-planète sort plus sombre qu'avec les matériaux PBR d'avant — 6,9 de moyenne
-sur la zone du feu, 13,6 en PBR, 11,2 dans l'alpha, à un instant de rotation
-qui n'est pas exactement le même.
+encodage, ambiance ajoutée en passe finale) est la piste. Le shader interne
+n'est pas hors d'atteinte : `Resources/unity default resources` garde
+`Internal-PrePassLighting` en assembleur ARB lisible, et c'est lui qui a
+tranché l'écart de l'écran-titre (section suivante).
+
+## Les ombres de l'écran-titre
+
+L'écran-titre du portage sortait plus sombre que celui de l'alpha. Calé sur
+le même instant de rotation (`pw-titre.mjs … 18`, meilleure corrélation
+géométrique, r = 0,935), l'image entière n'est en fait qu'à 10 % de l'alpha
+(9,4 / 12,5 / 5,9 contre 8,5 / 11,3 / 5,2) : l'écart est tout entier sur le
+**sol**, deux fois plus sombre (4,0 / 3,5 / 1,9 contre 2,1 / 1,6 / 0,7, sur
+(420, 150)–(640, 340)). Sans ombres, le sol passe à 6,1 / 4,3 / 1,7 : trop
+clair. C'étaient donc les ombres.
+
+Les deux ponctuelles du titre en portent (`m_Shadows.m_Type` 2, force 1,
+biais 0,05) ; la caméra est en Deferred Lighting, seul chemin d'Unity 4 où
+une ponctuelle projette. Le programme de fragment de la variante
+`POINT SHADOWS_CUBE` dit la règle :
+
+```
+MUL R2.w, R2, c[7]                 # d × _LightPositionRange.w (1 / portée)
+MAD R3.x, -R2.w, c[14], R3         # stocké − 0,97 × d / portée
+CMP R2.w, R3.x, c[8].x, R2         # < 0 : _LightShadowData.x (1 − force)
+```
+
+Le biais est **multiplicatif** — trois pour cent de la distance —, là où
+celui de Babylon s'ajoute à la profondeur stockée ; la variante
+`SHADOWS_SOFT` ne fait que quatre échantillons décalés de 1/128 d'unité, le
+même texel à plusieurs mètres. Le portage prenait un biais additif de 0,0005
+et quatre échantillons de Poisson : le sol s'ombrait lui-même.
+
+`patchOmbresUnity` (`lights.js`) remplace le test cubique de Babylon par
+`0.97 × depth > shadow`, et `ombreUnity` règle le générateur en conséquence :
+un échantillon, aucun biais additif, profondeur de 0 à la portée, obscurité
+`1 − force`. L'extraction lit maintenant `m_Shadows` entier (`ombre`) et les
+drapeaux `m_CastShadows` / `m_ReceiveShadows` de chaque renderer : au titre,
+les dix-huit maillages `branches` des pins ne reçoivent pas d'ombre.
+
+Le sol remonte à 2,7 / 2,1 / 0,9, et surtout l'ombre prend la forme de celle
+de l'alpha : les troncs et la barrière y découpent des bandes, au lieu d'un
+voile uniforme. L'écart restant vient du cadrage (l'alpha, à cet instant,
+montre le pin de gauche plus grand) et du pin éclairé en bleu par la lune,
+plus clair dans l'alpha. Invariants : `tests/05-extract.mjs` (les deux
+lumières, force 1 ; `CoreLight` à 0,7 ; dix-huit `branches`),
+`tests/09-jeu.mjs` (le patch ne touche que le test cubique, le générateur).
 
 ## La marche, côte à côte
 
@@ -418,3 +459,102 @@ sphère, capsule et boîte orientée, et le focus d'un récepteur vise depuis
 l'œil. Mesuré dans la page : placé à 2,2 m, la conversation ne s'ouvre que
 dans une direction sur trente-deux, celle du personnage ; à 4,5 m, jamais. La
 proximité reste le repli d'une extraction ancienne, sans colliders.
+
+Le vérificateur le garde par trois essais, le regard tourné par la sonde
+`__interaction.viser` dans le repère d'horizon de la caméra : face au Rocket
+Scientist à 2,2 m, on lui parle ; dos tourné, non ; à 4,5 m, non plus. (Un
+premier contrôle balayait le lacet par pas fixes : selon l'état laissé par les
+contrôles précédents, le pas enjambait la capsule, et il mesurait le pas plutôt
+que la règle.)
+
+## Viser un référentiel : le vide relâche
+
+Le vérificateur échouait une fois sur deux sur « un second clic la relâche » :
+le second clic ne relâchait pas, il **re-visait** un autre corps. Ce n'était
+pas du minutage. `ReferenceFrameTracker.UpdateTargeting`, lu dans l'IL :
+
+```
+possible = rayon de 1 000 sur le masque physique -> son référentiel
+sinon      RaycastAll de 100 000 sur le CALQUE ReferenceFrameVolume (19),
+           et parmi les sphères TOUCHÉES, la mieux centrée
+au clic :  possible nul ou identique -> Untarget ; sinon -> Target
+```
+
+Le portage prenait au second temps le corps le mieux centré du ciel entier,
+qu'on le regarde ou non : viser le vide gardait toujours une cible, et la
+dérive du regard sur une planète qui tourne suffisait à en changer entre deux
+clics. Le calque 19 porte onze sphères « RFVolume », une par corps — 600 pour
+Timber Hearth, 1 000 pour Giant's Deep, 1 500 pour Dark Bramble, 167,3 pour
+l'Attlerock —, dont six n'ont même pas le composant `ReferenceFrameVolume` :
+c'est le calque que le rayon interroge, pas la classe. L'extracteur les sort
+(`ReferenceFrameSphere`), et `aimedFrame` n'accepte plus au second temps
+qu'une sphère que le rayon traverse, en partant de dehors — un rayon d'Unity
+ne touche pas le collider dont il part.
+
+Et cette règle en a découvert une autre, plus grave : les positions que la
+visée comparait au regard étaient celles de **l'instant zéro** (`position0`).
+Au bout d'une minute d'orbite, on visait des planètes restées où elles étaient
+au réveil ; le « mieux centré du ciel entier » masquait l'erreur. La visée lit
+maintenant les positions courantes, et le vérificateur regarde un corps avant
+de cliquer — viser le vide ne vise plus rien.
+
+### Ce que l'outillage ne permet pas
+
+Sous Xvfb, **la souris de l'alpha est inutilisable** : dès que la fenêtre a
+le focus — au chargement ou en pleine partie —, le premier mouvement de souris
+envoie la caméra en NaN. On ne tourne donc pas la tête de l'alpha ; on vise en
+se déplaçant, par pas chassés et pas en avant tenus au clavier. Cela suffit
+pour la marche, le saut et la mise en place, pas pour viser une capsule de
+cinquante centimètres à deux pas : la conversation n'a pas pu être ouverte
+côté alpha, et la règle du rayon (dix unités, `_interactRange`) repose sur
+l'IL, pas sur une capture.
+
+## Le menu de pause, côte à côte
+
+`Escape` en pleine partie, des deux côtés, puis `S`. Trois écarts :
+
+- **`S` ne faisait rien.** `Menu.Update` lit `moveZ` et `moveX`, soit W/S et
+  I/K, A/D et J/L ; le portage ne lisait que les flèches, qu'aucun canal ne
+  lie dans le build — l'écran-titre, lui, lisait déjà les bons canaux. Les
+  touches des canaux passent maintenant par la même cadence (`MenuInput`,
+  0,2 s) ; les flèches restent, parce que ce sont les codes qu'envoient la
+  croix de la manette et le pavé tactile.
+- **Une huitième ligne, « Nouvelle partie ».** Un ajout du portage, en deux
+  validations, « faute de menu-titre ». Le menu-titre existe (docs/131) : elle
+  est retirée, et le menu a les sept lignes de l'alpha.
+- **La taille.** L'alpha pose son texte en pixels fixes, corps 40 : en
+  640 × 360, le menu sort de l'écran par le bas. Le portage le met à
+  l'échelle de la place disponible sur un écran bas — c'est ce qui le rend
+  utilisable sur un téléphone en paysage. L'écart est assumé, et il ne joue
+  que sous 720 pixels de haut environ.
+
+## La lampe et le pas de côté
+
+`F` au réveil, puis `D` : deux écarts encore.
+
+**La lampe.** Le portage tenait un cône de 56° à 1,4, choisis à l'œil, au bord
+net. La scène pose `Flashlight` sur `Player_Body` : projecteur de **80°**,
+intensité 1, blanc. Et Unity atténue un projecteur par sa texture de spot par
+défaut, qui s'éteint vers le bord du cône ; Babylon coupe net après
+`cos^exposant`. Un exposant de onze ramène le bord à 5 % et la mi-course à la
+moitié : le disque dur devient le halo de l'alpha.
+
+**Le pas.** Le pas de côté du portage allait bien plus loin que celui de
+l'alpha. `CharacterMovementModel.UpdateMovement`, lu dans l'IL, en dit plus
+que ce que le portage en avait tiré :
+
+```
+vitesse = _groundSpeed ; si (commande.z < 0) vitesse = _strafeSpeed
+cible   = (commande.x × _strafeSpeed, 0, commande.z × vitesse)   -- non bornée
+écart   = cible − vitesse   (repère du joueur, y à zéro)
+si |écart| > _tumbleThreshold (15, constructeur) : culbute
+écart.x, écart.z bornés à ±_groundAcceleration ; AddVelocityChange(écart)
+matériau : en course frottement 0 ; DEBOUT frottement 1 (au maximum) ; en l'air 0
+```
+
+Quatre corrections : on **recule à 5**, pas à 7 ; la diagonale n'est pas
+bornée (8,6, comme le jeu) ; `_groundAcceleration` est une **borne par pas
+fixe et par axe**, pas une fraction de l'écart — quatorze pas, 0,28 s, pour
+atteindre 7 — ; et debout, le matériau frotte, ce qui arrête en 0,59 m sur
+Timber Hearth (`pasAuSol`). La glissade après une touche lâchée, que
+l'alpha montrait et que le portage n'avait pas, en vient.

@@ -118,7 +118,7 @@ function tourne(v, axe, ang) {
  *     lisait `acceleration * dt` et mettait vingt et une SECONDES.
  *
  * Les deux constantes du build sont par PAS ; on les ramene au temps ecoule,
- * comme `approach` le fait pour la marche, ce qui garde le comportement exact a
+ * comme `pasAuSol` le fait pour la marche, ce qui garde le comportement exact a
  * cinquante hertz sans dependre de la cadence d'images.
  */
 export function fishStep(avant, vers, vitesse, vitesseMax, dt, cfg = FISH,

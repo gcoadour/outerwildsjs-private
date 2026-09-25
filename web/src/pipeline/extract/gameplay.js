@@ -401,6 +401,24 @@ export function extractGameplay(ctx) {
     });
   }
 
+  // LES SPHERES DE VISEE. `ReferenceFrameTracker.UpdateTargeting` lance, au
+  // second temps, un `RaycastAll` sur le CALQUE `ReferenceFrameVolume` (19) :
+  // onze spheres « RFVolume », une par corps — 600 pour Timber Hearth, 1 000
+  // pour Giant's Deep, 167,3 pour l'Attlerock. Six n'ont meme pas le
+  // composant de ce nom : c'est le calque qui compte, pas la classe. Sans
+  // elles, le portage visait le corps le mieux centre du ciel entier, et un
+  // clic dans le vide re-visait au lieu de relacher (docs/132).
+  const calqueVisee = 19;
+  for (const [gid, go] of ctx.gameObjects) {
+    if (go.m_Layer !== calqueVisee || !ctx.actif(gid)) continue;
+    const vol = ctx.volumeOf(gid);
+    if (!vol || vol.shape !== "sphere") continue;
+    (placed.ReferenceFrameSphere ||= []).push({
+      name: ctx.name(gid), position: ctx.worldPosition(gid),
+      body: ctx.bodyOf(gid), volume: vol,
+    });
+  }
+
   const stats = { classes: Object.keys(placed).length };
   if (ecartes.size) stats["references non textuelles"] = [...ecartes].sort();
   if (Object.keys(discovered).length) stats.decouvertes = discovered;

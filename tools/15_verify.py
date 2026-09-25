@@ -2121,6 +2121,18 @@ def _run(url, heavy, profil=None, zip_path=None):
         # La cible se REGARDE : un clic gauche verrouille ce qu'on a devant soi,
         # un second sur la meme la relache. Le portage ne la choisissait que
         # dans la carte, et les trois canaux de vol du build ne pilotaient rien.
+        #
+        # On REGARDE donc l'Attlerock d'abord : viser le vide ne vise plus
+        # rien, comme dans le build (docs/132), et c'est ce que ce controle
+        # prenait pour une cible. La lune est proche : le premier temps la
+        # retient, et la derive du regard entre deux clics ne l'en sort pas.
+        page.evaluate("""() => {
+          const lune = (window.__bodies || []).find((b) => b.name === "GravityWell_Moon");
+          if (lune && window.__interaction && window.__interaction.viser) {
+            window.__interaction.viser(lune.position);
+          }
+        }""")
+        page.wait_for_timeout(600)
         page.mouse.move(640, 360)
         page.mouse.down(button="left"); page.mouse.up(button="left")
         try:
@@ -2843,9 +2855,73 @@ def _run(url, heavy, profil=None, zip_path=None):
                page.evaluate("() => window.__modes.events.at(-1)"),
                "ExitMenuMode")
 
+        # Les touches du BUILD : `Move Z` (W/S, I/K). Dans l'alpha, S descend
+        # d'une ligne ; le portage ne lisait que les fleches (docs/132). Et le
+        # menu a ses sept lignes, sans la « Nouvelle partie » que le portage
+        # y avait ajoutee faute de menu-titre.
+        page.wait_for_timeout(250)
+        menu3 = page.evaluate("""async () => {
+          const s = window.__gui.settings;
+          const tape = (code) => dispatchEvent(new KeyboardEvent("keydown", { code }));
+          tape("Escape");
+          s.index = 0;
+          tape("KeyS");
+          const bas = s.index;
+          await new Promise((r) => setTimeout(r, 250));
+          tape("KeyW");
+          const haut = s.index;
+          const lignes = s.options.length;
+          tape("Escape");
+          return { bas, haut, lignes, ouvert: s.open };
+        }""")
+        rep.eq("S descend d'une ligne, comme dans l'alpha", menu3["bas"], 1)
+        rep.eq("W la remonte", menu3["haut"], 0)
+        rep.eq("sept lignes au menu en partie", menu3["lignes"], 7)
+        rep.eq("et le menu se referme", menu3["ouvert"], False)
+        page.wait_for_timeout(150)
+
         # --- les deux tables de manette (docs/94-manette.md) ------------------
         rep.eq("les deux tables de manette s'accordent dans la page",
                page.evaluate("() => window.__padAccord"), [])
+
+        # --- ON PARLE A QUI L'ON REGARDE (docs/132) ----------------------------
+        #
+        # `FirstPersonManipulator` vise a dix unites, `Observe` exige
+        # `_interactRange` (2) du point touche. Trois essais pres du Rocket
+        # Scientist, sur la droite qui le joint au point d'apparition : face a
+        # lui a 2,2 m (on parle), dos tourne (non), face a lui a 4,5 m (non).
+        essai = """async ([dist, face]) => {
+          const it = window.__interactables.items.find((x) => x.name === "ConversationZone"
+            && x.volume && Math.abs(x.world[2] + 8721) < 1 && Math.abs(x.world[0] - 4) < 1);
+          const s = window.__interaction;
+          if (!it || !s.repere || !s.viser) return null;
+          if (window.__dialogue && window.__dialogue.active) window.__dialogue.active = null;
+          const r = s.repere(it);
+          const sp = s.repere({ world: [-1.38, -26.51, -8721.03], body: "TimberHearth_Body" });
+          const d = [sp[0] - r[0], sp[1] - r[1], sp[2] - r[2]], n = Math.hypot(...d) || 1;
+          const agg = window.__player.body;
+          agg.transformNode.position.set(r[0] + d[0] / n * dist, r[1] + d[1] / n * dist,
+                                         r[2] + d[2] / n * dist);
+          agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+          await new Promise((res) => setTimeout(res, 1200));
+          const c = window.__player.pos, q = s.repere(it);
+          s.viser(face ? q : [2 * c.x - q[0], 2 * c.y - q[1], 2 * c.z - q[2]]);
+          await new Promise((res) => setTimeout(res, 600));
+          return true;
+        }"""
+        parle = {}
+        for cle, dist, face in (("face", 2.2, True), ("dos", 2.2, False), ("loin", 4.5, True)):
+            if not page.evaluate(essai, [dist, face]):
+                break
+            page.keyboard.down("KeyE"); page.wait_for_timeout(250)
+            page.keyboard.up("KeyE"); page.wait_for_timeout(600)
+            parle[cle] = page.evaluate("""() => { const a = !!(window.__dialogue && window.__dialogue.active);
+                if (a) window.__dialogue.active = null; return a; }""")
+        if parle:
+            rep.eq("a deux pas, face au Rocket Scientist, on lui parle", parle.get("face"), True)
+            rep.eq("dos tourne, non", parle.get("dos"), False)
+            rep.eq("a quatre metres et demi, non plus", parle.get("loin"), False)
 
         # --- ET ON S'ASSIED POUR DE VRAI (docs/97-assise-instantanee.md) -----
         #
