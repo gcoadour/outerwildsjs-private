@@ -675,3 +675,36 @@ ne tient que 0,5 s en l'air, et une image rendue sous SwiftShader peut
 couvrir plusieurs sous-pas — le saut monte et retombe entre deux images.
 Le contrôle lit donc la vitesse que `tryJump` donne au corps : 6 u/s, celle
 du build.
+
+### La lumière qui reste, remesurée sur un cadrage commun
+
+Le cadrage du réveil étant maintenant le même, l'écart de lumière se mesure
+objet par objet (alpha / portage, moyenne RVB) :
+
+| zone | alpha | portage |
+|---|---|---|
+| terminal de lancement (9 m du feu) | 61 / 49 / 31 | 26 / 19 / 12 |
+| Slate (3,7 m du feu) | 104 / 49 / 16 | 44 / 22 / 9 |
+| tour | 50 / 34 / 17 | 38 / 22 / 9 |
+| sol près du feu | 9 / 7 / 3 | 10 / 5 / 3 |
+
+Ce que la mesure écarte, une piste après l'autre :
+
+- **ni cuisson ni sondes** : les 2 261 renderers de `level0` ont tous
+  `m_LightmapIndex` 255, et aucun n'utilise de sonde de lumière ;
+- **ni facteur caché dans le shader** : la passe finale de `Bumped Diffuse`
+  en Deferred Lighting vaut `albedo × _Color × (tampon de lumière + terme de
+  sommet)`, et la passe de lumière ponctuelle `N·L × atténuation ×
+  _LightColor` (lues en assembleur ARB dans `unity default resources`) ;
+- **ni gamma ni traitement d'image** : basculer `gammaSpace` sur les 249
+  textures, ou couper le traitement d'image de Babylon, ne bouge rien ;
+- **ni cartes de normales ni normales du personnage** : les retirer ne change
+  rien, et une lumière posée sur la caméra éclaire bien Slate de face ;
+- **ni le vacillement** : `LightFlicker` est la même loi des deux côtés.
+
+Ce qui reste : le feu seul, figé à 2 au lieu de 0,93, porte le terminal de
+7 à 40 ; il en faudrait près de quatre fois plus pour rejoindre l'alpha,
+alors que le sol près du feu est, lui, déjà aussi clair. L'écart n'est donc
+pas un facteur global sur la lumière. Une anomalie à creuser : la boîte
+englobante du villageois reste dans la pose de liaison, à plusieurs
+centaines d'unités de son corps.
