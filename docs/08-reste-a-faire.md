@@ -42,10 +42,10 @@ portage.
 | géométrie des 7 corps | complète, 69 Mo en glTF |
 | matériaux et textures | 251 matériaux, 200 textures, normales désentrelacées |
 | collision | Havok, colliders trimesh du corps ancré |
-| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** |
+| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
 | ressources | oxygène, carburant, santé, intégrité |
 | vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
-| détection d'interaction | 39 interactifs, 34 lisibles |
+| détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ([`132`](132-comparaison-native.md)) |
 | audio spatial | 92 sources, 31 clips, instanciation à la volée |
 | particules | 135 systèmes, 15 textures, budget de 14 simultanés |
 | atmosphères et soleil | shaders maison, 122 shaders classés |
@@ -71,7 +71,7 @@ portage.
 | brouillards | Dark Bramble et coque quantique, masquage et lumières |
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
 | minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |
-| réglages | 7 options, sauvegarde distincte de la partie ; « Exit to Main Menu » ramène au titre |
+| réglages | 7 options comme l'alpha, pilotées par `Move Z`/`Move X` (W/S, A/D), sauvegarde distincte de la partie ; « Exit to Main Menu » ramène au titre |
 | écran-titre | la scène de `mainData` : planète, feu, fumées, voyageurs, cinq lignes lues dans l'IL ([`131`](131-ecran-titre.md)) |
 | temps | l'image découpée comme Unity : pas maximal de 1 s, Havok au même pas ([`132`](132-comparaison-native.md)) |
 | ciel et lumière | voûte `Skybox` du build, étoiles à leur taille, `SunLight` ponctuelle de portée 20 000 sans ombres, liseré de Giant's Deep d'après son programme, renderers éteints respectés ([`132`](132-comparaison-native.md)) |
@@ -158,7 +158,7 @@ portage.
 | réparation visible | un nœud réparé devient vert |
 | impostures de planète | les 3 câblées rendues à 1 Hz, effacées si le réel est là |
 | modules de particules | la queue de la comète, le plafond de l'explosion |
-| suivi de référentiel | distance et vitesse d'approche de la cible visée |
+| suivi de référentiel | distance et vitesse d'approche de la cible visée ; visée par les onze sphères du calque 19, aux positions courantes — viser le vide relâche ([`132`](132-comparaison-native.md)) |
 | poussière de vitesse | rien sous 30 u/s, puis des traits de plus en plus courts |
 | volumes composés | une entrée, une sortie, quel que soit le nombre d'enfants |
 | vérification sans le build | `15_verify.py --repli` : le moteur démarre, en navigateur |
