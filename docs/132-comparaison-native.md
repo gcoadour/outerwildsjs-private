@@ -467,3 +467,22 @@ pour la marche, le saut et la mise en place, pas pour viser une capsule de
 cinquante centimètres à deux pas : la conversation n'a pas pu être ouverte
 côté alpha, et la règle du rayon (dix unités, `_interactRange`) repose sur
 l'IL, pas sur une capture.
+
+## Le menu de pause, côte à côte
+
+`Escape` en pleine partie, des deux côtés, puis `S`. Trois écarts :
+
+- **`S` ne faisait rien.** `Menu.Update` lit `moveZ` et `moveX`, soit W/S et
+  I/K, A/D et J/L ; le portage ne lisait que les flèches, qu'aucun canal ne
+  lie dans le build — l'écran-titre, lui, lisait déjà les bons canaux. Les
+  touches des canaux passent maintenant par la même cadence (`MenuInput`,
+  0,2 s) ; les flèches restent, parce que ce sont les codes qu'envoient la
+  croix de la manette et le pavé tactile.
+- **Une huitième ligne, « Nouvelle partie ».** Un ajout du portage, en deux
+  validations, « faute de menu-titre ». Le menu-titre existe (docs/131) : elle
+  est retirée, et le menu a les sept lignes de l'alpha.
+- **La taille.** L'alpha pose son texte en pixels fixes, corps 40 : en
+  640 × 360, le menu sort de l'écran par le bas. Le portage le met à
+  l'échelle de la place disponible sur un écran bas — c'est ce qui le rend
+  utilisable sur un téléphone en paysage. L'écart est assumé, et il ne joue
+  que sous 720 pixels de haut environ.

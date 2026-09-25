@@ -2974,8 +2974,18 @@ async function boot() {
       // de seconde.
       const tReel = performance.now() / 1000;
       const verrou = !!(settings.options[settings.index] || {}).locked;
-      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1 : 0;
-      const x = code === "ArrowRight" ? 1 : code === "ArrowLeft" ? -1 : 0;
+      // Les touches du build d'abord : `Menu.Update` lit `moveZ` et `moveX`,
+      // soit W/S et I/K, A/D et J/L. Le portage ne lisait que les fleches,
+      // qu'aucun canal ne lie — dans l'alpha, S descend d'une ligne ; ici,
+      // rien (docs/132). Les fleches restent : ce sont les codes que la croix
+      // de la manette et le pave tactile envoient.
+      const signe = (canal) => {
+        const c = cmds.get(canal);
+        if (!c) return 0;
+        return c.pos.codes.includes(code) ? 1 : c.neg.codes.includes(code) ? -1 : 0;
+      };
+      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1 : signe("Move Z");
+      const x = code === "ArrowRight" ? 1 : code === "ArrowLeft" ? -1 : signe("Move X");
       const g = menuInput.axes(tReel, z, x, verrou);
       if (g.move) settings.move(g.move);
       if (g.toggle) settings.toggle(g.toggle);
@@ -2994,14 +3004,6 @@ async function boot() {
         // `PlayerData` repart bien de zero, savoirs et exploration compris.
         const choisi = settings.toggle(0);
         if (choisi === "exit") retourAuTitre();
-        if (choisi === "newGame") {
-          pdata.wipe();
-          respawn();
-          // `ResetSimulation` en DERNIER : `respawn` fait un `restart`, qui
-          // incremente le compte de boucles. Une partie neuve est au tour zero.
-          loop.resetSimulation();
-          console.log("nouvelle partie : la sauvegarde est effacee");
-        }
       }
       applySettings();
       settingsUI.render();

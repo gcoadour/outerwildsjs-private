@@ -489,29 +489,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("et le menu est bien ferme", b.open, false);
   }
 
-  // LA NOUVELLE PARTIE. `TitleScreenMenu.ToggleOption` appelle
-  // `TriggerLoad(true, ...)` sur deux de ses cinq options, et `TriggerLoad`
-  // appelle `CreateNewPlayerSave` : une partie neuve EFFACE la sauvegarde. Le
-  // portage n'a pas de menu-titre et `PlayerData.wipe` n'etait donc appelee de
-  // nulle part. C'est un AJOUT au menu des reglages, et il demande DEUX
-  // validations la ou le build n'en demande aucune : une nouvelle partie est
-  // ici a une touche d'une partie en cours.
+  // LA NOUVELLE PARTIE se choisit au menu-titre, comme dans le build : le
+  // menu des reglages n'a que ses sept lignes (docs/131, docs/132).
   {
-    const m = new Settings(null);
-    const i = m.options.findIndex((o) => o.key === "newGame");
-    check("la nouvelle partie est au menu", i >= 0, true);
-    m.index = i;
-    check("le premier appui ne fait rien", m.toggle(0), null);
-    check("mais il arme", m.confirmNewGame, true);
-    check("et le libelle le dit", m.label(m.options[i]).includes("confirmer"), true);
-    check("le second appui la declenche", m.toggle(0), "newGame");
-    check("et ferme le menu", m.open, false);
-    check("l'armement retombe", m.confirmNewGame, false);
-    // Quitter la ligne desarme : on ne laisse pas un effacement arme derriere.
-    m.index = i;
-    m.toggle(0);
-    m.move(1);
-    check("changer de ligne desarme", m.confirmNewGame, false);
+    const m = new Settings(null, { niveau: 1 });
+    check("pas de nouvelle partie aux reglages",
+          m.options.some((o) => o.key === "newGame"), false);
   }
 
   // --- LA SPHERE DE L'OBSERVATOIRE (docs/91-remise-a-zero.md) ------------

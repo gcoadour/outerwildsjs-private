@@ -2855,6 +2855,31 @@ def _run(url, heavy, profil=None, zip_path=None):
                page.evaluate("() => window.__modes.events.at(-1)"),
                "ExitMenuMode")
 
+        # Les touches du BUILD : `Move Z` (W/S, I/K). Dans l'alpha, S descend
+        # d'une ligne ; le portage ne lisait que les fleches (docs/132). Et le
+        # menu a ses sept lignes, sans la « Nouvelle partie » que le portage
+        # y avait ajoutee faute de menu-titre.
+        page.wait_for_timeout(250)
+        menu3 = page.evaluate("""async () => {
+          const s = window.__gui.settings;
+          const tape = (code) => dispatchEvent(new KeyboardEvent("keydown", { code }));
+          tape("Escape");
+          s.index = 0;
+          tape("KeyS");
+          const bas = s.index;
+          await new Promise((r) => setTimeout(r, 250));
+          tape("KeyW");
+          const haut = s.index;
+          const lignes = s.options.length;
+          tape("Escape");
+          return { bas, haut, lignes, ouvert: s.open };
+        }""")
+        rep.eq("S descend d'une ligne, comme dans l'alpha", menu3["bas"], 1)
+        rep.eq("W la remonte", menu3["haut"], 0)
+        rep.eq("sept lignes au menu en partie", menu3["lignes"], 7)
+        rep.eq("et le menu se referme", menu3["ouvert"], False)
+        page.wait_for_timeout(150)
+
         # --- les deux tables de manette (docs/94-manette.md) ------------------
         rep.eq("les deux tables de manette s'accordent dans la page",
                page.evaluate("() => window.__padAccord"), [])
