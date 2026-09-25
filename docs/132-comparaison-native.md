@@ -350,3 +350,9 @@ corps dans les premières images — la capsule de l'alpha est posée par son
 centre sur le point d'apparition —, et reste à mesurer. L'éblouissement
 blanc, lui, n'est ni le tonemapping (éteint par `TonemappingManager`) ni le
 flashback ; il n'est pas encore attribué.
+
+Et le cercle en haut à gauche de l'écran, absent de l'alpha : le marqueur de
+la sonde, créé `hidden` mais dont la classe pose `display: flex` — une règle
+d'auteur l'emporte sur l'attribut. `#ui [hidden]` rend la main à l'attribut,
+et le vérificateur contrôle qu'aucun élément caché de l'interface ne se
+dessine.

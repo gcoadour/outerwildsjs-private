@@ -510,6 +510,12 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.wait_for_timeout(3000)
 
         rep.eq("erreurs console au demarrage", errors[:3], [])
+        # Un element `hidden` de l'interface ne se dessine pas, meme quand sa
+        # classe pose un `display` : le marqueur de sonde dessinait un cercle
+        # vide en haut a gauche des le reveil (docs/132).
+        caches = page.evaluate("""() => [...document.querySelectorAll('#ui [hidden]')]
+          .filter(e => getComputedStyle(e).display !== 'none').map(e => e.className)""")
+        rep.eq("aucun element cache de l'interface ne se dessine", caches, [])
         # Le systeme ENTIER se charge derriere le titre, comme `level0` dans
         # l'alpha : c'est ce qui fait voir les planetes de loin (docs/132).
         # Mesure : 105,9 Mo, tampons et textures des huit lots compris.

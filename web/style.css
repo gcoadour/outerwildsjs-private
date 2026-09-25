@@ -678,6 +678,10 @@ body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
   padding-left: 44px;
   display: flex; align-items: center;
 }
+/* `hidden` doit gagner : sans cette règle, le `display: flex` du marqueur
+   l'emportait sur l'attribut, et un cercle vide restait dessiné en haut à
+   gauche de l'écran dès le réveil (docs/132). */
+#ui [hidden] { display: none !important; }
 .ow-probe-marker[data-icon="danger"] { color: #ff6b4a; }
 .ow-probe-marker[data-icon="anchor"] { color: #ffd9a0; }
 
