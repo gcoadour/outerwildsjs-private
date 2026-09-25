@@ -125,6 +125,18 @@ const gp = extractGameplay(ctx);
 console.timeEnd("gameplay");
 const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
+// Ce que vise le rayon de `FirstPersonManipulator` : le collider du recepteur,
+// et ce que vise `ReferenceFrameTracker` : les spheres du calque 19 (docs/132).
+check("chaque recepteur porte son collider",
+      gp.placed.InteractReceiver.filter((x) => x.volume).length, 39);
+{
+  const savant = gp.placed.InteractReceiver.find((x) => x.name === "ConversationZone"
+    && Math.abs(x.position[0] - 4.37) < 0.1 && Math.abs(x.position[2] + 8720.98) < 0.1);
+  check("le Rocket Scientist se vise sur une capsule", savant && savant.volume.shape, "capsule");
+}
+check("onze spheres de visee de referentiel", n("ReferenceFrameSphere"), 11);
+check("celle de Giant's Deep fait mille",
+      (gp.placed.ReferenceFrameSphere.find((x) => x.body === "GiantsDeep_Body") || {}).volume.radius, 1000);
 check("objets lisibles", n("ReadableObject"), 34);
 // Ce que ces trente-quatre textes DEMANDENT, et que rien n'affichait : leur
 // longueur. Vingt et un depassent une page de panneau, vingt-deux portent au
