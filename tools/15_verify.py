@@ -510,12 +510,17 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.wait_for_timeout(3000)
 
         rep.eq("erreurs console au demarrage", errors[:3], [])
-        rep.at_most("poids reseau (Mo)", round(weight["total"] / 1e6, 1), 70)
+        # Le systeme ENTIER se charge derriere le titre, comme `level0` dans
+        # l'alpha : c'est ce qui fait voir les planetes de loin (docs/132).
+        # Mesure : 105,9 Mo, tampons et textures des huit lots compris.
+        rep.at_most("poids reseau (Mo)", round(weight["total"] / 1e6, 1), 120)
 
-        # --- geometrie a la demande -----------------------------------------
+        # --- geometrie : tout le systeme, derriere le titre ------------------
         files = page.evaluate("() => window.__geo.entries.map(e => e.file).sort()")
-        rep.eq("fichiers glTF au demarrage", files,
-               ["sun_body.gltf", "timberhearth_pivot.gltf"])
+        rep.eq("fichiers glTF au demarrage : les huit lots", files,
+               ["brittlehollow_pivot.gltf", "comet_pivot.gltf", "darkbramble_pivot.gltf",
+                "giantsdeep_pivot.gltf", "hourglasstwins_pivot.gltf",
+                "quantummoon_body.gltf", "sun_body.gltf", "timberhearth_pivot.gltf"])
 
         # --- shaders, physique, secteurs ------------------------------------
         rep.at_least("affectations de shaders",
