@@ -1510,6 +1510,21 @@ check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
     check("PhysicMaterial lus au bit pres", exacts === n && n > 0, true);
     check("la capsule du joueur ne frotte pas", perso && perso.dynamicFriction, 0);
   }
+  // La repetition des textures : 54 materiaux, dont le sol et la roche de
+  // Timber Hearth, que le glTF etirait (docs/132).
+  {
+    const { textureTransform } = await import("../web/src/pipeline/extract/materials.js");
+    let repetes = 0, roche = null;
+    for (const o of env.objects({ type: "Material" })) {
+      const m = inputCtx.readEngine(o);
+      if (!m) continue;
+      const t = textureTransform(m);
+      if (t) repetes++;
+      if (m.m_Name === "HP_RockyMat") roche = t;
+    }
+    check("54 materiaux repetent ou decalent leur texture", repetes, 54);
+    check("la roche de Timber Hearth, vingt fois", roche && roche.scale.join(), "20,20");
+  }
   // `PlayerSettings` : le projet est en GAMMA — l'eclairage s'additionne comme
   // le calculent les shaders « legacy », ce que `toLegacyMaterials` reproduit —
   // et en Deferred Lighting par defaut (docs/132).

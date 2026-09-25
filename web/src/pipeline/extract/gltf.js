@@ -12,7 +12,7 @@
 import { decodeMesh } from "../unity/mesh.js";
 import { decodeTexture2D, resizeRGBA } from "../unity/texture.js";
 import { avatarTOS, decodeClip } from "../unity/muscle.js";
-import { texturePtr } from "./materials.js";
+import { texturePtr, textureTransform } from "./materials.js";
 
 const ARRAY_BUFFER = 34962, ELEMENT_ARRAY_BUFFER = 34963;
 const FLOAT = 5126, UNSIGNED_INT = 5125, UNSIGNED_SHORT = 5123;
@@ -473,7 +473,17 @@ export function exportSubtree(ctx, rootGid, label, {
     const shaderName = shaderObj ? (ctx.readEngine(shaderObj) || {}).m_Name || "" : "";
 
     const pbr = { baseColorFactor: factor, metallicFactor: 0, roughnessFactor: 0.85 };
-    if (base !== null) pbr.baseColorTexture = { index: base };
+    const transfo = (canal) => {
+      const t = textureTransform(mat, canal);
+      if (!t) return null;
+      g.usesTextureTransform = true;
+      return { KHR_texture_transform: t };
+    };
+    if (base !== null) {
+      pbr.baseColorTexture = { index: base };
+      const ext = transfo("_MainTex");
+      if (ext) pbr.baseColorTexture.extensions = ext;
+    }
     const entry = {
       name: mat.m_Name || "material",
       pbrMetallicRoughness: pbr,
@@ -505,7 +515,11 @@ export function exportSubtree(ctx, rootGid, label, {
       for (const f of floats) if (f.first && typeof f.second === "number") nombres[f.first.name] = f.second;
       entry.extras.unityProps = { couleurs, nombres };
     }
-    if (normal !== null) entry.normalTexture = { index: normal };
+    if (normal !== null) {
+      entry.normalTexture = { index: normal };
+      const ext = transfo("_BumpMap");
+      if (ext) entry.normalTexture.extensions = ext;
+    }
     if (entry.alphaMode === "MASK") entry.alphaCutoff = 0.5;
 
     g.materials.push(entry);
@@ -844,6 +858,7 @@ export function exportSubtree(ctx, rootGid, label, {
     samplers: [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }],
   };
   if (g.materials.length) { gltf.materials = g.materials; gltf.textures = g.textures; gltf.images = g.images; }
+  if (g.usesTextureTransform) gltf.extensionsUsed = ["KHR_texture_transform"];
   if (g.skins.length) gltf.skins = g.skins;
   if (g.animations.length) gltf.animations = g.animations;
 

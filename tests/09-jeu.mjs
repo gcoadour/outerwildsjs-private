@@ -94,6 +94,7 @@ import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
 import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres,
          masqueCamera, CALQUE_SONDE } from "../web/src/lights.js";
+import { textureTransform } from "../web/src/pipeline/extract/materials.js";
 import { taillesEtoiles, pixelsParRadian, gainPoint, moyenneTache, SEUIL_POINT } from "../web/src/etoiles.js";
 import { prewarmCycles, sizeGradients, emitterRotation, teinteParticules, boiteEmetteur } from "../web/src/particles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
@@ -8074,6 +8075,17 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("on cache le premier seul", hideDisabledRenderers([eteint, allume]), 1);
   check("... et le LOD ne le rallume pas", eteint.__lodPinned, true);
   check("l'autre reste visible", allume.isVisible, true);
+}
+
+// La repetition des textures, dans le repere retourne du glTF (docs/132).
+{
+  const mat = (sx, sy, ox, oy) => ({ m_SavedProperties: { m_TexEnvs: [{ first: { name: "_MainTex" },
+    second: { m_Scale: { x: sx, y: sy }, m_Offset: { x: ox, y: oy } } }] } });
+  check("une texture ni repetee ni decalee n'a pas de transformation", textureTransform(mat(1, 1, 0, 0)), null);
+  const roche = textureTransform(mat(20, 20, 0, 0));
+  check("la roche : vingt fois", roche.scale.join(), "20,20");
+  check("decalage en v retourne : 1 - s - o", roche.offset.join(), "0,-19");
+  check("un decalage d'Unity se retourne aussi", textureTransform(mat(1, 1, 0.25, 0.5)).offset.join(), "0.25,-0.5");
 }
 
 // La teinte des particules : 2 x _TintColor (docs/132).

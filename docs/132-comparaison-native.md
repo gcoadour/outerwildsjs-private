@@ -381,3 +381,18 @@ pas sans le shader interne du moteur. Même écart sur l'écran-titre, où la
 planète sort plus sombre qu'avec les matériaux PBR d'avant — 6,9 de moyenne
 sur la zone du feu, 13,6 en PBR, 11,2 dans l'alpha, à un instant de rotation
 qui n'est pas exactement le même.
+
+## La marche, côte à côte
+
+Même manœuvre des deux côtés : après le recentrage, `W` tenu deux secondes,
+puis un saut. Le portage parcourt 13,9 m (la vitesse au sol du build est de
+7 u/s) et s'arrête, comme l'alpha, devant la même touffe d'herbe au pied de
+la paroi ; le saut découvre le même bâtiment.
+
+Mais la paroi était un **aplat brun**. `HP_RockyMat` répète sa texture vingt
+fois (`m_Scale` de `_MainTex`), `HP_GrassMat`, le sol de Timber Hearth,
+cinquante : 54 matériaux du build répètent ou décalent leur texture, et le
+glTF n'en disait rien. L'exporteur écrit maintenant `KHR_texture_transform`
+sur la texture de base et la carte de normales (`textureTransform`, dans le
+repère aux UV retournées : décalage `1 − s − o`), que le chargeur de Babylon
+lit.
