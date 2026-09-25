@@ -456,3 +456,14 @@ Au bout d'une minute d'orbite, on visait des planètes restées où elles étaie
 au réveil ; le « mieux centré du ciel entier » masquait l'erreur. La visée lit
 maintenant les positions courantes, et le vérificateur regarde un corps avant
 de cliquer — viser le vide ne vise plus rien.
+
+### Ce que l'outillage ne permet pas
+
+Sous Xvfb, **la souris de l'alpha est inutilisable** : dès que la fenêtre a
+le focus — au chargement ou en pleine partie —, le premier mouvement de souris
+envoie la caméra en NaN. On ne tourne donc pas la tête de l'alpha ; on vise en
+se déplaçant, par pas chassés et pas en avant tenus au clavier. Cela suffit
+pour la marche, le saut et la mise en place, pas pour viser une capsule de
+cinquante centimètres à deux pas : la conversation n'a pas pu être ouverte
+côté alpha, et la règle du rayon (dix unités, `_interactRange`) repose sur
+l'IL, pas sur une capture.
