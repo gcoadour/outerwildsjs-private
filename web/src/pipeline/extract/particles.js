@@ -156,13 +156,20 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
 
   const materialFor = (gid) => {
     const ptr = matOf.get(gid);
-    if (!ptr) return { texture: null, blend: "add" };
+    if (!ptr) return { texture: null, blend: "add", tint: null };
     const matObj = ctx.env.deref(ptr, sceneFile);
     const mat = matObj && ctx.readEngine(matObj);
-    if (!mat) return { texture: null, blend: "add" };
+    if (!mat) return { texture: null, blend: "add", tint: null };
     const blend = blendMode(ctx, mat, matObj.file);
     const tex = textures.export(texturePtr(mat, "_MainTex"), matObj.file);
-    return { texture: tex, blend };
+    // `_TintColor` : les shaders `Particles/*` rendent 2 x teinte x couleur x
+    // texture. La teinte par defaut vaut 0,5 — neutre ; celle des flammes du
+    // build, 0,22, les rend deux fois moins vives que le portage ne les
+    // montrait (docs/132).
+    const c = ((mat.m_SavedProperties && mat.m_SavedProperties.m_Colors) || [])
+      .find((x) => x.first && x.first.name === "_TintColor");
+    const tint = c && c.second ? [c.second.r, c.second.g, c.second.b, c.second.a].map((v) => round(v, 4)) : null;
+    return { texture: tex, blend, tint };
   };
 
   const systems = [];
@@ -174,7 +181,7 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
     if (!d) { bump("illisible"); continue; }
     const gid = d.m_GameObject ? d.m_GameObject.pathId : 0;
     const init = d.InitialModule, emis = d.EmissionModule, shape = d.ShapeModule;
-    const { texture, blend } = materialFor(gid);
+    const { texture, blend, tint } = materialFor(gid);
 
     systems.push({
       name: ctx.name(gid),
@@ -275,6 +282,7 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
       texture: texture ? texture.file : null,
       textureSize: texture ? texture.size : null,
       blend,
+      tint,
     });
     bump("systemes");
   }

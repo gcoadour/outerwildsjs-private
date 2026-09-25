@@ -632,6 +632,10 @@ async function boot() {
 
   const particleMap = await loadParticleMap();
   const particles = new ParticleField(BABYLON, scene, particleMap);
+  // Les eruptions en cours (`MeteorLauncher`), et l'etat de l'explosion du
+  // vaisseau : ce qui joue des particules sur evenement.
+  let eruptions = [];
+  let navireExplose = false;
 
   // --- ce que le build portait et que rien ne lisait ---
   //
@@ -4792,7 +4796,21 @@ async function boot() {
     // Ils partent de leur lanceur, retombent avec le champ dominant, et
     // blessent au contact passe la demi-seconde d'immunite du prefabrique.
     if (meteores.launchers.length) {
-      meteores.update(dt, now);
+      // `LaunchMeteor` joue `_launchParticles` ; `Update` les arrete
+      // `_particleEmitDuration` secondes plus tard.
+      const nes = meteores.update(dt, now);
+      for (const m of nes) {
+        const l = meteores.launchers.find((x) => x.data.name === m.from && x.last === now);
+        if (!l) continue;
+        if (particles.jouerPres("EruptionParticles", l.data.position, 40)) {
+          eruptions.push({ position: l.data.position, fin: now + (l.data.emitSeconds || 3) });
+        }
+      }
+      eruptions = eruptions.filter((e) => {
+        if (now < e.fin) return true;
+        particles.arreterPres("EruptionParticles", e.position, 40);
+        return false;
+      });
       // Le champ dominant AU METEORE, et non celui du joueur : un caillou
       // au-dessus de Brittle Hollow retombe vers Brittle Hollow, meme quand le
       // joueur est ailleurs (docs/121-avis.md).
@@ -5546,6 +5564,13 @@ async function boot() {
     }
     // Le vaisseau detruit tue son pilote. Hors du vaisseau, il tombe.
     if (ship && ship.destroyed && ship.boarded) death.kill("impact");
+    // `ShipDamageController.ExplodeShip` joue l'explosion — un systeme en
+    // boucle, qui brule tant que la coque est detruite.
+    if (ship && !!ship.destroyed !== navireExplose) {
+      navireExplose = !!ship.destroyed;
+      if (navireExplose) particles.pulse(new Set(["Explosion_Fiery_Med"]));
+      else particles.arreter(new Set(["Explosion_Fiery_Med"]));
+    }
     // Impact : PlayerImpactAudio (au-dela de 3 u/s) et Resources.applyImpact (au-dela de 20 u/s)
     if (player.grounded && !wasGrounded && fallSpeed > 3) {
       const sonImp = sonsUI.playerImpact(fallSpeed, true);
@@ -5611,6 +5636,9 @@ async function boot() {
     }
     if (!supernovaExplosionPlayed && loop.supernova) {
       supernovaExplosionPlayed = true;
+      // `DissipatingParticlesBehavior.OnSunExploded` : les etoiles et la
+      // poussiere de l'etoile se dispersent.
+      particles.pulse(new Set(["DissapatingStars", "DissapatingParticles"]));
       const se = sonsUI.supernovaExplosion();
       if (se) audio.playOneShot(se.file, { volume: se.volume });
       const sw = sonsUI.supernovaWave();
@@ -6278,6 +6306,8 @@ async function boot() {
           if (crashes(impact)) {
             compteurEnfant.crashed();
             console.log(`annonce : CrashedModelShip (${impact.toFixed(1)} u/s)`);
+            // `ModelShipCrashBehavior.OnImpact` : `_explosionParticles.Play()`.
+            particles.pulse(new Set(["Explosion_Fiery_Small"]));
             const sc = sonsUI.modelShipCrash();
             if (sc) audio.playOneShot(sc.file, { volume: sc.volume });
             else if (modele.crashSound) audio.playOneShot(modele.crashSound);
@@ -6375,6 +6405,8 @@ async function boot() {
       if (passages.depart) {
         const son = (events.of("AncientTeleporter") || { clips: {} }).clips._teleportSound;
         if (son) audio.playOneShot(son);
+        // ... et `_teleportParticles.Play()`, celles de CE passage.
+        particles.jouerPres("TeleportParticles", passages.depart.teleporter.position, 60);
         console.log(`passage : ${passages.depart.teleporter.name} part`);
       }
       if (parti) {

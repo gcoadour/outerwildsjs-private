@@ -24,6 +24,19 @@ export async function loadParticleMap() {
 }
 
 /**
+ * La couleur de depart, teinte du materiau comprise.
+ *
+ * Les shaders `Particles/Additive` et `Particles/Alpha Blended` rendent
+ * `2 x _TintColor x couleur x texture` : la teinte par defaut, 0,5, est
+ * neutre. Celles du build ne le sont pas — 0,22 sur les flammes, un bleu-vert
+ * a 5 % sur les nuages de Giant's Deep. `Particles/Multiply` n'en a pas.
+ */
+export function teinteParticules(couleur, tint, blend = "add") {
+  if (!tint || blend === "multiply") return couleur.slice();
+  return couleur.map((v, i) => v * 2 * tint[i]);
+}
+
+/**
  * Le prechauffage d'Unity, en cycles de Babylon.
  *
  * `ParticleSystem.prewarm` : un systeme EN BOUCLE demarre « comme s'il avait
@@ -250,7 +263,7 @@ export class ParticleField {
       ps.emitter = new B.Vector3(p[0], p[1], p[2]);
     }
 
-    const c = s.color || [1, 1, 1, 1];
+    const c = teinteParticules(s.color || [1, 1, 1, 1], s.tint, s.blend);
     ps.color1 = new B.Color4(c[0], c[1], c[2], c[3]);
     ps.color2 = new B.Color4(c[0], c[1], c[2], c[3] * 0.6);
     ps.colorDead = new B.Color4(c[0], c[1], c[2], 0);
@@ -347,11 +360,65 @@ export class ParticleField {
     return ps;
   }
 
+  /**
+   * Demarre LE systeme de ce nom le plus proche d'un point du monde (position
+   * de l'instant zero, celle que portent les donnees). Six
+   * `TeleportParticles`, quatre `EruptionParticles` : c'est le script du lieu
+   * qui joue le sien, par sa reference (`_launchParticles`), et les passages
+   * sont a moins de 40 unites les uns des autres — le plus proche, pas tous
+   * ceux d'un rayon.
+   * @returns 1 si un systeme a ete pilote, 0 sinon
+   */
+  jouerPres(nom, point, rayon = 50) {
+    return this.piloterPres(nom, point, rayon, true);
+  }
+
+  /** Arrete les systemes nommes poses pres d'un point (`ParticleSystem.Stop`). */
+  arreterPres(nom, point, rayon = 50) {
+    return this.piloterPres(nom, point, rayon, false);
+  }
+
+  piloterPres(nom, point, rayon, allume) {
+    const ps = this.lePlusProche(nom, point, rayon);
+    if (!ps) return 0;
+    try { if (allume) ps.start(); else ps.stop(); return 1; } catch (e) { return 0; }
+  }
+
+  /** Le systeme vivant de ce nom le plus proche d'un point, dans un rayon. */
+  lePlusProche(nom, point, rayon = 50) {
+    if (!point) return null;
+    let best = null, bestD = rayon;
+    for (const [i, ps] of this.live) {
+      const s = this.systems[i] || {};
+      if (!ps || s.name !== nom || !s.position) continue;
+      const d = Math.hypot(s.position[0] - point[0], s.position[1] - point[1],
+                           s.position[2] - point[2]);
+      if (d <= bestD) { bestD = d; best = ps; }
+    }
+    return best;
+  }
+
+  /** Arrete les systemes NOMMES, ou qu'ils soient. */
+  arreter(noms) {
+    if (!noms || !noms.size) return 0;
+    let n = 0;
+    for (const [i, ps] of this.live) {
+      if (!ps || !noms.has((this.systems[i] || {}).name)) continue;
+      try { ps.stop(); n++; } catch (e) { /* dispose */ }
+    }
+    return n;
+  }
+
   spawn(i, s, p) {
     try {
       const ps = this.createSystem(s, p, s.name || `ps${i}`);
       if (ps) {
-        ps.start();
+        // `playOnAwake` : 53 des 135 systemes ne partent PAS seuls. Buses,
+        // eruptions, passages, explosions, etoiles qui se dispersent : c'est
+        // un script qui les joue (`ParticleSystem.Play`, `il.mjs --appel`).
+        // Le portage les demarrait tous — l'explosion du vaisseau brulait
+        // au-dessus du village des le reveil (docs/132).
+        if (s.playOnAwake !== false) ps.start();
         this.live.set(i, ps);
       } else {
         this.failed++;

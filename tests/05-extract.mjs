@@ -1275,6 +1275,12 @@ check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
         `${avec("clampVelocity")[0].clampVelocity.magnitude},` +
         `${avec("clampVelocity")[0].clampVelocity.dampen}`, "100,1");
   check("une rotation par vitesse", avec("rotationBySpeed").length, 1);
+  // Ce qui ne part pas seul, et la teinte du materiau (docs/132).
+  check("53 systemes sur 135 attendent un script",
+        parts.systems.filter((s) => s.playOnAwake === false).length, 53);
+  const explo = parts.systems.find((s) => s.name === "Explosion_Fiery_Med");
+  check("l'explosion du vaisseau ne part pas seule", explo.playOnAwake, false);
+  check("sa teinte est a 0,22", explo.tint && explo.tint[0], 0.2239);
   // `scalar` est en RADIANS dans le build : 0,349 rad/s font vingt degres.
   check("de vingt degres par seconde",
         avec("rotationBySpeed")[0].rotationBySpeed.degreesPerSecond, 20);

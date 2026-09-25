@@ -95,7 +95,7 @@ import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
 import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres,
          masqueCamera, CALQUE_SONDE } from "../web/src/lights.js";
 import { taillesEtoiles, pixelsParRadian, gainPoint, moyenneTache, SEUIL_POINT } from "../web/src/etoiles.js";
-import { prewarmCycles, sizeGradients, emitterRotation } from "../web/src/particles.js";
+import { prewarmCycles, sizeGradients, emitterRotation, teinteParticules } from "../web/src/particles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
@@ -8074,6 +8074,18 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("on cache le premier seul", hideDisabledRenderers([eteint, allume]), 1);
   check("... et le LOD ne le rallume pas", eteint.__lodPinned, true);
   check("l'autre reste visible", allume.isVisible, true);
+}
+
+// La teinte des particules : 2 x _TintColor (docs/132).
+{
+  const flamme = teinteParticules([1, 1, 1, 1], [0.2239, 0.2239, 0.2239, 0.502], "add");
+  check("une flamme teintee a 0,22 sort a 0,45", +flamme[0].toFixed(2), 0.45);
+  check("son alpha reste plein", +flamme[3].toFixed(2), 1);
+  check("la teinte par defaut est neutre",
+        teinteParticules([0.3, 0.6, 0.9, 1], [0.5, 0.5, 0.5, 0.5]).join(), "0.3,0.6,0.9,1");
+  check("sans teinte, la couleur telle quelle", teinteParticules([0.2, 0.4, 0.6, 1], null).join(), "0.2,0.4,0.6,1");
+  check("Particles/Multiply n'a pas de teinte",
+        teinteParticules([1, 1, 1, 1], [0.1, 0.1, 0.1, 0.1], "multiply").join(), "1,1,1,1");
 }
 
 check("Timber Hearth : un bleu de nuit a 0,12",
