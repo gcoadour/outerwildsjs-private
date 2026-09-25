@@ -289,6 +289,16 @@ const ranges = new Set((audio.sources || []).map((s) => s.range));
 // elles vont de 10 a 4 000. Une distribution qui s'y reduirait signalerait un
 // retour en arriere.
 check("les portees ne sont pas les trois valeurs inventees", ranges.size > 3, true);
+// Un clip importe en 2D (`m_3D` faux) ne se place pas : douze sources de
+// `level0` en portent un, et le portage les spatialisait (docs/132).
+{
+  const plates = audio.sources.filter((s) => !s.spatial).map((s) => s.name);
+  check("la lunette gresille en 2D", plates.includes("PlayerCamera"), true);
+  check("le souffle du casque est en 2D", plates.includes("SpacesuitAudio"), true);
+  check("la musique de voyage est en 2D", plates.includes("TravelMusicController"), true);
+  check("aucune source a clip 2D n'est lancee d'office",
+        audio.sources.filter((s) => !s.spatial && s.playOnAwake).length, 0);
+}
 const rolloffs = audio.sources.reduce((a, s) => (a[s.rolloff] = (a[s.rolloff] || 0) + 1, a), {});
 console.log("     sources:", audio.sources.length,
             "| portees distinctes:", ranges.size,
@@ -297,6 +307,23 @@ console.log("     sources:", audio.sources.length,
 
 console.time("lumieres");
 const lighting = extractLighting(ctx);
+// L'ACTIVITE DES GAMEOBJECTS (docs/132). Personne ne lisait `m_IsActive`.
+{
+  let effectifs = 0, eux = 0;
+  for (const [gid, go] of ctx.gameObjects) {
+    if (go.m_IsActive === false || go.m_IsActive === 0) eux++;
+    if (!ctx.actif(gid)) effectifs++;
+  }
+  check("GameObjects eteints eux-memes", eux, 143);
+  check("et inactifs par heritage compris", effectifs, 1648);
+  const eteintes = lighting.lights.filter((l) => !l.enabled).map((l) => l.name).sort();
+  check("le second soleil n'eclaire pas", eteintes.includes("SecondSun"), true);
+  check("ni la lumiere directionnelle de test", eteintes.includes("Directional light"), true);
+  const inactifs = Object.values(gp.placed).flat().filter((e) => e.active === false);
+  check("composants places sur des objets inactifs", inactifs.length > 0, true);
+  check("dont un volume qui blesse",
+        (gp.placed.HazardVolume || []).some((e) => e.active === false), true);
+}
 console.timeEnd("lumieres");
 // A3/A4 : le moteur n'avait que deux lumieres inventees, et fog.js portait des
 // RenderSettings recopies a la main.
@@ -968,8 +995,15 @@ console.log("     sources avec courbe echantillonnee:", courbes,
   // serialise sur le materiau partage.
   const vues = [];
   const skyImg = extractSky(ctx, (nom, img) => { vues.push([nom, img.width]); return nom; });
-  check("dix images de nuage ecrites", vues.length, 10);
-  check("toutes en 256 pixels", vues.every(([, w]) => w === 256), true);
+  const nuages = vues.filter(([nom]) => !nom.startsWith("sky_"));
+  check("dix images de nuage ecrites", nuages.length, 10);
+  check("toutes en 256 pixels", nuages.every(([, w]) => w === 256), true);
+  // La voute de fond de la partie : le `RenderSettings` de `level0` pose un
+  // materiau `Skybox`, que le portage remplacait par un bleu nuit invente.
+  check("la partie a sa voute", skyImg.skybox && skyImg.skybox.material,
+        "PlainStarscape_BiggerStars");
+  check("six faces de voute en jeu", vues.filter(([nom]) => nom.startsWith("sky_")).length, 6);
+  check("sa teinte", skyImg.skybox.tint[0], 0.47059);
   check("et chaque nuage sait laquelle est la sienne",
         skyImg.clouds.every((c) => !!c.image), true);
   check("les vingt-quatre portent le meme nom",
@@ -1241,6 +1275,16 @@ check("une entree de musee", (gp.placed.MuseumEntryway || []).length, 1);
         `${avec("clampVelocity")[0].clampVelocity.magnitude},` +
         `${avec("clampVelocity")[0].clampVelocity.dampen}`, "100,1");
   check("une rotation par vitesse", avec("rotationBySpeed").length, 1);
+  // Ce qui ne part pas seul, et la teinte du materiau (docs/132).
+  check("53 systemes sur 135 attendent un script",
+        parts.systems.filter((s) => s.playOnAwake === false).length, 53);
+  const explo = parts.systems.find((s) => s.name === "Explosion_Fiery_Med");
+  check("l'explosion du vaisseau ne part pas seule", explo.playOnAwake, false);
+  check("sa teinte est a 0,22", explo.tint && explo.tint[0], 0.2239);
+  // La flamme du feu de camp emet dans une boite de 0,8, pas de 2 (docs/132).
+  const flamme = parts.systems.find((s) => s.name === "Flame" && s.body === "TimberHearth_Body");
+  check("la flamme du feu emet dans une boite", flamme.shape.type, "box");
+  check("de 0,8 d'arete", flamme.shape.box.join(), "0.8,0.8,0.8");
   // `scalar` est en RADIANS dans le build : 0,349 rad/s font vingt degres.
   check("de vingt degres par seconde",
         avec("rotationBySpeed")[0].rotationBySpeed.degreesPerSecond, 20);
@@ -1430,6 +1474,88 @@ const inp = extractInput(inputCtx);
 check("soixante-six axes", inp.axisCount, 66);
 check("regroupes en vingt-deux canaux", Object.keys(inp.channels).length, 22);
 check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
+// Et la plus longue image que Unity accepte : une seconde. C'est elle que
+// `decoupeImage` (input.js) prend pour borne, et le repli doit la dire aussi.
+check("le pas maximal d'une image", inp.maxTimestep, 1);
+check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
+
+// A12 : L'ECRAN-TITRE, dans la scene de `mainData` (docs/131-ecran-titre.md).
+// `GUIText` et `GUITexture` n'avaient pas de structure : l'oracle d'abord.
+{
+  const { readTypeTree } = await import("../web/src/pipeline/unity/typetree.js");
+  for (const type of ["GUIText", "GUITexture"]) {
+    let n = 0, exacts = 0;
+    for (const o of env.objects({ type, file: "mainData" })) {
+      n++;
+      const r = o.file.reader(o);
+      readTypeTree(r, engineTypes.classes[type], o.file);
+      if (r.pos === o.byteSize) exacts++;
+    }
+    check(`${type} de mainData lus au bit pres`, `${exacts}/${n}`,
+          type === "GUIText" ? "13/13" : "2/2");
+  }
+  // `PhysicMaterial` : l'oracle, et la capsule du joueur, sans frottement —
+  // `CharacterMovementModel` change de materiau selon qu'on est debout, en
+  // course ou en l'air (docs/132).
+  {
+    let n = 0, exacts = 0, perso = null;
+    for (const o of env.objects({ type: "PhysicMaterial" })) {
+      n++;
+      const r = o.file.reader(o);
+      readTypeTree(r, engineTypes.classes.PhysicMaterial, o.file);
+      if (r.pos === o.byteSize) exacts++;
+      const v = inputCtx.readEngine(o);
+      if (v && v.m_Name === "Character") perso = v;
+    }
+    check("PhysicMaterial lus au bit pres", exacts === n && n > 0, true);
+    check("la capsule du joueur ne frotte pas", perso && perso.dynamicFriction, 0);
+  }
+  // La repetition des textures : 54 materiaux, dont le sol et la roche de
+  // Timber Hearth, que le glTF etirait (docs/132).
+  {
+    const { textureTransform } = await import("../web/src/pipeline/extract/materials.js");
+    let repetes = 0, roche = null;
+    for (const o of env.objects({ type: "Material" })) {
+      const m = inputCtx.readEngine(o);
+      if (!m) continue;
+      const t = textureTransform(m);
+      if (t) repetes++;
+      if (m.m_Name === "HP_RockyMat") roche = t;
+    }
+    check("54 materiaux repetent ou decalent leur texture", repetes, 54);
+    check("la roche de Timber Hearth, vingt fois", roche && roche.scale.join(), "20,20");
+  }
+  // `PlayerSettings` : le projet est en GAMMA — l'eclairage s'additionne comme
+  // le calculent les shaders « legacy », ce que `toLegacyMaterials` reproduit —
+  // et en Deferred Lighting par defaut (docs/132).
+  {
+    const o = [...env.objects({ type: "PlayerSettings", file: "mainData" })][0];
+    const r = o.file.reader(o);
+    readTypeTree(r, engineTypes.classes.PlayerSettings, o.file);
+    check("PlayerSettings lu au bit pres", r.pos, o.byteSize);
+    const ps = inputCtx.readEngine(o);
+    check("espace colorimetrique : gamma", ps.m_ActiveColorSpace, 0);
+    check("chemin de rendu : Deferred Lighting", ps.m_RenderingPath, 2);
+  }
+  const { extractTitre } = await import("../web/src/pipeline/extract/titre.js");
+  const t = extractTitre(inputCtx, (nom) => nom);
+  check("cinq options au menu-titre", t.menu.options.length, 5);
+  check("dans l'ordre de `_menuOptions`", t.menu.options.map((o) => o.text).join("|"),
+        "New Expedition|Resume Expedition|Skip Intro|Settings|Exit Game");
+  check("ancrees en bas a gauche", t.menu.options.every((o) => o.anchor === "LowerLeft"), true);
+  check("par pas de 60 pixels", t.menu.options.map((o) => o.pixelOffset[1]).join(","),
+        "240,180,120,60,0");
+  check("en corps 40", t.menu.options.every((o) => o.fontSize === 40), true);
+  check("au point d'ecran (0,05 ; 0,09)", t.menu.options[0].position.join(","), "0.05,0.09");
+  check("Loading... en HSV(104 ; 0,7 ; 0,7)", t.menu.colors.loading, "#57B336");
+  check("la camera du titre voit a 70 degres", t.camera.fov, 70);
+  check("sur la voute", t.camera.clear, "skybox");
+  check("deux RotateTransform", t.rotations.length, 2);
+  check("le logo : un encart de 385,73 x 212 pixels",
+        t.logo.pixelInset.slice(2).join("x"), "385.73x212");
+  check("six faces de voute", Object.keys(t.skybox.faces).length, 6);
+  check("la teinte de la voute", t.skybox.tint[0], 0.47059);
+}
 // Zero, et ce n'est pas un oubli : chaque corps porte son champ.
 check("la gravite de Unity est nulle", (inp.gravity || []).join(","), "0,0,0");
 check("sept iterations de solveur", inp.solverIterations, 7);

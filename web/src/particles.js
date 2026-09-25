@@ -23,6 +23,88 @@ export async function loadParticleMap() {
   }
 }
 
+/**
+ * La couleur de depart, teinte du materiau comprise.
+ *
+ * Les shaders `Particles/Additive` et `Particles/Alpha Blended` rendent
+ * `2 x _TintColor x couleur x texture` : la teinte par defaut, 0,5, est
+ * neutre. Celles du build ne le sont pas — 0,22 sur les flammes, un bleu-vert
+ * a 5 % sur les nuages de Giant's Deep. `Particles/Multiply` n'en a pas.
+ */
+export function teinteParticules(couleur, tint, blend = "add") {
+  if (!tint || blend === "multiply") return couleur.slice();
+  return couleur.map((v, i) => v * 2 * tint[i]);
+}
+
+/**
+ * Le prechauffage d'Unity, en cycles de Babylon.
+ *
+ * `ParticleSystem.prewarm` : un systeme EN BOUCLE demarre « comme s'il avait
+ * deja accompli un cycle entier » — donc `duration` secondes de simulation,
+ * pas une duree de vie. Babylon prechauffe par pas de
+ * `updateSpeed x preWarmStepOffset` ; on en compte assez pour couvrir la
+ * duree. Rien pour un systeme qui ne boucle pas, comme dans Unity.
+ */
+export function prewarmCycles(s, updateSpeed = 0.016, stepOffset = 5) {
+  if (!s || !s.prewarm || !s.looping || !(s.duration > 0)) return 0;
+  return Math.ceil(s.duration / (updateSpeed * stepOffset));
+}
+
+/**
+ * `SizeModule` d'Unity en gradients de Babylon.
+ *
+ * LA COURBE D'UNITY MULTIPLIE, LE GRADIENT DE BABYLON REMPLACE. Dans Unity la
+ * taille d'une particule vaut `startSize x courbe(age)` ; dans Babylon, des
+ * qu'un gradient de taille existe, c'est LUI qui donne la taille, et
+ * `minSize`/`maxSize` ne comptent plus. Le portage passait la courbe telle
+ * quelle : la colonne de fumee de l'ecran-titre — 30 a 60 unites au depart,
+ * courbe de 0,12 a 0,58 — sortait a trois dixiemes d'unite, et toutes les
+ * fumees, flammes et poussieres du monde a la meme echelle. Mesure dans le
+ * navigateur (docs/131-ecran-titre.md).
+ *
+ * @returns [[t, taille basse, taille haute]]
+ */
+export function sizeGradients(s, smin, smax) {
+  if (!s || !s.sizeOverLife || s.sizeOverLife.length < 2) return [];
+  return s.sizeOverLife.map(([t, v]) => [t, v * smin, v * smax]);
+}
+
+/**
+ * Les demi-aretes de la boite d'emission, dans le repere de l'emetteur.
+ *
+ * Unity donne les aretes `boxX`, `boxY`, `boxZ` du repere du systeme ;
+ * l'emetteur de Babylon est tourne d'un quart de tour (`emitterRotation`) qui
+ * porte son +Y sur le +Z d'Unity, et son Z sur l'Y. Le portage emettait dans
+ * un cube de deux unites quel que soit le systeme : la flamme du feu de camp,
+ * soixante particules par seconde, s'eparpillait en taches rouges au lieu de
+ * s'empiler en une langue orange (docs/132).
+ */
+export function boiteEmetteur(shape) {
+  const b = (shape && shape.box) || null;
+  if (!b) {
+    const r = Math.max(0.01, (shape && shape.radius) || 1);
+    return [r, r, r];
+  }
+  return [b[0] / 2, b[2] / 2, b[1] / 2];
+}
+
+/**
+ * La rotation d'un emetteur Babylon pour un systeme Unity d'orientation `q`.
+ *
+ * Unity emet le long du +Z local du systeme ; les emetteurs de Babylon (cone,
+ * boite) le long de leur +Y. On compose donc `q` avec le quart de tour qui
+ * porte +Y sur +Z. Rend (x, y, z, w).
+ */
+export function emitterRotation(q) {
+  // Quart de tour autour de X : (sin 45, 0, 0, cos 45) porte +Y sur +Z.
+  const s = Math.SQRT1_2;
+  const [ax, ay, az, aw] = q, [bx, by, bz, bw] = [s, 0, 0, s];
+  return [aw * bx + ax * bw + ay * bz - az * by,
+          aw * by - ax * bz + ay * bw + az * bx,
+          aw * bz + ax * by - ay * bx + az * bw,
+          aw * bw - ax * bx - ay * by - az * bz];
+}
+
 /** Rayon d'influence approximatif : de quoi decider quand instancier. */
 function reach(s) {
   const shape = (s.shape && s.shape.radius) || 0;
@@ -31,8 +113,10 @@ function reach(s) {
 }
 
 export class ParticleField {
-  constructor(BABYLON, scene, systems) {
+  /** @param dir le dossier des textures : l'ecran-titre a le sien */
+  constructor(BABYLON, scene, systems, dir = "data/particles/") {
     this.B = BABYLON;
+    this.dir = dir;
     this.scene = scene;
     this.systems = systems;
     this.live = new Map();
@@ -45,7 +129,7 @@ export class ParticleField {
     if (!this.textures.has(file)) {
       try {
         this.textures.set(file,
-          new this.B.Texture(`data/particles/${file}`, this.scene));
+          new this.B.Texture(`${this.dir}${file}`, this.scene));
       } catch (e) {
         this.textures.set(file, null);
       }
@@ -59,13 +143,17 @@ export class ParticleField {
    *              joueur : son champ est le leur, a la precision qui compte pour
    *              une etincelle qui vit une seconde.
    */
-  update(listener, toFrame, field = null) {
+  /** @param shiftOf systeme -> deplacement de son corps depuis le repos (docs/132) */
+  update(listener, toFrame, field = null, shiftOf = null) {
     // classe par distance : on garde les plus proches dans le budget
     const cand = [];
     for (let i = 0; i < this.systems.length; i++) {
       const s = this.systems[i];
-      const p = [s.position[0] - toFrame[0], s.position[1] - toFrame[1],
-                 s.position[2] - toFrame[2]];
+      if (s.active === false) continue;   // inactif dans la scene (docs/132)
+      const dv = shiftOf ? shiftOf(s) : null;
+      const p = [s.position[0] + (dv ? dv[0] : 0) - toFrame[0],
+                 s.position[1] + (dv ? dv[1] : 0) - toFrame[1],
+                 s.position[2] + (dv ? dv[2] : 0) - toFrame[2]];
       const d = Math.hypot(p[0] - listener.x, p[1] - listener.y, p[2] - listener.z);
       if (d < reach(s)) cand.push({ i, s, p, d });
     }
@@ -76,7 +164,8 @@ export class ParticleField {
     for (const c of cand.slice(0, MAX_LIVE)) {
       if (this.live.has(c.i)) {
         const ps = this.live.get(c.i);
-        if (ps) ps.emitter = new this.B.Vector3(c.p[0], c.p[1], c.p[2]);
+        if (ps && ps.emitter && ps.emitter.position) ps.emitter.position.set(c.p[0], c.p[1], c.p[2]);
+        else if (ps) ps.emitter = new this.B.Vector3(c.p[0], c.p[1], c.p[2]);
       } else {
         this.spawn(c.i, c.s, c.p);
       }
@@ -180,9 +269,20 @@ export class ParticleField {
       Math.min(s.capacity || 200, MAX_CAPACITY), this.scene);
     const tex = this.texture(s.texture);
     if (tex) ps.particleTexture = tex;
-    ps.emitter = new B.Vector3(p[0], p[1], p[2]);
+    if (s.rotation) {
+      // Un maillage vide sert d'emetteur : Babylon oriente les directions et
+      // la forme par sa matrice monde.
+      const e = new B.Mesh(`${ps.name}_emetteur`, this.scene);
+      e.position.set(p[0], p[1], p[2]);
+      e.rotationQuaternion = new B.Quaternion(...emitterRotation(s.rotation));
+      e.isPickable = false;
+      ps.emitter = e;
+      ps.onDisposeObservable.add(() => e.dispose());
+    } else {
+      ps.emitter = new B.Vector3(p[0], p[1], p[2]);
+    }
 
-    const c = s.color || [1, 1, 1, 1];
+    const c = teinteParticules(s.color || [1, 1, 1, 1], s.tint, s.blend);
     ps.color1 = new B.Color4(c[0], c[1], c[2], c[3]);
     ps.color2 = new B.Color4(c[0], c[1], c[2], c[3] * 0.6);
     ps.colorDead = new B.Color4(c[0], c[1], c[2], 0);
@@ -205,9 +305,7 @@ export class ParticleField {
     };
     const [smin, smax] = range(s.sizeRange, s.size || 1, 0.01);
     ps.minSize = smin; ps.maxSize = smax;
-    if (s.sizeOverLife && s.sizeOverLife.length > 1) {
-      for (const [t, v] of s.sizeOverLife) ps.addSizeGradient(t, v, v);
-    }
+    for (const [t, lo, hi] of sizeGradients(s, smin, smax)) ps.addSizeGradient(t, lo, hi);
     if (s.rotationSpeed) {
       ps.minAngularSpeed = -s.rotationSpeed;
       ps.maxAngularSpeed = s.rotationSpeed;
@@ -251,12 +349,16 @@ export class ParticleField {
     const [vmin, vmax] = range(s.speedRange, s.startSpeed || 0, 0);
     ps.minEmitPower = vmin; ps.maxEmitPower = vmax;
     ps.updateSpeed = 0.016 * (s.speedScale || 1);
+    const cycles = prewarmCycles(s, 0.016);
+    if (cycles) { ps.preWarmStepOffset = 5; ps.preWarmCycles = cycles; }
 
     const sh = s.shape || { type: "sphere", radius: 1 };
     const r2 = Math.max(0.01, sh.radius || 1);
-    if (sh.type === "box") ps.createBoxEmitter(
-      new B.Vector3(0, 1, 0), new B.Vector3(0, 1, 0),
-      new B.Vector3(-r2, -r2, -r2), new B.Vector3(r2, r2, r2));
+    if (sh.type === "box") {
+      const [bx, by, bz] = boiteEmetteur(sh);
+      ps.createBoxEmitter(new B.Vector3(0, 1, 0), new B.Vector3(0, 1, 0),
+        new B.Vector3(-bx, -by, -bz), new B.Vector3(bx, by, bz));
+    }
     else if (sh.type.startsWith("cone")) ps.createConeEmitter(
       r2, Math.min(Math.PI / 2, (sh.angle || 30) * Math.PI / 180));
     else if (sh.type.startsWith("hemisphere")) ps.createHemisphericEmitter(r2);
@@ -279,11 +381,65 @@ export class ParticleField {
     return ps;
   }
 
+  /**
+   * Demarre LE systeme de ce nom le plus proche d'un point du monde (position
+   * de l'instant zero, celle que portent les donnees). Six
+   * `TeleportParticles`, quatre `EruptionParticles` : c'est le script du lieu
+   * qui joue le sien, par sa reference (`_launchParticles`), et les passages
+   * sont a moins de 40 unites les uns des autres — le plus proche, pas tous
+   * ceux d'un rayon.
+   * @returns 1 si un systeme a ete pilote, 0 sinon
+   */
+  jouerPres(nom, point, rayon = 50) {
+    return this.piloterPres(nom, point, rayon, true);
+  }
+
+  /** Arrete les systemes nommes poses pres d'un point (`ParticleSystem.Stop`). */
+  arreterPres(nom, point, rayon = 50) {
+    return this.piloterPres(nom, point, rayon, false);
+  }
+
+  piloterPres(nom, point, rayon, allume) {
+    const ps = this.lePlusProche(nom, point, rayon);
+    if (!ps) return 0;
+    try { if (allume) ps.start(); else ps.stop(); return 1; } catch (e) { return 0; }
+  }
+
+  /** Le systeme vivant de ce nom le plus proche d'un point, dans un rayon. */
+  lePlusProche(nom, point, rayon = 50) {
+    if (!point) return null;
+    let best = null, bestD = rayon;
+    for (const [i, ps] of this.live) {
+      const s = this.systems[i] || {};
+      if (!ps || s.name !== nom || !s.position) continue;
+      const d = Math.hypot(s.position[0] - point[0], s.position[1] - point[1],
+                           s.position[2] - point[2]);
+      if (d <= bestD) { bestD = d; best = ps; }
+    }
+    return best;
+  }
+
+  /** Arrete les systemes NOMMES, ou qu'ils soient. */
+  arreter(noms) {
+    if (!noms || !noms.size) return 0;
+    let n = 0;
+    for (const [i, ps] of this.live) {
+      if (!ps || !noms.has((this.systems[i] || {}).name)) continue;
+      try { ps.stop(); n++; } catch (e) { /* dispose */ }
+    }
+    return n;
+  }
+
   spawn(i, s, p) {
     try {
       const ps = this.createSystem(s, p, s.name || `ps${i}`);
       if (ps) {
-        ps.start();
+        // `playOnAwake` : 53 des 135 systemes ne partent PAS seuls. Buses,
+        // eruptions, passages, explosions, etoiles qui se dispersent : c'est
+        // un script qui les joue (`ParticleSystem.Play`, `il.mjs --appel`).
+        // Le portage les demarrait tous — l'explosion du vaisseau brulait
+        // au-dessus du village des le reveil (docs/132).
+        if (s.playOnAwake !== false) ps.start();
         this.live.set(i, ps);
       } else {
         this.failed++;

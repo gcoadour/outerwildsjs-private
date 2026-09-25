@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
+import { prechauffer, traverserTitre } from "./pw-commun.mjs";
 
 const WEB_DIR = path.resolve("web");
 const ZIP_PATH = path.resolve("work/downloads/OuterWilds_Alpha_1_2_Linux.zip");
@@ -64,7 +65,12 @@ function assert(name, condition, details = "") {
 try {
   const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // Petite fenetre : sans GPU, le cout d'une image suit le nombre de pixels.
+    viewport: { width: 640, height: 360 },
+    // Un conteneur fournit souvent un Chromium deja installe dont la version
+    // ne suit pas celle du paquet playwright : on le prend s'il est la.
+    executablePath: process.env.PW_CHROMIUM || (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined),
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
   });
 
   const page = await context.newPage();
@@ -98,13 +104,10 @@ try {
   }
 
   await page.click("#gate-play");
-  await page.waitForFunction(() => window.__ready === true, { timeout: 60000 });
-  console.log("Moteur initialise avec succes.");
-
-  // ==========================================
-  // SCENARIO 1: REVEIL DU JOUEUR & REGARD
-  // ==========================================
-  console.log("\n--- Scenario 1: Reveil du joueur ---");
+  await traverserTitre(page);
+  await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+  // Le reveil se mesure A LA PREMIERE IMAGE : il se deroule en sept secondes,
+  // et le prechauffage des shaders en dure bien plus sans GPU.
   const reveilInfo = await page.evaluate(() => {
     const cam = window.__regardCam();
     return {
@@ -113,6 +116,13 @@ try {
       yaw: cam ? cam.yaw : 0,
     };
   });
+  const chauffe = await prechauffer(page);
+  console.log(`Moteur initialise avec succes (shaders compiles en ${(chauffe.ms / 1000).toFixed(0)} s).`);
+
+  // ==========================================
+  // SCENARIO 1: REVEIL DU JOUEUR & REGARD
+  // ==========================================
+  console.log("\n--- Scenario 1: Reveil du joueur ---");
   assert("Reveil arme au depart", reveilInfo.reveilArme === true);
   assert("Angle initial de 80 degres vers le ciel", Math.abs(reveilInfo.pitch - (-80 * Math.PI / 180)) < 0.05, `pitch=${reveilInfo.pitch}`);
 
@@ -153,12 +163,30 @@ try {
   const distWalk = Math.hypot(pos1.x - pos0.x, pos1.y - pos0.y, pos1.z - pos0.z);
   assert("Le joueur se deplace en marchant (Z/W)", distWalk > 0.5, `dist=${distWalk.toFixed(2)}m`);
 
-  // Jump with Space
-  const vy0 = await page.evaluate(() => window.__player.vel.y);
-  await page.keyboard.press("Space");
-  await page.waitForTimeout(50);
-  const vy1 = await page.evaluate(() => window.__player.vel.y);
-  assert("Le saut applique une impulsion", vy1 > vy0 || Math.abs(vy1 - vy0) > 0.1);
+  // Saut : la plus forte vitesse le long de la verticale LOCALE (l'oppose du
+  // champ), relevee a CHAQUE pas du joueur — une image dure ici pres d'une
+  // seconde, et l'arc du saut tient dans deux ou trois.
+  await page.waitForFunction(() => window.__player.grounded, { timeout: 15000 }).catch(() => {});
+  await page.evaluate(() => {
+    const p = window.__player;
+    window.__vMax = -Infinity;
+    const orig = p.update.bind(p);
+    p.update = (...a) => {
+      const r = orig(...a);
+      const d = p.field && p.field.dir;
+      if (d) window.__vMax = Math.max(window.__vMax, -(p.vel.x * d.x + p.vel.y * d.y + p.vel.z * d.z));
+      return r;
+    };
+  });
+  await page.keyboard.down("Space");
+  await page.evaluate(() => new Promise((r) => {
+    const sc = BABYLON.EngineStore.LastCreatedScene; let n = 0;
+    const o = sc.onAfterRenderObservable.add(() => { if (++n >= 2) { sc.onAfterRenderObservable.remove(o); r(); } });
+  }));
+  await page.keyboard.up("Space");
+  const vSaut = await page.evaluate(() => window.__vMax);
+  const jumpSpeed = await page.evaluate(() => window.__player.c.jumpSpeed);
+  assert("Le saut applique une impulsion", vSaut > jumpSpeed * 0.8, `v=${vSaut.toFixed(2)} jumpSpeed=${jumpSpeed}`);
 
   // ==========================================
   // SCENARIO 4: BATON DE GUIMAUVE & SOIN
@@ -178,11 +206,16 @@ try {
   assert("Baton resorti", stickBack === true);
 
   // Marshmallow heat & toast
-  await page.evaluate(() => {
-    window.__consoles.marshmallow.held = true;
-    window.__consoles.marshmallow.update(0.5, 50); // heat 50 for 0.5s
+  // Une guimauve NEUVE : au reveil, baton sorti pres du feu, elle grille
+  // toute seule, et pendant le prechauffage des shaders elle a eu le temps de
+  // bruler et de revenir. On mesure dans la meme image que la remise a zero.
+  const toastLevel = await page.evaluate(() => {
+    const m = window.__consoles.marshmallow;
+    m.gone = false; m.goneFor = 0; m.toast = 0;
+    m.held = true;
+    m.update(0.5, 50); // heat 50 for 0.5s
+    return m.toast;
   });
-  const toastLevel = await page.evaluate(() => window.__consoles.marshmallow.toast);
   assert("La guimauve grille a la chaleur", toastLevel > 0, `toast=${toastLevel.toFixed(2)}`);
 
   // Hurt player slightly and eat marshmallow to heal (tested with E/Interact key)
@@ -282,23 +315,36 @@ try {
   const boarded = await page.evaluate(() => window.__shipRef.boarded);
   assert("Joueur installe au poste de pilotage", boarded === true);
 
-  // Test tap up (short press with ShiftLeft, < 1.0s) -> should NOT liftoff
+  // Appui court : on relache DANS l'image ou l'allumage a commence. Sans GPU
+  // une image dure pres d'une seconde, et relacher depuis Node — un aller-retour
+  // de plus — laissait passer la seconde d'allumage : le jeu decollait, et il
+  // avait raison. Le relachement part donc de la page, a la fin de l'image.
   await page.keyboard.down("ShiftLeft");
-  await page.waitForFunction(() => window.__shipEvents.includes("StartShipIgnition"), { timeout: 5000 });
+  await page.evaluate(() => new Promise((fini) => {
+    const sc = BABYLON.EngineStore.LastCreatedScene;
+    const obs = sc.onAfterRenderObservable.add(() => {
+      if (!window.__shipEvents.includes("StartShipIgnition")) return;
+      sc.onAfterRenderObservable.remove(obs);
+      dispatchEvent(new KeyboardEvent("keyup", { code: "ShiftLeft", key: "Shift" }));
+      fini();
+    });
+  }));
   const startIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],
     landed: window.__shipRef.landed,
   }));
   assert("Appui court declenche StartShipIgnition", startIgnite.events.includes("StartShipIgnition"));
-
-  // Release ShiftLeft -> cancels ignition
+  // Le clavier de Playwright croit encore la touche tenue : on l'accorde.
   await page.keyboard.up("ShiftLeft");
-  await page.waitForFunction(() => window.__shipEvents.includes("CancelShipIgnition"), { timeout: 5000 });
+  // L'un OU l'autre : si l'image a dure plus que la seconde d'allumage, c'est
+  // `CompleteShipIgnition` qui vient, et le jeu a raison — on le dit.
+  await page.waitForFunction(() => window.__shipEvents.includes("CancelShipIgnition")
+    || window.__shipEvents.includes("CompleteShipIgnition"), { timeout: 15000 });
   const cancelIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],
     landed: window.__shipRef.landed,
   }));
-  assert("Relachement declenche CancelShipIgnition sans decollage", cancelIgnite.events.includes("CancelShipIgnition") && cancelIgnite.landed === true);
+  assert("Relachement declenche CancelShipIgnition sans decollage", cancelIgnite.events.includes("CancelShipIgnition") && cancelIgnite.landed === true, JSON.stringify(cancelIgnite));
 
   // Test full ignition (hold ShiftLeft until 1.0s ignition duration completes) -> should complete and liftoff
   await page.keyboard.down("ShiftLeft");
@@ -346,6 +392,39 @@ try {
   assert("Tir de la sonde de reconnaissance", probeActions.launched === true);
   assert("Prise de photo par la sonde", probeActions.hasSnapshot === true);
   assert("Rappel et recuperation de la sonde", probeActions.recalled === true);
+
+  // La meme sequence AU BOUTON, comme un joueur : une pichenette sur une sonde
+  // en vol la PHOTOGRAPHIE, elle ne la rappelle pas. Une frappe plus courte
+  // qu'une image vaut un sous-pas ; tenue toute l'image, elle durait jusqu'a
+  // une seconde de jeu et passait le seuil de rappel de 0,3 s (docs/132).
+  const sondeReelle = await (async () => {
+    await page.evaluate(() => {
+      const l = window.__lots;
+      if (!l.equipment.probe) l.equipment.pickUp(l.pickups.find((p) => p.probe));
+      window.__pdata.learn("knowsHowProbesWork");
+      window.__tools.probes.probe = null;
+      window.__look(0, -1.4);
+    });
+    const clic = async (ms) => {
+      await page.mouse.down({ button: "right" });
+      await page.waitForTimeout(ms);
+      await page.mouse.up({ button: "right" });
+    };
+    const lances0 = await page.evaluate(() => window.__tools.probes.launched);
+    await clic(120);
+    await page.waitForFunction((n) => window.__tools.probes.launched > n, lances0,
+                               { timeout: 20000 }).catch(() => {});
+    const partie = await page.evaluate(() => window.__tools.probes.active);
+    await clic(120);
+    await page.waitForTimeout(3000);
+    const apresTape = await page.evaluate(() => ({
+      active: window.__tools.probes.active,
+      lances: window.__tools.probes.launched }));
+    return { partie, apresTape, lances0 };
+  })();
+  assert("Au bouton, la sonde part", sondeReelle.partie === 1, JSON.stringify(sondeReelle));
+  assert("Une pichenette en vol ne la rappelle pas", sondeReelle.apresTape.active === 1
+    && sondeReelle.apresTape.lances === sondeReelle.lances0 + 1, JSON.stringify(sondeReelle.apresTape));
 
   // ==========================================
   // SCENARIO 9: PILOTE AUTOMATIQUE & ETAPES
@@ -443,7 +522,7 @@ try {
   // SCENARIO 13: MORT, FLASHBACK & REPRISE DE LA BOUCLE
   // ==========================================
   console.log("\n--- Scenario 13: Mort du joueur et boucle temporelle ---");
-  const loop0 = await page.evaluate(() => window.__pdata?.loopCount || 1);
+  const loop0 = await page.evaluate(() => window.__pdata?.loopCount ?? 0);
   await page.evaluate(() => {
     window.__death.kill("impact");
   });
@@ -463,7 +542,7 @@ try {
       if (window.__death.update(0.2)) window.__respawn();
     }
   });
-  const loop1 = await page.evaluate(() => window.__pdata?.loopCount || 1);
+  const loop1 = await page.evaluate(() => window.__pdata?.loopCount ?? 0);
   const respawned = await page.evaluate(() => ({
     playerAlive: !window.__death?.dead,
     reveilArme: window.__reveil?.arme === true,

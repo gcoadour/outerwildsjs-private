@@ -184,6 +184,8 @@ export class Commandes {
     // mesure isolee.
     this.modes = null;
     this.fixedTimestep = (data && data.fixedTimestep) || 0.016;
+    // `Maximum Allowed Timestep` : 1 s dans ce build. Voir `decoupeImage`.
+    this.maxTimestep = (data && data.maxTimestep) || 1;
     this.tags = (data && data.tags) || [];
     this.layers = (data && data.layers) || {};
   }
@@ -286,6 +288,37 @@ export class Commandes {
  * Meme forme que les autres chargeurs du moteur : le Service Worker sert le
  * fichier depuis l'OPFS quand l'extraction a eu lieu, et rend 404 sinon.
  */
+/**
+ * Le pas de plus long qu'une integration a l'image supporte sans diverger :
+ * c'etait le plafond du portage, et il le reste, mais pour un SOUS-pas.
+ */
+export const SOUS_PAS_MAX = 0.05;
+
+/**
+ * Le temps d'une image, decoupe comme Unity le fait avancer.
+ *
+ * Le build pose `Maximum Allowed Timestep` a 1 s dans son `TimeManager` :
+ * `Time.deltaTime` suit l'horloge tant qu'une image dure moins d'une seconde,
+ * et `FixedUpdate` rattrape par autant de pas fixes qu'il faut. Le portage,
+ * lui, plafonnait l'image a 0,05 s : sous 20 images par seconde, le JEU
+ * RALENTISSAIT. Mesure dans Chromium sans GPU (3 images par seconde) : une
+ * demi-seconde de marche avancait le joueur de 0,39 m au lieu de 3,5, et la
+ * boucle de vingt minutes en aurait dure plus de deux heures. Sur un
+ * telephone a 15 images par seconde, elle durait 27 minutes.
+ *
+ * On garde le plafond de 0,05 s — mais pour chaque SOUS-pas, et l'image en
+ * enchaine autant qu'il faut pour couvrir son temps reel, borne a la seconde
+ * du build. A 60 images par seconde, un seul sous-pas : rien ne change.
+ *
+ * @returns {{ n: number, h: number }} n sous-pas de h secondes chacun
+ */
+export function decoupeImage(delta, maxTimestep = 1, sousPas = SOUS_PAS_MAX) {
+  const t = Math.min(Math.max(0, delta || 0), maxTimestep > 0 ? maxTimestep : 1);
+  if (t === 0) return { n: 1, h: 0 };
+  const n = Math.max(1, Math.ceil(t / sousPas - 1e-9));
+  return { n, h: t / n };
+}
+
 export async function loadCommandes(fetcher = fetch) {
   try {
     const r = await fetcher("data/input.json");

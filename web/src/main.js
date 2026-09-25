@@ -15,7 +15,7 @@ import { loadSolarSystem, playerConstants } from "./config.js";
 import { buildBodies, syncBodies } from "./bodies.js";
 import { Player } from "./player.js";
 import { FloatingOrigin } from "./origin.js";
-import { GeometryStore, bootFiles, BODY_TO_FILE, EXTRA_VOLUMES, syncGeometry,
+import { GeometryStore, bootFiles, BODY_TO_FILE, BODY_FILES, EXTRA_VOLUMES, syncGeometry,
          entryForBody, findBodyNode, meshesForBody } from "./geometry.js";
 import { buildOrbits, advance, currentPosition, period,
          frameVelocity } from "./orbits.js";
@@ -23,11 +23,12 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI, MenuInput } from "./settings.js";
+import { loadTitre, TitleScreen, SKIP_INTRO_FLAGS } from "./titre.js";
 import { shipRecords, ShipComputer, Flashlight, Marshmallow,
          heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
@@ -57,7 +58,7 @@ import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
 import { BlackHole, DebrisField, WHITE_HOLE, leashBrake,
          growSteps } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "./bramble.js";
-import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
+import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
@@ -72,7 +73,7 @@ import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState, PLAYER_FALLBACK } from "./player.js";
-import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
+import { applyGameShaders, updateGameShaders, toLegacyMaterials } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
@@ -82,11 +83,12 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
          probeReadout, selfDestructed } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
-         createPlayerBody, teleportBody } from "./physics.js";
+         createPlayerBody, teleportBody, hideUnrendered, hiddenMesh,
+         disableInactive, underInactive } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
-import { loadCommandes } from "./input.js";
+import { loadCommandes, decoupeImage } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
@@ -131,8 +133,11 @@ import { MarshmallowStick as BatonGuimauve, thermTime,
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
-         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE } from "./lights.js";
+         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap,
+         patchAttenuationUnity, falloffUnity, layerMaskFor, applyLayers,
+         masqueCamera, CALQUE_SONDE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
+import { champEtoiles, creerVoute } from "./etoiles.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels, markCrushing,
          funnelActive } from "./sand.js";
@@ -161,7 +166,7 @@ import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          UpAligner, steadyPitch, steadyLook } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
-         UISounds, jumpSound, shipTurbulence } from "./reactaudio.js";
+         UISounds, jumpSound, shipTurbulence, SuitAmbience } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
@@ -169,8 +174,105 @@ function setStatus(msg) {
   if (el) el.textContent = msg;
 }
 
+/**
+ * `SettingsMenu.ToggleOption`, septieme option en partie : `LoadLevel(0)`.
+ *
+ * Recharger la page EST recharger le niveau 0 : tout ce qui doit survivre —
+ * la sauvegarde, les reglages — est deja dans le stockage du navigateur. La
+ * marque de session dit a la page de repartir droit sur l'ecran-titre, sans
+ * repasser par l'accueil (gate.js).
+ */
+function retourAuTitre() {
+  try { sessionStorage.setItem("outerwildsjs.titre", "1"); } catch (e) { /* */ }
+  location.reload();
+}
+
+/**
+ * L'ecran-titre, jusqu'au choix du joueur.
+ *
+ * @returns { ecran, choix } — ou null sans donnees de titre
+ */
+async function ecranTitre(BABYLON, engine, cmds) {
+  const donnees = await loadTitre();
+  if (!donnees || !donnees.menu) return null;
+  const ecran = new TitleScreen(BABYLON, engine, donnees, {
+    cmds,
+    // `PlayerData.LoadLoopCount` : ce que dit le DISQUE, avant tout choix.
+    loopCount: new PlayerData().loopCount,
+  });
+  window.__titre = ecran;
+  ecran.scene.registerBeforeRender(() => ecran.avancer());
+  engine.runRenderLoop(ecran.rendu);
+  ecran.jouerMusique();
+  ecran.chargerGeometrie(ParticleField, applyGameShaders, toLegacyMaterials);
+
+  // Les reglages ouverts DEPUIS le titre : le meme `SettingsMenu`, au niveau 0.
+  const iface = await loadInterface();
+  const uiRoot = document.getElementById("ui");
+  const reglages = new Settings(iface || {}, { niveau: 0 });
+  const retour = () => { if (!reglages.open) ecran.rouvrir(); };
+  const reglagesUI = uiRoot
+    ? new SettingsUI(uiRoot, reglages, "data/interface/", { onPick: () => retour() })
+    : null;
+  const menuInput = new MenuInput();
+  ecran.onSettings = () => {
+    reglages.ouvre();
+    menuInput.reouvre(true);
+    if (reglagesUI) reglagesUI.render();
+  };
+  const clavier = (e) => {
+    if (!reglages.open) return;
+    const canal = (nom) => {
+      const c = cmds.get(nom);
+      return c ? { pos: c.pos.codes.includes(e.code), neg: c.neg.codes.includes(e.code) } : {};
+    };
+    if (canal("Cancel").pos || e.code === "Escape") {
+      // `Menu.Update` : `cancel` ferme, et rouvre le parent.
+      reglages.ferme();
+    } else {
+      const z = canal("Move Z"), x = canal("Move X");
+      const dz = z.pos || e.code === "ArrowUp" ? 1 : z.neg || e.code === "ArrowDown" ? -1 : 0;
+      const dx = x.pos || e.code === "ArrowRight" ? 1 : x.neg || e.code === "ArrowLeft" ? -1 : 0;
+      const verrou = !!(reglages.options[reglages.index] || {}).locked;
+      const g = menuInput.axes(performance.now() / 1000, dz, dx, verrou);
+      if (g.move) reglages.move(g.move);
+      if (g.toggle) reglages.toggle(g.toggle);
+      if (!e.repeat && (canal("Interact").pos || canal("Jump").pos)) reglages.toggle(0);
+    }
+    if (reglagesUI) reglagesUI.render();
+    retour();
+  };
+  addEventListener("keydown", clavier);
+
+  const choix = await ecran.choix;
+  removeEventListener("keydown", clavier);
+  if (reglagesUI) reglagesUI.el.remove();
+  if (choix.quit) {
+    // `Application.Quit` : une page ne se ferme pas elle-meme. On revient a
+    // l'accueil, qui est ce qu'il y a « hors du jeu » ici.
+    location.reload();
+    return new Promise(() => {});
+  }
+  return { ecran, choix };
+}
+
 async function boot() {
   const BABYLON = window.BABYLON;
+  const canvas = document.getElementById("view");
+  // audioEngine: true est indispensable — depuis Babylon 8 le moteur audio
+  // herite n'est plus cree automatiquement, et BABYLON.Sound ne telecharge
+  // alors aucun fichier, sans lever d'erreur.
+  const engine = new BABYLON.Engine(canvas, true,
+    { stencil: true, audioEngine: true }, true);
+  addEventListener("resize", () => engine.resize());
+  // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
+  // prend le relais — et elle se sait repli, comme `config.js`.
+  const cmds = await loadCommandes();
+  // LE NIVEAU 0 AVANT LE NIVEAU 1. L'ecran-titre tourne, on choisit, et la
+  // partie se charge DERRIERE lui — `LoadLevelAsync` — pendant que « Loading... »
+  // reste affiche (docs/131-ecran-titre.md). Sans `data/titre/`, on entre droit
+  // dans la partie, comme le portage l'a toujours fait.
+  const titre = await ecranTitre(BABYLON, engine, cmds);
   const data = await loadSolarSystem();
   // charge avant le calcul du point d'apparition, qui s'appuie dessus
   const gameplay = await loadGameplay();
@@ -182,17 +284,36 @@ async function boot() {
     (gameplay.singletons.PlayerResources || {}).fields || {});
   const interactables = new Interactables(gameplay);
   window.__interactables = interactables;   // sonde : les trente-quatre lisibles
+  // Les recepteurs se visent au rayon quand l'extraction porte leurs colliders.
+  const visesParRayon = interactables.items.some((it) => it.kind === "interact" && it.volume);
+  // Sonde de verification : ce que le rayon vise, et ou est un recepteur dans
+  // le repere courant (le corps porteur tourne et se deplace).
+  const sondeInteraction = { vise: null, repere: null };
+  window.__interaction = sondeInteraction;
   const bodies = data.bodies;
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
-  const canvas = document.getElementById("view");
-  // audioEngine: true est indispensable — depuis Babylon 8 le moteur audio
-  // herite n'est plus cree automatiquement, et BABYLON.Sound ne telecharge
-  // alors aucun fichier, sans lever d'erreur.
-  const engine = new BABYLON.Engine(canvas, true,
-    { stencil: true, audioEngine: true }, true);
   const scene = new BABYLON.Scene(canvas ? engine : engine);
+  // L'attenuation des lumieres ponctuelles d'Unity 4, avant tout shader.
+  patchAttenuationUnity(BABYLON);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
+
+  // Le plafond de lumieres par materiau, lu sur le processeur graphique : le
+  // chargeur glTF le releve a chaque chargement, on le ramene a chaque image
+  // ou le nombre de materiaux a bouge (lights.js, `lightCap`).
+  {
+    const gl = engine._gl;
+    const plafond = lightCap(gl && gl.getParameter
+      ? Math.min(gl.getParameter(gl.MAX_VERTEX_UNIFORM_BLOCKS),
+                 gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_BLOCKS)) : 0);
+    // Chaque image : le chargeur ecrit la valeur a la FIN d'un chargement, pas
+    // quand le materiau apparait, et 170 comparaisons ne coutent rien.
+    scene.onBeforeRenderObservable.add(() => {
+      for (const m of scene.materials) {
+        if (m.maxSimultaneousLights > plafond) m.maxSimultaneousLights = plafond;
+      }
+    });
+  }
 
   // LE GROUPE DE RENDU 1 N'EST PAS UN CALQUE « APRES L'OPAQUE ».
   //
@@ -242,9 +363,6 @@ async function boot() {
   // simplement pas au jeu — c'est le genre d'ecart qu'une capture ne trahit
   // pas, faute de point de comparaison dans l'image.
   const camerasDuBuild = await loadCameras();
-  // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
-  // prend le relais — et elle se sait repli, comme `config.js`.
-  const cmds = await loadCommandes();
   // §K Le jeu de commandes actif. `OWInput` en echange l'ensemble a chaque
   // changement de mode, et tout ce qui lit une touche passe par lui
   // (docs/70-modes.md).
@@ -255,20 +373,34 @@ async function boot() {
   window.__commandes = cmds;
   const reglagesCam = reglagesDuJoueur(camerasDuBuild);
   camera.fov = (reglagesCam.fov || 70) * Math.PI / 180;
-  // Calque des billes de sonde : visible du joueur, pas de la sonde elle-meme.
-  camera.layerMask = 0x2FFFFFFF;
+  // Le masque de la `PlayerCamera` du build : tout sauf `HeadsUpDisplay` (23),
+  // que la camera du casque dessine seule, et deux calques de volumes. Il
+  // contient le bit 29, celui des billes de sonde : visibles du joueur, pas de
+  // la sonde elle-meme. Sans lui, les objets du calque 23 flottaient dans le
+  // decor (docs/132).
+  camera.layerMask = masqueCamera(reglagesCam.cullingMask);
   scene.activeCamera = camera;
 
-  // Une lumiere ponctuelle s'attenuerait a 8 500 unites du soleil. Pour une
-  // etoile aussi lointaine, une directionnelle reorientee chaque frame donne
-  // le bon eclairage sans probleme de portee.
-  const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(0, -1, 0), scene);
-  sun.intensity = 1.15;
+  // LE SOLEIL EST UNE PONCTUELLE. `SunLight` : posee sur l'etoile, portee
+  // 20 000, intensite 3, et l'attenuation d'Unity 4 (lights.js). Le portage
+  // tenait une directionnelle d'intensite 1,15 partout — la force du soleil a
+  // la distance de Timber Hearth, appliquee a tout le systeme. Or a 16 458
+  // unites, Giant's Deep n'en recoit que le vingtieme : l'alpha la montre
+  // presque noire, auréolée de son seul liseré, et Dark Bramble et la comete,
+  // au-dela de la portee, ne sont pas eclaires du tout (docs/132). Les
+  // reglages definitifs viennent du build plus bas, une fois `lighting` lu.
+  const sun = new BABYLON.PointLight("sun", new BABYLON.Vector3(0, 0, 0), scene);
+  sun.range = 20000;
+  sun.intensity = 3;
+  // La direction de la lumiere au point de vue, que lisent les materiaux du
+  // jeu (atmospheres, liseres) : de l'etoile vers la camera.
+  const sunDir = new BABYLON.Vector3(0, -1, 0);
   // L'ambiance n'est pas une constante : chaque secteur porte sa propre portee
   // d'eclairage ambiant (`_ambientLightRange`), de 750 sur Giant's Deep a 0 sur
   // la comete. On garde la lumiere sous la main pour la suivre.
   const ambient = new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0, 1, 0), scene);
-  ambient.intensity = 0.1;
+  ambient.intensity = 0;
+  ambient.specular = new BABYLON.Color3(0, 0, 0);
 
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
@@ -455,17 +587,23 @@ async function boot() {
     console.warn("Contexte WebGL restaure");
   }, false);
   engine.runRenderLoop(() => {
+    // Tant que la partie se charge, c'est l'ecran-titre qu'on voit.
+    if (titre && !titre.ecran.fini) return;
     try {
       scene.render();
     } catch (e) {
       console.warn("Erreur render loop interceptee :", e);
     }
   });
-  addEventListener("resize", () => engine.resize());
 
   // --- geometrie reelle et physique ---
   const dialogue = new DialogueSystem(await loadDialogue());
   const pdata = new PlayerData();
+  // `TriggerLoad(newSave, skipIntro)` : New Expedition et Skip Intro repartent
+  // d'une sauvegarde neuve ; Resume Expedition garde celle du disque.
+  if (titre && titre.choix.newSave) {
+    pdata.nouvelleSauvegarde(titre.choix.skipIntro, SKIP_INTRO_FLAGS);
+  }
   window.__pdata = pdata;
   window.__dialogue = dialogue;
   // §V La boucle qui commence est la suivante : `OnStartOfTimeLoop` la recoit
@@ -500,6 +638,10 @@ async function boot() {
 
   const particleMap = await loadParticleMap();
   const particles = new ParticleField(BABYLON, scene, particleMap);
+  // Les eruptions en cours (`MeteorLauncher`), et l'etat de l'explosion du
+  // vaisseau : ce qui joue des particules sur evenement.
+  let eruptions = [];
+  let navireExplose = false;
 
   // --- ce que le build portait et que rien ne lisait ---
   //
@@ -518,28 +660,29 @@ async function boot() {
   if (starField.ready) {
     // Un nuage de points plutot qu'un systeme de particules : les etoiles ne
     // naissent ni ne meurent — le build MET SON SYSTEME EN PAUSE des la
-    // premiere image — et un nuage de points se met a jour par indice, ce dont
-    // l'extinction a besoin. La taille est en pixels et non en unites monde :
-    // c'est l'approximation assumee du portage, et la seule.
-    const pcs = new BABYLON.PointsCloudSystem("etoiles", 3, scene);
-    const pos = starField.positions(1);
-    const [cr, cg, cb] = starField.color;
-    pcs.addPoints(starField.count, (p, i) => {
-      p.position = new BABYLON.Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
-      p.color = new BABYLON.Color4(cr, cg, cb, 1);
-    });
-    pcs.buildMeshAsync().then((mesh) => {
-      // Rendu additif et sans profondeur : une etoile est derriere tout, et
-      // n'a pas a se disputer le tampon de profondeur avec une planete.
-      mesh.material.disableDepthWrite = true;
-      mesh.alwaysSelectAsActiveMesh = true;
-      mesh.isPickable = false;
-      mesh.infiniteDistance = true;
-      starPCS = pcs;
-      console.log(`ciel : ${starField.count} etoiles`);
-    }).catch((e) => console.warn("champ d'etoiles :", e.message));
+    // premiere image — et un nuage se met a jour par indice, ce dont
+    // l'extinction a besoin. Chaque point est un sprite a la taille MONDE du
+    // build, texture comprise (etoiles.js).
+    const sys = particleMap.find((s) => s.name === "DistantStars");
+    starPCS = champEtoiles(BABYLON, scene, starField,
+      sys && sys.texture ? `data/particles/${sys.texture}` : null);
+    console.log(`ciel : ${starField.count} etoiles`);
+  }
+  // La voute de fond : `PlainStarscape_BiggerStars`, le materiau `Skybox` du
+  // `RenderSettings` de `level0`. Elle porte les etoiles fines qu'on voit
+  // derriere tout le reste ; le portage effacait l'ecran d'un bleu nuit de sa
+  // facon (docs/132). Un demi-tour sur Y, comme la geometrie (geometry.js) :
+  // le monde du portage est celui d'Unity tourne de 180 degres.
+  let voute = null;
+  try {
+    voute = skyData && creerVoute(BABYLON, scene, skyData.skybox, "data/sky/",
+                                  camera.maxZ);
+    if (voute) voute.rotation.y = Math.PI;
+  } catch (e) {
+    console.warn("voute indisponible :", e.message);
   }
   window.__sky = sky;
+  window.__voute = voute;
   // 44 surfaces defilantes que rien ne lisait (docs/42-lumieres.md).
   const scrollers = new TextureScrollers(await loadTextureAnimators());
   window.__texanim = scrollers;
@@ -804,6 +947,7 @@ async function boot() {
   const turbulence = new Turbulence();
   const thrusterSound = new ThrusterSound();
   const travelMusic = new TravelMusic();
+  const souffleCasque = new SuitAmbience();
   const endMusic = new EndOfTimeMusic();
   const turbShip = shipTurbulence(events);
   let shipWindLevel = 0;
@@ -865,7 +1009,20 @@ async function boot() {
     `${hazards.count} volumes qui blessent, ${pickups.length} objets a ramasser, ` +
     `${events.count} emetteurs de son d'evenement`);
 
-  const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
+  // `SunLight` est le soleil du build : une ponctuelle de portee 20 000 posee
+  // sur l'etoile. Le portage le tient par sa lumiere `sun`, qu'il deplace avec
+  // l'etoile ; le garder aussi parmi les lumieres posees compterait le soleil
+  // deux fois. `sun` en prend la portee, la force, la couleur et le MASQUE : le
+  // calque `IgnoreSun` reste dans l'ombre (docs/132).
+  const soleilDuBuild = (lighting.lights || []).find((l) => l.name === "SunLight");
+  if (soleilDuBuild) {
+    sun.includeOnlyWithLayerMask = layerMaskFor(soleilDuBuild.cullingMask);
+    if (soleilDuBuild.range > 0) sun.range = soleilDuBuild.range;
+    if (typeof soleilDuBuild.intensity === "number") sun.intensity = soleilDuBuild.intensity;
+    if (soleilDuBuild.color) sun.diffuse = new BABYLON.Color3(...soleilDuBuild.color.slice(0, 3));
+  }
+  const placedLights = new LightField(BABYLON, scene,
+    (lighting.lights || []).filter((l) => l !== soleilDuBuild));
   // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
   // .Enable` que sous trente pour cent de coque, et une lumiere que rien n'a
   // allumee ne bat pas (docs/116-trappe.md).
@@ -970,8 +1127,8 @@ async function boot() {
     }
     syncGeometry([entry], origin);
     if (sky.attach(entry.meshes)) {
-      // Le repere du parent se lit UNE fois, au rattachement : il ne change pas
-      // ensuite, et le lire chaque image couterait une matrice monde pour rien.
+      // Le repere du parent se relit a chaque image (plus bas) : le conteneur
+      // se retourne apres le rattachement, et le corps tourne sur lui-meme.
       sky.readBasis(sky.shell, BABYLON);
       if (sky.shell) sky.shell.isPickable = false;
       console.log(`ciel : voute rattachee`);
@@ -1027,7 +1184,10 @@ async function boot() {
         tex.hasAlpha = true;
         mat.diffuseTexture = tex;
         if ("albedoTexture" in mat) mat.albedoTexture = tex;
-        if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
+        // Seulement si le materiau en avait une : `SelfIlluminAlpha` est
+        // ECLAIRE (shaders/index.js), et une texture emissive sur chaque nuage
+        // les faisait briller en pleine nuit (docs/132).
+        if (mat.emissiveTexture) mat.emissiveTexture = tex;
         noeud.material = mat;
         peints += 1;
       }
@@ -1137,8 +1297,9 @@ async function boot() {
       node.parent = null;
       if (node.getChildMeshes) {
         for (const m of node.getChildMeshes(false)) {
-          m.setEnabled(true);
-          m.isVisible = true;
+          // Rallumer la coque, pas ce que le build tient eteint.
+          m.setEnabled(!underInactive(m));
+          m.isVisible = !hiddenMesh(m);
           MeshLOD.pin(m);
         }
       }
@@ -1380,10 +1541,30 @@ async function boot() {
   window.__resources = resources;   // sonde de verification
 
   // Modes d'affichage, messages du pilote automatique et minicarte.
-  // borne de casteurs d'ombre par lot : une planete entiere serait injouable
-  const SHADOW_CASTERS = 120;
   const AUTOPILOT_KEYS = new Set(["alignement", "vol", "approche", "egalisation"]);
   const guiMode = new GuiMode();
+  // Le reticule de `DebugHUD` : une croix de treize pixels, blanche a 50 %,
+  // au centre exact de l'ecran, que seul le mode cache efface.
+  const reticule = (() => {
+    const c = document.createElement("canvas");
+    c.id = "reticule";
+    c.width = CROSSHAIR.width; c.height = CROSSHAIR.height;
+    const g = c.getContext("2d");
+    const img = g.createImageData(c.width, c.height);
+    const px = crosshairPixels(c.width, c.height, CROSSHAIR.thickness);
+    const [r, v, b, a] = CROSSHAIR.color;
+    // `SetPixel(i, j)` : i est la colonne, j la ligne, comptee depuis le BAS.
+    for (let i = 0; i < c.width; i++) {
+      for (let j = 0; j < c.height; j++) {
+        if (!px[i * c.height + j]) continue;
+        const k = ((c.height - 1 - j) * c.width + i) * 4;
+        img.data.set([r * 255, v * 255, b * 255, a * 255], k);
+      }
+    }
+    g.putImageData(img, 0, 0);
+    document.body.appendChild(c);
+    return c;
+  })();
   const readout = uiRoot ? new AutopilotReadout(uiRoot) : null;
   const minimap = new Minimap(document.getElementById("minimap"));
   let lastPhase = "repos";
@@ -1401,7 +1582,8 @@ async function boot() {
   const menuInput = new MenuInput();
   const settingsUI = uiRoot
     ? new SettingsUI(uiRoot, settings, "data/interface/",
-                     { onPick: () => applySettings() }) : null;
+                     { onPick: (r) => { applySettings(); if (r === "exit") retourAuTitre(); } })
+    : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   const flashlight = new Flashlight(BABYLON, scene);
@@ -1423,6 +1605,11 @@ async function boot() {
     try {
       const res = await BABYLON.SceneLoader.ImportMeshAsync(
         "", "data/gltf/", fichier, scene);
+      hideUnrendered(res.meshes);
+      disableInactive(res);
+      toLegacyMaterials(BABYLON, scene, res.meshes);
+      falloffUnity(res.meshes);
+      applyLayers(res.meshes);
       const racine = new BABYLON.TransformNode(`main_${nom}`, scene);
       racine.parent = camera;
       racine.rotation.y = Math.PI;
@@ -1444,7 +1631,9 @@ async function boot() {
           lumieres.push(l);
         }
       }
-      for (const l of lumieres) l.setEnabled(false);
+      // Sous le plafond de lumieres, Babylon garde les premieres de la scene :
+      // les lumieres tenues passent devant celles du decor, qu'on voit de loin.
+      for (const l of lumieres) { l.setEnabled(false); l.renderPriority = 1; }
       const parNom = new Map();
       for (const g of groupes) parNom.set(g.name.replace(/^[~!]+/, "").split("|").pop(), g);
       enMain.set(nom, { racine, groupes, parNom, lumieres, meshes: res.meshes });
@@ -1567,24 +1756,10 @@ async function boot() {
     ip.toneMappingEnabled = v.brightness;
     ip.exposure = v.brightness ? 1.3 : 1.0;
     // QualitySettings.shadowDistance : le jeu ne fait qu'annuler la distance,
-    // il ne demonte pas la passe d'ombres. On construit donc le generateur une
-    // seule fois, a la premiere activation, puis on l'allume ou on l'eteint.
+    // il ne demonte pas la passe d'ombres. Et le soleil n'en a pas : `SunLight`
+    // porte `m_Shadows` a 0. Le portage lui avait donne un generateur d'ombres
+    // de son cru ; l'option ne fait plus que ce que fait celle du build.
     scene.shadowsEnabled = v.shadows;
-    if (v.shadows && !shadowGen) {
-      try {
-        shadowGen = new BABYLON.ShadowGenerator(1024, sun);
-        shadowGen.usePoissonSampling = true;
-        for (const e of geo) {
-          for (const m of e.meshes.slice(0, SHADOW_CASTERS)) {
-            shadowGen.addShadowCaster(m);
-            m.receiveShadows = true;
-          }
-        }
-      } catch (e) {
-        console.warn("ombres indisponibles :", e.message);
-        settings.values.shadows = false;
-      }
-    }
   }
   applySettings();
 
@@ -2350,7 +2525,7 @@ async function boot() {
   // `ProbeMesh`, mais la geometrie de la sonde n'est pas dans `level0` et le
   // portage ne charge que ce qui y est. Elle n'est jamais recreee : il n'y en a
   // qu'UNE, et c'est le fait de jeu de docs/60.
-  const PROBE_LAYER = 0x20000000;
+  const PROBE_LAYER = CALQUE_SONDE;
   const probeMat = new BABYLON.StandardMaterial("probeMat", scene);
   probeMat.emissiveColor = new BABYLON.Color3(0.6, 0.9, 1.0);
   probeMat.disableLighting = true;
@@ -2429,6 +2604,21 @@ async function boot() {
   // toiles et les regards poses dans la scene — une collision de nom qui a
   // fait tomber un controle sans rapport.
   window.__regardCam = () => ({ yaw, pitch });
+  // Tout le systeme, derriere le titre qui tourne encore : l'alpha charge
+  // `level0` en entier avant de l'activer, et ses planetes se voient de loin
+  // telles qu'elles sont (la vue lointaine de `Sectors`). Quarante-sept Mo de
+  // geometrie mesures pour les huit lots, pas les deux cents que ce code
+  // craignait.
+  if (sectors) {
+    sectors.lointain = true;
+    await Promise.all(BODY_FILES.map((f) => store.request(f)));
+  }
+  // Le niveau 1 est pret : `AsyncOperation.allowSceneActivation`. Le titre
+  // s'efface, la partie prend l'ecran.
+  if (titre) {
+    engine.stopRenderLoop(titre.ecran.rendu);
+    titre.ecran.dispose();
+  }
   window.__ready = true;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal
@@ -2491,25 +2681,52 @@ async function boot() {
   // disait. C'est `15_verify.py` qui l'a trouve : la sonde ne partait pas.
   const souris = Object.create(null);
   const relachementsSouris = [];
+  // UN RELACHEMENT N'ATTEND QUE SI L'APPUI N'A PAS ETE VU.
+  //
+  // Le report en fin d'image est la pour une frappe plus courte qu'une image :
+  // sans lui, elle serait perdue. Mais il s'appliquait a TOUT relachement, et
+  // une touche lachee entre deux images restait tenue pendant toute l'image
+  // suivante. Unity rend `GetKey` faux des l'`Update` qui suit. A 60 images par
+  // seconde, 17 ms ; sans GPU, pres d'une seconde : un appui court sur la
+  // poussee du vaisseau finissait l'allumage (1 s) au lieu de l'annuler. On ne
+  // reporte donc que ce qui a ete enfonce DEPUIS la derniere image.
+  const neufs = new Set(), neufsSouris = new Set();
   addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "mouse") souris[e.button] = true;
+    if (e.pointerType !== "mouse") return;
+    souris[e.button] = true;
+    neufsSouris.add(e.button);
   });
   addEventListener("pointerup", (e) => {
-    if (e.pointerType === "mouse") relachementsSouris.push(e.button);
+    if (e.pointerType !== "mouse") return;
+    if (neufsSouris.has(e.button)) relachementsSouris.push(e.button);
+    else souris[e.button] = false;
   });
   // Le clic droit ouvre le menu contextuel du navigateur, et c'est le bouton de
   // la sonde : sans cette ligne, lancer une sonde ouvre un menu — et le menu
   // avale le relachement, donc la sonde ne part jamais. On le refuse partout et
   // pas seulement sous verrou de souris : la page entiere est le jeu.
   addEventListener("contextmenu", (e) => e.preventDefault());
-  addEventListener("keydown", (e) => { keys[e.code] = true; });
-  addEventListener("keyup", (e) => { relachements.push(e.code); });
+  addEventListener("keydown", (e) => {
+    keys[e.code] = true;
+    neufs.add(e.code);
+    // Relachee puis renfoncee avant l'image : le relachement retenu ne vaut
+    // plus, sinon la fin d'image lacherait une touche qu'on tient.
+    const i = relachements.indexOf(e.code);
+    if (i >= 0) relachements.splice(i, 1);
+  });
+  addEventListener("keyup", (e) => {
+    if (neufs.has(e.code)) relachements.push(e.code);
+    else keys[e.code] = false;
+  });
   window.__keys = keys;
   window.__souris = souris;
   /** A appeler en fin d'image : applique les relachements retenus. */
   function appliquerRelachements() {
     while (relachements.length) keys[relachements.pop()] = false;
     while (relachementsSouris.length) souris[relachementsSouris.pop()] = false;
+    // Tout ce qui est enfonce a maintenant ete vu par une image.
+    neufs.clear();
+    neufsSouris.clear();
   }
   let interactPressed = false, optionPressed = 0;
   // La sonde ne se declenche plus a l'appui : elle se CHARGE tant qu'on tient,
@@ -2771,7 +2988,9 @@ async function boot() {
         // puis recharge la scene. Ici la scene ne se recharge pas — on la
         // remet a son etat de depart, ce que la boucle sait deja faire — mais
         // `PlayerData` repart bien de zero, savoirs et exploration compris.
-        if (settings.toggle(0) === "newGame") {
+        const choisi = settings.toggle(0);
+        if (choisi === "exit") retourAuTitre();
+        if (choisi === "newGame") {
           pdata.wipe();
           respawn();
           // `ResetSimulation` en DERNIER : `respawn` fait un `restart`, qui
@@ -2962,11 +3181,47 @@ async function boot() {
   // les commandes en ont besoin hors de la boucle (les consoles, par exemple,
   // sont posees en coordonnees monde).
   let framePos = [0, 0, 0];
+  // UNE IMAGE, CE SONT PLUSIEURS PAS (input.js, `decoupeImage`).
+  //
+  // Le temps d'une image est decoupe en sous-pas d'au plus 0,05 s, borne a la
+  // seconde du `TimeManager` du build, et Havok avance AVEC chacun d'eux.
+  // Babylon le faisait avancer seul, une fois par image, du delta reel — mais
+  // `applyForce` y devient une impulsion de `force * getTimeStep()`, le pas
+  // FIXE de 1/60 : sous 60 images par seconde la gravite faiblissait d'autant,
+  // pendant que le monde, lui, avancait du temps reel. Les deux horloges ne
+  // s'accordaient qu'a 60 images par seconde.
+  let horlogeImage = 0;
+  const physique = plugin ? scene.getPhysicsEngine() : null;
+  if (physique) scene.physicsEnabled = false;
   scene.registerBeforeRender(() => {
     // SettingsMenu.Open met Time.timeScale a 0 : le menu fige la partie
-    const dt = (settings && settings.open) ? 0
-      : Math.min(engine.getDeltaTime() / 1000, 0.05);
+    const { n, h } = decoupeImage(
+      (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
+      cmds.maxTimestep);
     const now = performance.now() / 1000;
+    // `Time.time` : l'horloge de l'image, avancee une fois pour toutes AVANT
+    // les sous-pas. Les minuteries des scripts `Update` s'y lisent.
+    horlogeImage += n * h;
+    for (let i = 0; i < n; i++) {
+      if (physique && h > 0) {
+        // La force posee au pas precedent se paie sur CE pas : meme duree.
+        plugin.setTimeStep(h);
+        physique._step(h);
+      }
+      pasDeJeu(h, now);
+      // Un appui est un FRONT : il appartient au premier sous-pas de l'image,
+      // comme `GetButtonDown` n'est vrai que dans un seul `Update`.
+      interactPressed = false;
+      // Et une frappe plus courte qu'une image vaut UN pas, pas l'image
+      // entiere : relachee apres le premier sous-pas. Tenue jusqu'a la fin de
+      // l'image, une pichenette de 120 ms durait une seconde de jeu sans GPU,
+      // passait le seuil de rappel de la sonde (0,3 s) et la rappelait au
+      // lieu de la photographier.
+      appliquerRelachements();
+    }
+  });
+
+  function pasDeJeu(dt, now) {
 
     // §T L'alignement sur le champ : on le perd, on le retrouve.
     {
@@ -3402,7 +3657,8 @@ async function boot() {
     if (star) {
       const p = star.data.position;
       const d = camera.position.subtract(new BABYLON.Vector3(p[0], p[1], p[2]));
-      if (d.lengthSquared() > 0) sun.direction = d.normalize();
+      if (d.lengthSquared() > 0) sunDir.copyFrom(d.normalize());
+      sun.position.set(p[0], p[1], p[2]);
     }
 
     // --- vaisseau, ressources, interaction ---
@@ -3631,9 +3887,35 @@ async function boot() {
     }
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
+    sondeInteraction.repere = (it) => {
+      const sh = decalageDuCorps(it.body, anchorPos) || [0, 0, 0];
+      return [it.world[0] + sh[0] - anchorPos[0], it.world[1] + sh[1] - anchorPos[1],
+              it.world[2] + sh[2] - anchorPos[2]];
+    };
     // --- dialogue ---
-    const convo = (!ship || !ship.boarded)
-      ? dialogue.nearest(playerW, (b) => decalageDuCorps(typeof b === "string" ? b : (b && b.body) || "TimberHearth_Body", anchorPos)) : null;
+    //
+    // On parle a qui l'on REGARDE : le rayon de `FirstPersonManipulator`
+    // touche la capsule du personnage, et `Observe` exige deux unites au plus
+    // du point touche (interact.js, `RAYON_VISEE`). Le portage ouvrait la
+    // conversation la plus proche a six metres, de dos s'il le fallait —
+    // l'alpha, elle, ne repond qu'au regard (docs/132). La proximite reste le
+    // repli d'une extraction qui n'a pas les colliders des recepteurs.
+    const decalConvo = (b) => decalageDuCorps(typeof b === "string" ? b : (b && b.body) || "TimberHearth_Body", anchorPos);
+    let convo = null;
+    if (!ship || !ship.boarded) {
+      if (visesParRayon) {
+        const vise = interactables.focus(player.pos, anchorPos, fwd,
+                                         (it) => decalageDuCorps(it.body, anchorPos), camera.position);
+        sondeInteraction.vise = vise;
+        if (vise && vise.kind === "interact") {
+          convo = (dialogue.conversations || []).find((c) => c.position
+            && Math.hypot(c.position[0] - vise.world[0], c.position[1] - vise.world[1],
+                          c.position[2] - vise.world[2]) < 0.05) || null;
+        }
+      } else {
+        convo = dialogue.nearest(playerW, decalConvo);
+      }
+    }
     if (interactPressed) {
       if (dialogue.active) {
         const avant = dialogue.active;
@@ -3675,7 +3957,8 @@ async function boot() {
       // Les objets suivent leur corps : un paquetage pose dans la cabine part
       // avec le vaisseau, et une zone du village tourne avec sa planete.
       focus = interactables.focus(player.pos, anchorPos, fwd,
-                                  (it) => decalageDuCorps(it.body, anchorPos));
+                                  (it) => decalageDuCorps(it.body, anchorPos),
+                                  visesParRayon ? camera.position : null);
     }
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
@@ -4073,6 +4356,11 @@ async function boot() {
         lastPhase = autopilot.phase;
       }
       readout.update(now, !guiMode.hidden && !guiMode.capture);
+      // `DebugHUD.OnGUI` : le reticule, sauf en mode cache ; et apres la mort,
+      // `DisableGUI` eteint le composant jusqu'au rechargement du niveau.
+      reticule.hidden = guiMode.hidden || death.dead;
+      // Le texte de mise au point n'apparait qu'en mode `IsDebugMode`.
+      document.body.classList.toggle("gui-debug", guiMode.debug);
     }
 
     // --- minicarte : le declencheur du secteur majeur, et rien d'autre ---
@@ -4330,7 +4618,7 @@ async function boot() {
       for (const e of entries) {
         if (e.isStar) continue;
         const ent = entryForBody(geo, e.data.name);
-        e.mesh.isVisible = !ent || !sectors.active.has(ent.file);
+        e.mesh.isVisible = !ent || (!sectors.lointain && !sectors.active.has(ent.file));
       }
       // La limite de poussee du secteur s'applique enfin au vaisseau : 20
       // partout, 200 sur la premiere jumelle, illimitee sur Giant's Deep.
@@ -4386,14 +4674,20 @@ async function boot() {
       // La TEINTE du secteur, que le portage ne lisait pas : `_ambientLight`
       // est un choix de couleur, pas un nombre. Bleu de nuit sur les mondes
       // rocheux, vert sur Giant's Deep et Dark Bramble.
-      const teinte = ambientTint(secMaj ? secMaj.ambient : 0);
+      // Sa valeur aussi : 0,0588, doublee — un bleu tres sombre, que le
+      // soleil et les feux dominent. Et uniforme : l'ambiance d'Unity n'a ni
+      // ciel ni sol, d'ou le sol de l'hemisphere pose a la meme couleur.
+      const teinte = ambientLight(secMaj ? secMaj.ambient : 0);
       ambient.diffuse.set(teinte[0], teinte[1], teinte[2]);
+      ambient.groundColor.set(teinte[0], teinte[1], teinte[2]);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
-      meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));
+      meshLOD.update(geo, camera.position,
+                     (f) => sectors.lointain || sectors.active.has(f));
 
       // eviction : ce qui est hors de portee depuis assez longtemps est rendu
-      for (const e of geo) evictor.see(e.file, sectors.inRange.has(e.file));
+      // En vue lointaine, rien ne se libere : ce qu'on voit au loin reste la.
+      for (const e of geo) evictor.see(e.file, sectors.lointain || sectors.inRange.has(e.file));
       const freed = evictor.update(dt, evictFile);
       for (const f of freed) console.log("geometrie liberee :", f);
     }
@@ -4535,7 +4829,21 @@ async function boot() {
     // Ils partent de leur lanceur, retombent avec le champ dominant, et
     // blessent au contact passe la demi-seconde d'immunite du prefabrique.
     if (meteores.launchers.length) {
-      meteores.update(dt, now);
+      // `LaunchMeteor` joue `_launchParticles` ; `Update` les arrete
+      // `_particleEmitDuration` secondes plus tard.
+      const nes = meteores.update(dt, now);
+      for (const m of nes) {
+        const l = meteores.launchers.find((x) => x.data.name === m.from && x.last === now);
+        if (!l) continue;
+        if (particles.jouerPres("EruptionParticles", l.data.position, 40)) {
+          eruptions.push({ position: l.data.position, fin: now + (l.data.emitSeconds || 3) });
+        }
+      }
+      eruptions = eruptions.filter((e) => {
+        if (now < e.fin) return true;
+        particles.arreterPres("EruptionParticles", e.position, 40);
+        return false;
+      });
       // Le champ dominant AU METEORE, et non celui du joueur : un caillou
       // au-dessus de Brittle Hollow retombe vers Brittle Hollow, meme quand le
       // joueur est ailleurs (docs/121-avis.md).
@@ -4812,6 +5120,7 @@ async function boot() {
         playerVelocity: [player.vel.x, player.vel.y, player.vel.z],
         playerPos: [player.pos.x, player.pos.y, player.pos.z],
         knowsProbes: pdata.knows("knowsHowProbesWork"),
+        horloge: horlogeImage,
         insideShip: etatJoueur.insideShip,
         atFlightConsole: etatJoueur.atFlightConsole,
         raycast: rayonSonde,
@@ -5288,6 +5597,13 @@ async function boot() {
     }
     // Le vaisseau detruit tue son pilote. Hors du vaisseau, il tombe.
     if (ship && ship.destroyed && ship.boarded) death.kill("impact");
+    // `ShipDamageController.ExplodeShip` joue l'explosion — un systeme en
+    // boucle, qui brule tant que la coque est detruite.
+    if (ship && !!ship.destroyed !== navireExplose) {
+      navireExplose = !!ship.destroyed;
+      if (navireExplose) particles.pulse(new Set(["Explosion_Fiery_Med"]));
+      else particles.arreter(new Set(["Explosion_Fiery_Med"]));
+    }
     // Impact : PlayerImpactAudio (au-dela de 3 u/s) et Resources.applyImpact (au-dela de 20 u/s)
     if (player.grounded && !wasGrounded && fallSpeed > 3) {
       const sonImp = sonsUI.playerImpact(fallSpeed, true);
@@ -5353,6 +5669,9 @@ async function boot() {
     }
     if (!supernovaExplosionPlayed && loop.supernova) {
       supernovaExplosionPlayed = true;
+      // `DissipatingParticlesBehavior.OnSunExploded` : les etoiles et la
+      // poussiere de l'etoile se dispersent.
+      particles.pulse(new Set(["DissapatingStars", "DissapatingParticles"]));
       const se = sonsUI.supernovaExplosion();
       if (se) audio.playOneShot(se.file, { volume: se.volume });
       const sw = sonsUI.supernovaWave();
@@ -5382,10 +5701,18 @@ async function boot() {
         * (a.mesh.scaling ? a.mesh.scaling.x : 1);
       a.mesh.setEnabled(Math.hypot(dx, dy, dz) > rayon);
     }
-    updateMaterials(BABYLON, mats, camera.position, sun.direction,
+    updateMaterials(BABYLON, mats, camera.position, sunDir,
                     performance.now() / 1000, loop.fraction);
-    updateGameShaders(BABYLON, scene, camera.position, performance.now() / 1000,
-                      sun.direction);
+    {
+      const k = sun.intensity, a = ambient.intensity;
+      updateGameShaders(BABYLON, scene, camera.position, performance.now() / 1000, {
+        position: sun.position,
+        couleur: new BABYLON.Vector3(sun.diffuse.r * k, sun.diffuse.g * k, sun.diffuse.b * k),
+        portee: sun.range,
+        ambiante: new BABYLON.Vector3(ambient.diffuse.r * a, ambient.diffuse.g * a,
+                                      ambient.diffuse.b * a),
+      });
+    }
     // Le ciel du build : ce qu'il calcule, on le calcule. Ce qu'il n'applique
     // pas, on ne l'applique pas non plus (docs/41-ciel.md).
     //
@@ -5436,6 +5763,7 @@ async function boot() {
         const v = [p[0] - c.x, p[1] - c.y, p[2] - c.z];
         const n = Math.hypot(v[0], v[1], v[2]);
         if (n > 0) {
+          sky.readBasis(sky.shell, BABYLON);
           const q = sky.lookAtSun([v[0] / n, v[1] / n, v[2] / n]);
           if (!sky.shell.rotationQuaternion) {
             sky.shell.rotationQuaternion = new BABYLON.Quaternion(q[0], q[1], q[2], q[3]);
@@ -6011,6 +6339,8 @@ async function boot() {
           if (crashes(impact)) {
             compteurEnfant.crashed();
             console.log(`annonce : CrashedModelShip (${impact.toFixed(1)} u/s)`);
+            // `ModelShipCrashBehavior.OnImpact` : `_explosionParticles.Play()`.
+            particles.pulse(new Set(["Explosion_Fiery_Small"]));
             const sc = sonsUI.modelShipCrash();
             if (sc) audio.playOneShot(sc.file, { volume: sc.volume });
             else if (modele.crashSound) audio.playOneShot(modele.crashSound);
@@ -6108,6 +6438,8 @@ async function boot() {
       if (passages.depart) {
         const son = (events.of("AncientTeleporter") || { clips: {} }).clips._teleportSound;
         if (son) audio.playOneShot(son);
+        // ... et `_teleportParticles.Play()`, celles de CE passage.
+        particles.jouerPres("TeleportParticles", passages.depart.teleporter.position, 60);
         console.log(`passage : ${passages.depart.teleporter.name} part`);
       }
       if (parti) {
@@ -6308,6 +6640,21 @@ async function boot() {
                                      exploded: loop.supernova });
       const cFin = clipDe("EndOfTimeMusicController");
       if (cFin) audio.loopAt(cFin, vFin * mixer.volume("Music"));
+      // Le souffle du casque hors de l'oxygene, et le gresillement de la
+      // lunette au volume du signal (`Telescope.Update` :
+      // `audio.volume = _signalStrength`, joue a `EnterTelescope`, coupe a
+      // `ExitTelescope`). Deux sources 2D que rien ne jouait (docs/132).
+      const sCasque = audioMap.find((x) => x.name === "SpacesuitAudio");
+      if (sCasque) {
+        const dansOxygene = !!(ship && ship.boarded) || !!zoneOxygene;
+        audio.loopAt(sCasque.file, souffleCasque.update(dt, dansOxygene)
+          * (sCasque.volume ?? 1) * mixer.volume(sCasque.track));
+      }
+      const sLunette = audioMap.find((x) => x.name === "PlayerCamera");
+      if (sLunette) {
+        audio.loopAt(sLunette.file, telescope.active
+          ? Math.min(1, telescope.signalStrength) * (sLunette.volume ?? 1) : 0);
+      }
     }
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) {
@@ -6321,7 +6668,8 @@ async function boot() {
                                 camera.position.z + anchorPos[2]],
                            (sh) => decalageDuCorps(sh.body, anchorPos))
         : null;
-      audio.update(player.pos, anchorPos, mixer, gains);
+      audio.update(player.pos, anchorPos, mixer, gains,
+                   (x) => decalageDuCorps(x.body, anchorPos));
     }
     // Les ambiances suivent la position MONDE de l'auditeur, dans la meme
     // convention que les sources placees : position dans le repere ancre, plus
@@ -6363,7 +6711,7 @@ async function boot() {
     if (fadeLight && fadeCible) {
       fadeCible.intensity = fadeLight.update(performance.now() / 1000);
     }
-    placedLights.update(player.pos, anchorPos);
+    placedLights.update(player.pos, anchorPos, (x) => decalageDuCorps(x.body, anchorPos));
     // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
     // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne
     // vacille pas se remarque (docs/42-lumieres.md).
@@ -6371,7 +6719,10 @@ async function boot() {
     placedLights.animate(performance.now() / 1000);
     // le champ dominant du joueur tient lieu de `Physics.gravity` pour le
     // `gravityModifier` des systemes de particules
-    if (particleMap.length) particles.update(player.pos, anchorPos, player.field);
+    if (particleMap.length) {
+      particles.update(player.pos, anchorPos, player.field,
+                       (x) => decalageDuCorps(x.body, anchorPos));
+    }
 
     const speed = Math.hypot(player.vel.x, player.vel.y, player.vel.z);
     setStatus(
@@ -6385,11 +6736,7 @@ async function boot() {
         ? ` — orbite ${(period(orbits, anchorBody) / 60).toFixed(1)} min` : "") +
       (data.synthetic ? "  [systeme de substitution]" : "")
     );
-    // Les touches relachees pendant l'image le deviennent maintenant : une
-    // frappe plus courte qu'une image compte pour une image entiere.
-    interactPressed = false;
-    appliquerRelachements();
-  });
+  }
 }
 
 export const ready = boot();

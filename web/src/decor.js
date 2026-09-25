@@ -449,6 +449,10 @@ export function warps(gameplay) {
  *   WarpVolume            sur Dark Bramble, sphere de 60   -> l'epave
  *   WarpVolume            sur l'epave, sphere de 550, SUR LA SORTIE -> Dark Bramble
  *
+ * Le premier est INACTIF dans la scene (`m_IsActive` a 0) et rien ne le
+ * rallume : le moteur ne le recoit pas (`actifsSeulement`, docs/132), et la
+ * partie n'a que les deux autres — comme l'alpha.
+ *
  * Le troisieme porte `_warpOnExit` : on ne quitte pas la dimension de l'epave
  * en entrant quelque part, mais en SORTANT de sa sphere. C'est ce qui la rend
  * close — elle n'a pas de porte, elle a un bord.

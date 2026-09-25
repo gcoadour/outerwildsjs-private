@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { decodeClip, ATTRIBUTE_HASHES } from "../web/src/pipeline/unity/muscle.js";
 import { TypeUniverse } from "../web/src/pipeline/dotnet/typetree.js";
 import { ExtractContext } from "../web/src/pipeline/extract/context.js";
-import { exportSubtree, findRoots } from "../web/src/pipeline/extract/gltf.js";
+import { exportSubtree, findRoots, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
 import { BUILD, haveBuild, loadEnv, check, report } from "./run.mjs";
 
 // --- 1. le flux entrelace, sur des donnees fabriquees -----------------------
@@ -309,4 +309,14 @@ check("et le compte est le meme des deux cotes", sansBoucle.length, once);
 // (Babylon le rend toujours), un humain lit `extras`.
 check("chaque clip sans boucle porte le marqueur",
       sansBoucle.filter((n) => !/^[~]?!/.test(n)).length, 0);
+// CE QUI NE SE VOIT PAS (docs/132). Un MeshFilter sans renderer est un volume
+// de jeu : la sphere `HeatDetector` de la guimauve etait dessinee en blanc
+// devant la camera au reveil. Elle sort, marquee cachee ; le reste non.
+{
+  const [baton] = findRoots(ctx, HELD_ROOTS.filter((n) => n === "MarshmallowStick"));
+  const res = baton && exportSubtree(ctx, baton.gid, "marshmallowstick", { emitImage: () => null });
+  const caches = res ? res.gltf.nodes.filter((n) => n.extras && n.extras.hidden).map((n) => n.name) : [];
+  check("le baton cache son HeatDetector, et lui seul", caches.join(","), "HeatDetector");
+}
+
 report();

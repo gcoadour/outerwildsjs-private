@@ -156,13 +156,20 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
 
   const materialFor = (gid) => {
     const ptr = matOf.get(gid);
-    if (!ptr) return { texture: null, blend: "add" };
+    if (!ptr) return { texture: null, blend: "add", tint: null };
     const matObj = ctx.env.deref(ptr, sceneFile);
     const mat = matObj && ctx.readEngine(matObj);
-    if (!mat) return { texture: null, blend: "add" };
+    if (!mat) return { texture: null, blend: "add", tint: null };
     const blend = blendMode(ctx, mat, matObj.file);
     const tex = textures.export(texturePtr(mat, "_MainTex"), matObj.file);
-    return { texture: tex, blend };
+    // `_TintColor` : les shaders `Particles/*` rendent 2 x teinte x couleur x
+    // texture. La teinte par defaut vaut 0,5 — neutre ; celle des flammes du
+    // build, 0,22, les rend deux fois moins vives que le portage ne les
+    // montrait (docs/132).
+    const c = ((mat.m_SavedProperties && mat.m_SavedProperties.m_Colors) || [])
+      .find((x) => x.first && x.first.name === "_TintColor");
+    const tint = c && c.second ? [c.second.r, c.second.g, c.second.b, c.second.a].map((v) => round(v, 4)) : null;
+    return { texture: tex, blend, tint };
   };
 
   const systems = [];
@@ -174,12 +181,23 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
     if (!d) { bump("illisible"); continue; }
     const gid = d.m_GameObject ? d.m_GameObject.pathId : 0;
     const init = d.InitialModule, emis = d.EmissionModule, shape = d.ShapeModule;
-    const { texture, blend } = materialFor(gid);
+    const { texture, blend, tint } = materialFor(gid);
 
     systems.push({
       name: ctx.name(gid),
+      body: ctx.bodyOf(gid),
+      // Inactif dans la scene : il n'emet pas (docs/132). Garde, marque.
+      ...(ctx.actif(gid) ? {} : { active: false }),
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
+      // L'ORIENTATION : un systeme Unity emet le long de SON +Z. Sans elle, la
+      // flamme du feu de camp partait le long du Y du monde — a plat sur le
+      // sol de Timber Hearth, dont la verticale n'est pas celle-la (docs/132).
+      rotation: ctx.world(gid)[1].map((v) => round(v, 6)),
       looping: !!d.looping,
+      // `prewarm` : un systeme en boucle part comme s'il avait deja fait un
+      // cycle entier. C'est ce qui fait qu'une colonne de fumee est la des la
+      // premiere image, et non trente secondes plus tard.
+      prewarm: !!d.prewarm,
       playOnAwake: !!d.playOnAwake,
       duration: round(d.lengthInSec ?? 5, 3),
       speedScale: round(d.speed ?? 1, 3),
@@ -203,6 +221,9 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
         radius: round(shape.radius ?? 1, 4),
         angle: round(shape.angle ?? 0, 4),
         randomDirection: !!shape.randomDirection,
+        // La boite a ses TROIS aretes (`boxX`, `boxY`, `boxZ`) : la flamme
+        // du feu de camp n'a rien d'un cube de rayon 1 (docs/132).
+        box: [shape.boxX ?? 1, shape.boxY ?? 1, shape.boxZ ?? 1].map((v) => round(v, 4)),
       } : null,
       // Modules secondaires. Mesure d'usage sur les 135 systemes du build :
       // ColorModule (110) et SizeModule (80) dominent, RotationModule (28) et
@@ -264,6 +285,7 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
       texture: texture ? texture.file : null,
       textureSize: texture ? texture.size : null,
       blend,
+      tint,
     });
     bump("systemes");
   }

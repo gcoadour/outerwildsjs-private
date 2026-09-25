@@ -16,6 +16,31 @@ export function texturePtr(material, channel = "_MainTex") {
 }
 
 /**
+ * La repetition et le decalage d'une texture (`m_Scale`, `m_Offset`), rendus
+ * en `KHR_texture_transform` pour un glTF dont les UV sont retournees
+ * (`v' = 1 - v`, voir gltf.js). Unity echantillonne `uv x s + o` ; dans le
+ * repere retourne cela devient `v' x s + (1 - s - o)`.
+ *
+ * 54 materiaux du build repetent leur texture — le sol de Timber Hearth
+ * cinquante fois, sa roche vingt. Sans cette transformation, tout le terrain
+ * etait etire en aplats sans grain (docs/132).
+ *
+ * @returns l'extension, ou null quand la texture n'est ni repetee ni decalee
+ */
+export function textureTransform(material, channel = "_MainTex") {
+  const envs = material && material.m_SavedProperties
+    && material.m_SavedProperties.m_TexEnvs;
+  if (!Array.isArray(envs)) return null;
+  const e = envs.find((x) => x.first && x.first.name === channel);
+  const st = e && e.second;
+  if (!st || !st.m_Scale) return null;
+  const sx = st.m_Scale.x ?? 1, sy = st.m_Scale.y ?? 1;
+  const ox = (st.m_Offset && st.m_Offset.x) || 0, oy = (st.m_Offset && st.m_Offset.y) || 0;
+  if (sx === 1 && sy === 1 && !ox && !oy) return null;
+  return { scale: [sx, sy], offset: [ox, 1 - sy - oy] };
+}
+
+/**
  * Mode de fusion, lu dans le NOM du shader : "Particles/Additive" est additif,
  * "Alpha Blended" ne l'est pas. Tout forcer en additif sature l'image.
  */

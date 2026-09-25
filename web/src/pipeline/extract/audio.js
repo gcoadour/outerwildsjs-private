@@ -148,6 +148,11 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
   }
 
   const clipFiles = new Map();
+  // `AudioClip.m_3D` : un clip importe en 2D ne s'attenue ni ne se place, OU
+  // QUE SOIT sa source. Douze sources de `level0` en portent un — musiques,
+  // ambiances du village, souffle du casque, gresillement de la lunette — et
+  // le portage les posait dans le decor comme des sons de proximite.
+  const clip3D = new Map();
   const sources = [];
   const stats = {};
   const bump = (k) => { stats[k] = (stats[k] || 0) + 1; };
@@ -172,6 +177,7 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
         if (target) {
           try {
             const clip = readAudioClip(target.file.reader(target), target.file);
+            clip3D.set(pid, clip.m_3D !== false);
             const bytes = clip.data !== null ? clip.data
               : target.file.resource(clip.offset, clip.size);
             if (bytes && bytes.length) {
@@ -222,12 +228,16 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
     const maxD = Number.isFinite(src.MaxDistance) ? src.MaxDistance : null;
     const minD = Number.isFinite(src.MinDistance) ? src.MinDistance : null;
     // Pan2D vaut 1 pour un son entierement 2D : une source non spatialisee.
-    const flat = Number.isFinite(src.Pan2D) && src.Pan2D >= 1;
+    const flat = (Number.isFinite(src.Pan2D) && src.Pan2D >= 1)
+      || clip3D.get(ptr.pathId) === false;
     const range = maxD !== null ? maxD : (DEFAULT_RANGE[track] ?? 60);
     if (maxD === null) bump("portee de repli");
 
     sources.push({
       name: ctx.name(gid),
+      body: ctx.bodyOf(gid),
+      // Inactive dans la scene : elle ne joue pas (docs/132).
+      ...(ctx.actif(gid) ? {} : { active: false }),
       file,
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
       volume: round(src.m_Volume ?? 1, 3),

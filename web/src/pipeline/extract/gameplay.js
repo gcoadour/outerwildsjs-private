@@ -190,7 +190,10 @@ const WANT_VOLUME = new RegExp([
   // `HatchController.OnEntry` est un declencheur, et son rayon est celui du
   // collider de « HatchControls » : c'est lui qui dit quand la trappe se
   // referme derriere vous (docs/116-trappe.md).
-  "|LaunchTerminal|LaunchElevatorController|HatchController)$",
+  "|LaunchTerminal|LaunchElevatorController|HatchController",
+  // `FirstPersonManipulator` vise le collider de l'`InteractReceiver` : c'est
+  // la capsule d'un personnage qu'on regarde pour lui parler (docs/132).
+  "|InteractReceiver)$",
 ].join(""), "i");
 
 /**
@@ -375,6 +378,9 @@ export function extractGameplay(ctx) {
       const [, rot] = ctx.world(gid);
       entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
     }
+    // Un script sur un GameObject inactif ne tourne pas. On le garde — trois
+    // classes sont rallumees en cours de partie (`SetActive`) —, marque.
+    if (!ctx.actif(gid)) entry.active = false;
     (placed[cls] ||= []).push(entry);
   }
 

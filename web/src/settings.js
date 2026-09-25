@@ -158,9 +158,25 @@ export class MenuInput {
 }
 
 export class Settings {
-  constructor(conf) {
+  /**
+   * @param niveau  `Application.loadedLevel` : 0 a l'ecran-titre, 1 en partie.
+   *                La septieme option en depend (voir `label` et `toggle`).
+   */
+  constructor(conf, { niveau = 1 } = {}) {
     const c = (conf && conf.settings) || {};
-    this.options = c.options || [];
+    this.niveau = niveau;
+    // `SettingsMenu.UpdateOptionText` et `ToggleOption`, septieme option :
+    //
+    //     loadedLevel != 0   « Exit to Main Menu » ; valider fait
+    //                        Time.timeScale = 1 puis LoadLevel(0)
+    //     loadedLevel == 0   String.Empty ; valider ne fait rien
+    //
+    // Elle n'est donc verrouillee NULLE PART : le portage la verrouillait
+    // « faute de menu principal », et il en a un desormais
+    // (docs/131-ecran-titre.md). Une extraction ancienne la marque encore
+    // verrouillee ; on relit la regle ici plutot que la donnee.
+    this.options = (c.options || []).map((o) => (o.key === "exit"
+      ? { ...o, locked: false, label: niveau === 0 ? "" : "Exit to Main Menu" } : o));
     this.colors = c.colors || {};
     this.bounds = c.sensitivity || { default: 5, min: 1, max: 10, neutral: 5 };
     const d = this.bounds.default;
@@ -188,7 +204,9 @@ export class Settings {
     // validations, ce que le build ne fait pas : la ou une nouvelle partie se
     // choisit depuis un ecran-titre, elle est ici a une touche d'une partie en
     // cours, et effacer sa progression ne se defait pas.
-    if (!this.options.some((o) => o.key === "newGame")) {
+    // Au titre, la nouvelle partie est la premiere ligne du menu-titre : l'ajout
+    // n'y a pas lieu d'etre.
+    if (niveau !== 0 && !this.options.some((o) => o.key === "newGame")) {
       this.options = [...this.options, { key: "newGame", label: "%s",
                                          states: ["Nouvelle partie",
                                                   "Nouvelle partie : confirmer"],
@@ -293,6 +311,11 @@ export class Settings {
         if (!this.confirmNewGame) { this.confirmNewGame = true; return null; }
         this.ferme();
         return "newGame";
+      // `if (dir == 0 && loadedLevel != 0) { timeScale = 1; LoadLevel(0); }`
+      case "exit":
+        if (dir !== 0 || this.niveau === 0) return null;
+        this.ferme();
+        return "exit";
       case "invertY": this.values.invertY = !this.values.invertY; break;
       case "lookSensitivity":
       case "flightSensitivity":
@@ -374,8 +397,8 @@ export class SettingsUI {
       d.addEventListener("click", () => {
         if (o.locked) return;
         this.s.index = i;
-        this.s.toggle(0);
-        if (this.onPick) this.onPick();
+        const r = this.s.toggle(0);
+        if (this.onPick) this.onPick(r);
         this.render();
       });
       // `Menu.Update` : `GetMouseButtonDown(1)` appelle `ToggleOption(-1)`.

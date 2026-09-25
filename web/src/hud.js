@@ -400,3 +400,27 @@ export class AutopilotReadout {
 
   clear() { this.until = 0; }
 }
+
+/**
+ * `IconGenerator.GenerateCrosshair(w, h, couleur, epaisseur)`, que
+ * `DebugHUD.Awake` appelle avec (13, 13, blanc a 50 %, 1).
+ *
+ * Un pixel est colore si sa COLONNE ou sa LIGNE tombe dans la bande
+ * `] w/2 - epaisseur, w/2 ]` — division entiere : 13 / 2 = 6. Une croix d'un
+ * pixel, donc, de treize de cote. Le portage n'avait aucun reticule :
+ * l'alpha n'affiche pourtant rien d'autre en jeu (docs/132).
+ *
+ * @returns un tableau de booleens, ligne par ligne
+ */
+export const CROSSHAIR = { width: 13, height: 13, color: [1, 1, 1, 0.5], thickness: 1 };
+
+export function crosshairPixels(w = 13, h = 13, t = 1) {
+  const out = [];
+  const cx = Math.floor(w / 2), cy = Math.floor(h / 2);
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < h; j++) {
+      out.push((i <= cx && i > cx - t) || (j <= cy && j > cy - t));
+    }
+  }
+  return out;
+}

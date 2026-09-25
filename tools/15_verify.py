@@ -249,6 +249,10 @@ def run_repli(url):
           cam.position.copyFrom(p.add(p.subtract(e).normalize().scale(800)));
           cam.setTarget(e);
           scene.render();
+          // On mesure le RENDU : le reticule de `DebugHUD`, une croix au
+          // centre exact de l'ecran, tomberait sur le pixel qu'on lit.
+          const r = document.getElementById('reticule');
+          if (r) r.hidden = true;
         }""")
         vue = page.locator("canvas").first.screenshot()
         vp = page.viewport_size
@@ -496,16 +500,37 @@ def _run(url, heavy, profil=None, zip_path=None):
                       "  Sans build, il n'y a pas de moteur a verifier.")
                 browser.close()
                 sys.exit(2)
+        # L'ecran-titre d'abord (docs/131-ecran-titre.md) : « New Expedition »
+        # est la ligne choisie a l'ouverture, `Interact` (E) la valide. Sans
+        # titre extrait, le moteur part droit dans la partie.
+        page.wait_for_function("window.__titre || window.__ready===true", timeout=300000)
+        if not page.evaluate("window.__ready===true"):
+            titre = page.evaluate("""() => ({
+              options: window.__titre.lignes.map((l) => l.textContent),
+              verrous: window.__titre.menu.locked })""")
+            rep.eq("cinq lignes au menu-titre", len(titre["options"]), 5)
+            page.keyboard.press("KeyE")
         page.wait_for_function("window.__ready===true", timeout=300000)
         page.wait_for_timeout(3000)
 
         rep.eq("erreurs console au demarrage", errors[:3], [])
-        rep.at_most("poids reseau (Mo)", round(weight["total"] / 1e6, 1), 70)
+        # Un element `hidden` de l'interface ne se dessine pas, meme quand sa
+        # classe pose un `display` : le marqueur de sonde dessinait un cercle
+        # vide en haut a gauche des le reveil (docs/132).
+        caches = page.evaluate("""() => [...document.querySelectorAll('#ui [hidden]')]
+          .filter(e => getComputedStyle(e).display !== 'none').map(e => e.className)""")
+        rep.eq("aucun element cache de l'interface ne se dessine", caches, [])
+        # Le systeme ENTIER se charge derriere le titre, comme `level0` dans
+        # l'alpha : c'est ce qui fait voir les planetes de loin (docs/132).
+        # Mesure : 105,9 Mo, tampons et textures des huit lots compris.
+        rep.at_most("poids reseau (Mo)", round(weight["total"] / 1e6, 1), 120)
 
-        # --- geometrie a la demande -----------------------------------------
+        # --- geometrie : tout le systeme, derriere le titre ------------------
         files = page.evaluate("() => window.__geo.entries.map(e => e.file).sort()")
-        rep.eq("fichiers glTF au demarrage", files,
-               ["sun_body.gltf", "timberhearth_pivot.gltf"])
+        rep.eq("fichiers glTF au demarrage : les huit lots", files,
+               ["brittlehollow_pivot.gltf", "comet_pivot.gltf", "darkbramble_pivot.gltf",
+                "giantsdeep_pivot.gltf", "hourglasstwins_pivot.gltf",
+                "quantummoon_body.gltf", "sun_body.gltf", "timberhearth_pivot.gltf"])
 
         # --- shaders, physique, secteurs ------------------------------------
         rep.at_least("affectations de shaders",
@@ -673,7 +698,9 @@ def _run(url, heavy, profil=None, zip_path=None):
           m.reset();
           return out;
         }""")
-        rep.eq("emetteurs de signal", audio["emetteurs"], 9)
+        # Neuf dans la scene, dont deux sur des objets INACTIFS que rien ne
+        # rallume : sept emettent dans l'alpha (`actifsSeulement`, docs/132).
+        rep.eq("emetteurs de signal", audio["emetteurs"], 7)
         rep.eq("signal plein dans le point chaud", audio["centre"], 1)
         rep.near("decroissance quadratique a mi-chemin", audio["moitie"], 0.287, 0.002)
         rep.eq("signal nul au rayon de coupure", audio["bord"], 0)
@@ -1091,9 +1118,13 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("et sa distance d'arrivee vient du build", lots["arrivee"], 1000)
             rep.at_least("decors vivants rattaches", lots["decors"], 1)
             rep.eq("passages anciens suivis", lots["passages"], 6)
-            rep.eq("volumes qui blessent", lots["dangers"], 1)
+            # Le seul `HazardVolume` de la scene, `KillVolume`, est INACTIF :
+            # il ne blesse personne dans l'alpha (docs/132).
+            rep.eq("volumes qui blessent", lots["dangers"], 0)
             rep.eq("objets a ramasser", lots["ramassages"], 2)
-            rep.eq("emetteurs de son d'evenement", lots["evenements"], 22)
+            # 22 a l'origine ; les docs 124, 128 et 129 en ont porte dix-sept
+            # de plus (`EVENT_AUDIO`, extract/audio.js) sans relever ce compte.
+            rep.eq("emetteurs de son d'evenement", lots["evenements"], 39)
             # Le volume de destruction du soleil est une sphere de 2 000 unites
             # centree sur l'origine du MONDE : teste avec une position du repere
             # ancre, il tuait le joueur des la premiere image.
@@ -1373,7 +1404,8 @@ def _run(url, heavy, profil=None, zip_path=None):
                    noeuds: a.noeudsCasses.length, remous: a.remous.length,
                    lanceurs: window.__meteores.launchers.length };
         }""")
-        rep.eq("quatorze alignements sur un corps designe", att["alignes"], 14)
+        # Quatorze poses, dont `OribitingIsland`, inactive et jamais rallumee.
+        rep.eq("treize alignements sur un corps designe", att["alignes"], 13)
         rep.eq("neuf heritiers de champ", att["heritiers"], 9)
         rep.eq("deux clignotants", att["clignotants"], 2)
         rep.eq("trois noeuds casses", att["noeuds"], 3)
@@ -1609,7 +1641,9 @@ def _run(url, heavy, profil=None, zip_path=None):
         ch = page.evaluate("""() => {
           const c = window.__chaleur;
           if (!c) return null;
-          return { sources: c.sources.length,
+          // Neuf emetteurs de rayonnement, dont HUIT feux (`radiationType` 1) :
+          // compter le tout mesurait autre chose que ce que le controle nomme.
+          return { sources: c.sources.filter((e) => e.type === 1).length,
                    surLeFeu: c.sur ? Math.round(c.sur) : 0 };
         }""")
         if ch:
@@ -1665,15 +1699,18 @@ def _run(url, heavy, profil=None, zip_path=None):
                    surSortie: e.warps.filter(w => w.data.onExit).length,
                    jumeaux: e.warps.filter(w => w.jumeau).length };
         }""")
-        rep.eq("trois passages de Dark Bramble", ep["n"], 3)
-        rep.eq("dont le raccourci depuis Timber Hearth",
-               "DarkBrambleShortcut" in ep["noms"], True)
+        # `DarkBrambleShortcut` est INACTIF dans le build, et aucun `SetActive`
+        # ne le rallume (`il.mjs --appel SetActive`) : l'alpha n'a pas de
+        # raccourci depuis Timber Hearth (docs/132).
+        rep.eq("deux passages de Dark Bramble", ep["n"], 2)
+        rep.eq("pas de raccourci depuis Timber Hearth",
+               "DarkBrambleShortcut" in ep["noms"], False)
         rep.eq("un seul part sur la SORTIE", ep["surSortie"], 1)
-        rep.eq("et les trois connaissent leur jumeau", ep["jumeaux"], 3)
+        rep.eq("et les deux connaissent leur jumeau", ep["jumeaux"], 2)
         # Trois secondes, pas a l'instant : la moitie de `_warpDuration`.
         saut = page.evaluate("""() => {
           const e = window.__epaves;
-          const w = e.warps.find(x => x.data.name === "DarkBrambleShortcut");
+          const w = e.warps.find(x => !x.data.onExit);
           const p = w.data.position;
           const a = e.update(0.1, 1000, p);
           const b = e.update(0.1, 1002, p);
@@ -1686,7 +1723,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("entrer ne suffit pas", saut["a"], False)
         rep.eq("ni deux secondes", saut["b"], False)
         rep.eq("a trois secondes, on part", saut["c"], True)
-        rep.eq("vers Dark Bramble", saut["vers"], "DarkBramble_Body")
+        rep.eq("de Dark Bramble vers l'epave", saut["vers"], "DerelictDimension_Body")
         rep.eq("et en mouvement", saut["vitesse"], 10)
         # Les coquilles sonores, appariees a leur source par position.
         coq = page.evaluate("""() => {
@@ -2086,7 +2123,12 @@ def _run(url, heavy, profil=None, zip_path=None):
         # dans la carte, et les trois canaux de vol du build ne pilotaient rien.
         page.mouse.move(640, 360)
         page.mouse.down(button="left"); page.mouse.up(button="left")
-        page.wait_for_timeout(600)
+        try:
+            page.wait_for_function(
+                "() => window.__visee.current !== null && Math.round(window.__visee.bracket * 100) === 0",
+                timeout=5000)
+        except Exception:
+            pass
         visee = page.evaluate("""() => { const l = window.__visee;
           return { cible: l.current ? l.current.name : null,
                    crochets: Math.round(l.bracket * 100) / 100,
@@ -2097,7 +2139,16 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("et la carte tient la meme cible", visee["carte"], visee["cible"])
         rep.eq("les crochets se sont fermes", visee["crochets"], 0)
         page.mouse.down(button="left"); page.mouse.up(button="left")
-        page.wait_for_timeout(600)
+        # On ATTEND l'etat, au lieu de six dixiemes fixes : depuis que le
+        # systeme entier est charge (docs/132), une image logicielle peut
+        # depasser ce delai, et le controle echouait une fois sur trois sans
+        # rien mesurer. Les crochets se rouvrent en fondu : on laisse le temps.
+        try:
+            page.wait_for_function(
+                "() => window.__visee.current === null && Math.round(window.__visee.bracket) === 1",
+                timeout=5000)
+        except Exception:
+            pass
         rep.eq("un second clic la relache",
                page.evaluate("() => window.__visee.current"), None)
         rep.eq("et les crochets se rouvrent",
@@ -2131,6 +2182,20 @@ def _run(url, heavy, profil=None, zip_path=None):
           // manche gauche pousse a fond vers l'avant : axe sature, et le cran
           // de course MONTE, depuis que l'accelerateur a disparu : le build
           // n'en a pas, et la majuscule y est `Move Up` (docs/61-commandes.md)
+          //
+          // SANS COMBINAISON, RIEN NE MONTE : le sac dorsal est inerte tant
+          // qu'on ne l'a pas revetue (`PlayerJetpackController.enabled`,
+          // docs/124), et les boutons Monter/Descendre sont masques. Le cran
+          // de course se mesure donc les deux fois.
+          const suitAvant = t.suit;
+          t.setContext({menu: false, map: false, suit: false});
+          send('.tc-zone-move', 'pointerdown', 200, 500, 1);
+          send('.tc-zone-move', 'pointermove', 200, 400, 1);
+          const courseSansCombi = t.axes.up;
+          send('.tc-zone-move', 'pointerup', 200, 400, 1);
+          const enVolSansCombi = [...document.querySelectorAll('#touchui .tc-btn')]
+            .filter(b => b.offsetParent).map(b => b.getAttribute('aria-label'));
+          t.setContext({menu: false, map: false, suit: true});
           send('.tc-zone-move', 'pointerdown', 200, 500, 1);
           send('.tc-zone-move', 'pointermove', 200, 400, 1);
           const avant = +t.axes.forward.toFixed(2);
@@ -2279,13 +2344,20 @@ def _run(url, heavy, profil=None, zip_path=None):
           const empreintes = document.querySelectorAll('#touch .tc-home').length;
           const boutons = document.querySelectorAll('#touchui .tc-btn').length;
           t.disable();          // la page est rendue telle qu'elle etait
-          return {avant, course, relache, apresCourse, glisse, vitesse, arret,
+          t.setContext({menu: false, map: false, suit: !!suitAvant});
+          return {courseSansCombi, enVolSansCombi,
+                  avant, course, relache, apresCourse, glisse, vitesse, arret,
                   vus, apresGigue, apresGlissement, dlg, lecture,
                   suspendu, manches, empreintes, boutons, enVol, enMenu,
                   pouceGauche, pouceDroit};
         }""")
         rep.eq("manche gauche a fond : axe sature a 1", tactile["avant"], 1)
-        rep.eq("a fond devant : le cran de course fait MONTER", tactile["course"], True)
+        rep.eq("sans combinaison, le cran de course ne monte pas",
+               tactile["courseSansCombi"], False)
+        rep.eq("sans combinaison, ni Monter ni Descendre",
+               [b for b in tactile["enVolSansCombi"] if b in ("Monter", "Descendre")], [])
+        rep.eq("a fond devant, en combinaison : le cran de course fait MONTER",
+               tactile["course"], True)
         rep.eq("manche relache : axe a zero", tactile["relache"], 0)
         rep.eq("manche relache : la montee s'arrete", tactile["apresCourse"], False)
         rep.eq("un manche par pouce", tactile["manches"], 2)
@@ -2312,7 +2384,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         # La disposition suit les canaux du build : plus d'accelerateur (il
         # n'existe pas), une DESCENTE au sac dorsal (elle existe et manquait),
         # et le saut a sa propre place — `Jump` et `Move Up` sont deux canaux.
-        rep.eq("la manette en vol", tactile["enVol"],
+        rep.eq("la manette en vol, en combinaison", tactile["enVol"],
                ["Telescope", "Sonde", "Carte du systeme", "Lampe",
                 "Ordinateur de bord", "Affichage", "Menu",
                 "Monter", "Descendre", "Sauter", "Interagir, parler"])
@@ -2340,8 +2412,9 @@ def _run(url, heavy, profil=None, zip_path=None):
         # --- lire un panneau (docs/105-lire.md) -------------------------------
         lect = tactile["lecture"]
         if lect:
-            rep.eq("trente-quatre objets lisibles, tous avec leur texte",
-                   lect["lisibles"], 34)
+            # Trente-quatre poses, dont un sur un objet inactif (docs/132).
+            rep.eq("trente-trois objets lisibles, tous avec leur texte",
+                   lect["lisibles"], 33)
             rep.eq("aucun objet lisible sans texte", lect["sansTexte"], 0)
             rep.eq("le plus long se lit en plusieurs fois", lect["pages"] > 1, True)
             # Cinq lignes AU PLUS : le plus long des trente-quatre commence par
@@ -2635,16 +2708,28 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("le toucher s'est annonce", pose["annonces"][:1],
                    ["ShipTouchdown"])
             # Le lancer a plus de cinq unites : on ne se pose plus, on glisse.
-            lance = page.evaluate("""() => {
+            #
+            # Ce qui se mesure est l'ANNONCE, pas l'etat qui suit. Au sol, le
+            # frottement (0,7 par soixantieme) ramene quarante unites sous cinq
+            # en moins d'un dixieme de seconde : le vaisseau decolle des
+            # capteurs, glisse, et se repose — et sans GPU les trois tiennent
+            # dans une seule image. Lire `onPad` ensuite mesurait le repos.
+            n0 = page.evaluate("""() => {
               const s = window.__shipRef;
+              const n = s.pads.events.length;
               s.vel.x += 40;
-              return true;
+              return n;
             }""")
-            page.wait_for_timeout(700)
-            apres = page.evaluate("() => ({ pose: window.__shipRef.onPad,"
-                                 " annonces: window.__shipRef.pads.events.slice(-1) })")
-            rep.eq("lance a quarante unites, il ne l'est plus", apres["pose"], False)
-            rep.eq("et le decollage s'annonce", apres["annonces"], ["ShipTakeoff"])
+            try:
+                page.wait_for_function(
+                    "(n) => window.__shipRef.pads.events.slice(n).length > 0", arg=n0,
+                    timeout=15000)
+            except Exception:
+                pass
+            apres = page.evaluate("(n) => window.__shipRef.pads.events.slice(n)", n0)
+            rep.eq("lance a quarante unites, il ne l'est plus",
+                   "ShipTakeoff" in apres, True)
+            rep.eq("et le decollage s'annonce", apres[:1], ["ShipTakeoff"])
 
         # --- la sphere de l'observatoire (docs/91-remise-a-zero.md) -----------
         raz = page.evaluate("""() => {
@@ -2790,6 +2875,15 @@ def _run(url, heavy, profil=None, zip_path=None):
           const s = window.__shipRef, p = window.__player;
           if (!s || !p || !p.body || !window.__pdata) return false;
           window.__pdata.knowsLaunchCodes = true;
+          // La COMBINAISON d'abord : sans elle, la barriere de Coach renvoie le
+          // joueur et ouvre son avertissement (docs/130) — dans l'alpha comme
+          // ici, on ne va pas au vaisseau en civil.
+          const l = window.__lots;
+          if (l && !l.equipment.suit) {
+            const combi = l.pickups.find((x) => x.suit);
+            if (combi) l.equipment.pickUp(combi); else l.equipment.suit = true;
+          }
+          if (window.__dialogue && window.__dialogue.active) window.__dialogue.active = null;
           s.boarded = false;
           window.__assise.points.detach([0, 0, 0]);
           const agg = p.body;
@@ -2821,6 +2915,18 @@ def _run(url, heavy, profil=None, zip_path=None):
             avant = page.evaluate(lecture)
             if avant:
                 break
+        if avant is None:
+            print("    diagnostic de l'assise :", page.evaluate("""() => {
+              const s = window.__shipRef, p = window.__player;
+              return { boarded: s && s.boarded,
+                       distance: s && p ? Math.round(Math.hypot(p.pos.x - s.pos.x,
+                         p.pos.y - s.pos.y, p.pos.z - s.pos.z) * 10) / 10 : null,
+                       mort: !!(window.__death && window.__death.dead),
+                       cause: window.__death && window.__death.cause,
+                       mode: window.__modes && window.__modes.mode,
+                       dialogue: !!(window.__dialogue && window.__dialogue.active),
+                       reglages: !!document.querySelector('.ow-settings:not([hidden])') };
+            }"""))
         rep.eq("la touche d'interaction assied pour de vrai",
                avant is not None, True)
         if avant:

@@ -214,6 +214,27 @@ function principal() {
     }
     return;
   }
+  // `--appel <motif>` : les methodes qui APPELLENT un membre dont le nom
+  // complet (`Type::Membre`) correspond au motif. C'est la question « qui
+  // rallume un GameObject ? » (`GameObject::SetActive`), que `--string` ne
+  // pose pas : un appel n'est pas une chaine.
+  if (args[0] === "--appel") {
+    const re = new RegExp(args[1], "i");
+    for (const { asm } of assemblies()) {
+      const n = asm.rows(TABLE.TypeDef);
+      for (let i = 1; i <= n; i++) {
+        const clsName = asm.str(asm.row(TABLE.TypeDef, i)[1]);
+        for (const m of methodsOf(asm, i)) {
+          const vus = disassemble(asm, m.index)
+            .filter((l) => /\s(call|callvrt|newobj)\s/.test(l) && re.test(l));
+          if (vus.length) {
+            console.log(`${clsName}.${m.name}: ${[...new Set(vus.map((l) => l.split(/\s+/).pop()))].join(", ")}`);
+          }
+        }
+      }
+    }
+    return;
+  }
   if (args[0] === "--grep") {
     const re = new RegExp(args[1], "i");
     for (const { name: an, asm } of assemblies()) {

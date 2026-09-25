@@ -158,6 +158,35 @@ export class ExtractContext {
     return out;
   }
 
+  /**
+   * `GameObject.activeInHierarchy` : l'objet ET tous ses ancetres actifs.
+   *
+   * Personne ne le lisait. 1 648 GameObjects de `level0` sont pourtant
+   * inactifs — 143 eteints eux-memes, le reste par heritage —, et avec eux
+   * 955 maillages, 29 systemes de particules, cinq sources audio, trois
+   * lumieres et une trentaine de scripts : un cratere d'origine superpose au
+   * vrai, des arbres de test, un second soleil, un volume mortel. Ils ne
+   * tournent ni ne se dessinent dans l'alpha ; le portage les rendait tous
+   * (docs/132).
+   */
+  actif(gid) {
+    if (!this.actifs) this.actifs = new Map();
+    if (this.actifs.has(gid)) return this.actifs.get(gid);
+    const go = this.gameObjects.get(gid);
+    let v = !go || go.m_IsActive !== false && go.m_IsActive !== 0;
+    if (v) {
+      const t = this.transformOf.get(gid);
+      const parent = t && t.m_Father ? this.env.deref(t.m_Father, this.sceneObj) : null;
+      const pt = parent ? this.env.read(parent) : null;
+      if (pt && pt.m_GameObject && pt.m_GameObject.pathId !== gid) {
+        this.actifs.set(gid, true);          // garde contre un cycle
+        v = this.actif(pt.m_GameObject.pathId);
+      }
+    }
+    this.actifs.set(gid, v);
+    return v;
+  }
+
   /** GameObject porteur d'un composant. */
   ownerId(o) {
     const h = this.env.read(o) || this.env.monoHeader(o);

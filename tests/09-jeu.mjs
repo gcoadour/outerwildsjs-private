@@ -37,7 +37,7 @@ import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
          COMPRESSION_GRACE, PlayerState, JetpackGate, JETPACK,
          inputAngle } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
-         FadeLight, SATELLITE_FADE, DayNightTracker } from "../web/src/lights.js";
+         FadeLight, SATELLITE_FADE, DayNightTracker, lightCap } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
@@ -79,7 +79,7 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
-import { Interactables } from "../web/src/interact.js";
+import { Interactables, rayonVolume, RAYON_VISEE } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
          ALIGN, slerpRate, steadyPitch, steadyLook, UpAligner,
@@ -87,7 +87,17 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
-import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
+import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
+import { crosshairPixels, CROSSHAIR } from "../web/src/hud.js";
+import { actifsSeulement } from "../web/src/config.js";
+import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
+         placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
+import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres,
+         masqueCamera, CALQUE_SONDE } from "../web/src/lights.js";
+import { textureTransform } from "../web/src/pipeline/extract/materials.js";
+import { taillesEtoiles, pixelsParRadian, gainPoint, moyenneTache, SEUIL_POINT } from "../web/src/etoiles.js";
+import { prewarmCycles, sizeGradients, emitterRotation, teinteParticules, boiteEmetteur } from "../web/src/particles.js";
+import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
 import { ATTERRISSAGE, rollMode, orbitSpeed, project,
@@ -132,7 +142,7 @@ import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
 import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep, noCollide } from "../web/src/physics.js";
+import { underAsleep, noCollide, rendererOff, hideDisabledRenderers } from "../web/src/physics.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
@@ -143,8 +153,8 @@ import { Anglerfish, fromToAngular, fishStep, FISH, shipOnlyMusicState } from ".
 import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
          leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
-import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
-         ambientColor, ambientTint, hsvToRgb, Sectors,
+import { ambientIntensity, ambientLight, majorSectors, activeMajorSector, sectorThrustLimit,
+         ambientColor, hsvToRgb, Sectors,
          sectorMap } from "../web/src/sectors.js";
 import { entrywayTriggers, sunlessZones, isOutsideEntryway, Entryway,
          EffectZones, ZonePresence, zonesAround } from "../web/src/entryways.js";
@@ -955,6 +965,15 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("loin de la planete comme de sa lune, le lot s'eteint",
         loin.container.enabled, false);
 
+  // LA VUE LOINTAINE : l'alpha ne diffuse rien, et Giant's Deep se voit de
+  // Timber Hearth. Le lot reste affiche, mais n'est pas « a portee ».
+  const vu = lot();
+  const lointaine = new Sectors(secteurs, corps(), () => vu, () => FICHIER);
+  lointaine.lointain = true;
+  lointaine.update({ x: 0, y: 0, z: 20000 });
+  check("en vue lointaine, le lot lointain reste affiche", vu.container.enabled, true);
+  check("... sans compter comme actif", lointaine.active.has(FICHIER), false);
+
   // Meme regle par-dessus les deux boucles : `darkbramble_pivot.gltf` est
   // reclame par un corps ET par un volume sans puits de gravite, qui n'ont ni
   // la meme portee ni le meme tour de boucle. A 2 000 u, le corps (200 de
@@ -1097,19 +1116,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // `MajorSector.GetAmbientLight` est une MARCHE : la couleur pleine sous
   // `_ambientLightRange`, le noir au-dela. Le portage en avait fait une pente,
   // et le test gardait la pente — une conclusion, pas une mesure.
-  check("secteur sans ambiance", round(ambientIntensity(0, 0), 3), 0.1);
-  check("centre d'un secteur eclaire", round(ambientIntensity(0, 750), 3), 0.35);
+  check("secteur sans ambiance", round(ambientIntensity(0, 0), 3), 0);
+  check("centre d'un secteur eclaire", round(ambientIntensity(0, 750), 3), 1);
   check("a mi-portee, la meme chose qu'au centre",
-        round(ambientIntensity(375, 750), 3), 0.35);
+        round(ambientIntensity(375, 750), 3), 1);
   check("juste en deca de la portee, encore pleine",
-        round(ambientIntensity(749.9, 750), 3), 0.35);
+        round(ambientIntensity(749.9, 750), 3), 1);
   check("a la portee exacte, la marche tombe",
-        round(ambientIntensity(750, 750), 3), 0.1);
-  check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0.1);
+        round(ambientIntensity(750, 750), 3), 0);
+  check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0);
   // `_ambientLight = 0` rend Color.black : la portee ne rattrape rien. Dark
   // Bramble a 1 200 de portee et la valeur 0.
   check("un secteur noir n'eclaire pas, meme a portee",
-        round(ambientIntensity(0, 1200, 0), 3), 0.1);
+        round(ambientIntensity(0, 1200, 0), 3), 0);
 
   // La TEINTE : une enumeration a trois valeurs, pas un nombre.
   check("le noir est noir", ambientColor(0).join(","), "0,0,0");
@@ -1119,9 +1138,6 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         ambientColor(2).map((x) => round(x, 4)).join(","), "0.045,0.0588,0.0484");
   check("les deux teintes ont la meme valeur",
         Math.max(...ambientColor(1)) === Math.max(...ambientColor(2)), true);
-  check("la teinte normalisee vaut un sur sa composante forte",
-        Math.max(...ambientTint(1)), 1);
-  check("et sans couleur, elle est blanche", ambientTint(0).join(","), "1,1,1");
   // `ColorHSV.ToColorRGB` : saturation nulle, du gris.
   check("saturation nulle : du gris", hsvToRgb(200, 0, 0.5).join(","), "0.5,0.5,0.5");
   check("rouge pur", hsvToRgb(0, 1, 1).join(","), "1,0,0");
@@ -5378,6 +5394,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         Math.round(orbitalSpeed(12, 300, 0)));
   check("et le son est celui de la faible puissance",
         orbital.events.includes("ProbeLaunch_LowPower"), true);
+  // L'HORLOGE DE L'IMAGE (docs/132). Vingt sous-pas d'une MEME image, bouton
+  // tenu : une seconde de jeu, mais une seule lecture du bouton dans le build.
+  // Le rappel ne part pas ; il part a l'image suivante si le bouton tient.
+  {
+    const l = new Lanceur();
+    l.update(0.016, { launch: true }, { ...monde, horloge: 0 });
+    l.update(0.016, { launch: false }, { ...monde, horloge: 0.5 });
+    check("(horloge) la sonde part", l.active, 1);
+    for (let i = 0; i < 20; i++) l.update(0.05, { retrieve: true }, { ...monde, horloge: 2 });
+    check("vingt sous-pas d'une meme image ne la rappellent pas", l.active, 1);
+    l.update(0.05, { retrieve: true }, { ...monde, horloge: 3 });
+    check("l'image d'apres, toujours tenu, si", l.active, 0);
+  }
   // Un mur devant : le tir est refuse, et une seule fois.
   const bloque = new Lanceur();
   const mur = { ...monde, raycast: () => ({ point: [0, 0, 3], normal: [0, 0, -1] }) };
@@ -7824,5 +7853,284 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("shipOnlyMusicState ni l'un ni l'autre", shipOnlyMusicState(false, false), false);
   }
 }
+
+// Le TEMPS D'UNE IMAGE (input.js, `decoupeImage`). Le build borne
+// `Time.deltaTime` a 1 s (`Maximum Allowed Timestep`) ; le portage bornait
+// l'image a 0,05 s et ralentissait le jeu sous 20 images par seconde.
+{
+  const a60 = decoupeImage(1 / 60, 1);
+  check("a 60 images par seconde, un seul sous-pas", a60.n, 1);
+  check("et il vaut l'image entiere", Math.abs(a60.h - 1 / 60) < 1e-12, true);
+  const a3 = decoupeImage(1 / 3, 1);
+  check("a 3 images par seconde, sept sous-pas", a3.n, 7);
+  check("dont la somme est le temps reel de l'image",
+        Math.abs(a3.n * a3.h - 1 / 3) < 1e-12, true);
+  check("aucun sous-pas ne depasse le plafond", a3.h <= SOUS_PAS_MAX, true);
+  const lent = decoupeImage(4, 1);
+  check("une image de 4 s ne compte qu'une seconde, comme dans Unity",
+        lent.n * lent.h, 1);
+  check("un menu ouvert fige le jeu", decoupeImage(0, 1).h, 0);
+  check("exactement 0,05 s ne se decoupe pas", decoupeImage(0.05, 1).n, 1);
+  check("la seconde du build est le repli de Commandes",
+        new Commandes(null).maxTimestep, 1);
+}
+
+// Le PLAFOND DE LUMIERES par materiau (lights.js, `lightCap`) : trois blocs
+// d'uniformes fixes et un de marge, le reste aux lumieres.
+check("SwiftShader (14 blocs) : dix lumieres", lightCap(14), 10);
+check("ANGLE sur Direct3D 11 (12 blocs) : huit", lightCap(12), 8);
+check("sans mesure, la valeur par defaut de Babylon", lightCap(0), 4);
+check("jamais sous quatre", lightCap(6), 4);
+
+// L'ECRAN-TITRE (titre.js, docs/131-ecran-titre.md).
+{
+  // `TitleScreenMenu.Start` : « Resume » verrouillee sous deux boucles.
+  const neuf = new TitleMenu(5, 0);
+  check("partie neuve : Resume Expedition verrouillee", neuf.locked[1], true);
+  check("une boucle ne suffit pas", new TitleMenu(5, 1).locked[1], true);
+  check("deux boucles la deverrouillent", new TitleMenu(5, 2).locked[1], false);
+  // `Menu.Update` : la navigation saute la ligne verrouillee.
+  neuf.move(1);
+  check("descendre depuis New Expedition saute Resume", neuf.index, 2);
+  neuf.move(-1);
+  check("et remonter la saute aussi", neuf.index, 0);
+  neuf.move(-1);
+  check("en anneau : au-dessus de la premiere, la derniere", neuf.index, 4);
+  // Le survol pose l'index sans regarder le verrou ; valider, non.
+  neuf.hover(1);
+  check("la souris peut viser Resume grisee", neuf.index, 1);
+  check("mais pas la valider", neuf.validate(), null);
+  check("la ligne visee et verrouillee se peint verrouillee", neuf.state(1), "locked");
+  neuf.hover(2);
+  const skip = neuf.validate();
+  check("Skip Intro : nouvelle sauvegarde", skip.newSave, true);
+  check("et l'introduction sautee", skip.skipIntro, true);
+  check("apres le choix, plus rien ne bouge", (neuf.move(1), neuf.index), 2);
+  check("New Expedition ne saute rien", TITLE_ACTIONS[0].skipIntro, false);
+  check("Resume garde la sauvegarde", TITLE_ACTIONS[1].newSave, false);
+  check("Settings ouvre les reglages", TITLE_ACTIONS[3].settings, true);
+  check("cinq savoirs accordes par Skip Intro", SKIP_INTRO_FLAGS.length, 5);
+  // Les quatre horloges de `Menu` : 0,2 s entre deux pas du meme sens.
+  const h = { haut: -Infinity, bas: -Infinity };
+  check("premier pas vers le bas", titleStep(h, 10, -1), 1);
+  check("un second trop tot ne passe pas", titleStep(h, 10.1, -1), 0);
+  check("il passe apres 0,2 s", titleStep(h, 10.25, -1), 1);
+  check("sous le seuil de 0,2, rien", titleStep(h, 20, 0.1), 0);
+  // Les deux `RotateTransform` de la scene, tels que le build les pose.
+  const r = repereDuTitre([
+    { name: "PlanetPivot", worldAxis: [0, -1, 0], degreesPerSecond: -1, ancestors: ["Root"] },
+    { name: "Root", worldAxis: [0, 1, 0], degreesPerSecond: 1, ancestors: [] },
+  ]);
+  check("les deux axes sont paralleles", r.parallel, true);
+  check("dans le repere de la planete, la camera tourne a -1 deg/s", r.camera, -1);
+  check("et la voute a -2 deg/s", r.sky, -2);
+  // Placement des GUIText (LowerLeft) et de la GUITexture du logo, 1280 x 720.
+  const ne = placeGuiText({ position: [0.05, 0.09], pixelOffset: [0, 240],
+                            anchor: "LowerLeft" }, 1280, 720);
+  check("New Expedition a 64 px du bord gauche", ne.left, 64);
+  check("et son bas a 415,2 px du haut", Math.abs(ne.top - 415.2) < 1e-9, true);
+  check("ancre LowerLeft : le texte monte au-dessus du point", ne.ty, -100);
+  const lg = placeGuiTexture({ position: [0, 0.98], pixelInset: [41.33, -235.3, 385.73, 212] },
+                             1280, 720);
+  check("le logo a 41,33 px du bord", lg.left, 41.33);
+  check("et a 37,7 px du haut", Math.abs(lg.top - 37.7) < 1e-9, true);
+  check("teinte de GUITexture : deux fois m_Color",
+        guiTint([0.12208, 0.24314, 0.07914, 1]).map((v) => v.toFixed(4)).join(","),
+        "0.2442,0.4863,0.1583");
+  // Le prechauffage : un cycle de `duration`, pour un systeme en boucle seul.
+  check("TallSmoke prechauffe cinq secondes", prewarmCycles(
+    { prewarm: true, looping: true, duration: 5 }) * 0.016 * 5 >= 5, true);
+  check("pas de prechauffage sans le drapeau", prewarmCycles(
+    { prewarm: false, looping: true, duration: 5 }), 0);
+  check("ni pour un systeme qui ne boucle pas", prewarmCycles(
+    { prewarm: true, looping: false, duration: 5 }), 0);
+}
+
+// `SizeModule` : la courbe MULTIPLIE la taille initiale (particles.js).
+{
+  const g = sizeGradients({ sizeOverLife: [[0, 0.12121], [1, 0.57944]] }, 30, 60);
+  check("TallSmoke nait entre 3,6 et 7,3 unites",
+        g[0].slice(1).map((v) => v.toFixed(1)).join("-"), "3.6-7.3");
+  check("et finit entre 17 et 35", g[1].slice(1).map((v) => v.toFixed(0)).join("-"), "17-35");
+  check("sans courbe, pas de gradient", sizeGradients({ sizeOverLife: null }, 1, 2).length, 0);
+}
+
+// L'attenuation d'Unity 4 et le x2 des shaders legacy (titre.js).
+check("au pied de la lumiere, deux fois sa couleur", attenuationUnity(0, 10), 2);
+check("a la moitie de la portee, 2/7,25", attenuationUnity(5, 10).toFixed(4), "0.2759");
+check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
+
+// `SpacesuitAudioController` : FadeIn(5) hors de l'oxygene, FadeOut(5) dedans.
+{
+  const c = new SuitAmbience();
+  check("silencieux au depart", c.update(0.1, true), 0);
+  check("hors de l'oxygene, a moitie en 2,5 s", c.update(2.5, false), 0.5);
+  check("plein en cinq secondes", c.update(10, false), 1);
+  check("et retombe en cinq", (c.update(SUIT_AMBIENCE_FADE, true)), 0);
+}
+
+// Le reticule de `DebugHUD` : une croix d'un pixel, treize de cote.
+{
+  const px = crosshairPixels(CROSSHAIR.width, CROSSHAIR.height, CROSSHAIR.thickness);
+  check("vingt-cinq pixels allumes (13 + 13 - 1)", px.filter(Boolean).length, 25);
+  check("le centre est allume", px[6 * 13 + 6], true);
+  check("un coin ne l'est pas", px[0], false);
+}
+
+// Les composants d'un GameObject inactif ne tournent pas, sauf ceux que le
+// build rallume (`SetActive`).
+{
+  const gp = { placed: {
+    HazardVolume: [{ name: "a" }, { name: "b", active: false }],
+    ShipComponent: [{ name: "c", active: false }],
+  } };
+  check("un composant inactif est retire", actifsSeulement(gp), 1);
+  check("l'actif reste", gp.placed.HazardVolume.map((e) => e.name).join(), "a");
+  check("une piece de vaisseau inactive reste : on la rallume",
+        gp.placed.ShipComponent.length, 1);
+}
+
+// Les calques : un maillage exporte porte le bit de son calque Unity, une
+// lumiere le masque qu'elle eclaire (docs/132).
+{
+  check("un masque plein ne filtre rien", layerMaskFor(0xFFFFFFFF), 0);
+  const soleil = layerMaskFor(0xFF7F6FFF);
+  const maillage = (md) => ({ metadata: md, getTotalVertices: () => 3 });
+  const m15 = maillage({ gltf: { extras: { layer: 15 } } });
+  const m0 = maillage(null);
+  const autre = { layerMask: 0x0FFFFFFF };
+  check("deux maillages exportes recoivent leur calque", applyLayers([m15, m0, autre]), 2);
+  check("le soleil n'eclaire pas IgnoreSun", (m15.layerMask & soleil) === 0, true);
+  check("il eclaire le calque 0", (m0.layerMask & soleil) !== 0, true);
+  check("un noeud sans geometrie garde son masque", autre.layerMask, 0x0FFFFFFF);
+  const surface = layerMaskFor(0xFF7F6FFE);
+  check("les surfacelighter n'eclairent pas le calque 0", (m0.layerMask & surface) === 0, true);
+}
+
+// Une lumiere posee sur une planete ORBITE avec elle (docs/132) : au repos,
+// le feu est a l'origine ; la planete a avance de 500 unites, le joueur aussi.
+{
+  const feu = { name: "Light", type: "point", position: [0, 0, 0], range: 30, intensity: 1, body: "TH" };
+  const joueur = [500, 0, 2];
+  check("sans decalage, le feu est oublie", choisirLumieres([feu], joueur).length, 0);
+  check("avec le deplacement du corps, il est retenu",
+        choisirLumieres([feu], joueur, 8, 1.25, (l) => [l.position[0] + 500, 0, 0]).length, 1);
+}
+
+// L'emetteur oriente : le +Y de Babylon porte sur le +Z du systeme Unity.
+{
+  const tourne = (q, v) => {
+    const [x, y, z, w] = q;
+    const ix = w * v[0] + y * v[2] - z * v[1], iy = w * v[1] + z * v[0] - x * v[2];
+    const iz = w * v[2] + x * v[1] - y * v[0], iw = -x * v[0] - y * v[1] - z * v[2];
+    return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z,
+            iz * w + iw * -z + ix * -y - iy * -x].map((a) => Math.round(a * 1000) / 1000 + 0);
+  };
+  check("sans rotation, l'emetteur vise le +Z", tourne(emitterRotation([0, 0, 0, 1]), [0, 1, 0]).join(), "0,0,1");
+  // La flamme du feu de camp : -90 degres sur X, son +Z est le +Y du monde.
+  const flamme = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+  check("la flamme du feu de camp monte", tourne(emitterRotation(flamme), [0, 1, 0]).join(), "0,1,0");
+}
+
+// L'ambiance du build, doublee comme dans les shaders d'Unity 4 (docs/132).
+// Le ciel de nuit, cote a cote avec l'alpha (docs/132).
+{
+  // Un lot sans voute ne retire pas celle d'un autre : le systeme entier se
+  // charge au depart, et le dernier lot arrive remettait la voute a rien.
+  const ciel = new Sky({ shell: { name: "SkyShell" }, clouds: [
+    { name: "PieceOfRing", position: [0, 0, 0] }] });
+  const voute = { name: "SkyShell" };
+  check("la voute se rattache", ciel.attach([voute]), 1);
+  check("un autre lot ne la trouve pas...", ciel.attach([{ name: "Rocher" }]), 0);
+  check("... et ne la retire pas", ciel.shell, voute);
+  const nuage = { name: "PieceOfRing", position: { x: 0, y: 0, z: 0 } };
+  check("le nuage se rattache", ciel.attachClouds([nuage]), 1);
+  check("un lot sans nuage ne defait rien", ciel.attachClouds([{ name: "Rocher" }]), 0);
+  check("... le nuage reste", ciel.clouds.length, 1);
+
+  // Les etoiles : taille MONDE, 200 a 400 unites a 30 000 ; en 640 x 360 a
+  // 70 degres, 1,7 a 3,4 pixels — des points d'un pixel dans l'alpha.
+  const k = pixelsParRadian(360, 70 * Math.PI / 180) / 30000;
+  check("une etoile de 300 u fait 2,6 pixels", +(300 * k).toFixed(1), 2.6);
+  const t = taillesEtoiles(1000, [200, 400]);
+  check("mille tailles tirees", t.length, 1000);
+  check("toutes entre 200 et 400", t.every((x) => x >= 200 && x <= 400), true);
+  check("et pas toutes pareilles", new Set(t).size > 900, true);
+  check("sous le seuil, l'etoile est un point d'un pixel", 300 * k < SEUIL_POINT, true);
+  check("qui garde l'energie du sprite", +gainPoint(2, 0.0765).toFixed(3), 0.306);
+  // La tache du build : rgb et alpha decroissent ensemble.
+  const px = new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0]);
+  check("moyenne de rgb x a sur deux pixels", moyenneTache(px), 0.5);
+
+  // Le masque de la camera du build garde le bit des billes de sonde.
+  check("la PlayerCamera exclut le HUD", (masqueCamera(0xBE7FFFFF) >>> 23) & 1, 0);
+  check("et voit les billes de sonde", (masqueCamera(0xBE7FFFFF) & CALQUE_SONDE) !== 0, true);
+  check("un repli voit tout ce que Babylon pose", masqueCamera(null), 0x2FFFFFFF);
+
+  // Un renderer eteint ne se dessine pas.
+  const eteint = { metadata: { gltf: { extras: { rendererOff: true } } }, isVisible: true };
+  const allume = { metadata: { gltf: { extras: {} } }, isVisible: true };
+  check("un renderer eteint est reconnu", rendererOff(eteint), true);
+  check("un maillage ordinaire ne l'est pas", rendererOff(allume), false);
+  check("on cache le premier seul", hideDisabledRenderers([eteint, allume]), 1);
+  check("... et le LOD ne le rallume pas", eteint.__lodPinned, true);
+  check("l'autre reste visible", allume.isVisible, true);
+}
+
+// On parle a qui l'on regarde : rayon de dix unites, puis `_interactRange`
+// du point touche (docs/132).
+{
+  const capsule = { shape: "capsule", radius: 0.5, height: 2, axis: 1, center: [0, 0, 0] };
+  const o = [0, 0, -3], d = [0, 0, 1];
+  check("la capsule en face est touchee a 2,5", +rayonVolume(o, d, [0, 0, 0], null, capsule).toFixed(2), 2.5);
+  check("a cote, rien", rayonVolume([2, 0, -3], d, [0, 0, 0], null, capsule), null);
+  check("le haut de la capsule se touche aussi (3 - racine de 0,09)", +rayonVolume([0, 0.9, -3], d, [0, 0, 0], null, capsule).toFixed(2), 2.7);
+  check("une sphere", +rayonVolume(o, d, [0, 0, 0], null, { shape: "sphere", radius: 1 }).toFixed(2), 2);
+  check("une boite tournee de 90 degres sur Y",
+        +rayonVolume(o, d, [0, 0, 0], [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+                     { shape: "box", size: [4, 1, 1] }).toFixed(2), 1);
+  check("derriere l'oeil, rien", rayonVolume([0, 0, 3], d, [0, 0, 0], null, capsule), null);
+  check("la portee du rayon du build", RAYON_VISEE, 10);
+  const gp = { placed: { InteractReceiver: [
+    { name: "ConversationZone", position: [0, 0, 0], fields: { _prompt: "Talk", _interactRange: 2 },
+      volume: capsule } ] } };
+  const it = new Interactables(gp);
+  const regard = (z, x = 0) => it.focus({ x, y: 0, z }, [0, 0, 0], { x: 0, y: 0, z: 1 }, null, { x, y: 0, z });
+  check("a deux pas, en le regardant : on lui parle", regard(-2.4) && regard(-2.4).prompt, "Talk");
+  check("a quatre metres, non : `_interactRange` vaut 2", regard(-4), null);
+  check("a cote de lui, sans le regarder, non plus", regard(-2, 1.5), null);
+}
+
+// La repetition des textures, dans le repere retourne du glTF (docs/132).
+{
+  const mat = (sx, sy, ox, oy) => ({ m_SavedProperties: { m_TexEnvs: [{ first: { name: "_MainTex" },
+    second: { m_Scale: { x: sx, y: sy }, m_Offset: { x: ox, y: oy } } }] } });
+  check("une texture ni repetee ni decalee n'a pas de transformation", textureTransform(mat(1, 1, 0, 0)), null);
+  const roche = textureTransform(mat(20, 20, 0, 0));
+  check("la roche : vingt fois", roche.scale.join(), "20,20");
+  check("decalage en v retourne : 1 - s - o", roche.offset.join(), "0,-19");
+  check("un decalage d'Unity se retourne aussi", textureTransform(mat(1, 1, 0.25, 0.5)).offset.join(), "0.25,-0.5");
+}
+
+// La teinte des particules : 2 x _TintColor (docs/132).
+{
+  const flamme = teinteParticules([1, 1, 1, 1], [0.2239, 0.2239, 0.2239, 0.502], "add");
+  check("une flamme teintee a 0,22 sort a 0,45", +flamme[0].toFixed(2), 0.45);
+  check("son alpha reste plein", +flamme[3].toFixed(2), 1);
+  check("la teinte par defaut est neutre",
+        teinteParticules([0.3, 0.6, 0.9, 1], [0.5, 0.5, 0.5, 0.5]).join(), "0.3,0.6,0.9,1");
+  check("sans teinte, la couleur telle quelle", teinteParticules([0.2, 0.4, 0.6, 1], null).join(), "0.2,0.4,0.6,1");
+  // La boite d'emission : demi-aretes, Z d'Unity sur l'Y de l'emetteur.
+  check("la flamme du feu : 0,8 d'arete, 0,4 de demi-arete",
+        boiteEmetteur({ type: "box", box: [0.8, 0.8, 0.8] }).join(), "0.4,0.4,0.4");
+  check("l'Y et le Z s'echangent", boiteEmetteur({ box: [0.1, 0.1, 0.2] }).join(), "0.05,0.1,0.05");
+  check("sans aretes, le rayon", boiteEmetteur({ radius: 2 }).join(), "2,2,2");
+  check("Particles/Multiply n'a pas de teinte",
+        teinteParticules([1, 1, 1, 1], [0.1, 0.1, 0.1, 0.1], "multiply").join(), "1,1,1,1");
+}
+
+check("Timber Hearth : un bleu de nuit a 0,12",
+      ambientLight(1).map((x) => x.toFixed(3)).join(), "0.090,0.090,0.118");
+check("la comete : le noir", ambientLight(0).join(), "0,0,0");
 
 report();

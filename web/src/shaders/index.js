@@ -42,6 +42,39 @@ export function unityShaderOf(material) {
 }
 
 /**
+ * L'alpha d'un materiau vient de sa texture, quel que soit son type.
+ *
+ * Depuis `toLegacyMaterials`, les materiaux du glTF sont des `StandardMaterial`
+ * et la propriete s'appelle `useAlphaFromDiffuseTexture` ; le PBR, lui, lit
+ * `useAlphaFromAlbedoTexture`. Ne poser que la seconde laissait la voute
+ * `SkyShell` opaque — et le ciel noir, sans lune ni planete (docs/132).
+ */
+function alphaDeTexture(mat) {
+  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
+  if ("useAlphaFromDiffuseTexture" in mat) mat.useAlphaFromDiffuseTexture = true;
+}
+
+/**
+ * Non eclaire : la couleur de la texture, telle quelle.
+ *
+ * Le PBR a `unlit`. Un `StandardMaterial` dont on coupe l'eclairage rend
+ * `(emissif + ambiant) x texture` : avec l'emissif noir, NOIR — c'est ce que
+ * devenait la voute celeste une fois convertie. On y met donc l'emissif blanc,
+ * et pas de texture emissive, qui s'ajouterait a l'emissif et doublerait la
+ * texture au carre.
+ */
+function sansEclairage(BABYLON, mat) {
+  if ("unlit" in mat) {
+    mat.unlit = true;
+    if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+    return;
+  }
+  if ("disableLighting" in mat) mat.disableLighting = true;
+  if ("emissiveTexture" in mat) mat.emissiveTexture = null;
+  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+}
+
+/**
  * Decoupe alpha double face : la vegetation. Le shader d'origine declare
  * _Cutoff, _BumpMap et Cull Off.
  */
@@ -78,19 +111,21 @@ function applySelfIllum(BABYLON, mat) {
   mat.disableDepthWrite = true;
   const tex = mat.albedoTexture || mat.diffuseTexture;
   if (tex) {
-    if ("emissiveTexture" in mat) mat.emissiveTexture = tex;
+    if ("unlit" in mat && "emissiveTexture" in mat) mat.emissiveTexture = tex;
     tex.hasAlpha = true;
     if (BABYLON.Texture) {
       tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
       tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
     }
   }
-  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
-  if ("emissiveColor" in mat) {
+  alphaDeTexture(mat);
+  if ("unlit" in mat) {
     mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    mat.disableLighting = true;
+    mat.unlit = true;
+  } else {
+    sansEclairage(BABYLON, mat);
   }
-  if ("disableLighting" in mat) mat.disableLighting = true;
-  if ("unlit" in mat) mat.unlit = true;
   mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
   if ("transparencyMode" in mat) {
     mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATESTANDBLEND;
@@ -109,6 +144,18 @@ function applySelfIllum(BABYLON, mat) {
  * Les rendre non eclaires et emissifs en blanc, c'etait les allumer a fond
  * quelle que soit l'heure. Sur une scene de depart dont le soleil est a 77
  * degres SOUS l'horizon, les nuages brillaient donc comme en plein midi.
+ *
+ * Mais il y a bien une emission, et c'est `lightStrength` : le programme de
+ * fragment, lu dans le build, rend
+ *
+ *   c = texture x _Color
+ *   couleur = c x (2 N.L x lumiere + ambiante) + c x lightStrength
+ *
+ * Sur `CloudMat`, `_Color` vaut 0,5 et `lightStrength` 2 : de nuit, un nuage
+ * rend sa texture a 95 %, ni noir ni plein midi. Dans un materiau standard,
+ * `(eclairage x diffuse + emissif) x texture` : l'emissif est `_Color x
+ * lightStrength`. Et `AlphaTest Greater 0` : on ne jette que l'alpha nul — la
+ * decoupe a 0,4 du portage taillait les bords doux des nuages au couteau.
  */
 function applyLitAlpha(BABYLON, mat) {
   mat.backFaceCulling = false;
@@ -122,14 +169,22 @@ function applyLitAlpha(BABYLON, mat) {
       tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
     }
   }
-  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
-  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+  alphaDeTexture(mat);
+  const extras = (mat.metadata && mat.metadata.gltf && mat.metadata.gltf.extras) || {};
+  const ls = typeof extras.lightStrength === "number" ? extras.lightStrength : 2;
+  const base = mat.diffuseColor || mat.albedoColor || null;
+  if ("emissiveColor" in mat) {
+    mat.emissiveColor = base && !("unlit" in mat)
+      ? new BABYLON.Color3(base.r * ls, base.g * ls, base.b * ls)
+      : new BABYLON.Color3(0, 0, 0);
+  }
   if ("disableLighting" in mat) mat.disableLighting = false;
   if ("unlit" in mat) mat.unlit = false;
   mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
   if ("transparencyMode" in mat) {
     mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATESTANDBLEND;
   }
+  if ("alphaCutOff" in mat) mat.alphaCutOff = 1 / 255;
   return mat;
 }
 
@@ -159,10 +214,8 @@ function applyAlphaBlend(BABYLON, mat, { cullOff = true } = {}) {
       tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
     }
   }
-  if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
-  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
-  if ("disableLighting" in mat) mat.disableLighting = true;
-  if ("unlit" in mat) mat.unlit = true;
+  alphaDeTexture(mat);
+  sansEclairage(BABYLON, mat);
   if (cullOff) mat.backFaceCulling = false;
   mat.disableDepthWrite = true;                    // ZWrite Off
   mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;    // SrcAlpha OneMinusSrcAlpha
@@ -179,18 +232,98 @@ function applyAlphaBlend(BABYLON, mat, { cullOff = true } = {}) {
  * `~Additive-Multiply` melange en `DstColor One`, que Babylon n'expose pas tel
  * quel ; il est rendu en additif, ce qui est proche et ne concerne qu'un seul
  * maillage de la scene.
+ *
+ * Et la TEINTE : `Particles/Additive` rend `2 x _TintColor x texture`, en
+ * `SrcAlpha One`. Le portage ajoutait la texture en blanc — `TornadoClouds`,
+ * la couche externe de Giant's Deep, teintee d'un bleu-vert a 5 %, faisait
+ * de la planete une boule blanche dans le ciel de nuit (docs/132).
  */
 function applyParticleAdditive(BABYLON, mat) {
   const tex = mat.albedoTexture || mat.diffuseTexture;
   if (tex) tex.hasAlpha = true;
-  if ("emissiveTexture" in mat && tex) mat.emissiveTexture = tex;
-  if ("emissiveColor" in mat) mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
-  if ("disableLighting" in mat) mat.disableLighting = true;
-  if ("unlit" in mat) mat.unlit = true;
+  const ex = (mat.metadata && mat.metadata.gltf && mat.metadata.gltf.extras) || {};
+  const t = ex.tintColor || [0.5, 0.5, 0.5, 0.5];
+  if ("unlit" in mat) {
+    if ("emissiveTexture" in mat && tex) mat.emissiveTexture = tex;
+    mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    mat.disableLighting = true;
+    mat.unlit = true;
+  } else {
+    sansEclairage(BABYLON, mat);
+    mat.emissiveColor = new BABYLON.Color3(2 * t[0], 2 * t[1], 2 * t[2]);
+    alphaDeTexture(mat);
+    mat.alpha = Math.min(1, 2 * t[3]);
+  }
   mat.backFaceCulling = false;
   mat.disableDepthWrite = true;
   mat.alphaMode = BABYLON.Engine.ALPHA_ADD;
   return mat;
+}
+
+/**
+ * LES SHADERS « LEGACY » D'UNITY 4 ECLAIRENT EN ESPACE GAMMA.
+ *
+ * `Diffuse`, `Bumped Diffuse`, `Specular`… : la couleur de la texture, telle
+ * qu'elle est stockee, multipliee par la somme des lumieres — et par deux.
+ * Le chargeur glTF de Babylon rend des materiaux PBR, qui decodent la texture
+ * en lineaire, divisent par pi, puis reencodent. Mesure dans Chromium, pour
+ * une couleur 0,5 sous une lumiere d'intensite 1 : le PBR rend 0,43, le
+ * materiau standard 0,50 — le calcul d'Unity. Le PBR APLATIT : il eclaircit
+ * la penombre et eteint ce qui est eclaire, et le reveil de Timber Hearth,
+ * de nuit, y ressemblait a un soir terne (docs/132).
+ *
+ * On convertit donc chaque materiau PBR du glTF en `StandardMaterial`, sans
+ * rien perdre de ce que l'exporteur y a mis : texture et couleur, carte de
+ * normales, alpha, emissif, et le nom du shader d'origine, que
+ * `applyGameShaders` lit ensuite.
+ */
+export function toLegacyMaterials(BABYLON, scene, meshes) {
+  const faits = new Map();
+  let n = 0;
+  for (const m of meshes || []) {
+    const pbr = m.material;
+    if (!pbr || pbr.getClassName() !== "PBRMaterial") continue;
+    let std = faits.get(pbr);
+    if (!std) {
+      std = new BABYLON.StandardMaterial(pbr.name, scene);
+      std.metadata = pbr.metadata;
+      if (pbr.albedoTexture) std.diffuseTexture = pbr.albedoTexture;
+      if (pbr.albedoColor) std.diffuseColor = pbr.albedoColor.clone();
+      if (pbr.bumpTexture) {
+        std.bumpTexture = pbr.bumpTexture;
+        std.invertNormalMapX = pbr.invertNormalMapX;
+        std.invertNormalMapY = pbr.invertNormalMapY;
+      }
+      if (pbr.emissiveTexture) std.emissiveTexture = pbr.emissiveTexture;
+      if (pbr.emissiveColor) std.emissiveColor = pbr.emissiveColor.clone();
+      std.alpha = pbr.alpha;
+      std.backFaceCulling = pbr.backFaceCulling;
+      std.twoSidedLighting = pbr.twoSidedLighting;
+      std.transparencyMode = pbr.transparencyMode;
+      if ("alphaCutOff" in pbr) std.alphaCutOff = pbr.alphaCutOff;
+      if (pbr.albedoTexture && pbr.albedoTexture.hasAlpha) {
+        std.useAlphaFromDiffuseTexture = true;
+      }
+      // Seuls les shaders `Specular` ont un reflet : `_SpecColor` gris a 50 %
+      // et `_Shininess` 0,078 — un exposant de 10 — par defaut dans Unity 4.
+      const shader = unityShaderOf(pbr) || "";
+      if (/Specular/i.test(shader)) {
+        std.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+        std.specularPower = 10;
+      } else {
+        std.specularColor = new BABYLON.Color3(0, 0, 0);
+      }
+      std.maxSimultaneousLights = pbr.maxSimultaneousLights;
+      faits.set(pbr, std);
+    }
+    m.material = std;
+    n++;
+  }
+  for (const pbr of faits.keys()) {
+    // Les textures sont partagees : on ne libere que le materiau.
+    try { pbr.dispose(false, false); } catch (e) { /* deja libere */ }
+  }
+  return n;
 }
 
 /**
@@ -237,8 +370,9 @@ export function applyGameShaders(BABYLON, scene, meshes) {
       bump(name);
     } else if (base === "RimShader" || /RimShader/.test(name)) {
       if (!cache.has("RimShader")) {
+        const ex = (mat.metadata && mat.metadata.gltf && mat.metadata.gltf.extras) || {};
         cache.set("RimShader", makeRim(BABYLON, scene,
-          mat.albedoTexture || mat.diffuseTexture || null));
+          mat.albedoTexture || mat.diffuseTexture || null, ex.unityProps || null));
       }
       mesh.material = cache.get("RimShader");
       bump("RimShader");
@@ -300,7 +434,7 @@ export function applyDecals(BABYLON, meshes, names) {
     mat.zOffset = DECAL_ZOFFSET;
     const tex = mat.albedoTexture || mat.diffuseTexture || null;
     if (tex) tex.hasAlpha = true;
-    if ("useAlphaFromAlbedoTexture" in mat) mat.useAlphaFromAlbedoTexture = true;
+    alphaDeTexture(mat);
     if ("transparencyMode" in mat && BABYLON.Material) {
       mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
     }
@@ -314,8 +448,14 @@ export function applyDecals(BABYLON, meshes, names) {
   return n;
 }
 
-/** Uniformes dependant de la camera pour les materiaux maison. */
-export function updateGameShaders(BABYLON, scene, cameraPos, timeSec, sunDir = null) {
+/**
+ * Uniformes dependant de la camera pour les materiaux maison.
+ *
+ * @param soleil  `{ position, couleur, portee, ambiante }` : la ponctuelle
+ *                `SunLight` telle que le moteur la tient (couleur deja
+ *                multipliee par l'intensite), et l'ambiance courante
+ */
+export function updateGameShaders(BABYLON, scene, cameraPos, timeSec, soleil = null) {
   for (const m of scene.materials) {
     if (!m.setVector3) continue;
     if (["diamond", "vfog", "rim", "distortion"].includes(m.name)) {
@@ -323,7 +463,12 @@ export function updateGameShaders(BABYLON, scene, cameraPos, timeSec, sunDir = n
         new BABYLON.Vector3(cameraPos.x, cameraPos.y, cameraPos.z));
       if (m.name === "vfog") m.setFloat("scroll", timeSec);
       if (m.name === "distortion") m.setFloat("time", timeSec);
-      if (m.name === "rim" && sunDir) m.setVector3("sunDir", sunDir);
+      if (m.name === "rim" && soleil) {
+        m.setVector3("sunPos", soleil.position);
+        m.setVector3("sunColor", soleil.couleur);
+        m.setFloat("sunRange", soleil.portee);
+        m.setVector3("ambient", soleil.ambiante);
+      }
     }
   }
 }

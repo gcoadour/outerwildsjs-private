@@ -99,6 +99,11 @@ async function startEngine() {
   }
   $("gate").hidden = true;
   document.body.classList.add("playing");
+  // Le bandeau de mise au point : masque comme dans l'alpha, sauf demande.
+  if (new URLSearchParams(location.search).has("debug")) document.body.classList.add("debug");
+  addEventListener("keydown", (e) => {
+    if (e.code === "F3") { e.preventDefault(); document.body.classList.toggle("debug"); }
+  });
   await import("./main.js?v=126");
 }
 
@@ -217,5 +222,13 @@ export async function initGate() {
     $("gate-step-done").hidden = false;
     $("gate-summary").innerHTML =
       `<p>Une extraction est deja presente dans ce navigateur (${human(await vfs.size())}).</p>`;
+    // « Exit to Main Menu » recharge la page (`LoadLevel(0)`) : on repart
+    // alors droit sur l'ecran-titre, sans repasser par cet accueil.
+    let retour = false;
+    try {
+      retour = sessionStorage.getItem("outerwildsjs.titre") === "1";
+      sessionStorage.removeItem("outerwildsjs.titre");
+    } catch (e) { /* stockage indisponible */ }
+    if (retour) startEngine();
   }
 }

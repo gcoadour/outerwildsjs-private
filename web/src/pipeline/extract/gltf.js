@@ -12,7 +12,7 @@
 import { decodeMesh } from "../unity/mesh.js";
 import { decodeTexture2D, resizeRGBA } from "../unity/texture.js";
 import { avatarTOS, decodeClip } from "../unity/muscle.js";
-import { texturePtr } from "./materials.js";
+import { texturePtr, textureTransform } from "./materials.js";
 
 const ARRAY_BUFFER = 34962, ELEMENT_ARRAY_BUFFER = 34963;
 const FLOAT = 5126, UNSIGNED_INT = 5125, UNSIGNED_SHORT = 5123;
@@ -329,11 +329,31 @@ export function exportSubtree(ctx, rootGid, label, {
       colliderGids.add(v.m_GameObject.pathId);
     }
   }
+  // CE QUI SE VOIT. Un `MeshFilter` ne dessine rien : c'est le RENDERER qui
+  // dessine, et vingt-deux objets de `level0` n'en ont AUCUN. Le feu de camp
+  // porte ainsi une sphere `RadiationEmitter`, la guimauve une sphere
+  // `HeatDetector` — des volumes de jeu, que l'alpha ne montre pas et que le
+  // portage dessinait en blanc devant la camera au reveil (docs/132). Le
+  // maillage reste exporte : il peut servir de collider.
+  //
+  // Un renderer ETEINT, lui, n'est pas un volume : quarante-deux sont
+  // rallumes par des scripts (les paupieres des villageois, la lunette, les
+  // anneaux de nuages, les plans de LOD), et le moteur les bascule deja. Seule
+  // l'absence de renderer compte ici.
+  const rendus = new Set();
+  // Les renderers ETEINTS (`m_Enabled` a 0) : 42 dans `level0`. Les quatre
+  // anneaux porteurs des nuages de Timber Hearth en sont — rendus, ils
+  // voilaient le ciel de nuit d'un gris uni —, avec les paupieres des
+  // villageois, la vitre de la longue-vue, le rayon tracteur… Un script en
+  // rallume certains ; au depart, aucun ne se voit (docs/132).
+  const eteints = new Set();
   for (const type of ["MeshRenderer", "SkinnedMeshRenderer"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
       const v = ctx.readEngine(o);
       if (!v || !v.m_GameObject) continue;
       const gid = v.m_GameObject.pathId;
+      rendus.add(gid);
+      if (!v.m_Enabled) eteints.add(gid);
       if (v.m_Materials && v.m_Materials.length) matOf.set(gid, v.m_Materials[0]);
       if (type === "SkinnedMeshRenderer") {
         skinOf.set(gid, v);
@@ -453,7 +473,17 @@ export function exportSubtree(ctx, rootGid, label, {
     const shaderName = shaderObj ? (ctx.readEngine(shaderObj) || {}).m_Name || "" : "";
 
     const pbr = { baseColorFactor: factor, metallicFactor: 0, roughnessFactor: 0.85 };
-    if (base !== null) pbr.baseColorTexture = { index: base };
+    const transfo = (canal) => {
+      const t = textureTransform(mat, canal);
+      if (!t) return null;
+      g.usesTextureTransform = true;
+      return { KHR_texture_transform: t };
+    };
+    if (base !== null) {
+      pbr.baseColorTexture = { index: base };
+      const ext = transfo("_MainTex");
+      if (ext) pbr.baseColorTexture.extensions = ext;
+    }
     const entry = {
       name: mat.m_Name || "material",
       pbrMetallicRoughness: pbr,
@@ -462,7 +492,34 @@ export function exportSubtree(ctx, rootGid, label, {
       // equivalent (voir web/src/shaders/).
       extras: { unityShader: shaderName },
     };
-    if (normal !== null) entry.normalTexture = { index: normal };
+    // `Custom/SelfIlluminAlpha` ajoute `albedo x lightStrength` a l'eclairage :
+    // c'est son emission, et elle vaut 2 sur les nuages (docs/132).
+    const floats = (mat.m_SavedProperties && mat.m_SavedProperties.m_Floats) || [];
+    const ls = floats.find((f) => f.first && f.first.name === "lightStrength");
+    if (ls && typeof ls.second === "number") entry.extras.lightStrength = ls.second;
+    // `_TintColor` : la teinte des shaders de particules, que `_Color` ne dit
+    // pas. Celle de `TornadoClouds`, la couche externe de Giant's Deep, est un
+    // bleu-vert a 5 % : sans elle, la planete sortait blanche (docs/132).
+    const tint = colors.find((c) => c.first && c.first.name === "_TintColor" && c.second);
+    if (tint) {
+      entry.extras.tintColor = [tint.second.r, tint.second.g, tint.second.b, tint.second.a];
+    }
+    // Les shaders que le moteur REECRIT lisent leurs proprietes nommees : le
+    // liseré de Giant's Deep a ses couleurs et sa puissance, pas celles qu'un
+    // module aurait choisies (shaders/rim.js).
+    if (/Rim/.test(shaderName)) {
+      const couleurs = {}, nombres = {};
+      for (const c of colors) {
+        if (c.first && c.second) couleurs[c.first.name] = [c.second.r, c.second.g, c.second.b, c.second.a];
+      }
+      for (const f of floats) if (f.first && typeof f.second === "number") nombres[f.first.name] = f.second;
+      entry.extras.unityProps = { couleurs, nombres };
+    }
+    if (normal !== null) {
+      entry.normalTexture = { index: normal };
+      const ext = transfo("_BumpMap");
+      if (ext) entry.normalTexture.extensions = ext;
+    }
     if (entry.alphaMode === "MASK") entry.alphaCutoff = 0.5;
 
     g.materials.push(entry);
@@ -572,12 +629,31 @@ export function exportSubtree(ctx, rootGid, label, {
       if (mi !== null) {
         node.mesh = mi;
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);
+        // Le CALQUE : les lumieres du build le lisent (`m_CullingMask`). Le
+        // calque 15 s'appelle `IgnoreSun` et porte 766 renderers — le soleil
+        // ne les eclaire pas —, le 12 `UseSunImposter` (docs/132).
+        const couche = (ctx.gameObjects && ctx.gameObjects.get(gid) || {}).m_Layer || 0;
+        if (couche) node.extras = { ...(node.extras || {}), layer: couche };
+        if (!rendus.has(gid)) {
+          node.extras = { ...(node.extras || {}), hidden: true };
+          stats.hidden = (stats.hidden || 0) + 1;
+        } else if (eteints.has(gid)) {
+          node.extras = { ...(node.extras || {}), rendererOff: true };
+          stats.rendererOff = (stats.rendererOff || 0) + 1;
+        }
         // Ce que le build ne rend pas solide ne doit pas le devenir ici.
         if (!colliderGids.has(gid)) {
           node.extras = { ...(node.extras || {}), noCollide: true };
           stats.noCollide++;
         }
       }
+    }
+    // Un GameObject INACTIF ne se dessine pas, ni rien sous lui : le moteur
+    // eteint le noeud, et la hierarchie de Babylon fait le reste (docs/132).
+    const go = ctx.gameObjects ? ctx.gameObjects.get(gid) : null;
+    if (go && (go.m_IsActive === false || go.m_IsActive === 0)) {
+      node.extras = { ...(node.extras || {}), inactive: true };
+      stats.inactive = (stats.inactive || 0) + 1;
     }
     if (animOf.has(gid)) animatedRoots.push([tid, gid]);
     const kids = (childrenOf.get(tid) || [])
@@ -782,6 +858,7 @@ export function exportSubtree(ctx, rootGid, label, {
     samplers: [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }],
   };
   if (g.materials.length) { gltf.materials = g.materials; gltf.textures = g.textures; gltf.images = g.images; }
+  if (g.usesTextureTransform) gltf.extensionsUsed = ["KHR_texture_transform"];
   if (g.skins.length) gltf.skins = g.skins;
   if (g.animations.length) gltf.animations = g.animations;
 

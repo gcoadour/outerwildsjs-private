@@ -38,11 +38,41 @@ export async function loadSolarSystem() {
  * Donnees de gameplay : vaisseau, ressources, objets interactifs, textes.
  * Produites par tools/09_gameplay.py, non versionnees (contenu du jeu).
  */
+/**
+ * Les scripts que le build RALLUME en cours de partie (`GameObject.SetActive`,
+ * lu dans l'IL : `ShipDamageController`, `BrokenNode`, et `ShipComputer`, qui
+ * allume `_staticElementsRoot` en s'asseyant et `_updateElementsRoot` en
+ * entrant dans un secteur — les deux icones clignotantes de l'ordinateur de
+ * bord vivent dessous). Leurs instances inactives sont un etat de depart, pas
+ * une absence.
+ */
+export const RALLUMES = new Set(["ShipComponent", "RepairVolume", "BlinkingRenderer"]);
+
+/**
+ * Retire des composants places ceux dont le GameObject est inactif dans la
+ * scene : leur script ne tourne pas dans l'alpha. Un volume mortel, un volume
+ * d'oxygene, trois champs de force, deux emetteurs de signal et un lisible
+ * agissaient dans le portage (docs/132).
+ */
+export function actifsSeulement(gameplay, rallumes = RALLUMES) {
+  const placed = (gameplay && gameplay.placed) || {};
+  let retires = 0;
+  for (const [cls, liste] of Object.entries(placed)) {
+    if (rallumes.has(cls) || !Array.isArray(liste)) continue;
+    const garde = liste.filter((e) => e.active !== false);
+    retires += liste.length - garde.length;
+    placed[cls] = garde;
+  }
+  return retires;
+}
+
 export async function loadGameplay() {
   try {
     const res = await fetch("data/gameplay.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
-    return await res.json();
+    const gameplay = await res.json();
+    actifsSeulement(gameplay);
+    return gameplay;
   } catch (e) {
     console.warn("data/gameplay.json absent :", e.message);
     return { singletons: {}, placed: {} };

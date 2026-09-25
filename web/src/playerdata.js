@@ -60,6 +60,23 @@ export class PlayerData {
   }
 
   /** Efface tout : la seule chose que la boucle ne doit PAS faire. */
+  /**
+   * `PlayerData.CreateNewPlayerSave(skipIntro)`, appele par le menu-titre.
+   *
+   * Une sauvegarde NEUVE, en memoire : `SavePlayer` n'est appele que si l'on
+   * saute l'introduction, apres avoir accorde les cinq savoirs qu'elle aurait
+   * appris. Une nouvelle partie ordinaire n'ecrit donc rien tant que la boucle
+   * ne sauve pas elle-meme — quitter aussitot laisse l'ancienne sauvegarde.
+   */
+  nouvelleSauvegarde(skipIntro = false, flags = []) {
+    this.explored.clear();
+    this.loopCount = 0;
+    for (const f of FLAGS) this[f] = false;
+    if (!skipIntro) return;
+    for (const f of flags) this[f] = true;
+    this.save();
+  }
+
   wipe() {
     this.explored.clear();
     this.loopCount = 0;

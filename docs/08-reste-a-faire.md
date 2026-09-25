@@ -21,7 +21,7 @@ lisait**.
 > | `recensement.mjs` — ce que le build **installe** | 12 classes / 15 instances sans lecteur, et 6 / 21 extraites sans lecteur, sur 295 / 1 451 |
 > | `evenements.mjs` — ce que le build **annonce** | **79** des 124 nommés |
 > | `lois.mjs` — ce que le portage **appelle** | **0** — les vingt fermées par quatre issues ([`97`](97-assise-instantanee.md), [`98`](98-flashback.md), [`99`](99-lois-branchees.md)) |
-> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **176 des 176** méthodes nommées, sur 75 classes — le dénominateur est fermé ([`103`](103-refait.md) → [`121`](121-avis.md)) |
+> | `refait.mjs` — ce que le build **fait dans une classe qu'on lit** | **187 des 187** méthodes nommées, sur 80 classes — le dénominateur est fermé ([`103`](103-refait.md) → [`121`](121-avis.md), [`131`](131-ecran-titre.md)) |
 >
 > Les trois se sont chacun menti une fois, et chaque fois dans le sens qui
 > flatte : [`47`](47-effets-image.md), [`65`](65-onde.md), [`68`](68-lois.md),
@@ -57,8 +57,8 @@ portage.
 | lune quantique | 4 orbites hôtes, effondrement à la perte de vue |
 | trou noir / trou blanc | capture, éjection en cône, effondrement de croûte |
 | Dark Bramble | prédateurs sensibles au bruit, croissance des ronces |
-| secteurs | bascule géométrie/substitution **et téléchargement**, 3 corps sur 12 ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md)) |
-| poids au démarrage | 60,0 Mo pour la première image, contre 199,6 avant |
+| secteurs | **tout le système chargé derrière le titre** et visible de loin, comme `level0` ; « à portée » par secteur ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md), [`132`](132-comparaison-native.md)) |
+| poids au démarrage | 47 Mo de tampons pour les huit lots, chargés pendant que le titre tourne |
 | pilote auto et dégâts | 4 phases, seuils d'impact 15/30/300 |
 | carte du système | orbites, marqueurs, sélection de cible |
 | shaders du jeu | **203 affectations**, tous les shaders utilisés couverts |
@@ -71,7 +71,11 @@ portage.
 | brouillards | Dark Bramble et coque quantique, masquage et lumières |
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
 | minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |
-| réglages | 7 options, sauvegarde distincte de la partie |
+| réglages | 7 options, sauvegarde distincte de la partie ; « Exit to Main Menu » ramène au titre |
+| écran-titre | la scène de `mainData` : planète, feu, fumées, voyageurs, cinq lignes lues dans l'IL ([`131`](131-ecran-titre.md)) |
+| temps | l'image découpée comme Unity : pas maximal de 1 s, Havok au même pas ([`132`](132-comparaison-native.md)) |
+| ciel et lumière | voûte `Skybox` du build, étoiles à leur taille, `SunLight` ponctuelle de portée 20 000 sans ombres, liseré de Giant's Deep d'après son programme, renderers éteints respectés ([`132`](132-comparaison-native.md)) |
+| particules | `playOnAwake` respecté (53 sur 135 attendent un script), `_TintColor` appliquée, cinq déclencheurs du build portés ([`132`](132-comparaison-native.md)) |
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
@@ -210,7 +214,7 @@ portage.
 | état de mort du joueur | `PlayerState._isDead`, et c'est lui qui arrête les photos ([`98`](98-flashback.md)) |
 | passages de Dark Bramble | l'**éclair de brouillard** du build, monté à l'entrée, et non l'éclair bleu du téléporteur ([`99`](99-lois-branchees.md)) |
 | projecteur du satellite | la salle s'éteint en 2 s pendant qu'on regarde ([`99`](99-lois-branchees.md)) |
-| nouvelle partie | `CreateNewPlayerSave`, au menu des réglages faute de menu-titre ([`99`](99-lois-branchees.md)) |
+| nouvelle partie | `CreateNewPlayerSave`, depuis le **menu-titre** — New Expedition, Skip Intro — et encore aux réglages en partie ([`131`](131-ecran-titre.md)) |
 | jauges du casque | elles sont **sur la visière** : sans combinaison, il n'y en a pas ([`99`](99-lois-branchees.md)) |
 | orbites de la carte | cinq couleurs du build, centrées sur le **Soleil**, et l'ellipse de la comète ([`100`](100-carte.md)) |
 | **sauter ne décolle pas** | la poussée horizontale se coupe au sol et demande un geste pour revenir ([`101`](101-sac-dorsal.md)) |

@@ -149,6 +149,12 @@ export class Sectors {
     this.entryFor = entryFor;
     this.active = new Set();
     this.current = null;
+    // LA VUE LOINTAINE. L'alpha ne diffuse rien en flux : toute la geometrie
+    // du systeme est dans `level0`, et Giant's Deep se voit pour de vrai depuis
+    // Timber Hearth, sa lune et son halo compris. Quand ce drapeau est leve,
+    // un lot charge reste affiche hors de portee ; `active` garde son sens —
+    // a portee — et c'est lui que le reste du moteur consulte (docs/132).
+    this.lointain = false;
   }
 
   /** Secteur dont le centre est le plus proche d'un corps donne. */
@@ -245,7 +251,7 @@ export class Sectors {
     for (const [file, on] of veut) {
       const entry = lots.get(file);
       if (!entry) continue;
-      if (entry.container.setEnabled) entry.container.setEnabled(on);
+      if (entry.container.setEnabled) entry.container.setEnabled(on || this.lointain);
       this.active[on ? "add" : "delete"](file);
     }
     // `actifs` compte les DEMANDEURS servis, pas les fichiers : c'est ce que
@@ -274,17 +280,31 @@ export class Sectors {
  * Un secteur a 0 n'eclaire donc rien du tout, ou qu'on soit : c'est ce qu'on
  * sent en arrivant sur la comete, dont le ciel n'est eclaire que par l'etoile.
  *
- * `base` reste la part du portage : le build rend du NOIR hors de portee, et
- * une page entierement noire n'est pas jouable sans les phares du jeu final.
- * C'est un repli assume, pas une mesure.
+ * La MARCHE rend 1 (la couleur du secteur) ou 0 (le noir) : l'amplitude
+ * est dans la couleur, `ambientLight` (plus bas). Le portage gardait la sienne
+ * — 0,35 dans le secteur, 0,1 au-dehors —, trois fois plus claire que le build
+ * et jamais noire : le reveil de Timber Hearth, de nuit, y etait eclaire comme
+ * un soir d'ete. Cote a cote avec l'alpha, l'ecart sautait aux yeux
+ * (docs/132).
  */
-export function ambientIntensity(distance, range, kind = 1, base = 0.1, full = 0.35) {
+export function ambientIntensity(distance, range, kind = 1, base = 0, full = 1) {
   // `_ambientLight = 0` rend `Color.black` : le secteur n'eclaire rien, quelle
   // que soit sa portee. Dark Bramble a 1 200 de portee ET la valeur 0 — une
   // grande portee pour une couleur noire, ce qu'aucune lecture du seul
   // `_ambientLightRange` ne pouvait dire.
   if (!kind) return base;
   return distance < range ? full : base;
+}
+
+/**
+ * La lumiere ambiante que Babylon doit poser : la couleur du secteur, doublee.
+ *
+ * Unity 4 double l'ambiance dans ses shaders (`UNITY_LIGHTMODEL_AMBIENT` vaut
+ * `glstate.lightmodel.ambient * 2`), comme il double chaque lumiere dans les
+ * shaders « legacy » (lights.js, `attenuationUnity`).
+ */
+export function ambientLight(kind) {
+  return ambientColor(kind).map((x) => x * 2);
 }
 
 /**
@@ -333,16 +353,3 @@ export function hsvToRgb(h, s, v) {
   }
 }
 
-/**
- * La teinte normalisee : la couleur du secteur, ramenee a sa composante la plus
- * forte.
- *
- * Le moteur porte une INTENSITE (`ambientIntensity`) et une lumiere
- * hemispherique ; multiplier l'une par l'autre demande une teinte de norme 1,
- * sans quoi le secteur bleu serait seize fois plus sombre que la valeur choisie.
- */
-export function ambientTint(kind) {
-  const c = ambientColor(kind);
-  const m = Math.max(...c);
-  return m > 0 ? c.map((x) => x / m) : [1, 1, 1];
-}

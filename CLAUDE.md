@@ -58,6 +58,12 @@ python3 tools/15_verify.py --profil work/profil [--lourd]   # sans toucher au pi
 # controle NAVIGATEUR qui tourne sans les 289 Mo, et il attrape ce que
 # check-modules.mjs ne peut pas voir — une erreur d'execution dans boot().
 python3 tools/15_verify.py --repli
+
+# Les deux versions cote a cote (docs/132) : l'alpha native sous Xvfb (ELF
+# 32 bits, bibliotheques i386 requises), le portage dans Chromium.
+scripts/alpha.sh start | shot <png> | key <touche> | stop
+node scripts/playwright-scenarios.mjs        # 20 scenarios, titre traverse
+node scripts/pw-titre.mjs work/t.png 1280 720 20000 4   # titre, horloge calee a 4 s
 ```
 
 `tests/01`…`08` lisent le build ; `tests/09-jeu.mjs` est de la logique pure et

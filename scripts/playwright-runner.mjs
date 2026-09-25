@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
+import { traverserTitre } from "./pw-commun.mjs";
 
 const WEB_DIR = path.resolve("web");
 const ZIP_PATH = path.resolve("work/downloads/OuterWilds_Alpha_1_2_Linux.zip");
@@ -51,7 +52,10 @@ console.log("Static server running on http://127.0.0.1:8089");
 try {
   const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // Un conteneur fournit souvent un Chromium deja installe dont la version
+    // ne suit pas celle du paquet playwright : on le prend s'il est la.
+    executablePath: process.env.PW_CHROMIUM || (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined),
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
   });
 
   const page = await context.newPage();
@@ -99,6 +103,7 @@ try {
   // Click play button
   console.log("Clicking play button...");
   await page.click("#gate-play");
+  await traverserTitre(page);
 
   // Wait for game to initialize (window.__ready === true)
   console.log("Waiting for window.__ready...");
