@@ -101,6 +101,13 @@ export function extractLighting(ctx) {
       // dans les lightmaps n'a rien a eclairer a l'execution.
       lightmapping: v.m_Lightmapping ?? null,
       shadows: v.m_Shadows ? (v.m_Shadows.m_Type ?? 0) : 0,
+      // La FORCE de l'ombre, que le portage ne lisait pas : a 1 par defaut,
+      // une ombre de Babylon est noire, et le sol du titre sortait trois fois
+      // trop sombre (docs/132). Le biais et la resolution suivent.
+      ombre: v.m_Shadows && (v.m_Shadows.m_Type ?? 0) > 0
+        ? { force: round(v.m_Shadows.m_Strength ?? 1, 4), biais: round(v.m_Shadows.m_Bias ?? 0, 4),
+            resolution: v.m_Shadows.m_Resolution ?? -1, douceur: round(v.m_Shadows.m_Softness ?? 0, 4) }
+        : null,
       // Ce qui l'anime, s'il y a lieu : pulsation, vacillement, jour et nuit.
       behaviours: behaviours.get(gid) || null,
     });

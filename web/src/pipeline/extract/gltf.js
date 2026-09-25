@@ -347,6 +347,7 @@ export function exportSubtree(ctx, rootGid, label, {
   // villageois, la vitre de la longue-vue, le rayon tracteur… Un script en
   // rallume certains ; au depart, aucun ne se voit (docs/132).
   const eteints = new Set();
+  const sansOmbrePortee = new Set(), sansOmbreRecue = new Set();
   for (const type of ["MeshRenderer", "SkinnedMeshRenderer"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
       const v = ctx.readEngine(o);
@@ -354,6 +355,11 @@ export function exportSubtree(ctx, rootGid, label, {
       const gid = v.m_GameObject.pathId;
       rendus.add(gid);
       if (!v.m_Enabled) eteints.add(gid);
+      // Porter et recevoir l'ombre : deux drapeaux par renderer, que le
+      // portage ignorait en faisant de TOUT maillage un porteur et un
+      // receveur. Au titre, le sol sortait trois fois trop sombre (docs/132).
+      if (!v.m_CastShadows) sansOmbrePortee.add(gid);
+      if (!v.m_ReceiveShadows) sansOmbreRecue.add(gid);
       if (v.m_Materials && v.m_Materials.length) matOf.set(gid, v.m_Materials[0]);
       if (type === "SkinnedMeshRenderer") {
         skinOf.set(gid, v);
@@ -640,6 +646,14 @@ export function exportSubtree(ctx, rootGid, label, {
         } else if (eteints.has(gid)) {
           node.extras = { ...(node.extras || {}), rendererOff: true };
           stats.rendererOff = (stats.rendererOff || 0) + 1;
+        }
+        if (sansOmbrePortee.has(gid)) {
+          node.extras = { ...(node.extras || {}), noCastShadows: true };
+          stats.noCastShadows = (stats.noCastShadows || 0) + 1;
+        }
+        if (sansOmbreRecue.has(gid)) {
+          node.extras = { ...(node.extras || {}), noReceiveShadows: true };
+          stats.noReceiveShadows = (stats.noReceiveShadows || 0) + 1;
         }
         // Ce que le build ne rend pas solide ne doit pas le devenir ici.
         if (!colliderGids.has(gid)) {

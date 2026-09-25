@@ -72,7 +72,7 @@ portage.
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
 | minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |
 | réglages | 7 options comme l'alpha, pilotées par `Move Z`/`Move X` (W/S, A/D), sauvegarde distincte de la partie ; « Exit to Main Menu » ramène au titre |
-| écran-titre | la scène de `mainData` : planète, feu, fumées, voyageurs, cinq lignes lues dans l'IL ([`131`](131-ecran-titre.md)) |
+| écran-titre | la scène de `mainData` : planète, feu, fumées, voyageurs, cinq lignes lues dans l'IL ; ombres ponctuelles au test du build (biais × 0,97, porter et recevoir par renderer) ([`131`](131-ecran-titre.md), [`132`](132-comparaison-native.md)) |
 | temps | l'image découpée comme Unity : pas maximal de 1 s, Havok au même pas ([`132`](132-comparaison-native.md)) |
 | ciel et lumière | voûte `Skybox` du build, étoiles à leur taille, `SunLight` ponctuelle de portée 20 000 sans ombres, liseré de Giant's Deep d'après son programme, renderers éteints respectés ([`132`](132-comparaison-native.md)) |
 | particules | `playOnAwake` respecté (53 sur 135 attendent un script), `_TintColor` appliquée, cinq déclencheurs du build portés ([`132`](132-comparaison-native.md)) |

@@ -113,6 +113,17 @@ export function rendererOff(mesh) {
 }
 
 /**
+ * Ce maillage porte-t-il, recoit-il l'ombre (`m_CastShadows`,
+ * `m_ReceiveShadows`) ? Un maillage sans extras fait les deux, comme un
+ * renderer d'Unity par defaut.
+ */
+export function ombresDuRenderer(mesh) {
+  const m = mesh && mesh.metadata;
+  const e = (m && m.gltf && m.gltf.extras) || {};
+  return { porte: !e.noCastShadows, recoit: !e.noReceiveShadows };
+}
+
+/**
  * Cache ce que le build pose avec un renderer eteint.
  *
  * Distinct de `hideUnrendered` : un renderer eteint se RALLUME (`Renderer

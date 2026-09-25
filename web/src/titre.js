@@ -15,8 +15,8 @@
 // l'ecran viennent ensuite (`TitleScreen`).
 
 import { MENU } from "./settings.js";
-import { flicker, patchAttenuationUnity, falloffUnity } from "./lights.js";
-import { hideUnrendered, disableInactive } from "./physics.js";
+import { flicker, patchAttenuationUnity, patchOmbresUnity, ombreUnity, falloffUnity } from "./lights.js";
+import { hideUnrendered, disableInactive, ombresDuRenderer } from "./physics.js";
 import { creerVoute } from "./etoiles.js";
 
 /**
@@ -252,6 +252,7 @@ export class TitleScreen {
   construireScene() {
     const B = this.B, d = this.data;
     patchAttenuationUnity(B);
+    patchOmbresUnity(B);
     const scene = new B.Scene(this.engine);
     const bg = (d.camera && d.camera.background) || [0, 0, 0];
     scene.clearColor = new B.Color4(bg[0], bg[1], bg[2], 1);
@@ -339,13 +340,14 @@ export class TitleScreen {
           for (const x of this.lumieres) {
             if (!(x.l.shadows > 0)) continue;
             try {
-              const g = new B.ShadowGenerator(512, x.node);
-              g.usePoissonSampling = true;
-              g.bias = 0.0005;
+              const g = ombreUnity(B, new B.ShadowGenerator(512, x.node), x.node, x.l.ombre);
+              // Chaque renderer dit s'il porte et s'il recoit l'ombre : les
+              // branches des pins n'en recoivent pas (extract/gltf.js).
               for (const m of res.meshes) {
                 if (m.getTotalVertices && m.getTotalVertices() > 0) {
-                  g.addShadowCaster(m, false);
-                  m.receiveShadows = true;
+                  const o = ombresDuRenderer(m);
+                  if (o.porte) g.addShadowCaster(m, false);
+                  m.receiveShadows = o.recoit;
                 }
               }
               x.ombres = g;

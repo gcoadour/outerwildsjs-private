@@ -86,6 +86,61 @@ export function patchAttenuationUnity(BABYLON) {
 }
 
 /**
+ * Le test d'ombre des lumieres PONCTUELLES d'Unity 4, a la place de celui de
+ * Babylon.
+ *
+ * Lu dans le programme de fragment `Internal-PrePassLighting` (variante
+ * `POINT SHADOWS_CUBE`) de `unity default resources` : la distance stockee
+ * dans la cube map, divisee par la portee (`_LightPositionRange.w`), est
+ * comparee a `0.97 x d / portee`. Le biais est MULTIPLICATIF — trois pour cent
+ * de la distance —, la ou celui de Babylon s'ajoute a la profondeur stockee.
+ * Avec un biais additif de 0,0005 et quatre echantillons de Poisson, le sol de
+ * l'ecran-titre s'ombrait lui-meme et sortait trois fois trop sombre
+ * (docs/132). La variante `SHADOWS_SOFT` prend quatre echantillons decales de
+ * 1/128 d'unite : a plusieurs metres de la lumiere, c'est le meme texel ; un
+ * seul echantillon suffit donc.
+ *
+ * La comparaison est invariante d'echelle tant que la profondeur de Babylon
+ * vaut `d / maxZ` : il faut `shadowMinZ` a 0 et un biais nul (`ombreUnity`).
+ */
+export const BIAIS_OMBRE_PONCTUELLE = 0.97;
+
+export function patchOmbresUnity(BABYLON) {
+  const store = BABYLON && BABYLON.Effect && BABYLON.Effect.IncludesShadersStore;
+  if (!store || typeof store.shadowsFragmentFunctions !== "string") return false;
+  const k = "shadowsFragmentFunctions";
+  const debut = store[k].indexOf("float computeShadowCube(");
+  if (debut < 0) return false;
+  const avant = "return depth>shadow ? darkness : 1.0;";
+  const apres = `return ${BIAIS_OMBRE_PONCTUELLE.toFixed(2)}*depth>shadow ? darkness : 1.0;`;
+  const i = store[k].indexOf(avant, debut);
+  if (i >= 0 && store[k].indexOf(apres, debut) < 0) {
+    store[k] = store[k].slice(0, i) + apres + store[k].slice(i + avant.length);
+  }
+  return store[k].indexOf(apres, debut) >= 0;
+}
+
+/**
+ * Regle un generateur d'ombres de Babylon comme une ombre ponctuelle d'Unity 4.
+ *
+ * @param ombre  `{ force }` lu dans `m_Shadows` (extract/lighting.js)
+ */
+export function ombreUnity(BABYLON, generateur, lumiere, ombre = null) {
+  const force = ombre && typeof ombre.force === "number" ? ombre.force : 1;
+  generateur.usePoissonSampling = false;
+  if (BABYLON.ShadowGenerator && "FILTER_NONE" in BABYLON.ShadowGenerator) {
+    generateur.filter = BABYLON.ShadowGenerator.FILTER_NONE;
+  }
+  generateur.bias = 0;
+  generateur.normalBias = 0;
+  // `_LightShadowData.x` vaut 1 - force : l'ombre ne tombe jamais sous lui.
+  generateur.setDarkness(1 - force);
+  lumiere.shadowMinZ = 0;
+  if (lumiere.range) lumiere.shadowMaxZ = lumiere.range;
+  return generateur;
+}
+
+/**
  * Le masque de calques d'une lumiere Unity, pour Babylon.
  *
  * Un maillage exporte porte `layerMask = 1 << calque` (`applyLayers`) ; une

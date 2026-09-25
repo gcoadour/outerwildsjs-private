@@ -142,7 +142,8 @@ import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
 import { paginate } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep, noCollide, rendererOff, hideDisabledRenderers } from "../web/src/physics.js";
+import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer } from "../web/src/physics.js";
+import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE } from "../web/src/lights.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
@@ -8068,6 +8069,40 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("on cache le premier seul", hideDisabledRenderers([eteint, allume]), 1);
   check("... et le LOD ne le rallume pas", eteint.__lodPinned, true);
   check("l'autre reste visible", allume.isVisible, true);
+}
+
+// L'ombre ponctuelle d'Unity 4 : biais multiplicatif de 0,97, lu dans
+// `Internal-PrePassLighting` (docs/132).
+{
+  check("le biais du build", BIAIS_OMBRE_PONCTUELLE, 0.97);
+  const plan = "float computeShadow(vec4 v){return depth>shadow ? darkness : 1.0;}";
+  const cube = "float computeShadowCube(vec3 w){float depth=1.;return depth>shadow ? darkness : 1.0;}";
+  const B = { Effect: { IncludesShadersStore: { shadowsFragmentFunctions: plan + cube } } };
+  check("le test cubique se patche", patchOmbresUnity(B), true);
+  const f = B.Effect.IncludesShadersStore.shadowsFragmentFunctions;
+  check("... le test plan reste celui de Babylon", f.startsWith(plan), true);
+  check("... le cubique compare 0,97 d", f.includes("return 0.97*depth>shadow"), true);
+  patchOmbresUnity(B);
+  check("patcher deux fois ne double rien",
+        B.Effect.IncludesShadersStore.shadowsFragmentFunctions, f);
+  check("sans Babylon, rien", patchOmbresUnity(null), false);
+
+  let sombre = null;
+  const g = { usePoissonSampling: true, bias: 0.0005, normalBias: 1,
+              setDarkness(d) { sombre = d; } };
+  const l = { range: 170, shadowMinZ: 1 };
+  ombreUnity({ ShadowGenerator: { FILTER_NONE: 0 } }, g, l, { force: 0.7 });
+  check("un seul echantillon", g.usePoissonSampling === false && g.filter === 0, true);
+  check("aucun biais additif", g.bias + g.normalBias, 0);
+  check("l'obscurite vaut 1 - force", Math.round(sombre * 100) / 100, 0.3);
+  check("la profondeur part de la lumiere", l.shadowMinZ, 0);
+  check("et finit a sa portee", l.shadowMaxZ, 170);
+
+  const branche = { metadata: { gltf: { extras: { noReceiveShadows: true } } } };
+  check("une branche porte l'ombre", ombresDuRenderer(branche).porte, true);
+  check("mais ne la recoit pas", ombresDuRenderer(branche).recoit, false);
+  check("un maillage nu fait les deux",
+        JSON.stringify(ombresDuRenderer({})), '{"porte":true,"recoit":true}');
 }
 
 // On parle a qui l'on regarde : rayon de dix unites, puis `_interactRange`

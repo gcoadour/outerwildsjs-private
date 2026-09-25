@@ -376,11 +376,52 @@ presque neutre d'une dizaine de niveaux. Ce n'est pas le glow (le portage a
 le réveil du build, glow blanc à 3 qui retombe, puis `Awake` l'éteint), et
 doubler l'ambiance du secteur n'en rend que le tiers, sans la bonne teinte.
 Le passage du forward au Deferred Lighting d'Unity 4 (tampon de lumière,
-encodage, ambiance ajoutée en passe finale) est la piste ; elle ne se tranche
-pas sans le shader interne du moteur. Même écart sur l'écran-titre, où la
-planète sort plus sombre qu'avec les matériaux PBR d'avant — 6,9 de moyenne
-sur la zone du feu, 13,6 en PBR, 11,2 dans l'alpha, à un instant de rotation
-qui n'est pas exactement le même.
+encodage, ambiance ajoutée en passe finale) est la piste. Le shader interne
+n'est pas hors d'atteinte : `Resources/unity default resources` garde
+`Internal-PrePassLighting` en assembleur ARB lisible, et c'est lui qui a
+tranché l'écart de l'écran-titre (section suivante).
+
+## Les ombres de l'écran-titre
+
+L'écran-titre du portage sortait plus sombre que celui de l'alpha. Calé sur
+le même instant de rotation (`pw-titre.mjs … 18`, meilleure corrélation
+géométrique, r = 0,935), l'image entière n'est en fait qu'à 10 % de l'alpha
+(9,4 / 12,5 / 5,9 contre 8,5 / 11,3 / 5,2) : l'écart est tout entier sur le
+**sol**, deux fois plus sombre (4,0 / 3,5 / 1,9 contre 2,1 / 1,6 / 0,7, sur
+(420, 150)–(640, 340)). Sans ombres, le sol passe à 6,1 / 4,3 / 1,7 : trop
+clair. C'étaient donc les ombres.
+
+Les deux ponctuelles du titre en portent (`m_Shadows.m_Type` 2, force 1,
+biais 0,05) ; la caméra est en Deferred Lighting, seul chemin d'Unity 4 où
+une ponctuelle projette. Le programme de fragment de la variante
+`POINT SHADOWS_CUBE` dit la règle :
+
+```
+MUL R2.w, R2, c[7]                 # d × _LightPositionRange.w (1 / portée)
+MAD R3.x, -R2.w, c[14], R3         # stocké − 0,97 × d / portée
+CMP R2.w, R3.x, c[8].x, R2         # < 0 : _LightShadowData.x (1 − force)
+```
+
+Le biais est **multiplicatif** — trois pour cent de la distance —, là où
+celui de Babylon s'ajoute à la profondeur stockée ; la variante
+`SHADOWS_SOFT` ne fait que quatre échantillons décalés de 1/128 d'unité, le
+même texel à plusieurs mètres. Le portage prenait un biais additif de 0,0005
+et quatre échantillons de Poisson : le sol s'ombrait lui-même.
+
+`patchOmbresUnity` (`lights.js`) remplace le test cubique de Babylon par
+`0.97 × depth > shadow`, et `ombreUnity` règle le générateur en conséquence :
+un échantillon, aucun biais additif, profondeur de 0 à la portée, obscurité
+`1 − force`. L'extraction lit maintenant `m_Shadows` entier (`ombre`) et les
+drapeaux `m_CastShadows` / `m_ReceiveShadows` de chaque renderer : au titre,
+les dix-huit maillages `branches` des pins ne reçoivent pas d'ombre.
+
+Le sol remonte à 2,7 / 2,1 / 0,9, et surtout l'ombre prend la forme de celle
+de l'alpha : les troncs et la barrière y découpent des bandes, au lieu d'un
+voile uniforme. L'écart restant vient du cadrage (l'alpha, à cet instant,
+montre le pin de gauche plus grand) et du pin éclairé en bleu par la lune,
+plus clair dans l'alpha. Invariants : `tests/05-extract.mjs` (les deux
+lumières, force 1 ; `CoreLight` à 0,7 ; dix-huit `branches`),
+`tests/09-jeu.mjs` (le patch ne touche que le test cubique, le générateur).
 
 ## La marche, côte à côte
 
