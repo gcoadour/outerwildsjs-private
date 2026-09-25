@@ -88,9 +88,12 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
 import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
+import { crosshairPixels, CROSSHAIR } from "../web/src/hud.js";
+import { actifsSeulement } from "../web/src/config.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
-         placeGuiText, placeGuiTexture, guiTint, attenuationUnity } from "../web/src/titre.js";
-import { prewarmCycles, sizeGradients } from "../web/src/particles.js";
+         placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
+import { attenuationUnity, layerMaskFor, applyLayers, pickLights as choisirLumieres } from "../web/src/lights.js";
+import { prewarmCycles, sizeGradients, emitterRotation } from "../web/src/particles.js";
 import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
@@ -147,8 +150,8 @@ import { Anglerfish, fromToAngular, fishStep, FISH, shipOnlyMusicState } from ".
 import { DebrisField, DEBRIS_RADIUS, WHITE_HOLE, exitTrajectory,
          leashBrake, growSteps, BlackHole } from "../web/src/blackhole.js";
 import { MeshLOD, Evictor, LOD_RATIO } from "../web/src/lod.js";
-import { ambientIntensity, majorSectors, activeMajorSector, sectorThrustLimit,
-         ambientColor, ambientTint, hsvToRgb, Sectors,
+import { ambientIntensity, ambientLight, majorSectors, activeMajorSector, sectorThrustLimit,
+         ambientColor, hsvToRgb, Sectors,
          sectorMap } from "../web/src/sectors.js";
 import { entrywayTriggers, sunlessZones, isOutsideEntryway, Entryway,
          EffectZones, ZonePresence, zonesAround } from "../web/src/entryways.js";
@@ -1101,19 +1104,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // `MajorSector.GetAmbientLight` est une MARCHE : la couleur pleine sous
   // `_ambientLightRange`, le noir au-dela. Le portage en avait fait une pente,
   // et le test gardait la pente — une conclusion, pas une mesure.
-  check("secteur sans ambiance", round(ambientIntensity(0, 0), 3), 0.1);
-  check("centre d'un secteur eclaire", round(ambientIntensity(0, 750), 3), 0.35);
+  check("secteur sans ambiance", round(ambientIntensity(0, 0), 3), 0);
+  check("centre d'un secteur eclaire", round(ambientIntensity(0, 750), 3), 1);
   check("a mi-portee, la meme chose qu'au centre",
-        round(ambientIntensity(375, 750), 3), 0.35);
+        round(ambientIntensity(375, 750), 3), 1);
   check("juste en deca de la portee, encore pleine",
-        round(ambientIntensity(749.9, 750), 3), 0.35);
+        round(ambientIntensity(749.9, 750), 3), 1);
   check("a la portee exacte, la marche tombe",
-        round(ambientIntensity(750, 750), 3), 0.1);
-  check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0.1);
+        round(ambientIntensity(750, 750), 3), 0);
+  check("au-dela de la portee", round(ambientIntensity(2000, 750), 3), 0);
   // `_ambientLight = 0` rend Color.black : la portee ne rattrape rien. Dark
   // Bramble a 1 200 de portee et la valeur 0.
   check("un secteur noir n'eclaire pas, meme a portee",
-        round(ambientIntensity(0, 1200, 0), 3), 0.1);
+        round(ambientIntensity(0, 1200, 0), 3), 0);
 
   // La TEINTE : une enumeration a trois valeurs, pas un nombre.
   check("le noir est noir", ambientColor(0).join(","), "0,0,0");
@@ -1123,9 +1126,6 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         ambientColor(2).map((x) => round(x, 4)).join(","), "0.045,0.0588,0.0484");
   check("les deux teintes ont la meme valeur",
         Math.max(...ambientColor(1)) === Math.max(...ambientColor(2)), true);
-  check("la teinte normalisee vaut un sur sa composante forte",
-        Math.max(...ambientTint(1)), 1);
-  check("et sans couleur, elle est blanche", ambientTint(0).join(","), "1,1,1");
   // `ColorHSV.ToColorRGB` : saturation nulle, du gris.
   check("saturation nulle : du gris", hsvToRgb(200, 0, 0.5).join(","), "0.5,0.5,0.5");
   check("rouge pur", hsvToRgb(0, 1, 1).join(","), "1,0,0");
@@ -7956,5 +7956,73 @@ check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
   check("plein en cinq secondes", c.update(10, false), 1);
   check("et retombe en cinq", (c.update(SUIT_AMBIENCE_FADE, true)), 0);
 }
+
+// Le reticule de `DebugHUD` : une croix d'un pixel, treize de cote.
+{
+  const px = crosshairPixels(CROSSHAIR.width, CROSSHAIR.height, CROSSHAIR.thickness);
+  check("vingt-cinq pixels allumes (13 + 13 - 1)", px.filter(Boolean).length, 25);
+  check("le centre est allume", px[6 * 13 + 6], true);
+  check("un coin ne l'est pas", px[0], false);
+}
+
+// Les composants d'un GameObject inactif ne tournent pas, sauf ceux que le
+// build rallume (`SetActive`).
+{
+  const gp = { placed: {
+    HazardVolume: [{ name: "a" }, { name: "b", active: false }],
+    ShipComponent: [{ name: "c", active: false }],
+  } };
+  check("un composant inactif est retire", actifsSeulement(gp), 1);
+  check("l'actif reste", gp.placed.HazardVolume.map((e) => e.name).join(), "a");
+  check("une piece de vaisseau inactive reste : on la rallume",
+        gp.placed.ShipComponent.length, 1);
+}
+
+// Les calques : un maillage exporte porte le bit de son calque Unity, une
+// lumiere le masque qu'elle eclaire (docs/132).
+{
+  check("un masque plein ne filtre rien", layerMaskFor(0xFFFFFFFF), 0);
+  const soleil = layerMaskFor(0xFF7F6FFF);
+  const maillage = (md) => ({ metadata: md, getTotalVertices: () => 3 });
+  const m15 = maillage({ gltf: { extras: { layer: 15 } } });
+  const m0 = maillage(null);
+  const autre = { layerMask: 0x0FFFFFFF };
+  check("deux maillages exportes recoivent leur calque", applyLayers([m15, m0, autre]), 2);
+  check("le soleil n'eclaire pas IgnoreSun", (m15.layerMask & soleil) === 0, true);
+  check("il eclaire le calque 0", (m0.layerMask & soleil) !== 0, true);
+  check("un noeud sans geometrie garde son masque", autre.layerMask, 0x0FFFFFFF);
+  const surface = layerMaskFor(0xFF7F6FFE);
+  check("les surfacelighter n'eclairent pas le calque 0", (m0.layerMask & surface) === 0, true);
+}
+
+// Une lumiere posee sur une planete ORBITE avec elle (docs/132) : au repos,
+// le feu est a l'origine ; la planete a avance de 500 unites, le joueur aussi.
+{
+  const feu = { name: "Light", type: "point", position: [0, 0, 0], range: 30, intensity: 1, body: "TH" };
+  const joueur = [500, 0, 2];
+  check("sans decalage, le feu est oublie", choisirLumieres([feu], joueur).length, 0);
+  check("avec le deplacement du corps, il est retenu",
+        choisirLumieres([feu], joueur, 8, 1.25, (l) => [l.position[0] + 500, 0, 0]).length, 1);
+}
+
+// L'emetteur oriente : le +Y de Babylon porte sur le +Z du systeme Unity.
+{
+  const tourne = (q, v) => {
+    const [x, y, z, w] = q;
+    const ix = w * v[0] + y * v[2] - z * v[1], iy = w * v[1] + z * v[0] - x * v[2];
+    const iz = w * v[2] + x * v[1] - y * v[0], iw = -x * v[0] - y * v[1] - z * v[2];
+    return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z,
+            iz * w + iw * -z + ix * -y - iy * -x].map((a) => Math.round(a * 1000) / 1000 + 0);
+  };
+  check("sans rotation, l'emetteur vise le +Z", tourne(emitterRotation([0, 0, 0, 1]), [0, 1, 0]).join(), "0,0,1");
+  // La flamme du feu de camp : -90 degres sur X, son +Z est le +Y du monde.
+  const flamme = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+  check("la flamme du feu de camp monte", tourne(emitterRotation(flamme), [0, 1, 0]).join(), "0,1,0");
+}
+
+// L'ambiance du build, doublee comme dans les shaders d'Unity 4 (docs/132).
+check("Timber Hearth : un bleu de nuit a 0,12",
+      ambientLight(1).map((x) => x.toFixed(3)).join(), "0.090,0.090,0.118");
+check("la comete : le noir", ambientLight(0).join(), "0,0,0");
 
 report();

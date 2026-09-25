@@ -15,7 +15,8 @@
 // l'ecran viennent ensuite (`TitleScreen`).
 
 import { MENU } from "./settings.js";
-import { flicker } from "./lights.js";
+import { flicker, patchAttenuationUnity, falloffUnity } from "./lights.js";
+import { hideUnrendered, disableInactive } from "./physics.js";
 
 /**
  * `TitleScreenMenu.ToggleOption(0)`, option par option.
@@ -199,40 +200,6 @@ export function guiTint(c) {
   return c.slice(0, 3).map((v) => Math.min(1, Math.max(0, v * 2)));
 }
 
-/**
- * L'attenuation d'une lumiere ponctuelle dans Unity 4, rendu direct.
- *
- * `_LightTextureB0` est une table de `1 / (1 + 25 x^2)`, x etant la distance
- * rapportee a la portee, et rien au-dela de la portee. Les shaders « legacy »
- * du build (Diffuse, Bumped Diffuse) multiplient ensuite par DEUX :
- * `Albedo * _LightColor0 * (NdotL * atten * 2)`. D'ou le feu de camp qui
- * dore toute la planete du titre, la ou une decroissance lineaire le laissait
- * brun sombre, et la lune qui l'eclaire moins qu'on ne croirait.
- */
-// @mesure
-export function attenuationUnity(distance, range) {
-  if (!(range > 0)) return 0;
-  const x2 = (distance * distance) / (range * range);
-  return x2 < 1 ? 2 / (1 + 25 * x2) : 0;
-}
-
-/**
- * Remplace, dans les shaders PBR de Babylon, l'attenuation « standard » par
- * celle d'Unity 4. Seuls les materiaux qui renoncent a l'attenuation physique
- * (`usePhysicalLightFalloff = false`) la lisent : ceux de l'ecran-titre.
- */
-export function patchAttenuationUnity(BABYLON) {
-  const store = BABYLON && BABYLON.Effect && BABYLON.Effect.IncludesShadersStore;
-  const k = "pbrDirectLightingFalloffFunctions";
-  if (!store || typeof store[k] !== "string") return false;
-  const avant = "{return max(0.,1.0-length(lightOffset)/range);}";
-  const apres = "{float x2=dot(lightOffset,lightOffset)/(range*range);" +
-                "return x2<1.0?2.0/(1.0+25.0*x2):0.0;}";
-  if (!store[k].includes(avant)) return store[k].includes(apres);
-  store[k] = store[k].replace(avant, apres);
-  return true;
-}
-
 export async function loadTitre(fetcher = fetch) {
   try {
     const r = await fetcher("data/titre/titre.json", { cache: "no-store" });
@@ -351,11 +318,14 @@ export class TitleScreen {
   }
 
   /** La geometrie : charge a part, parce que le menu doit repondre avant elle. */
-  async chargerGeometrie(ParticleField, applyGameShaders = null) {
+  async chargerGeometrie(ParticleField, applyGameShaders = null, toLegacyMaterials = null) {
     const B = this.B, d = this.data;
     if (d.gltf && B.SceneLoader) {
       try {
         const res = await B.SceneLoader.ImportMeshAsync("", "data/titre/", d.gltf, this.scene);
+        hideUnrendered(res.meshes);
+        disableInactive(res);
+        if (toLegacyMaterials) toLegacyMaterials(B, this.scene, res.meshes);
         // Le conteneur qui annule le demi-tour du chargeur glTF : repere
         // Babylon = repere Unity, comme pour les corps du monde (geometry.js).
         const racine = new B.TransformNode("titre_racine", this.scene);
@@ -370,10 +340,7 @@ export class TitleScreen {
         // la lune, la planete recevait un six-millieme de sa lumiere et
         // restait noire. On passe ces materiaux a l'attenuation « standard »,
         // que `patchAttenuationUnity` a remplacee par celle d'Unity.
-        for (const m of res.meshes) {
-          const mat = m.material;
-          if (mat && "usePhysicalLightFalloff" in mat) mat.usePhysicalLightFalloff = false;
-        }
+        falloffUnity(res.meshes);
         // Le banjo joue (`Animation`, lecture automatique). La flute, elle, est
         // sous un `Animator` SANS controleur : le Voyageur ne bouge pas.
         for (const g of res.animationGroups || []) {

@@ -56,6 +56,23 @@ export function sizeGradients(s, smin, smax) {
   return s.sizeOverLife.map(([t, v]) => [t, v * smin, v * smax]);
 }
 
+/**
+ * La rotation d'un emetteur Babylon pour un systeme Unity d'orientation `q`.
+ *
+ * Unity emet le long du +Z local du systeme ; les emetteurs de Babylon (cone,
+ * boite) le long de leur +Y. On compose donc `q` avec le quart de tour qui
+ * porte +Y sur +Z. Rend (x, y, z, w).
+ */
+export function emitterRotation(q) {
+  // Quart de tour autour de X : (sin 45, 0, 0, cos 45) porte +Y sur +Z.
+  const s = Math.SQRT1_2;
+  const [ax, ay, az, aw] = q, [bx, by, bz, bw] = [s, 0, 0, s];
+  return [aw * bx + ax * bw + ay * bz - az * by,
+          aw * by - ax * bz + ay * bw + az * bx,
+          aw * bz + ax * by - ay * bx + az * bw,
+          aw * bw - ax * bx - ay * by - az * bz];
+}
+
 /** Rayon d'influence approximatif : de quoi decider quand instancier. */
 function reach(s) {
   const shape = (s.shape && s.shape.radius) || 0;
@@ -94,13 +111,17 @@ export class ParticleField {
    *              joueur : son champ est le leur, a la precision qui compte pour
    *              une etincelle qui vit une seconde.
    */
-  update(listener, toFrame, field = null) {
+  /** @param shiftOf systeme -> deplacement de son corps depuis le repos (docs/132) */
+  update(listener, toFrame, field = null, shiftOf = null) {
     // classe par distance : on garde les plus proches dans le budget
     const cand = [];
     for (let i = 0; i < this.systems.length; i++) {
       const s = this.systems[i];
-      const p = [s.position[0] - toFrame[0], s.position[1] - toFrame[1],
-                 s.position[2] - toFrame[2]];
+      if (s.active === false) continue;   // inactif dans la scene (docs/132)
+      const dv = shiftOf ? shiftOf(s) : null;
+      const p = [s.position[0] + (dv ? dv[0] : 0) - toFrame[0],
+                 s.position[1] + (dv ? dv[1] : 0) - toFrame[1],
+                 s.position[2] + (dv ? dv[2] : 0) - toFrame[2]];
       const d = Math.hypot(p[0] - listener.x, p[1] - listener.y, p[2] - listener.z);
       if (d < reach(s)) cand.push({ i, s, p, d });
     }
@@ -111,7 +132,8 @@ export class ParticleField {
     for (const c of cand.slice(0, MAX_LIVE)) {
       if (this.live.has(c.i)) {
         const ps = this.live.get(c.i);
-        if (ps) ps.emitter = new this.B.Vector3(c.p[0], c.p[1], c.p[2]);
+        if (ps && ps.emitter && ps.emitter.position) ps.emitter.position.set(c.p[0], c.p[1], c.p[2]);
+        else if (ps) ps.emitter = new this.B.Vector3(c.p[0], c.p[1], c.p[2]);
       } else {
         this.spawn(c.i, c.s, c.p);
       }
@@ -215,7 +237,18 @@ export class ParticleField {
       Math.min(s.capacity || 200, MAX_CAPACITY), this.scene);
     const tex = this.texture(s.texture);
     if (tex) ps.particleTexture = tex;
-    ps.emitter = new B.Vector3(p[0], p[1], p[2]);
+    if (s.rotation) {
+      // Un maillage vide sert d'emetteur : Babylon oriente les directions et
+      // la forme par sa matrice monde.
+      const e = new B.Mesh(`${ps.name}_emetteur`, this.scene);
+      e.position.set(p[0], p[1], p[2]);
+      e.rotationQuaternion = new B.Quaternion(...emitterRotation(s.rotation));
+      e.isPickable = false;
+      ps.emitter = e;
+      ps.onDisposeObservable.add(() => e.dispose());
+    } else {
+      ps.emitter = new B.Vector3(p[0], p[1], p[2]);
+    }
 
     const c = s.color || [1, 1, 1, 1];
     ps.color1 = new B.Color4(c[0], c[1], c[2], c[3]);

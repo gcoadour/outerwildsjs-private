@@ -194,6 +194,72 @@ function applyParticleAdditive(BABYLON, mat) {
 }
 
 /**
+ * LES SHADERS « LEGACY » D'UNITY 4 ECLAIRENT EN ESPACE GAMMA.
+ *
+ * `Diffuse`, `Bumped Diffuse`, `Specular`… : la couleur de la texture, telle
+ * qu'elle est stockee, multipliee par la somme des lumieres — et par deux.
+ * Le chargeur glTF de Babylon rend des materiaux PBR, qui decodent la texture
+ * en lineaire, divisent par pi, puis reencodent. Mesure dans Chromium, pour
+ * une couleur 0,5 sous une lumiere d'intensite 1 : le PBR rend 0,43, le
+ * materiau standard 0,50 — le calcul d'Unity. Le PBR APLATIT : il eclaircit
+ * la penombre et eteint ce qui est eclaire, et le reveil de Timber Hearth,
+ * de nuit, y ressemblait a un soir terne (docs/132).
+ *
+ * On convertit donc chaque materiau PBR du glTF en `StandardMaterial`, sans
+ * rien perdre de ce que l'exporteur y a mis : texture et couleur, carte de
+ * normales, alpha, emissif, et le nom du shader d'origine, que
+ * `applyGameShaders` lit ensuite.
+ */
+export function toLegacyMaterials(BABYLON, scene, meshes) {
+  const faits = new Map();
+  let n = 0;
+  for (const m of meshes || []) {
+    const pbr = m.material;
+    if (!pbr || pbr.getClassName() !== "PBRMaterial") continue;
+    let std = faits.get(pbr);
+    if (!std) {
+      std = new BABYLON.StandardMaterial(pbr.name, scene);
+      std.metadata = pbr.metadata;
+      if (pbr.albedoTexture) std.diffuseTexture = pbr.albedoTexture;
+      if (pbr.albedoColor) std.diffuseColor = pbr.albedoColor.clone();
+      if (pbr.bumpTexture) {
+        std.bumpTexture = pbr.bumpTexture;
+        std.invertNormalMapX = pbr.invertNormalMapX;
+        std.invertNormalMapY = pbr.invertNormalMapY;
+      }
+      if (pbr.emissiveTexture) std.emissiveTexture = pbr.emissiveTexture;
+      if (pbr.emissiveColor) std.emissiveColor = pbr.emissiveColor.clone();
+      std.alpha = pbr.alpha;
+      std.backFaceCulling = pbr.backFaceCulling;
+      std.twoSidedLighting = pbr.twoSidedLighting;
+      std.transparencyMode = pbr.transparencyMode;
+      if ("alphaCutOff" in pbr) std.alphaCutOff = pbr.alphaCutOff;
+      if (pbr.albedoTexture && pbr.albedoTexture.hasAlpha) {
+        std.useAlphaFromDiffuseTexture = true;
+      }
+      // Seuls les shaders `Specular` ont un reflet : `_SpecColor` gris a 50 %
+      // et `_Shininess` 0,078 — un exposant de 10 — par defaut dans Unity 4.
+      const shader = unityShaderOf(pbr) || "";
+      if (/Specular/i.test(shader)) {
+        std.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+        std.specularPower = 10;
+      } else {
+        std.specularColor = new BABYLON.Color3(0, 0, 0);
+      }
+      std.maxSimultaneousLights = pbr.maxSimultaneousLights;
+      faits.set(pbr, std);
+    }
+    m.material = std;
+    n++;
+  }
+  for (const pbr of faits.keys()) {
+    // Les textures sont partagees : on ne libere que le materiau.
+    try { pbr.dispose(false, false); } catch (e) { /* deja libere */ }
+  }
+  return n;
+}
+
+/**
  * Remplace ou reconfigure les materiaux d'une scene selon leur shader d'origine.
  * @returns compte par shader traite
  */

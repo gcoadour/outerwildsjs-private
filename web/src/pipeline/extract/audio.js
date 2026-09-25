@@ -235,6 +235,9 @@ export function extractAudio(ctx, emit, { maxClips = 400 } = {}) {
 
     sources.push({
       name: ctx.name(gid),
+      body: ctx.bodyOf(gid),
+      // Inactive dans la scene : elle ne joue pas (docs/132).
+      ...(ctx.actif(gid) ? {} : { active: false }),
       file,
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
       volume: round(src.m_Volume ?? 1, 3),

@@ -146,3 +146,61 @@ trois familles.
 - le cran de course tactile et les boutons Monter/Descendre : masqués sans
   combinaison depuis la doc 126 — le sac dorsal y est inerte. Le contrôle
   mesure maintenant les deux états.
+
+## Le réveil, côte à côte
+
+L'alpha tourne aussi **en jeu** sous Xvfb, à condition de lui laisser le
+processeur : en 640 × 360, le niveau 1 se charge en 19 s et le réveil se
+déroule. (Lancée pendant que Chromium compilait ses shaders, elle émettait
+9 000 « Invalid parameter because it was infinity or nan » et restait noire :
+un artefact de la machine saturée, pas du jeu.) `scripts/pw-jeu.mjs` capture
+le même moment dans le portage.
+
+La première comparaison était sans appel : l'alpha s'ouvre de nuit, le feu de
+camp éclaire le Voyageur et le pied de la tour ; le portage montrait un soir
+terne et uniforme, du rose dans le décor, deux sphères blanches devant la
+caméra, pas de flammes, un bandeau de texte en bas de l'écran. Huit causes, et
+une seule tenait à un réglage.
+
+1. **Le bandeau d'état et l'aide des touches** sont des outils du portage :
+   l'alpha n'affiche en jeu que son réticule, une croix de treize pixels
+   blanche à 50 % (`IconGenerator.GenerateCrosshair`, appelé par
+   `DebugHUD.Awake`). Le bandeau est masqué (F3, `?debug` ou le mode de
+   débogage de `GUIMode` le rendent) ; le réticule est porté.
+2. **Les maillages sans renderer.** Un `MeshFilter` ne dessine rien : vingt-deux
+   objets n'ont pas de renderer — les huit `RadiationEmitter` des feux, le
+   `HeatDetector` de la guimauve… L'exporteur les marque `hidden`.
+3. **Les GameObjects inactifs.** Personne ne lisait `m_IsActive` : 1 648 objets
+   de `level0` sont inactifs, avec 955 maillages — un cratère d'origine
+   superposé au vrai, des maquettes grises (le « rose »), des arbres de test —,
+   29 systèmes de particules, cinq sources, trois lumières dont un second
+   soleil, et une trentaine de scripts dont un volume mortel. `ctx.actif(gid)`
+   les désigne ; le glTF éteint leurs nœuds, les colliders les ignorent, et le
+   moteur retire leurs composants (`actifsSeulement`), sauf ceux que le build
+   rallume par `SetActive` — le nouvel `il.mjs --appel` le dit.
+4. **Ce qui orbite.** Lumières, particules et sources étaient posées à leur
+   position monde de l'instant zéro ; Timber Hearth orbite à plus de 200 u/s.
+   Dès la première seconde, le feu laissait sa lumière et sa flamme derrière
+   lui. Elles portent maintenant leur corps, et le décalage déjà écrit pour
+   les volumes (`decalageDuCorps`, docs/46) s'y applique.
+5. **L'orientation des particules.** Un système Unity émet le long de son +Z ;
+   le portage émettait le long du Y du monde, et la flamme s'étalait sur le
+   sol. Un émetteur orienté (`emitterRotation`) la redresse.
+6. **Les calques.** Le calque 15 s'appelle `IgnoreSun` et porte 766
+   renderers ; les deux `surfacelighter` de l'étoile n'éclairent que sa
+   surface. Chaque maillage reçoit le bit de son calque, chaque lumière son
+   `m_CullingMask` ; le soleil directionnel du portage prend le masque de
+   `SunLight`, qu'il remplace.
+7. **L'atténuation et l'ambiance.** Unity 4 atténue une lumière ponctuelle sur
+   sa portée, `2 / (1 + 25 (d/r)²)` ; le PBR de Babylon en 1/d², ce qui éteint
+   tout au-delà d'un mètre. Et l'ambiance du build est un bleu de nuit de
+   valeur 0,06 (doublée par Unity), noire hors des secteurs ; le portage
+   visait 0,35 et 0,1 partout, un choix de jouabilité qui s'écartait de
+   l'alpha.
+8. **L'espace gamma.** Les shaders « legacy » d'Unity 4 multiplient la
+   couleur de la texture, telle quelle, par la lumière. Le PBR de Babylon
+   décode en linéaire, divise par π et réencode : mesuré, 0,43 là où Unity
+   rend 0,50, et une image aplatie — la pénombre trop claire, le lumineux
+   éteint. Les matériaux glTF sont convertis en `StandardMaterial`
+   (`toLegacyMaterials`), qui calcule comme Unity, et son atténuation reçoit
+   la même correction.

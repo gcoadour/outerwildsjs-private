@@ -81,8 +81,16 @@ export function extractLighting(ctx) {
     const [pos, rot] = ctx.world(gid);
     lights.push({
       name: ctx.name(gid),
+      // Le corps qui la porte : elle orbite avec lui (docs/132).
+      body: ctx.bodyOf(gid),
       type: LIGHT_TYPES[v.m_Type] || "point",
-      enabled: v.m_Enabled !== 0,
+      // Eteinte si le composant l'est, OU si son GameObject est inactif :
+      // `SecondSun` et une `Directional light` de test eclairaient la nuit
+      // de Timber Hearth (docs/132).
+      enabled: v.m_Enabled !== 0 && ctx.actif(gid),
+      // Les calques qu'elle eclaire, bit par bit. Le soleil saute `IgnoreSun`
+      // (15), les `surfacelighter` n'eclairent que la surface de l'etoile.
+      cullingMask: v.m_CullingMask ? (v.m_CullingMask.m_Bits >>> 0) : 0xFFFFFFFF,
       position: pos.map((x) => round(x, 3)),
       direction: forward(rot),
       color: color(v.m_Color),

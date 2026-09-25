@@ -266,7 +266,8 @@ export class AudioField {
    * @param mixer AudioMixer, dont le volume de piste multiplie celui de chaque
    *              source : c'est ainsi que la supernova coupe musique et ambiance
    */
-  update(listener, toFrame, mixer = null, shellGains = null) {
+  /** @param shiftOf source -> deplacement de son corps depuis le repos (docs/132) */
+  update(listener, toFrame, mixer = null, shellGains = null, shiftOf = null) {
     if (!this.engine) return;
     if (this.engine.listener) {
       try {
@@ -277,9 +278,11 @@ export class AudioField {
 
     for (let i = 0; i < this.sources.length; i++) {
       const s = this.sources[i];
-      const p = [s.position[0] - toFrame[0],
-                 s.position[1] - toFrame[1],
-                 s.position[2] - toFrame[2]];
+      if (s.active === false) continue;   // inactive dans la scene (docs/132)
+      const dv = shiftOf ? shiftOf(s) : null;
+      const p = [s.position[0] + (dv ? dv[0] : 0) - toFrame[0],
+                 s.position[1] + (dv ? dv[1] : 0) - toFrame[1],
+                 s.position[2] + (dv ? dv[2] : 0) - toFrame[2]];
       const d = Math.hypot(p[0] - listener.x, p[1] - listener.y, p[2] - listener.z);
       // Une source non spatiale est « toujours a portee ». Mais celles du
       // build — les six a `Pan2D` 1, et les douze dont le CLIP est 2D

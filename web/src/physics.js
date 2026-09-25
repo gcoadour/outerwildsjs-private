@@ -58,6 +58,53 @@ export function underAsleep(mesh, asleep) {
  * Deux consequences : on ne se pose plus sur un nuage ni sur l'interieur de la
  * voute celeste, et le budget de colliders cesse d'etre mange par du decor.
  */
+/**
+ * Le maillage n'a pas de renderer allume dans le build (`extras.hidden`) : il
+ * existe pour la collision ou pour le jeu, pas pour l'oeil.
+ */
+export function hiddenMesh(mesh) {
+  const m = mesh && mesh.metadata;
+  const e = m && m.gltf && m.gltf.extras;
+  return !!(e && e.hidden);
+}
+
+/** Le GameObject est inactif dans la scene (`extras.inactive`, docs/132). */
+export function inactiveNode(node) {
+  const m = node && node.metadata;
+  const e = m && m.gltf && m.gltf.extras;
+  return !!(e && e.inactive);
+}
+
+/** Vrai si le noeud ou l'un de ses ancetres est inactif. */
+export function underInactive(node) {
+  for (let n = node; n; n = n.parent) if (inactiveNode(n)) return true;
+  return false;
+}
+
+/**
+ * Eteint, dans un lot importe, les GameObjects inactifs du build : un cratere
+ * d'origine superpose au vrai, des arbres de test, des maquettes grises. Leur
+ * descendance s'eteint avec eux, par la hierarchie.
+ */
+export function disableInactive(res) {
+  let n = 0;
+  for (const x of [...(res.transformNodes || []), ...(res.meshes || [])]) {
+    if (inactiveNode(x)) { x.setEnabled(false); n++; }
+  }
+  return n;
+}
+
+/** Masque, dans un lot importe, ce que le build ne dessine pas. */
+export function hideUnrendered(meshes) {
+  let n = 0;
+  // `__lodPinned` : le LOD (lod.js) rallume tout ce qui grandit a l'ecran, et
+  // la sphere du feu de camp, a quatre metres, grandissait assez.
+  for (const m of meshes || []) {
+    if (hiddenMesh(m)) { m.isVisible = false; m.__lodPinned = true; n++; }
+  }
+  return n;
+}
+
 export function noCollide(mesh) {
   const m = mesh && mesh.metadata;
   const e = m && m.gltf && m.gltf.extras;
@@ -70,9 +117,13 @@ export function buildColliders(BABYLON, scene, meshes, opts = {}) {
   let skipped = 0;
   let dormants = 0;
   let traversables = 0;
+  let inactifs = 0;
   for (const m of meshes) {
     if (aggregates.length >= maxCount) break;
     if (noCollide(m)) { traversables++; continue; }
+    // Un collider sur un GameObject inactif n'existe pas pour PhysX : on ne se
+    // heurte pas au cratere d'origine que la scene garde eteint (docs/132).
+    if (underInactive(m)) { inactifs++; continue; }
     if (underAsleep(m, asleep)) { dormants++; continue; }
     if (m.getTotalVertices() < minVertices) { skipped++; continue; }
     try {
@@ -83,7 +134,7 @@ export function buildColliders(BABYLON, scene, meshes, opts = {}) {
       skipped++;
     }
   }
-  return { aggregates, skipped, dormants, traversables };
+  return { aggregates, skipped, dormants, traversables, inactifs };
 }
 
 export function disposeColliders(set) {

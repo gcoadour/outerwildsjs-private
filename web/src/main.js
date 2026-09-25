@@ -23,7 +23,7 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
@@ -58,7 +58,7 @@ import { QuantumObject as ObjetQuantique, planarQuantumObjects, quantumStatues,
 import { BlackHole, DebrisField, WHITE_HOLE, leashBrake,
          growSteps } from "./blackhole.js";
 import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "./bramble.js";
-import { Sectors, sectorMap, ambientIntensity, ambientTint, majorSectors,
+import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
 import { SolarMap, mapMarkers } from "./map.js";
@@ -73,7 +73,7 @@ import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState, PLAYER_FALLBACK } from "./player.js";
-import { applyGameShaders, updateGameShaders } from "./shaders/index.js";
+import { applyGameShaders, updateGameShaders, toLegacyMaterials } from "./shaders/index.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
@@ -83,7 +83,8 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
          probeReadout, selfDestructed } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
-         createPlayerBody, teleportBody } from "./physics.js";
+         createPlayerBody, teleportBody, hideUnrendered, hiddenMesh,
+         disableInactive, underInactive } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
@@ -132,7 +133,8 @@ import { MarshmallowStick as BatonGuimauve, thermTime,
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
-         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap } from "./lights.js";
+         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap,
+         patchAttenuationUnity, falloffUnity, layerMaskFor, applyLayers } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels, markCrushing,
@@ -200,7 +202,7 @@ async function ecranTitre(BABYLON, engine, cmds) {
   ecran.scene.registerBeforeRender(() => ecran.avancer());
   engine.runRenderLoop(ecran.rendu);
   ecran.jouerMusique();
-  ecran.chargerGeometrie(ParticleField, applyGameShaders);
+  ecran.chargerGeometrie(ParticleField, applyGameShaders, toLegacyMaterials);
 
   // Les reglages ouverts DEPUIS le titre : le meme `SettingsMenu`, au niveau 0.
   const iface = await loadInterface();
@@ -284,6 +286,8 @@ async function boot() {
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
   const scene = new BABYLON.Scene(canvas ? engine : engine);
+  // L'attenuation des lumieres ponctuelles d'Unity 4, avant tout shader.
+  patchAttenuationUnity(BABYLON);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
 
   // Le plafond de lumieres par materiau, lu sur le processeur graphique : le
@@ -374,7 +378,8 @@ async function boot() {
   // d'eclairage ambiant (`_ambientLightRange`), de 750 sur Giant's Deep a 0 sur
   // la comete. On garde la lumiere sous la main pour la suivre.
   const ambient = new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0, 1, 0), scene);
-  ambient.intensity = 0.1;
+  ambient.intensity = 0;
+  ambient.specular = new BABYLON.Color3(0, 0, 0);
 
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
@@ -978,7 +983,16 @@ async function boot() {
     `${hazards.count} volumes qui blessent, ${pickups.length} objets a ramasser, ` +
     `${events.count} emetteurs de son d'evenement`);
 
-  const placedLights = new LightField(BABYLON, scene, lighting.lights || []);
+  // `SunLight` est le soleil du build : une ponctuelle de portee 20 000 posee
+  // sur l'etoile. Le portage le tient par sa directionnelle `sun`, reorientee a
+  // chaque image ; les garder toutes deux, maintenant que l'attenuation
+  // d'Unity rend sa force a la ponctuelle, comptait le soleil deux fois. La
+  // directionnelle en prend le MASQUE : le calque `IgnoreSun` reste dans
+  // l'ombre (docs/132).
+  const soleilDuBuild = (lighting.lights || []).find((l) => l.name === "SunLight");
+  if (soleilDuBuild) sun.includeOnlyWithLayerMask = layerMaskFor(soleilDuBuild.cullingMask);
+  const placedLights = new LightField(BABYLON, scene,
+    (lighting.lights || []).filter((l) => l !== soleilDuBuild));
   // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
   // .Enable` que sous trente pour cent de coque, et une lumiere que rien n'a
   // allumee ne bat pas (docs/116-trappe.md).
@@ -1250,8 +1264,9 @@ async function boot() {
       node.parent = null;
       if (node.getChildMeshes) {
         for (const m of node.getChildMeshes(false)) {
-          m.setEnabled(true);
-          m.isVisible = true;
+          // Rallumer la coque, pas ce que le build tient eteint.
+          m.setEnabled(!underInactive(m));
+          m.isVisible = !hiddenMesh(m);
           MeshLOD.pin(m);
         }
       }
@@ -1497,6 +1512,28 @@ async function boot() {
   const SHADOW_CASTERS = 120;
   const AUTOPILOT_KEYS = new Set(["alignement", "vol", "approche", "egalisation"]);
   const guiMode = new GuiMode();
+  // Le reticule de `DebugHUD` : une croix de treize pixels, blanche a 50 %,
+  // au centre exact de l'ecran, que seul le mode cache efface.
+  const reticule = (() => {
+    const c = document.createElement("canvas");
+    c.id = "reticule";
+    c.width = CROSSHAIR.width; c.height = CROSSHAIR.height;
+    const g = c.getContext("2d");
+    const img = g.createImageData(c.width, c.height);
+    const px = crosshairPixels(c.width, c.height, CROSSHAIR.thickness);
+    const [r, v, b, a] = CROSSHAIR.color;
+    // `SetPixel(i, j)` : i est la colonne, j la ligne, comptee depuis le BAS.
+    for (let i = 0; i < c.width; i++) {
+      for (let j = 0; j < c.height; j++) {
+        if (!px[i * c.height + j]) continue;
+        const k = ((c.height - 1 - j) * c.width + i) * 4;
+        img.data.set([r * 255, v * 255, b * 255, a * 255], k);
+      }
+    }
+    g.putImageData(img, 0, 0);
+    document.body.appendChild(c);
+    return c;
+  })();
   const readout = uiRoot ? new AutopilotReadout(uiRoot) : null;
   const minimap = new Minimap(document.getElementById("minimap"));
   let lastPhase = "repos";
@@ -1537,6 +1574,11 @@ async function boot() {
     try {
       const res = await BABYLON.SceneLoader.ImportMeshAsync(
         "", "data/gltf/", fichier, scene);
+      hideUnrendered(res.meshes);
+      disableInactive(res);
+      toLegacyMaterials(BABYLON, scene, res.meshes);
+      falloffUnity(res.meshes);
+      applyLayers(res.meshes);
       const racine = new BABYLON.TransformNode(`main_${nom}`, scene);
       racine.parent = camera;
       racine.rotation.y = Math.PI;
@@ -4260,6 +4302,11 @@ async function boot() {
         lastPhase = autopilot.phase;
       }
       readout.update(now, !guiMode.hidden && !guiMode.capture);
+      // `DebugHUD.OnGUI` : le reticule, sauf en mode cache ; et apres la mort,
+      // `DisableGUI` eteint le composant jusqu'au rechargement du niveau.
+      reticule.hidden = guiMode.hidden || death.dead;
+      // Le texte de mise au point n'apparait qu'en mode `IsDebugMode`.
+      document.body.classList.toggle("gui-debug", guiMode.debug);
     }
 
     // --- minicarte : le declencheur du secteur majeur, et rien d'autre ---
@@ -4573,8 +4620,12 @@ async function boot() {
       // La TEINTE du secteur, que le portage ne lisait pas : `_ambientLight`
       // est un choix de couleur, pas un nombre. Bleu de nuit sur les mondes
       // rocheux, vert sur Giant's Deep et Dark Bramble.
-      const teinte = ambientTint(secMaj ? secMaj.ambient : 0);
+      // Sa valeur aussi : 0,0588, doublee — un bleu tres sombre, que le
+      // soleil et les feux dominent. Et uniforme : l'ambiance d'Unity n'a ni
+      // ciel ni sol, d'ou le sol de l'hemisphere pose a la meme couleur.
+      const teinte = ambientLight(secMaj ? secMaj.ambient : 0);
       ambient.diffuse.set(teinte[0], teinte[1], teinte[2]);
+      ambient.groundColor.set(teinte[0], teinte[1], teinte[2]);
 
       // niveau de detail par maillage, sur les lots effectivement affiches
       meshLOD.update(geo, camera.position, (f) => sectors.active.has(f));
@@ -6524,7 +6575,8 @@ async function boot() {
                                 camera.position.z + anchorPos[2]],
                            (sh) => decalageDuCorps(sh.body, anchorPos))
         : null;
-      audio.update(player.pos, anchorPos, mixer, gains);
+      audio.update(player.pos, anchorPos, mixer, gains,
+                   (x) => decalageDuCorps(x.body, anchorPos));
     }
     // Les ambiances suivent la position MONDE de l'auditeur, dans la meme
     // convention que les sources placees : position dans le repere ancre, plus
@@ -6566,7 +6618,7 @@ async function boot() {
     if (fadeLight && fadeCible) {
       fadeCible.intensity = fadeLight.update(performance.now() / 1000);
     }
-    placedLights.update(player.pos, anchorPos);
+    placedLights.update(player.pos, anchorPos, (x) => decalageDuCorps(x.body, anchorPos));
     // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
     // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne
     // vacille pas se remarque (docs/42-lumieres.md).
@@ -6574,7 +6626,10 @@ async function boot() {
     placedLights.animate(performance.now() / 1000);
     // le champ dominant du joueur tient lieu de `Physics.gravity` pour le
     // `gravityModifier` des systemes de particules
-    if (particleMap.length) particles.update(player.pos, anchorPos, player.field);
+    if (particleMap.length) {
+      particles.update(player.pos, anchorPos, player.field,
+                       (x) => decalageDuCorps(x.body, anchorPos));
+    }
 
     const speed = Math.hypot(player.vel.x, player.vel.y, player.vel.z);
     setStatus(

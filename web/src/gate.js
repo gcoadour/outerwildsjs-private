@@ -99,6 +99,11 @@ async function startEngine() {
   }
   $("gate").hidden = true;
   document.body.classList.add("playing");
+  // Le bandeau de mise au point : masque comme dans l'alpha, sauf demande.
+  if (new URLSearchParams(location.search).has("debug")) document.body.classList.add("debug");
+  addEventListener("keydown", (e) => {
+    if (e.code === "F3") { e.preventDefault(); document.body.classList.toggle("debug"); }
+  });
   await import("./main.js?v=126");
 }
 

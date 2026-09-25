@@ -35,6 +35,109 @@ export function lightCap(maxUniformBlocks) {
   return Math.max(4, Math.floor(maxUniformBlocks) - 4);
 }
 
+/**
+ * L'attenuation d'une lumiere ponctuelle dans Unity 4, rendu direct.
+ *
+ * `_LightTextureB0` est une table de `1 / (1 + 25 x^2)`, x etant la distance
+ * rapportee a la portee, et rien au-dela de la portee. Les shaders « legacy »
+ * du build (Diffuse, Bumped Diffuse) multiplient ensuite par DEUX :
+ * `Albedo * _LightColor0 * (NdotL * atten * 2)`. D'ou le feu de camp qui
+ * dore toute la planete du titre, la ou une decroissance lineaire le laissait
+ * brun sombre, et la lune qui l'eclaire moins qu'on ne croirait.
+ */
+// @mesure
+export function attenuationUnity(distance, range) {
+  if (!(range > 0)) return 0;
+  const x2 = (distance * distance) / (range * range);
+  return x2 < 1 ? 2 / (1 + 25 * x2) : 0;
+}
+
+/**
+ * Remplace, dans les shaders PBR de Babylon, l'attenuation « standard » par
+ * celle d'Unity 4. Seuls les materiaux qui renoncent a l'attenuation physique
+ * (`usePhysicalLightFalloff = false`, voir `falloffUnity`) la lisent.
+ */
+export function patchAttenuationUnity(BABYLON) {
+  const store = BABYLON && BABYLON.Effect && BABYLON.Effect.IncludesShadersStore;
+  if (!store) return false;
+  let ok = false;
+  // Le PBR : sa fonction d'attenuation « standard ».
+  const k = "pbrDirectLightingFalloffFunctions";
+  if (typeof store[k] === "string") {
+    const avant = "{return max(0.,1.0-length(lightOffset)/range);}";
+    const apres = "{float x2=dot(lightOffset,lightOffset)/(range*range);" +
+                  "return x2<1.0?2.0/(1.0+25.0*x2):0.0;}";
+    if (store[k].includes(avant)) store[k] = store[k].replace(avant, apres);
+    ok = store[k].includes(apres);
+  }
+  // Le materiau STANDARD (`computeLighting`, `computeSpotLighting`), qui porte
+  // desormais le monde : ponctuelles et spots.
+  const k2 = "lightsFragmentFunctions";
+  if (typeof store[k2] === "string") {
+    // Deux formes : une affectation, et une DECLARATION (`float attenuation=`),
+    // qu'un bloc en accolades casserait.
+    const avant = "attenuation=max(0.,1.0-length(direction)/range);";
+    const expr = "(dot(direction,direction)<range*range?" +
+                 "2.0/(1.0+25.0*dot(direction,direction)/(range*range)):0.0);";
+    store[k2] = store[k2].split(avant).join("attenuation=" + expr);
+    ok = store[k2].includes(expr) && ok;
+  }
+  return ok;
+}
+
+/**
+ * Le masque de calques d'une lumiere Unity, pour Babylon.
+ *
+ * Un maillage exporte porte `layerMask = 1 << calque` (`applyLayers`) ; une
+ * lumiere dont le masque couvre tout ne filtre rien (0 dans Babylon).
+ */
+export function layerMaskFor(cullingMask) {
+  const m = (cullingMask ?? 0xFFFFFFFF) >>> 0;
+  return m === 0xFFFFFFFF ? 0 : m;
+}
+
+/**
+ * Pose, sur chaque maillage importe, le bit de son calque Unity.
+ *
+ * Sans lui, toute lumiere eclairait tout : les deux `surfacelighter` de
+ * l'etoile teintaient la nuit de Timber Hearth d'orange et de rose, et le
+ * soleil eclairait les 766 objets du calque `IgnoreSun` (docs/132). La camera
+ * du portage voit les bits 0 a 27 : les calques du build (0 a 23) y tiennent.
+ */
+export function applyLayers(meshes) {
+  let n = 0;
+  // Tout maillage du lot : Babylon ne cree `metadata.gltf` que pour un noeud
+  // qui porte des `extras`, et le calque 0 n'en ecrit pas.
+  for (const m of meshes || []) {
+    if (!m || typeof m.getTotalVertices !== "function") continue;
+    const md = m.metadata && m.metadata.gltf;
+    const couche = (md && md.extras && md.extras.layer) || 0;
+    m.layerMask = (1 << couche) >>> 0;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Fait lire l'attenuation d'Unity aux materiaux d'un lot importe.
+ *
+ * Tous les materiaux glTF du portage sont en PBR, dont l'attenuation
+ * physique (1/d^2) eteint une lumiere ponctuelle d'intensite 1 a un metre :
+ * le feu de camp du reveil n'eclairait rien, ni les lampes du village. Unity 4
+ * decroit sur la PORTEE (docs/131, docs/132).
+ */
+export function falloffUnity(meshes) {
+  let n = 0;
+  for (const m of meshes || []) {
+    const mat = m.material;
+    if (mat && "usePhysicalLightFalloff" in mat && mat.usePhysicalLightFalloff) {
+      mat.usePhysicalLightFalloff = false;
+      n++;
+    }
+  }
+  return n;
+}
+
 export async function loadLighting() {
   try {
     const res = await fetch("data/lighting.json", { cache: "no-store" });
@@ -55,14 +158,15 @@ export async function loadLighting() {
  * partout.
  */
 export function pickLights(lights, listener, budget = LIGHT_BUDGET,
-                           reach = LIGHT_REACH) {
+                           reach = LIGHT_REACH, posOf = null) {
   const near = [];
   for (const l of lights) {
     if (l.enabled === false || l.lightmapping === 2) continue;
     if (!(l.intensity > 0)) continue;
-    const d = Math.hypot(l.position[0] - listener[0],
-                         l.position[1] - listener[1],
-                         l.position[2] - listener[2]);
+    const q = posOf ? posOf(l) : l.position;
+    const d = Math.hypot(q[0] - listener[0],
+                         q[1] - listener[1],
+                         q[2] - listener[2]);
     if (l.type === "directional") { near.push({ light: l, distance: 0 }); continue; }
     if (!(l.range > 0) || d > l.range * reach) continue;
     near.push({ light: l, distance: d });
@@ -210,12 +314,24 @@ export class LightField {
    * @param listener position de l'auditeur dans le repere courant
    * @param toFrame  decalage monde -> repere (position du corps ancre)
    */
-  update(listener, toFrame = [0, 0, 0]) {
+  /**
+   * @param shiftOf lumiere -> deplacement de son corps depuis le repos, ou null.
+   *   Les positions extraites sont celles de la scene A L'ARRET ; Timber
+   *   Hearth, lui, orbite a plus de deux cents unites par seconde. Sans ce
+   *   decalage, le feu de camp du reveil laissait sa lumiere derriere lui des
+   *   la premiere seconde (docs/132).
+   */
+  update(listener, toFrame = [0, 0, 0], shiftOf = null) {
     if (!this.lights.length) return 0;
     const world = [listener.x + toFrame[0], listener.y + toFrame[1],
                    listener.z + toFrame[2]];
+    const posOf = shiftOf ? (l) => {
+      const d = shiftOf(l);
+      return d ? [l.position[0] + d[0], l.position[1] + d[1], l.position[2] + d[2]]
+        : l.position;
+    } : null;
     const want = new Set();
-    for (const { light } of pickLights(this.lights, world, this.budget)) {
+    for (const { light } of pickLights(this.lights, world, this.budget, LIGHT_REACH, posOf)) {
       want.add(light);
       let node = this.live.get(light);
       if (!node) {
@@ -223,8 +339,8 @@ export class LightField {
         if (!node) continue;
         this.live.set(light, node);
       }
-      const p = [light.position[0] - toFrame[0], light.position[1] - toFrame[1],
-                 light.position[2] - toFrame[2]];
+      const q = posOf ? posOf(light) : light.position;
+      const p = [q[0] - toFrame[0], q[1] - toFrame[1], q[2] - toFrame[2]];
       if (node.position) node.position.set(p[0], p[1], p[2]);
     }
     for (const [light, node] of [...this.live]) {
@@ -237,6 +353,15 @@ export class LightField {
   }
 
   create(l) {
+    const B = this.B, V = B.Vector3;
+    const node = this.createNode(l);
+    if (node && "includeOnlyWithLayerMask" in node) {
+      node.includeOnlyWithLayerMask = layerMaskFor(l.cullingMask);
+    }
+    return node;
+  }
+
+  createNode(l) {
     const B = this.B, V = B.Vector3;
     try {
       const p = new V(l.position[0], l.position[1], l.position[2]);

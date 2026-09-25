@@ -350,6 +350,15 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 /* Le HUD du moteur reste cache tant que l'ecran d'accueil est la. */
 body:not(.playing) #hud,
 body:not(.playing) #ui { display: none; }
+/* Le bandeau d'etat et l'aide des touches sont des outils du PORTAGE : l'alpha
+   n'affiche en jeu que son reticule (`DebugHUD.OnGUI`). Masques par defaut,
+   ils reviennent avec F3 ou `?debug` (docs/132). */
+body:not(.debug):not(.gui-debug) #hud { display: none; }
+#reticule {
+  position: fixed; left: calc(50% - 6.5px); top: calc(50% - 6.5px);
+  z-index: 6; pointer-events: none; image-rendering: pixelated;
+}
+body:not(.playing) #reticule, body.titre #reticule { display: none; }
 
 /* --- Commandes tactiles et jeu en paysage (voir web/src/touch.js) -----------
    Rien ici ne vient du build : le jeu de 2013 ne connait ni ecran tactile ni

@@ -375,6 +375,9 @@ export function extractGameplay(ctx) {
       const [, rot] = ctx.world(gid);
       entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
     }
+    // Un script sur un GameObject inactif ne tourne pas. On le garde — trois
+    // classes sont rallumees en cours de partie (`SetActive`) —, marque.
+    if (!ctx.actif(gid)) entry.active = false;
     (placed[cls] ||= []).push(entry);
   }
 

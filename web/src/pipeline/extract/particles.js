@@ -178,7 +178,14 @@ export function extractParticles(ctx, emitImage, { maxTexture = 256 } = {}) {
 
     systems.push({
       name: ctx.name(gid),
+      body: ctx.bodyOf(gid),
+      // Inactif dans la scene : il n'emet pas (docs/132). Garde, marque.
+      ...(ctx.actif(gid) ? {} : { active: false }),
       position: ctx.world(gid)[0].map((v) => round(v, 3)),
+      // L'ORIENTATION : un systeme Unity emet le long de SON +Z. Sans elle, la
+      // flamme du feu de camp partait le long du Y du monde — a plat sur le
+      // sol de Timber Hearth, dont la verticale n'est pas celle-la (docs/132).
+      rotation: ctx.world(gid)[1].map((v) => round(v, 6)),
       looping: !!d.looping,
       // `prewarm` : un systeme en boucle part comme s'il avait deja fait un
       // cycle entier. C'est ce qui fait qu'une colonne de fumee est la des la

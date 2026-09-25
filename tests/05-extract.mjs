@@ -307,6 +307,23 @@ console.log("     sources:", audio.sources.length,
 
 console.time("lumieres");
 const lighting = extractLighting(ctx);
+// L'ACTIVITE DES GAMEOBJECTS (docs/132). Personne ne lisait `m_IsActive`.
+{
+  let effectifs = 0, eux = 0;
+  for (const [gid, go] of ctx.gameObjects) {
+    if (go.m_IsActive === false || go.m_IsActive === 0) eux++;
+    if (!ctx.actif(gid)) effectifs++;
+  }
+  check("GameObjects eteints eux-memes", eux, 143);
+  check("et inactifs par heritage compris", effectifs, 1648);
+  const eteintes = lighting.lights.filter((l) => !l.enabled).map((l) => l.name).sort();
+  check("le second soleil n'eclaire pas", eteintes.includes("SecondSun"), true);
+  check("ni la lumiere directionnelle de test", eteintes.includes("Directional light"), true);
+  const inactifs = Object.values(gp.placed).flat().filter((e) => e.active === false);
+  check("composants places sur des objets inactifs", inactifs.length > 0, true);
+  check("dont un volume qui blesse",
+        (gp.placed.HazardVolume || []).some((e) => e.active === false), true);
+}
 console.timeEnd("lumieres");
 // A3/A4 : le moteur n'avait que deux lumieres inventees, et fog.js portait des
 // RenderSettings recopies a la main.

@@ -19,7 +19,7 @@ case "${1:-}" in
   start)
     pgrep -f "Xvfb $DISPLAY" >/dev/null || { Xvfb "$DISPLAY" -screen 0 1280x720x24 +extension GLX >/dev/null 2>&1 & sleep 2; }
     chmod +x "$GAME"
-    LIBGL_ALWAYS_SOFTWARE=1 "$GAME" -screen-width 1280 -screen-height 720 \
+    LIBGL_ALWAYS_SOFTWARE=1 "$GAME" -screen-width "${ALPHA_W:-1280}" -screen-height "${ALPHA_H:-720}" \
       -screen-fullscreen 0 -logFile "$PWD/work/alpha.log" >/dev/null 2>&1 &
     echo $! > work/alpha.pid
     echo "alpha lancee (pid $(cat work/alpha.pid))"

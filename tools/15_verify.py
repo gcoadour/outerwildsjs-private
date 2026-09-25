@@ -2670,33 +2670,28 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("le toucher s'est annonce", pose["annonces"][:1],
                    ["ShipTouchdown"])
             # Le lancer a plus de cinq unites : on ne se pose plus, on glisse.
-            lance = page.evaluate("""() => {
+            #
+            # Ce qui se mesure est l'ANNONCE, pas l'etat qui suit. Au sol, le
+            # frottement (0,7 par soixantieme) ramene quarante unites sous cinq
+            # en moins d'un dixieme de seconde : le vaisseau decolle des
+            # capteurs, glisse, et se repose — et sans GPU les trois tiennent
+            # dans une seule image. Lire `onPad` ensuite mesurait le repos.
+            n0 = page.evaluate("""() => {
               const s = window.__shipRef;
+              const n = s.pads.events.length;
               s.vel.x += 40;
-              return true;
+              return n;
             }""")
-            # Une image sans GPU dure souvent plus que les 700 ms d'autrefois :
-            # on attend que les capteurs aient vu une image, pas une duree.
             try:
-                page.wait_for_function("() => !window.__shipRef.onPad", timeout=15000)
+                page.wait_for_function(
+                    "(n) => window.__shipRef.pads.events.slice(n).length > 0", arg=n0,
+                    timeout=15000)
             except Exception:
                 pass
-            apres = page.evaluate("() => ({ pose: window.__shipRef.onPad,"
-                                 " annonces: window.__shipRef.pads.events.slice(-1) })")
-            if apres["pose"]:
-                # Ce qui a pu le retenir : une mort et une boucle qui repart
-                # reposent le vaisseau, un menu fige le temps.
-                print("    diagnostic du lancer :", page.evaluate("""() => {
-                  const s = window.__shipRef;
-                  return { parked: s.parked, landed: s.landed, boarded: s.boarded,
-                           vitesse: Math.round(s.speed * 10) / 10,
-                           mort: !!(window.__death && window.__death.dead),
-                           boucles: window.__pdata && window.__pdata.loopCount,
-                           reglages: !!(window.__ui && document.querySelector('.ow-settings:not([hidden])')),
-                           dialogue: !!(window.__dialogue && window.__dialogue.active) };
-                }"""))
-            rep.eq("lance a quarante unites, il ne l'est plus", apres["pose"], False)
-            rep.eq("et le decollage s'annonce", apres["annonces"], ["ShipTakeoff"])
+            apres = page.evaluate("(n) => window.__shipRef.pads.events.slice(n)", n0)
+            rep.eq("lance a quarante unites, il ne l'est plus",
+                   "ShipTakeoff" in apres, True)
+            rep.eq("et le decollage s'annonce", apres[:1], ["ShipTakeoff"])
 
         # --- la sphere de l'observatoire (docs/91-remise-a-zero.md) -----------
         raz = page.evaluate("""() => {
@@ -2842,6 +2837,15 @@ def _run(url, heavy, profil=None, zip_path=None):
           const s = window.__shipRef, p = window.__player;
           if (!s || !p || !p.body || !window.__pdata) return false;
           window.__pdata.knowsLaunchCodes = true;
+          // La COMBINAISON d'abord : sans elle, la barriere de Coach renvoie le
+          // joueur et ouvre son avertissement (docs/130) — dans l'alpha comme
+          // ici, on ne va pas au vaisseau en civil.
+          const l = window.__lots;
+          if (l && !l.equipment.suit) {
+            const combi = l.pickups.find((x) => x.suit);
+            if (combi) l.equipment.pickUp(combi); else l.equipment.suit = true;
+          }
+          if (window.__dialogue && window.__dialogue.active) window.__dialogue.active = null;
           s.boarded = false;
           window.__assise.points.detach([0, 0, 0]);
           const agg = p.body;
@@ -2880,6 +2884,7 @@ def _run(url, heavy, profil=None, zip_path=None):
                        distance: s && p ? Math.round(Math.hypot(p.pos.x - s.pos.x,
                          p.pos.y - s.pos.y, p.pos.z - s.pos.z) * 10) / 10 : null,
                        mort: !!(window.__death && window.__death.dead),
+                       cause: window.__death && window.__death.cause,
                        mode: window.__modes && window.__modes.mode,
                        dialogue: !!(window.__dialogue && window.__dialogue.active),
                        reglages: !!document.querySelector('.ow-settings:not([hidden])') };

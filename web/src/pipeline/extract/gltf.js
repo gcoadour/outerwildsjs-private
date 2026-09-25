@@ -329,11 +329,24 @@ export function exportSubtree(ctx, rootGid, label, {
       colliderGids.add(v.m_GameObject.pathId);
     }
   }
+  // CE QUI SE VOIT. Un `MeshFilter` ne dessine rien : c'est le RENDERER qui
+  // dessine, et vingt-deux objets de `level0` n'en ont AUCUN. Le feu de camp
+  // porte ainsi une sphere `RadiationEmitter`, la guimauve une sphere
+  // `HeatDetector` — des volumes de jeu, que l'alpha ne montre pas et que le
+  // portage dessinait en blanc devant la camera au reveil (docs/132). Le
+  // maillage reste exporte : il peut servir de collider.
+  //
+  // Un renderer ETEINT, lui, n'est pas un volume : quarante-deux sont
+  // rallumes par des scripts (les paupieres des villageois, la lunette, les
+  // anneaux de nuages, les plans de LOD), et le moteur les bascule deja. Seule
+  // l'absence de renderer compte ici.
+  const rendus = new Set();
   for (const type of ["MeshRenderer", "SkinnedMeshRenderer"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
       const v = ctx.readEngine(o);
       if (!v || !v.m_GameObject) continue;
       const gid = v.m_GameObject.pathId;
+      rendus.add(gid);
       if (v.m_Materials && v.m_Materials.length) matOf.set(gid, v.m_Materials[0]);
       if (type === "SkinnedMeshRenderer") {
         skinOf.set(gid, v);
@@ -572,12 +585,28 @@ export function exportSubtree(ctx, rootGid, label, {
       if (mi !== null) {
         node.mesh = mi;
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);
+        // Le CALQUE : les lumieres du build le lisent (`m_CullingMask`). Le
+        // calque 15 s'appelle `IgnoreSun` et porte 766 renderers — le soleil
+        // ne les eclaire pas —, le 12 `UseSunImposter` (docs/132).
+        const couche = (ctx.gameObjects && ctx.gameObjects.get(gid) || {}).m_Layer || 0;
+        if (couche) node.extras = { ...(node.extras || {}), layer: couche };
+        if (!rendus.has(gid)) {
+          node.extras = { ...(node.extras || {}), hidden: true };
+          stats.hidden = (stats.hidden || 0) + 1;
+        }
         // Ce que le build ne rend pas solide ne doit pas le devenir ici.
         if (!colliderGids.has(gid)) {
           node.extras = { ...(node.extras || {}), noCollide: true };
           stats.noCollide++;
         }
       }
+    }
+    // Un GameObject INACTIF ne se dessine pas, ni rien sous lui : le moteur
+    // eteint le noeud, et la hierarchie de Babylon fait le reste (docs/132).
+    const go = ctx.gameObjects ? ctx.gameObjects.get(gid) : null;
+    if (go && (go.m_IsActive === false || go.m_IsActive === 0)) {
+      node.extras = { ...(node.extras || {}), inactive: true };
+      stats.inactive = (stats.inactive || 0) + 1;
     }
     if (animOf.has(gid)) animatedRoots.push([tid, gid]);
     const kids = (childrenOf.get(tid) || [])

@@ -21,6 +21,10 @@
 // inverse. Surtout pas par une mise a l'echelle negative : celle-ci inverserait
 // l'orientation des faces.
 
+import { hideUnrendered, disableInactive } from "./physics.js";
+import { falloffUnity, applyLayers } from "./lights.js";
+import { toLegacyMaterials } from "./shaders/index.js";
+
 // Quel fichier glTF contient quel corps. Les fichiers exportes depuis un pivot
 // contiennent tout le sous-arbre, lunes comprises : plusieurs corps partagent
 // donc le meme fichier.
@@ -59,6 +63,15 @@ export const BODY_FILES = [
 /** Charge un fichier glTF et l'enveloppe dans un conteneur. */
 async function loadFile(BABYLON, scene, file) {
   const res = await BABYLON.SceneLoader.ImportMeshAsync("", "data/gltf/", file, scene);
+  // Ce que le build ne dessine pas — un MeshFilter sans renderer allume.
+  hideUnrendered(res.meshes);
+  disableInactive(res);
+  // L'eclairage d'Unity 4 : en espace gamma, pas en PBR (shaders/index.js).
+  toLegacyMaterials(BABYLON, scene, res.meshes);
+  // Et l'attenuation d'Unity 4, pas celle du PBR (lights.js).
+  falloffUnity(res.meshes);
+  // Et le calque Unity de chaque maillage, que les lumieres lisent.
+  applyLayers(res.meshes);
   const container = new BABYLON.TransformNode("geo_" + file, scene);
   container.rotation.y = Math.PI;
   for (const m of res.meshes) {
