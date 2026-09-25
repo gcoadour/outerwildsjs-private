@@ -86,7 +86,7 @@ import { initPhysics, buildColliders, disposeColliders,
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
-import { loadCommandes } from "./input.js";
+import { loadCommandes, decoupeImage } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
@@ -131,7 +131,7 @@ import { MarshmallowStick as BatonGuimauve, thermTime,
 import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
-         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE } from "./lights.js";
+         SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { loadTextureAnimators, TextureScrollers } from "./texanim.js";
 import { SandLevels, sandColumns, sandFunnels, markCrushing,
@@ -193,6 +193,23 @@ async function boot() {
     { stencil: true, audioEngine: true }, true);
   const scene = new BABYLON.Scene(canvas ? engine : engine);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
+
+  // Le plafond de lumieres par materiau, lu sur le processeur graphique : le
+  // chargeur glTF le releve a chaque chargement, on le ramene a chaque image
+  // ou le nombre de materiaux a bouge (lights.js, `lightCap`).
+  {
+    const gl = engine._gl;
+    const plafond = lightCap(gl && gl.getParameter
+      ? Math.min(gl.getParameter(gl.MAX_VERTEX_UNIFORM_BLOCKS),
+                 gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_BLOCKS)) : 0);
+    // Chaque image : le chargeur ecrit la valeur a la FIN d'un chargement, pas
+    // quand le materiau apparait, et 170 comparaisons ne coutent rien.
+    scene.onBeforeRenderObservable.add(() => {
+      for (const m of scene.materials) {
+        if (m.maxSimultaneousLights > plafond) m.maxSimultaneousLights = plafond;
+      }
+    });
+  }
 
   // LE GROUPE DE RENDU 1 N'EST PAS UN CALQUE « APRES L'OPAQUE ».
   //
@@ -1444,7 +1461,9 @@ async function boot() {
           lumieres.push(l);
         }
       }
-      for (const l of lumieres) l.setEnabled(false);
+      // Sous le plafond de lumieres, Babylon garde les premieres de la scene :
+      // les lumieres tenues passent devant celles du decor, qu'on voit de loin.
+      for (const l of lumieres) { l.setEnabled(false); l.renderPriority = 1; }
       const parNom = new Map();
       for (const g of groupes) parNom.set(g.name.replace(/^[~!]+/, "").split("|").pop(), g);
       enMain.set(nom, { racine, groupes, parNom, lumieres, meshes: res.meshes });
@@ -2491,25 +2510,52 @@ async function boot() {
   // disait. C'est `15_verify.py` qui l'a trouve : la sonde ne partait pas.
   const souris = Object.create(null);
   const relachementsSouris = [];
+  // UN RELACHEMENT N'ATTEND QUE SI L'APPUI N'A PAS ETE VU.
+  //
+  // Le report en fin d'image est la pour une frappe plus courte qu'une image :
+  // sans lui, elle serait perdue. Mais il s'appliquait a TOUT relachement, et
+  // une touche lachee entre deux images restait tenue pendant toute l'image
+  // suivante. Unity rend `GetKey` faux des l'`Update` qui suit. A 60 images par
+  // seconde, 17 ms ; sans GPU, pres d'une seconde : un appui court sur la
+  // poussee du vaisseau finissait l'allumage (1 s) au lieu de l'annuler. On ne
+  // reporte donc que ce qui a ete enfonce DEPUIS la derniere image.
+  const neufs = new Set(), neufsSouris = new Set();
   addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "mouse") souris[e.button] = true;
+    if (e.pointerType !== "mouse") return;
+    souris[e.button] = true;
+    neufsSouris.add(e.button);
   });
   addEventListener("pointerup", (e) => {
-    if (e.pointerType === "mouse") relachementsSouris.push(e.button);
+    if (e.pointerType !== "mouse") return;
+    if (neufsSouris.has(e.button)) relachementsSouris.push(e.button);
+    else souris[e.button] = false;
   });
   // Le clic droit ouvre le menu contextuel du navigateur, et c'est le bouton de
   // la sonde : sans cette ligne, lancer une sonde ouvre un menu — et le menu
   // avale le relachement, donc la sonde ne part jamais. On le refuse partout et
   // pas seulement sous verrou de souris : la page entiere est le jeu.
   addEventListener("contextmenu", (e) => e.preventDefault());
-  addEventListener("keydown", (e) => { keys[e.code] = true; });
-  addEventListener("keyup", (e) => { relachements.push(e.code); });
+  addEventListener("keydown", (e) => {
+    keys[e.code] = true;
+    neufs.add(e.code);
+    // Relachee puis renfoncee avant l'image : le relachement retenu ne vaut
+    // plus, sinon la fin d'image lacherait une touche qu'on tient.
+    const i = relachements.indexOf(e.code);
+    if (i >= 0) relachements.splice(i, 1);
+  });
+  addEventListener("keyup", (e) => {
+    if (neufs.has(e.code)) relachements.push(e.code);
+    else keys[e.code] = false;
+  });
   window.__keys = keys;
   window.__souris = souris;
   /** A appeler en fin d'image : applique les relachements retenus. */
   function appliquerRelachements() {
     while (relachements.length) keys[relachements.pop()] = false;
     while (relachementsSouris.length) souris[relachementsSouris.pop()] = false;
+    // Tout ce qui est enfonce a maintenant ete vu par une image.
+    neufs.clear();
+    neufsSouris.clear();
   }
   let interactPressed = false, optionPressed = 0;
   // La sonde ne se declenche plus a l'appui : elle se CHARGE tant qu'on tient,
@@ -2962,11 +3008,41 @@ async function boot() {
   // les commandes en ont besoin hors de la boucle (les consoles, par exemple,
   // sont posees en coordonnees monde).
   let framePos = [0, 0, 0];
+  // UNE IMAGE, CE SONT PLUSIEURS PAS (input.js, `decoupeImage`).
+  //
+  // Le temps d'une image est decoupe en sous-pas d'au plus 0,05 s, borne a la
+  // seconde du `TimeManager` du build, et Havok avance AVEC chacun d'eux.
+  // Babylon le faisait avancer seul, une fois par image, du delta reel — mais
+  // `applyForce` y devient une impulsion de `force * getTimeStep()`, le pas
+  // FIXE de 1/60 : sous 60 images par seconde la gravite faiblissait d'autant,
+  // pendant que le monde, lui, avancait du temps reel. Les deux horloges ne
+  // s'accordaient qu'a 60 images par seconde.
+  const physique = plugin ? scene.getPhysicsEngine() : null;
+  if (physique) scene.physicsEnabled = false;
   scene.registerBeforeRender(() => {
     // SettingsMenu.Open met Time.timeScale a 0 : le menu fige la partie
-    const dt = (settings && settings.open) ? 0
-      : Math.min(engine.getDeltaTime() / 1000, 0.05);
+    const { n, h } = decoupeImage(
+      (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
+      cmds.maxTimestep);
     const now = performance.now() / 1000;
+    for (let i = 0; i < n; i++) {
+      if (physique && h > 0) {
+        // La force posee au pas precedent se paie sur CE pas : meme duree.
+        plugin.setTimeStep(h);
+        physique._step(h);
+      }
+      pasDeJeu(h, now);
+      // Un appui est un FRONT : il appartient au premier sous-pas de l'image,
+      // comme `GetButtonDown` n'est vrai que dans un seul `Update`.
+      interactPressed = false;
+    }
+    // Les touches relachees pendant l'image le deviennent maintenant : une
+    // frappe plus courte qu'une image compte pour une image entiere.
+    interactPressed = false;
+    appliquerRelachements();
+  });
+
+  function pasDeJeu(dt, now) {
 
     // §T L'alignement sur le champ : on le perd, on le retrouve.
     {
@@ -6385,11 +6461,7 @@ async function boot() {
         ? ` — orbite ${(period(orbits, anchorBody) / 60).toFixed(1)} min` : "") +
       (data.synthetic ? "  [systeme de substitution]" : "")
     );
-    // Les touches relachees pendant l'image le deviennent maintenant : une
-    // frappe plus courte qu'une image compte pour une image entiere.
-    interactPressed = false;
-    appliquerRelachements();
-  });
+  }
 }
 
 export const ready = boot();

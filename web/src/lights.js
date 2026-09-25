@@ -15,6 +15,26 @@ export const LIGHT_BUDGET = 8;
 /** Multiple de la portee au-dela duquel une lumiere ne sert plus a rien. */
 export const LIGHT_REACH = 1.25;
 
+/**
+ * Combien de lumieres un materiau peut recevoir sur CE processeur graphique.
+ *
+ * Sous WebGL 2, Babylon donne a chaque lumiere son propre bloc d'uniformes, en
+ * plus de trois blocs fixes (scene, maillage, materiau). Le chargeur glTF, lui,
+ * releve `maxSimultaneousLights` de TOUS les materiaux au nombre de lumieres
+ * de la scene — quinze ici, des qu'un objet tenu apporte les siennes. Mesure
+ * dans Chromium : `GL_MAX_VERTEX_UNIFORM_BLOCKS` vaut 14 sous SwiftShader, et
+ * ANGLE sur Direct3D 11 en donne 12. Au-dela, chaque shader echoue, retombe
+ * sur son repli, et RECOMMENCE a l'image suivante : 7 s par image, 0,14 image
+ * par seconde, et une scene sans eclairage.
+ *
+ * On garde une marge d'un bloc (les os et les cibles de morphing en prennent
+ * un selon le maillage). Le plancher de 4 est la valeur par defaut de Babylon.
+ */
+export function lightCap(maxUniformBlocks) {
+  if (!(maxUniformBlocks > 0)) return 4;
+  return Math.max(4, Math.floor(maxUniformBlocks) - 4);
+}
+
 export async function loadLighting() {
   try {
     const res = await fetch("data/lighting.json", { cache: "no-store" });

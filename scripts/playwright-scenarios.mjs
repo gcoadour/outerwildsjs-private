@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
+import { prechauffer } from "./pw-commun.mjs";
 
 const WEB_DIR = path.resolve("web");
 const ZIP_PATH = path.resolve("work/downloads/OuterWilds_Alpha_1_2_Linux.zip");
@@ -64,7 +65,12 @@ function assert(name, condition, details = "") {
 try {
   const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // Petite fenetre : sans GPU, le cout d'une image suit le nombre de pixels.
+    viewport: { width: 640, height: 360 },
+    // Un conteneur fournit souvent un Chromium deja installe dont la version
+    // ne suit pas celle du paquet playwright : on le prend s'il est la.
+    executablePath: process.env.PW_CHROMIUM || (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined),
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
   });
 
   const page = await context.newPage();
@@ -98,13 +104,9 @@ try {
   }
 
   await page.click("#gate-play");
-  await page.waitForFunction(() => window.__ready === true, { timeout: 60000 });
-  console.log("Moteur initialise avec succes.");
-
-  // ==========================================
-  // SCENARIO 1: REVEIL DU JOUEUR & REGARD
-  // ==========================================
-  console.log("\n--- Scenario 1: Reveil du joueur ---");
+  await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+  // Le reveil se mesure A LA PREMIERE IMAGE : il se deroule en sept secondes,
+  // et le prechauffage des shaders en dure bien plus sans GPU.
   const reveilInfo = await page.evaluate(() => {
     const cam = window.__regardCam();
     return {
@@ -113,6 +115,13 @@ try {
       yaw: cam ? cam.yaw : 0,
     };
   });
+  const chauffe = await prechauffer(page);
+  console.log(`Moteur initialise avec succes (shaders compiles en ${(chauffe.ms / 1000).toFixed(0)} s).`);
+
+  // ==========================================
+  // SCENARIO 1: REVEIL DU JOUEUR & REGARD
+  // ==========================================
+  console.log("\n--- Scenario 1: Reveil du joueur ---");
   assert("Reveil arme au depart", reveilInfo.reveilArme === true);
   assert("Angle initial de 80 degres vers le ciel", Math.abs(reveilInfo.pitch - (-80 * Math.PI / 180)) < 0.05, `pitch=${reveilInfo.pitch}`);
 
@@ -282,23 +291,36 @@ try {
   const boarded = await page.evaluate(() => window.__shipRef.boarded);
   assert("Joueur installe au poste de pilotage", boarded === true);
 
-  // Test tap up (short press with ShiftLeft, < 1.0s) -> should NOT liftoff
+  // Appui court : on relache DANS l'image ou l'allumage a commence. Sans GPU
+  // une image dure pres d'une seconde, et relacher depuis Node — un aller-retour
+  // de plus — laissait passer la seconde d'allumage : le jeu decollait, et il
+  // avait raison. Le relachement part donc de la page, a la fin de l'image.
   await page.keyboard.down("ShiftLeft");
-  await page.waitForFunction(() => window.__shipEvents.includes("StartShipIgnition"), { timeout: 5000 });
+  await page.evaluate(() => new Promise((fini) => {
+    const sc = BABYLON.EngineStore.LastCreatedScene;
+    const obs = sc.onAfterRenderObservable.add(() => {
+      if (!window.__shipEvents.includes("StartShipIgnition")) return;
+      sc.onAfterRenderObservable.remove(obs);
+      dispatchEvent(new KeyboardEvent("keyup", { code: "ShiftLeft", key: "Shift" }));
+      fini();
+    });
+  }));
   const startIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],
     landed: window.__shipRef.landed,
   }));
   assert("Appui court declenche StartShipIgnition", startIgnite.events.includes("StartShipIgnition"));
-
-  // Release ShiftLeft -> cancels ignition
+  // Le clavier de Playwright croit encore la touche tenue : on l'accorde.
   await page.keyboard.up("ShiftLeft");
-  await page.waitForFunction(() => window.__shipEvents.includes("CancelShipIgnition"), { timeout: 5000 });
+  // L'un OU l'autre : si l'image a dure plus que la seconde d'allumage, c'est
+  // `CompleteShipIgnition` qui vient, et le jeu a raison — on le dit.
+  await page.waitForFunction(() => window.__shipEvents.includes("CancelShipIgnition")
+    || window.__shipEvents.includes("CompleteShipIgnition"), { timeout: 15000 });
   const cancelIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],
     landed: window.__shipRef.landed,
   }));
-  assert("Relachement declenche CancelShipIgnition sans decollage", cancelIgnite.events.includes("CancelShipIgnition") && cancelIgnite.landed === true);
+  assert("Relachement declenche CancelShipIgnition sans decollage", cancelIgnite.events.includes("CancelShipIgnition") && cancelIgnite.landed === true, JSON.stringify(cancelIgnite));
 
   // Test full ignition (hold ShiftLeft until 1.0s ignition duration completes) -> should complete and liftoff
   await page.keyboard.down("ShiftLeft");
@@ -443,7 +465,7 @@ try {
   // SCENARIO 13: MORT, FLASHBACK & REPRISE DE LA BOUCLE
   // ==========================================
   console.log("\n--- Scenario 13: Mort du joueur et boucle temporelle ---");
-  const loop0 = await page.evaluate(() => window.__pdata?.loopCount || 1);
+  const loop0 = await page.evaluate(() => window.__pdata?.loopCount ?? 0);
   await page.evaluate(() => {
     window.__death.kill("impact");
   });
@@ -463,7 +485,7 @@ try {
       if (window.__death.update(0.2)) window.__respawn();
     }
   });
-  const loop1 = await page.evaluate(() => window.__pdata?.loopCount || 1);
+  const loop1 = await page.evaluate(() => window.__pdata?.loopCount ?? 0);
   const respawned = await page.evaluate(() => ({
     playerAlive: !window.__death?.dead,
     reveilArme: window.__reveil?.arme === true,

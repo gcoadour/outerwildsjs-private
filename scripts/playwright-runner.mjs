@@ -51,7 +51,10 @@ console.log("Static server running on http://127.0.0.1:8089");
 try {
   const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // Un conteneur fournit souvent un Chromium deja installe dont la version
+    // ne suit pas celle du paquet playwright : on le prend s'il est la.
+    executablePath: process.env.PW_CHROMIUM || (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined),
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
   });
 
   const page = await context.newPage();

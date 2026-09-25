@@ -1430,6 +1430,10 @@ const inp = extractInput(inputCtx);
 check("soixante-six axes", inp.axisCount, 66);
 check("regroupes en vingt-deux canaux", Object.keys(inp.channels).length, 22);
 check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
+// Et la plus longue image que Unity accepte : une seconde. C'est elle que
+// `decoupeImage` (input.js) prend pour borne, et le repli doit la dire aussi.
+check("le pas maximal d'une image", inp.maxTimestep, 1);
+check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
 // Zero, et ce n'est pas un oubli : chaque corps porte son champ.
 check("la gravite de Unity est nulle", (inp.gravity || []).join(","), "0,0,0");
 check("sept iterations de solveur", inp.solverIterations, 7);

@@ -37,7 +37,7 @@ import { playerNoise, CompressionSensor, INTERACT_RANGE, NOISE,
          COMPRESSION_GRACE, PlayerState, JetpackGate, JETPACK,
          inputAngle } from "../web/src/player.js";
 import { ambientTarget, ambientStep, shiplightRange, SHIPLIGHT_RANGE,
-         FadeLight, SATELLITE_FADE, DayNightTracker } from "../web/src/lights.js";
+         FadeLight, SATELLITE_FADE, DayNightTracker, lightCap } from "../web/src/lights.js";
 import { shellGain, audioShells, SHELL_FADE, AudioShells } from "../web/src/audio.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "../web/src/imposters.js";
 import { clipLoops, WRAP, HELD_ROOTS } from "../web/src/pipeline/extract/gltf.js";
@@ -87,7 +87,7 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
-import { Commandes, COMMANDES, AJOUTS, codeUnity } from "../web/src/input.js";
+import { Commandes, COMMANDES, AJOUTS, codeUnity, decoupeImage, SOUS_PAS_MAX } from "../web/src/input.js";
 import { Modes, ENSEMBLES, ALIAS, canaux, SAUVEGARDENT, EVENEMENTS,
          annonceDe } from "../web/src/modes.js";
 import { ATTERRISSAGE, rollMode, orbitSpeed, project,
@@ -7824,5 +7824,33 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("shipOnlyMusicState ni l'un ni l'autre", shipOnlyMusicState(false, false), false);
   }
 }
+
+// Le TEMPS D'UNE IMAGE (input.js, `decoupeImage`). Le build borne
+// `Time.deltaTime` a 1 s (`Maximum Allowed Timestep`) ; le portage bornait
+// l'image a 0,05 s et ralentissait le jeu sous 20 images par seconde.
+{
+  const a60 = decoupeImage(1 / 60, 1);
+  check("a 60 images par seconde, un seul sous-pas", a60.n, 1);
+  check("et il vaut l'image entiere", Math.abs(a60.h - 1 / 60) < 1e-12, true);
+  const a3 = decoupeImage(1 / 3, 1);
+  check("a 3 images par seconde, sept sous-pas", a3.n, 7);
+  check("dont la somme est le temps reel de l'image",
+        Math.abs(a3.n * a3.h - 1 / 3) < 1e-12, true);
+  check("aucun sous-pas ne depasse le plafond", a3.h <= SOUS_PAS_MAX, true);
+  const lent = decoupeImage(4, 1);
+  check("une image de 4 s ne compte qu'une seconde, comme dans Unity",
+        lent.n * lent.h, 1);
+  check("un menu ouvert fige le jeu", decoupeImage(0, 1).h, 0);
+  check("exactement 0,05 s ne se decoupe pas", decoupeImage(0.05, 1).n, 1);
+  check("la seconde du build est le repli de Commandes",
+        new Commandes(null).maxTimestep, 1);
+}
+
+// Le PLAFOND DE LUMIERES par materiau (lights.js, `lightCap`) : trois blocs
+// d'uniformes fixes et un de marge, le reste aux lumieres.
+check("SwiftShader (14 blocs) : dix lumieres", lightCap(14), 10);
+check("ANGLE sur Direct3D 11 (12 blocs) : huit", lightCap(12), 8);
+check("sans mesure, la valeur par defaut de Babylon", lightCap(0), 4);
+check("jamais sous quatre", lightCap(6), 4);
 
 report();
