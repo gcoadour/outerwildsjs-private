@@ -156,8 +156,15 @@ try {
   // ==========================================
   console.log("\n--- Scenario 3: Deplacement et saut ---");
   const pos0 = await page.evaluate(() => ({ ...window.__player.pos }));
+  // On TIENT la touche jusqu'a ce que le joueur ait bouge, trois secondes au
+  // plus : la marche du build monte en vitesse en quatorze pas fixes
+  // (`pasAuSol`), et une image logicielle peut durer plus que la demi-seconde
+  // que ce scenario tenait la touche.
   await page.keyboard.down("KeyW");
-  await page.waitForTimeout(500);
+  await page.waitForFunction((p0) => {
+    const p = window.__player.pos;
+    return Math.hypot(p.x - p0.x, p.y - p0.y, p.z - p0.z) > 0.5;
+  }, pos0, { timeout: 3000 }).catch(() => {});
   await page.keyboard.up("KeyW");
   const pos1 = await page.evaluate(() => ({ ...window.__player.pos }));
   const distWalk = Math.hypot(pos1.x - pos0.x, pos1.y - pos0.y, pos1.z - pos0.z);

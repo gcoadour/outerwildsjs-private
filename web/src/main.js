@@ -1586,7 +1586,8 @@ async function boot() {
     : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
-  const flashlight = new Flashlight(BABYLON, scene);
+  const flashlight = new Flashlight(BABYLON, scene,
+    (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
   // L'etat du baton : sorti ou range, ce qui se joue, ou en est l'aiguille.
   const baton = new BatonGuimauve();

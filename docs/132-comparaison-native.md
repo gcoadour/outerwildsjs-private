@@ -486,3 +486,34 @@ l'IL, pas sur une capture.
   l'échelle de la place disponible sur un écran bas — c'est ce qui le rend
   utilisable sur un téléphone en paysage. L'écart est assumé, et il ne joue
   que sous 720 pixels de haut environ.
+
+## La lampe et le pas de côté
+
+`F` au réveil, puis `D` : deux écarts encore.
+
+**La lampe.** Le portage tenait un cône de 56° à 1,4, choisis à l'œil, au bord
+net. La scène pose `Flashlight` sur `Player_Body` : projecteur de **80°**,
+intensité 1, blanc. Et Unity atténue un projecteur par sa texture de spot par
+défaut, qui s'éteint vers le bord du cône ; Babylon coupe net après
+`cos^exposant`. Un exposant de onze ramène le bord à 5 % et la mi-course à la
+moitié : le disque dur devient le halo de l'alpha.
+
+**Le pas.** Le pas de côté du portage allait bien plus loin que celui de
+l'alpha. `CharacterMovementModel.UpdateMovement`, lu dans l'IL, en dit plus
+que ce que le portage en avait tiré :
+
+```
+vitesse = _groundSpeed ; si (commande.z < 0) vitesse = _strafeSpeed
+cible   = (commande.x × _strafeSpeed, 0, commande.z × vitesse)   -- non bornée
+écart   = cible − vitesse   (repère du joueur, y à zéro)
+si |écart| > _tumbleThreshold (15, constructeur) : culbute
+écart.x, écart.z bornés à ±_groundAcceleration ; AddVelocityChange(écart)
+matériau : en course frottement 0 ; DEBOUT frottement 1 (au maximum) ; en l'air 0
+```
+
+Quatre corrections : on **recule à 5**, pas à 7 ; la diagonale n'est pas
+bornée (8,6, comme le jeu) ; `_groundAcceleration` est une **borne par pas
+fixe et par axe**, pas une fraction de l'écart — quatorze pas, 0,28 s, pour
+atteindre 7 — ; et debout, le matériau frotte, ce qui arrête en 0,59 m sur
+Timber Hearth (`pasAuSol`). La glissade après une touche lâchée, que
+l'alpha montrait et que le portage n'avait pas, en vient.

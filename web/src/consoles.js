@@ -118,14 +118,34 @@ export class ShipComputer {
  */
 export const FLASHLIGHT_RANGE = 80;
 
+/**
+ * La lumiere de la lampe, telle que la scene la pose : `Flashlight` sur
+ * `Player_Body`, projecteur de QUATRE-VINGTS degres, intensite 1, blanc. Le
+ * portage tenait un cone de 56 degres a 1,4, choisis a l'oeil ; cote a cote
+ * avec l'alpha, son disque net tranchait la ou l'alpha pose un halo large
+ * (docs/132).
+ *
+ * Le bord : Unity attenue un projecteur par sa texture de spot par defaut,
+ * qui s'eteint vers le bord du cone ; Babylon, par `cos(angle)^exposant`, puis
+ * coupe net. Un exposant de onze ramene le bord a cinq pour cent et la
+ * mi-course a la moitie — l'allure de la texture d'Unity, sans le trait.
+ */
+export const FLASHLIGHT_FALLBACK = { spotAngle: 80, intensity: 1, color: [1, 1, 1] };
+export const FLASHLIGHT_EXPONENT = 11;
+
 export class Flashlight {
-  constructor(BABYLON, scene) {
+  /** @param build la lumiere `Flashlight` de data/lighting.json, ou null */
+  constructor(BABYLON, scene, build = null) {
     this.B = BABYLON;
+    const b = build || FLASHLIGHT_FALLBACK;
     this.light = new BABYLON.SpotLight(
       "flashlight", BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, 0, 1),
-      Math.PI / 3.2, 2, scene);
+      (b.spotAngle || FLASHLIGHT_FALLBACK.spotAngle) * Math.PI / 180,
+      FLASHLIGHT_EXPONENT, scene);
     this.light.range = FLASHLIGHT_RANGE;
-    this.light.intensity = 1.4;
+    this.light.intensity = b.intensity ?? FLASHLIGHT_FALLBACK.intensity;
+    const c = b.color || FLASHLIGHT_FALLBACK.color;
+    this.light.diffuse = new BABYLON.Color3(c[0], c[1], c[2]);
     this.light.setEnabled(false);
     this.on = false;
   }

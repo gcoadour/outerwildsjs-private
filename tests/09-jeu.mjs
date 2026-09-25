@@ -124,7 +124,7 @@ import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION, shipNoise, SHIP_NOISE } from "../web/src/ship.js";
-import { Player, PLAYER_FALLBACK, groundTarget, approach, walkable,
+import { Player, PLAYER_FALLBACK, groundTarget, pasAuSol, walkable,
          jumpHeight, frameFriction } from "../web/src/player.js";
 import { playerConstants } from "../web/src/config.js";
 import { buildOrbits, advance, frameVelocity } from "../web/src/orbits.js";
@@ -2200,32 +2200,42 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(groundTarget({ forward: 1, right: 0 }, basis, c).z, 3), 7);
   check("de cote, on vise _strafeSpeed",
         round(groundTarget({ forward: 0, right: 1 }, basis, c).x, 3), 5);
-  // Composer 7 et 5 sans borner donnerait 8,6 en diagonale : plus vite en
-  // biais qu'en ligne droite, ce qui est le defaut classique.
+  // `UpdateMovement` : on recule a la vitesse de COTE, et la diagonale n'est
+  // pas bornee — 8,6 en biais, comme dans le jeu (docs/132).
+  check("en arriere, on vise _strafeSpeed",
+        round(groundTarget({ forward: -1, right: 0 }, basis, c).z, 3), -5);
   const diag = groundTarget({ forward: 1, right: 1 }, basis, c);
-  check("en diagonale, on ne va pas plus vite qu'en avant",
-        Math.hypot(diag.x, diag.z) <= 7 + 1e-9, true);
+  check("en diagonale, 7 et 5 se composent : 8,6", round(Math.hypot(diag.x, diag.z), 2), 8.6);
 
-  // Regime etabli : v -> _groundSpeed a 1 % pres. `_groundAcceleration` est
-  // une fraction par PAS FIXE (50 Hz), pas par seconde : la mise en vitesse se
-  // compte en dixiemes de seconde, pas en dizaines.
-  let v = 0;
-  for (let i = 0; i < 60; i++) v = approach(v, 7, c.acceleration, 1 / 60);
-  check("la vitesse de regime est _groundSpeed a 1 % pres",
-        Math.abs(v - 7) / 7 < 0.01, true);
-  let court = 0;
-  for (let i = 0; i < 12; i++) court = approach(court, 7, c.acceleration, 1 / 60);
-  check("... et elle est atteinte en un cinquieme de seconde",
-        Math.abs(court - 7) / 7 < 0.01, true);
-  // Meme mise en vitesse quelle que soit la cadence (le principe du §2.5).
-  const apres1s = (fps) => {
-    let u = 0;
-    for (let i = 0; i < fps; i++) u = approach(u, 7, c.acceleration, 1 / fps);
-    return u;
+  // `_groundAcceleration` est une BORNE par pas fixe et par axe, pas une
+  // fraction : quatorze pas pour atteindre 7, autant pour s'arreter.
+  const marche = (v0, cible, pas, dt = 0.02) => {
+    let v = { x: 0, y: 0, z: v0 }, n = 0;
+    while (n < pas) { v = pasAuSol(v, { x: 0, y: 0, z: cible }, basis, c, dt).vel; n++; }
+    return v.z;
   };
-  check("la mise en vitesse ne depend pas de la frequence d'images",
-        Math.abs(apres1s(30) - apres1s(144)) < 1e-9, true);
-  check("l'approche ne depasse jamais sa cible", approach(0, 7, 1, 1), 7);
+  check("au bout de sept pas, on est a mi-vitesse", round(marche(0, 7, 7), 3), 3.5);
+  check("il faut quatorze pas (0,28 s) pour atteindre 7", round(marche(0, 7, 14), 3), 7);
+  check("et on ne la depasse pas", round(marche(0, 7, 20), 3), 7);
+  let glisse = 0, v = 7;
+  while (v > 0) { v = pasAuSol({ x: 0, y: 0, z: v }, { x: 0, y: 0, z: 0 }, basis, c, 0.02).vel.z; glisse += v * 0.02; }
+  check("lacher la touche : on glisse encore pres d'un metre", round(glisse, 2), 0.91);
+  // Debout, le materiau frotte (1, au maximum avec le sol) : sous les douze de
+  // Timber Hearth, l'arret est plus court.
+  let glisseDebout = 0, vd = 7;
+  while (vd > 1e-9) {
+    vd = pasAuSol({ x: 0, y: 0, z: vd }, { x: 0, y: 0, z: 0 }, basis, c, 0.02, 0.02, 12).vel.z;
+    glisseDebout += vd * 0.02;
+  }
+  check("debout sur Timber Hearth, on glisse six dixiemes de metre", round(glisseDebout, 2), 0.59);
+  check("en marchant, pas de frottement : la cible seule borne",
+        round(pasAuSol({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 7 }, basis, c, 0.02, 0.02, 12).vel.z, 3), 0.5);
+  check("la meme mise en vitesse a 30 et a 60 images par seconde",
+        round(marche(0, 7, 6, 1 / 30), 3), round(marche(0, 7, 12, 1 / 60), 3));
+  check("un ecart de plus de quinze fait culbuter",
+        pasAuSol({ x: 0, y: 0, z: 20 }, { x: 0, y: 0, z: 0 }, basis, c, 0.02).culbute, true);
+  check("a chaque axe sa borne : le cote n'attend pas l'avant",
+        round(pasAuSol({ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 7 }, basis, c, 0.02).vel.x, 3), 0.5);
 
   // Pente praticable : _maxAngleToBeGrounded vaut 45 degres. Le portage
   // n'avait aucun seuil, et on tenait sur une paroi verticale.
@@ -3059,7 +3069,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 // scene : c'est son controleur qui le pose au demarrage de la conversation.
 {
   const data = new PlayerData();
-  data.wipe();
+  data.nouvelleSauvegarde(); data.save();
   const curator = { index: 0, character: "Curator", position: [0, 0, 0],
                     tree: null,
                     controller: { kind: "CuratorConvoController",
@@ -7250,7 +7260,7 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // --- L'INVULNERABILITE DU PREMIER TOUR (docs/81-invulnerable.md) ---
 
   const d = new PlayerData();
-  d.wipe();
+  d.nouvelleSauvegarde(); d.save();
   check("premiere boucle, sans les codes : invulnerable",
         d.startOfTimeLoop(1), true);
   check("et le savoir d'entrainement retombe", d.completedZeroGTraining, false);
