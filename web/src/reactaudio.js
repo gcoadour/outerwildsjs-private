@@ -200,6 +200,36 @@ export class ThrusterSound {
 export const TRAVEL_FADE = 5;
 
 /**
+ * `SpacesuitAudioController` : le souffle du casque, hors de l'oxygene.
+ *
+ *     Start           loop = true ; panLevel = 0 (2D) ; Stop() ; volume local 0
+ *     OnExitOxygen    FadeIn(5)       le souffle monte en cinq secondes
+ *     OnEnterOxygen   FadeOut(5)      et retombe de meme
+ *
+ * Le portage ne jouait que le clip du plein (`_refillOxygenClip`) : la source
+ * elle-meme — `SpacesuitAmbience`, posee sur `Player_Body/Audio` — n'etait
+ * lancee que si l'on passait a moins de 700 unites de l'endroit ou le joueur
+ * se tenait au chargement, comme un son pose dans le decor (docs/132).
+ */
+export const SUIT_AMBIENCE_FADE = 5;
+
+export class SuitAmbience {
+  constructor(fade = SUIT_AMBIENCE_FADE) {
+    this.fade = fade;
+    this.level = 0;     // `SetLocalVolume(0)` au `Start`
+  }
+
+  /** @returns le volume local, de 0 a 1 */
+  update(dt, inOxygen) {
+    const cible = inOxygen ? 0 : 1;
+    const pas = this.fade > 0 ? dt / this.fade : 1;
+    if (this.level < cible) this.level = Math.min(cible, this.level + pas);
+    else if (this.level > cible) this.level = Math.max(cible, this.level - pas);
+    return this.level;
+  }
+}
+
+/**
  * La musique de voyage : au poste de pilotage ET dans le vide.
  *
  * Les deux conditions ensemble, et c'est tout le sens du morceau : il ne joue

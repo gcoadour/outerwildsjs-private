@@ -289,6 +289,16 @@ const ranges = new Set((audio.sources || []).map((s) => s.range));
 // elles vont de 10 a 4 000. Une distribution qui s'y reduirait signalerait un
 // retour en arriere.
 check("les portees ne sont pas les trois valeurs inventees", ranges.size > 3, true);
+// Un clip importe en 2D (`m_3D` faux) ne se place pas : douze sources de
+// `level0` en portent un, et le portage les spatialisait (docs/132).
+{
+  const plates = audio.sources.filter((s) => !s.spatial).map((s) => s.name);
+  check("la lunette gresille en 2D", plates.includes("PlayerCamera"), true);
+  check("le souffle du casque est en 2D", plates.includes("SpacesuitAudio"), true);
+  check("la musique de voyage est en 2D", plates.includes("TravelMusicController"), true);
+  check("aucune source a clip 2D n'est lancee d'office",
+        audio.sources.filter((s) => !s.spatial && s.playOnAwake).length, 0);
+}
 const rolloffs = audio.sources.reduce((a, s) => (a[s.rolloff] = (a[s.rolloff] || 0) + 1, a), {});
 console.log("     sources:", audio.sources.length,
             "| portees distinctes:", ranges.size,

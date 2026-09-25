@@ -281,8 +281,9 @@ export class AudioField {
                  s.position[1] - toFrame[1],
                  s.position[2] - toFrame[2]];
       const d = Math.hypot(p[0] - listener.x, p[1] - listener.y, p[2] - listener.z);
-      // Une source non spatiale est « toujours a portee ». Mais les six du
-      // build sont des morceaux de musique declenches par evenement, tous a
+      // Une source non spatiale est « toujours a portee ». Mais celles du
+      // build — les six a `Pan2D` 1, et les douze dont le CLIP est 2D
+      // (docs/132) — sont declenchees par un controleur, toutes a
       // playOnAwake false : les charger au demarrage coutait 15,1 Mo pour du
       // son que rien ne joue. On attend donc qu'on les demande.
       // `LOOPED` dit comment jouer, pas s'il faut charger : les six sources non

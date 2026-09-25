@@ -87,10 +87,23 @@ guimauve, bâton sorti près du feu au réveil, grille toute seule. Les tests
 relèvent maintenant la vitesse à **chaque pas du joueur**, et partent d'une
 guimauve neuve.
 
-## Ce qui reste ouvert
+### 6. Douze sons 2D posés dans le décor
 
-- **Douze sources jouent un clip 2D** (`m_3D = false`) — les musiques du
-  village et du voyage, les ambiances de jour et de nuit, `chomp`,
-  `radio_static` — et l'extracteur audio ignore ce drapeau : elles sont
-  atténuées par la distance là où Unity les joue partout. À traiter source par
-  source, en regardant ce qui les pilote.
+`AudioClip.m_3D` dit si un clip se place dans l'espace. Douze sources de
+`level0` portent un clip **2D** — les musiques du village, du voyage, des
+Anciens et de la fin des temps, « Into the Unknown », les ambiances de jour et
+de nuit, le souffle du casque, le grésillement de la lunette, `chomp`, le son
+de la carte — et l'extracteur ignorait ce drapeau. Les pistes Music et
+Ambience étant jouées d'office, **la musique de voyage et les ambiances du
+village se lançaient dès qu'on passait à moins de 700 unités de leur point
+d'origine**, spatialisées, en doublon des zones d'ambiance qui les jouent déjà.
+Une source n'est plus spatiale que si son clip l'est, et elle attend alors
+qu'un contrôleur la demande.
+
+Deux de ces sons n'avaient d'ailleurs **aucun** contrôleur dans le portage :
+
+- le **souffle du casque** (`SpacesuitAudioController`) : monte en 5 s quand on
+  quitte l'oxygène (`OnExitOxygen` → `FadeIn(5)`), retombe en 5 s quand on y
+  rentre — `SuitAmbience` ;
+- le **grésillement de la lunette** (`Telescope`) : lancé à `EnterTelescope`,
+  réglé chaque image sur `_signalStrength`, coupé à `ExitTelescope`.

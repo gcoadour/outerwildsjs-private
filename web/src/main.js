@@ -162,7 +162,7 @@ import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          UpAligner, steadyPitch, steadyLook } from "./attach.js";
 import { loadEventAudio, eventAudio, Footsteps, Turbulence, ThrusterSound,
          TravelMusic, EndOfTimeMusic, END_OF_TIME, THRUSTER_AUDIO,
-         UISounds, jumpSound, shipTurbulence } from "./reactaudio.js";
+         UISounds, jumpSound, shipTurbulence, SuitAmbience } from "./reactaudio.js";
 import { applyDecals } from "./shaders/index.js";
 
 function setStatus(msg) {
@@ -916,6 +916,7 @@ async function boot() {
   const turbulence = new Turbulence();
   const thrusterSound = new ThrusterSound();
   const travelMusic = new TravelMusic();
+  const souffleCasque = new SuitAmbience();
   const endMusic = new EndOfTimeMusic();
   const turbShip = shipTurbulence(events);
   let shipWindLevel = 0;
@@ -6488,6 +6489,21 @@ async function boot() {
                                      exploded: loop.supernova });
       const cFin = clipDe("EndOfTimeMusicController");
       if (cFin) audio.loopAt(cFin, vFin * mixer.volume("Music"));
+      // Le souffle du casque hors de l'oxygene, et le gresillement de la
+      // lunette au volume du signal (`Telescope.Update` :
+      // `audio.volume = _signalStrength`, joue a `EnterTelescope`, coupe a
+      // `ExitTelescope`). Deux sources 2D que rien ne jouait (docs/132).
+      const sCasque = audioMap.find((x) => x.name === "SpacesuitAudio");
+      if (sCasque) {
+        const dansOxygene = !!(ship && ship.boarded) || !!zoneOxygene;
+        audio.loopAt(sCasque.file, souffleCasque.update(dt, dansOxygene)
+          * (sCasque.volume ?? 1) * mixer.volume(sCasque.track));
+      }
+      const sLunette = audioMap.find((x) => x.name === "PlayerCamera");
+      if (sLunette) {
+        audio.loopAt(sLunette.file, telescope.active
+          ? Math.min(1, telescope.signalStrength) * (sLunette.volume ?? 1) : 0);
+      }
     }
     // sources audio dans la portee de l'auditeur, creees et liberees a la volee
     if (audioMap.length) {

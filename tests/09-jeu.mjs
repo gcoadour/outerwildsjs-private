@@ -87,6 +87,7 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
+import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint, attenuationUnity } from "../web/src/titre.js";
 import { prewarmCycles, sizeGradients } from "../web/src/particles.js";
@@ -7933,5 +7934,14 @@ check("jamais sous quatre", lightCap(6), 4);
 check("au pied de la lumiere, deux fois sa couleur", attenuationUnity(0, 10), 2);
 check("a la moitie de la portee, 2/7,25", attenuationUnity(5, 10).toFixed(4), "0.2759");
 check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
+
+// `SpacesuitAudioController` : FadeIn(5) hors de l'oxygene, FadeOut(5) dedans.
+{
+  const c = new SuitAmbience();
+  check("silencieux au depart", c.update(0.1, true), 0);
+  check("hors de l'oxygene, a moitie en 2,5 s", c.update(2.5, false), 0.5);
+  check("plein en cinq secondes", c.update(10, false), 1);
+  check("et retombe en cinq", (c.update(SUIT_AMBIENCE_FADE, true)), 0);
+}
 
 report();
