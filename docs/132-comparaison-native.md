@@ -347,7 +347,12 @@ alors que les positions du build (point d'apparition, caméra à 0,9 au-dessus
 du centre du corps et 0,15 devant, feu) placent l'œil à 4,5 m de la flamme, et
 le portage à 4,7 m. L'écart vient sans doute de ce que la physique fait du
 corps dans les premières images — la capsule de l'alpha est posée par son
-centre sur le point d'apparition —, et reste à mesurer. L'éblouissement
+centre sur le point d'apparition, et `MatchInitialMotion` ne lui donne que le
+mouvement de translation de la planète —, et reste à mesurer. Ce n'est pas une
+glissade à l'arrêt : la capsule porte `Character`, sans frottement, mais
+`CharacterMovementModel` change de matériau physique selon qu'on est debout,
+en course ou en l'air. `PhysicMaterial` (classe 134) se lit maintenant au bit
+près. L'éblouissement
 blanc, lui, n'est ni le tonemapping (éteint par `TonemappingManager`) ni le
 flashback ; il n'est pas encore attribué.
 

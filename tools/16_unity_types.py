@@ -50,6 +50,10 @@ CLASSES = {
     # Sans elles, leur texte, leur ancre et leur decalage en pixels restaient
     # a recopier a la main (docs/131-ecran-titre.md).
     131: "GUITexture", 132: "GUIText",
+    # 134 PhysicMaterial : le frottement et le rebond des colliders. La
+    # capsule du joueur en porte un, qui dit s'il glisse sur une pente
+    # (docs/132).
+    134: "PhysicMaterial",
 }
 
 

@@ -1494,6 +1494,22 @@ check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
     check(`${type} de mainData lus au bit pres`, `${exacts}/${n}`,
           type === "GUIText" ? "13/13" : "2/2");
   }
+  // `PhysicMaterial` : l'oracle, et la capsule du joueur, sans frottement —
+  // `CharacterMovementModel` change de materiau selon qu'on est debout, en
+  // course ou en l'air (docs/132).
+  {
+    let n = 0, exacts = 0, perso = null;
+    for (const o of env.objects({ type: "PhysicMaterial" })) {
+      n++;
+      const r = o.file.reader(o);
+      readTypeTree(r, engineTypes.classes.PhysicMaterial, o.file);
+      if (r.pos === o.byteSize) exacts++;
+      const v = inputCtx.readEngine(o);
+      if (v && v.m_Name === "Character") perso = v;
+    }
+    check("PhysicMaterial lus au bit pres", exacts === n && n > 0, true);
+    check("la capsule du joueur ne frotte pas", perso && perso.dynamicFriction, 0);
+  }
   const { extractTitre } = await import("../web/src/pipeline/extract/titre.js");
   const t = extractTitre(inputCtx, (nom) => nom);
   check("cinq options au menu-titre", t.menu.options.length, 5);
