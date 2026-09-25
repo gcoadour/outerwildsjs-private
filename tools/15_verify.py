@@ -249,6 +249,10 @@ def run_repli(url):
           cam.position.copyFrom(p.add(p.subtract(e).normalize().scale(800)));
           cam.setTarget(e);
           scene.render();
+          // On mesure le RENDU : le reticule de `DebugHUD`, une croix au
+          // centre exact de l'ecran, tomberait sur le pixel qu'on lit.
+          const r = document.getElementById('reticule');
+          if (r) r.hidden = true;
         }""")
         vue = page.locator("canvas").first.screenshot()
         vp = page.viewport_size
