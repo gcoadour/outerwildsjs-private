@@ -49,11 +49,14 @@
 //
 // LA PIECE TOUCHEE EST LA PLUS PROCHE. Pas celle que designe une normale : le
 // build parcourt ses composants et garde celui dont le GameObject est le plus
-// pres du POINT d'impact. C'est pourquoi les dix reacteurs portent une position
-// dans la scene et pas une direction.
+// pres du POINT d'impact — parmi QUINZE : dix reacteurs et cinq pieces de coque
+// (deux a l'arriere, deux en haut, une devant). Le portage ne lisait que les
+// reacteurs et ramenait les degats a cinq positions ; ils vivent maintenant sur
+// les pieces, et les positions n'en sont que la vue du casque.
 //
-// TROIS PIECES ABIMEES AU PLUS. Au-dela, un impact ne fait plus de nouvelle
-// victime : sa force se partage entre les pieces deja touchees.
+// TROIS ENTREES AU PLUS. `_damagedParts` est une liste ou une piece rentre a
+// chaque coup, sans `Contains` : au-dela de trois entrees, un impact ne fait
+// plus de nouvelle victime et sa force se partage entre elles.
 //
 // LA FORCE, ET LA MORT :
 //
@@ -139,7 +142,9 @@ export function engineComponents(gameplay) {
     const alerte = Object.entries(LOCATIONS)
       .find(([, bit]) => bit === (f._alertLocation ?? 0));
     return {
+      id: c.id ?? null,
       name: c.name,
+      moteur: true,
       position: c.position || null,
       thruster: THRUSTERS[f._thrusterLocation ?? 0] || null,
       thrusterIndex: f._thrusterLocation ?? 0,
@@ -170,15 +175,66 @@ export function awakeThreshold(fields = {}, engine = false) {
   return base + mod;
 }
 
+/**
+ * Les QUINZE pieces du vaisseau : les dix reacteurs et les cinq pieces de
+ * coque, avec leur position ramenee dans le repere du vaisseau au repos.
+ *
+ * `_components = GetComponentsInChildren<ShipComponent>()` les prend toutes,
+ * et `EngineComponent` n'en est qu'une sous-classe. Le portage ne lisait que
+ * les reacteurs : un choc sur le nez, ou le dessus de la coque, allait donc au
+ * reacteur le plus proche, jamais au cockpit (docs/132).
+ *
+ * @param rest    position de repos de `Ship_Body`, dans le monde de la scene
+ * @param restRot sa rotation de repos (x, y, z, w)
+ */
+export function shipComponents(gameplay, rest = null, restRot = null) {
+  const placed = gameplay.placed || {};
+  const generiques = (placed.ShipComponent || []).map((c) => {
+    const f = c.fields || {};
+    const alerte = Object.entries(LOCATIONS).find(([, bit]) => bit === (f._alertLocation ?? 0));
+    return { id: c.id ?? null, name: c.name, moteur: false, position: c.position || null,
+             thruster: null, thrusterIndex: null, alertBit: f._alertLocation ?? 0,
+             location: alerte ? alerte[0] : null, impactThreshold: f._impactThreshold ?? 0,
+             integrity: f._integrity ?? 100 };
+  });
+  const toutes = [...engineComponents(gameplay), ...generiques];
+  if (!rest) return toutes;
+  const [qx, qy, qz, qw] = restRot || [0, 0, 0, 1];
+  // Rotation par l'INVERSE de la pose de repos : le point d'impact arrive dans
+  // le repere du vaisseau (droite, haut, avant), et c'est la qu'on compare.
+  const inv = (v) => {
+    const x = -qx, y = -qy, z = -qz, w = qw;
+    const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+    return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz),
+            v[2] + w * tz + (x * ty - y * tx)];
+  };
+  return toutes.map((c) => ({
+    ...c,
+    position: c.position
+      ? inv([c.position[0] - rest[0], c.position[1] - rest[1], c.position[2] - rest[2]])
+      : null,
+  }));
+}
+
+/**
+ * Les buses que `ShipThrusterModel.FireTranslationalThrusters` consulte, par
+ * axe et par sens. Deux par direction, chacune pour moitie ; l'axe lateral
+ * n'en consulte AUCUNE — `Left` et `Right` ont beau etre des reacteurs, rien ne
+ * les eteint dans la poussee.
+ */
+const BUSES = {
+  "z+": ["BackLeft", "BackRight"], "z-": ["FrontLeft", "FrontRight"],
+  "y+": ["BottomLeft", "BottomRight"], "y-": ["TopLeft", "TopRight"],
+};
+
 export class ShipDamage {
   /**
-   * @param fields champs de ShipDamageController, tels qu'extraits
+   * @param fields     champs de ShipDamageController, tels qu'extraits
+   * @param composants les pieces (`shipComponents()`, ou les seuls reacteurs
+   *                   d'`engineComponents()`) ; sans elles, une piece par
+   *                   position, choisie par la normale
    */
-  /**
-   * @param fields champs de ShipDamageController, tels qu'extraits
-   * @param engines les dix `EngineComponent`, si on les a (`engineComponents()`)
-   */
-  constructor(fields = {}, engines = []) {
+  constructor(fields = {}, composants = []) {
     // `_damageLocationMask` s'ACCUMULE : sa valeur serialisee est l'etat de
     // depart, c'est-a-dire zero, et non une permission.
     this.mask = fields._damageLocationMask ?? 0;
@@ -197,20 +253,48 @@ export class ShipDamage {
     this.mediumSound = fields._mediumImpactThreshold ?? DAMAGE.medium;
     this.shipTotalHealth = fields._shipTotalHealth ?? DAMAGE.total;
     this.instantDeathSpeed = fields._instantDeathSpeed ?? DAMAGE.instantDeath ?? 300;
-    // L'integrite d'une PIECE, serialisee a 100 sur chacun des dix
-    // `EngineComponent`. Elle n'a rien a voir avec `_shipTotalHealth`, qui
-    // borne le CUMUL : les confondre faisait naitre des pieces increvables.
+    // L'integrite d'une PIECE, serialisee a 100 sur chacune. Elle n'a rien a
+    // voir avec `_shipTotalHealth`, qui borne le CUMUL.
     this.total = DAMAGE.total;
 
-    this.parts = {};
-    for (const k of Object.keys(LOCATIONS)) {
-      this.parts[k] = { name: PART_AT[k], integrity: this.total, dead: false, totalDamage: 0 };
-    }
-    // Les reacteurs, quand on les a : chacun sait son cote et sa buse.
-    this.engines = engines;
+    const base = composants.length ? composants
+      : Object.keys(LOCATIONS).map((k) => ({ name: PART_AT[k], moteur: false, position: null,
+                                            location: k, alertBit: LOCATIONS[k] }));
+    this.composants = base.map((c) => ({
+      id: c.id ?? null, name: c.name, moteur: !!c.moteur, position: c.position || null,
+      thruster: c.thruster || null, location: c.location || null,
+      alertBit: c.alertBit ?? LOCATIONS[c.location] ?? 0,
+      // `Awake` ecrase le seuil serialise (80 sur les pieces de coque, 0 sur
+      // les reacteurs) : c'est celui du reveil qui vaut.
+      seuil: c.moteur ? this.seuilPiece : this.seuilGenerique,
+      integrity: this.total, totalDamage: 0, dead: false,
+    }));
+    // `_damagedParts` : une LISTE, et une piece y entre a CHAQUE coup qui
+    // l'abime, sans `Contains`. Voir `impact`.
+    this.endommagees = [];
+    // `ShipThrusterModel.DisableThruster` : une buse coupee le reste, la
+    // reparation ne la rallume pas (`EnableThruster` n'est appele nulle part).
+    this.busesCoupees = new Set();
     this.destroyed = false;
     this.lastImpact = 0;
     this.lastLocation = null;
+    this.lastPiece = null;
+  }
+
+  /**
+   * Les pieces, regroupees par position d'alerte : ce que le casque montre.
+   * Une vue, recalculee : la verite est dans `composants`.
+   */
+  get parts() {
+    const out = {};
+    for (const k of Object.keys(LOCATIONS)) {
+      const ici = this.composants.filter((c) => c.location === k);
+      out[k] = { name: PART_AT[k], pieces: ici.length,
+                 integrity: ici.length ? Math.min(...ici.map((c) => c.integrity)) : this.total,
+                 totalDamage: ici.reduce((s, c) => s + c.totalDamage, 0),
+                 dead: ici.some((c) => c.dead) };
+    }
+    return out;
   }
 
   /**
@@ -228,50 +312,39 @@ export class ShipDamage {
   }
 
   /**
-   * `RecalculateShipDamge` : la somme des `_totalDamage` des pieces.
+   * `RecalculateShipDamge` : la somme des `_totalDamage` sur `_damagedParts`.
    *
-   * Le build n'a PAS d'integrite de coque. `ShipDamageController` ne porte
-   * aucun champ de sante propre : il explose sur deux conditions seulement, la
-   * vitesse d'un choc et ce cumul-la. L'« integrite » du vaisseau est donc ce
-   * qu'il lui reste avant le cumul fatal — une soustraction, pas un compteur
-   * separe (docs/113-seuil.md).
+   * SUR LA LISTE, DOUBLONS COMPRIS. Une piece touchee deux fois y figure deux
+   * fois, et son dommage compte donc double : deux chocs a 100 u/s sur le meme
+   * reacteur (25,9 chacun) font un cumul de 2 x 51,9 = 103,7, et le vaisseau
+   * explose au DEUXIEME choc et non au quatrieme. C'est le build ; le portage
+   * le garde tel quel.
    */
   get cumul() {
-    return Object.values(this.parts).reduce((s, p) => s + p.totalDamage, 0);
+    return this.endommagees.reduce((s, c) => s + c.totalDamage, 0);
   }
 
-  /**
-   * Ce qu'il reste au vaisseau, de `_shipTotalHealth` a zero.
-   *
-   * CE QUI A ETE RETIRE : une courbe de degats de coque inventee par ce
-   * portage — « progression lineaire entre le seuil leger et le seuil de mort
-   * instantanee », avec une severite de 0,4 ou 1. Elle prenait
-   * `_lightImpactThreshold` et `_mediumImpactThreshold` pour des seuils de
-   * DEGATS ; ce sont les seuils du BRUIT, et leur seul autre emploi dans
-   * `OnImpact` est de choisir entre `_lightImpactClip` et `_mediumImpactClip`.
-   *
-   * Elle avait une consequence qu'aucun test ne voyait : la coque mourait
-   * toujours avant qu'une piece n'atteigne zero, si bien que
-   * `_disableDamagedThrusters` ne pouvait JAMAIS couper un propulseur.
-   */
+  /** `GetHullIntegrityFraction`, en points : ce qu'il reste avant le cumul fatal. */
   get integrity() {
     return Math.max(0, this.shipTotalHealth - this.cumul);
   }
 
-  /** `ApplyDamageForce` : ce qu'une piece perd, et ce qu'elle allume. */
-  _blesse(p, cle, force) {
-    p.integrity = Math.max(0, p.integrity - force);
-    p.totalDamage += force;
-    if (p.integrity <= 0) {
-      p.integrity = 0;
-      p.dead = true;
+  /** `ApplyDamageForce` : ce qu'une piece perd, et la buse qu'elle coupe. */
+  _blesse(c, force) {
+    c.integrity -= force;
+    c.totalDamage += force;
+    if (c.integrity <= 0) {
+      c.integrity = 0;
+      c.dead = true;
+      if (c.moteur && c.thruster && this.disableDamagedThrusters) this.busesCoupees.add(c.thruster);
     }
-    // Le masque d'alerte s'accumule, et c'est lui que le HUD affiche.
-    if (cle) this.mask |= LOCATIONS[cle] || 0;
   }
 
   /** Le vaisseau a-t-il pris quelque chose ? */
-  get damaged() { return this.cumul > 0 || this.deadParts.length > 0; }
+  get damaged() { return this.endommagees.length > 0; }
+
+  /** La piece est-elle dans `_damagedParts` — donc son volume allume ? */
+  estEndommagee(c) { return this.endommagees.includes(c); }
 
   /** La position est-elle dans le masque d'alerte COURANT ? */
   covers(location) {
@@ -284,154 +357,154 @@ export class ShipDamage {
   }
 
   /**
-   * La piece la plus proche d'un point d'impact, exprime dans le repere du
-   * vaisseau. C'est ainsi que le build choisit — pas par une normale.
+   * La piece la plus proche d'un point d'impact, dans le repere du vaisseau.
+   * La boucle du build part de la premiere et ne change que sur un `<` strict :
+   * a egalite, la premiere dans l'ordre de la hierarchie l'emporte.
    */
-  nearestEngine(point) {
-    if (!point || !this.engines.length) return null;
+  plusProche(point) {
+    if (!point) return null;
     let best = null, bestD = Infinity;
-    for (const e of this.engines) {
-      if (!e.position) continue;
-      const d = Math.hypot(e.position[0] - point[0], e.position[1] - point[1],
-                           e.position[2] - point[2]);
-      if (d < bestD) { bestD = d; best = e; }
+    for (const c of this.composants) {
+      if (!c.position) continue;
+      const d = Math.hypot(c.position[0] - point[0], c.position[1] - point[1],
+                           c.position[2] - point[2]);
+      if (d < bestD) { bestD = d; best = c; }
     }
     return best;
   }
 
   /**
-   * Un impact.
+   * Un impact, `OnImpact`.
    *
    * @param speed  vitesse NORMALE a la surface, en u/s
    * @param normal normale de l'impact dans le repere du vaisseau, ou null
    * @param point  point d'impact dans le repere du vaisseau, ou null — quand on
    *               l'a, c'est LUI qui designe la piece, comme dans le build
-   * @returns {damage, location, part, destroyed}
+   * @returns {damage, location, piece, part, destroyed, justExploded}
    */
   impact(speed, normal = null, point = null) {
     // `OnImpact` n'a pas de garde d'entree : il joue un bruit selon la vitesse
-    // — leger au-dessus de quinze, moyen au-dessus de trente — puis cherche la
-    // piece. Un choc plus doux que le seuil leger ne fait meme pas de bruit.
+    // puis cherche la piece.
     if (!(speed > 0)) {
-      return { damage: 0, location: null, part: 0, destroyed: this.destroyed };
+      return { damage: 0, location: null, piece: null, part: 0, destroyed: this.destroyed };
     }
     this.lastImpact = Math.round(speed);
-
-    // Le build choisit par PROXIMITE quand il a des composants poses, et le
-    // portage retombe sur la normale quand il n'en a pas.
-    const proche = this.nearestEngine(point);
-    const loc = proche ? proche.location : (normal ? locationOf(normal) : null);
-    this.lastLocation = loc;
-
-    let part = 0;
-    // `Awake` a ecrase le seuil serialise : c'est celui du reveil qui vaut, et
-    // il gate l'impact autant qu'il entre dans la force.
-    const seuil = this.seuilPiece;
-    const abimees = Object.values(this.parts).filter((p) => p.totalDamage > 0);
-
     const wasDestroyed = this.destroyed;
-    if (abimees.length < 3) {
-      // TANT QU'IL Y A MOINS DE TROIS PIECES ABIMEES, le choc en cherche une
-      // nouvelle : la plus proche du point, et elle seule.
-      if (loc && this.parts[loc] && speed > seuil) {
+    let part = 0, cible = null;
+
+    if (this.endommagees.length < 3) {
+      // TANT QUE LA LISTE COMPTE MOINS DE TROIS ENTREES, le choc cherche la
+      // piece la plus proche du point — parmi les quinze, deja touchee ou non.
+      // Le portage retombe sur la normale quand il n'a pas de positions.
+      cible = this.plusProche(point);
+      if (!cible && normal) {
+        const loc = locationOf(normal);
+        cible = this.composants.find((c) => c.location === loc) || null;
+      }
+      if (cible && cible.seuil < speed) {
+        // Le masque d'alerte s'accumule, et c'est lui que le HUD affiche.
+        this.mask |= cible.alertBit;
         // force = 100 x (|v| - seuil) / (mortInstantanee - seuil)
-        const denom = (this.instantDeathSpeed - seuil) || 1;
-        part = 100 * (speed - seuil) / denom;
-        this._blesse(this.parts[loc], loc, part);
+        const denom = (this.instantDeathSpeed - cible.seuil) || 1;
+        part = 100 * (speed - cible.seuil) / denom;
+        this._blesse(cible, part);
+        // SANS `Contains` : une piece retouchee entre une deuxieme fois. Trois
+        // chocs sur le meme reacteur remplissent donc la liste a eux seuls.
+        this.endommagees.push(cible);
       }
       // `if (_instantDeathSpeed <= |velocity|) ExplodeShip();` vit DANS cette
       // branche, et pas dans l'autre. C'est une bizarrerie du build, gardee
-      // telle quelle : passe trois pieces abimees, la mort instantanee par
-      // vitesse ne se declenche plus, et seul le cumul peut encore tuer.
+      // telle quelle : passe trois entrees, seule le cumul peut encore tuer.
       if (speed >= this.instantDeathSpeed) this.destroyed = true;
     } else {
-      // AU-DELA DE TROIS, LA FORCE SE PARTAGE — et elle ne suit plus la
-      // formule. Le build applique `velocity / n` a chaque piece deja abimee
-      // dont le seuil est passe, `n` etant leur nombre. Un choc a quarante
-      // reparti sur trois pieces leur coute donc 13,3 chacune, bien PLUS que
-      // les 3,7 de la branche ordinaire (docs/113-seuil.md).
-      const concernees = abimees.filter(() => speed > seuil);
+      // AU-DELA, LA FORCE SE PARTAGE : `velocity / n` a chaque ENTREE dont le
+      // seuil est passe, `n` etant leur nombre — doublons compris, si bien
+      // qu'une piece presente deux fois prend deux parts (docs/113-seuil.md).
+      const concernees = this.endommagees.filter((c) => speed > c.seuil);
       const n = concernees.length;
       if (n > 0) {
         part = speed / n;
-        for (const p of concernees) {
-          const cle = Object.keys(this.parts).find((k) => this.parts[k] === p);
-          this._blesse(p, cle, part);
-        }
+        for (const c of concernees) this._blesse(c, part);
       }
     }
+    const loc = cible ? cible.location : (normal ? locationOf(normal) : null);
+    this.lastLocation = loc;
+    this.lastPiece = cible;
 
-    // `Abs(_currentShipDamage) > _shipTotalHealth` : le CUMUL des
-    // `_totalDamage`, recalcule par `RecalculateShipDamge`. Il n'y a pas de
-    // troisieme condition, et pas d'integrite de coque.
+    // `Abs(_currentShipDamage) > _shipTotalHealth`, et rien d'autre.
     if (this.cumul > this.shipTotalHealth) this.destroyed = true;
     const justExploded = !wasDestroyed && this.destroyed;
-    return { damage: this.soundLevel(speed), location: loc, part,
+    return { damage: this.soundLevel(speed), location: loc, piece: cible, part,
              destroyed: this.destroyed, justExploded };
   }
 
   /**
-   * Poussee encore disponible dans une direction du repere du vaisseau.
+   * Fraction de poussee disponible sur un axe du repere du vaisseau, dans un
+   * sens : `FireTranslationalThrusters` n'ajoute que la moitie de la poussee
+   * par buse encore allumee. Un vaisseau detruit ne pousse plus du tout.
    *
-   * `_disableDamagedThrusters` est le seul des quatre champs a etre un booleen,
-   * et le seul dont l'effet ne depend pas d'un modificateur : une piece morte
-   * coupe le propulseur qui la porte. Un vaisseau detruit ne pousse plus du
-   * tout.
+   * @param axe "x", "y" ou "z" ; signe > 0 ou < 0
    */
-  thrustFactor(location) {
+  poussee(axe, signe) {
     if (this.destroyed) return 0;
-    if (!this.disableDamagedThrusters) return 1;
-    const p = this.parts[location];
-    return p && p.dead ? 0 : 1;
+    const buses = BUSES[`${axe}${signe > 0 ? "+" : "-"}`];
+    if (!buses || !this.busesCoupees.size) return 1;
+    return buses.filter((b) => !this.busesCoupees.has(b)).length / 2;
+  }
+
+  /** `OnCompleteRepair` pour une piece. */
+  _repare(c) {
+    this.endommagees = this.endommagees.filter((x) => x !== c);
+    // Le bit ne tombe que si plus AUCUNE piece abimee ne le porte.
+    if (!this.endommagees.some((x) => x.alertBit === c.alertBit)) this.mask &= ~c.alertBit;
+    c.totalDamage = 0;
+    c.integrity = this.total;
+    c.dead = false;
   }
 
   /**
-   * Rend une piece a son integrite.
+   * Rend une piece a son integrite : celle d'un `RepairVolume`, qui ne repare
+   * que la piece dont il est l'enfant.
    *
-   * Dans le build, chaque `RepairVolume` est pose SUR la piece qu'il repare et
-   * ne repare que celle-la. Le portage n'a pas encore la correspondance volume
-   * -> piece (elle passe par `EngineComponent`, qui n'est pas lu) : sans
-   * position donnee, on rend donc la piece morte la plus abimee, ce qui revient
-   * au meme tant qu'on repare une piece a la fois.
-   *
-   * @returns {string|null} la position reparee, ou null s'il n'y avait rien a
-   *   reparer.
+   * @param cible la piece, son identifiant de GameObject, une POSITION (toutes
+   *   les pieces abimees qui la portent — le repli sans volumes) ou rien (la
+   *   plus abimee)
+   * @returns {string|null} la position reparee, ou null s'il n'y avait rien
    */
-  repair(location = null) {
-    const cible = location && this.parts[location]
-      ? location
-      : Object.entries(this.parts)
-          .filter(([, p]) => p.dead || p.integrity < this.total)
-          .sort((a, b) => a[1].integrity - b[1].integrity)
-          .map(([k]) => k)[0];
-    if (!cible) return null;
-    const p = this.parts[cible];
-    p.integrity = this.total;
-    p.dead = false;
-    p.totalDamage = 0;
-    // Reparer une piece retire sa position de l'alerte.
-    this.mask &= ~LOCATIONS[cible];
-    // L'integrite remonte d'elle-meme : elle est `_shipTotalHealth` moins le
-    // cumul, et le cumul vient de tomber.
+  repair(cible = null) {
+    let pieces;
+    if (cible && typeof cible === "object") pieces = [cible];
+    else if (typeof cible === "string" && LOCATIONS[cible]) {
+      pieces = this.composants.filter((c) => c.location === cible && this.estEndommagee(c));
+    } else if (cible != null) {
+      pieces = this.composants.filter((c) => c.id === cible);
+    } else {
+      pieces = [...new Set(this.endommagees)]
+        .sort((a, b) => a.integrity - b.integrity).slice(0, 1);
+    }
+    pieces = pieces.filter((c) => this.estEndommagee(c));
+    if (!pieces.length) return null;
+    for (const c of pieces) this._repare(c);
     if (this.integrity > 0) this.destroyed = false;
-    return cible;
+    return pieces[0].location;
   }
 
-  /** Pieces mortes, dans l'ordre des positions. */
+  /** Pieces mortes, par position. */
   get deadParts() {
-    return Object.entries(this.parts).filter(([, p]) => p.dead).map(([k]) => k);
+    return Object.keys(LOCATIONS).filter((k) => this.composants.some((c) => c.location === k && c.dead));
   }
 
   reset() {
     this.destroyed = false;
     this.lastImpact = 0;
     this.lastLocation = null;
+    this.lastPiece = null;
     // Le masque est un cumul : le remettre a zero fait partie de la remise a
     // neuf, sans quoi l'alerte de degats survivrait a la boucle.
     this.mask = 0;
-    for (const p of Object.values(this.parts)) {
-      p.integrity = this.total; p.dead = false; p.totalDamage = 0;
-    }
+    this.endommagees = [];
+    this.busesCoupees.clear();
+    for (const c of this.composants) { c.integrity = this.total; c.dead = false; c.totalDamage = 0; }
   }
 
   get summary() {

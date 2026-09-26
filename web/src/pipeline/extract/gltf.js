@@ -640,6 +640,19 @@ export function exportSubtree(ctx, rootGid, label, {
     return g.meshes.length - 1;
   };
 
+  // LES PIECES DU VAISSEAU. Chacune porte une decalcomanie de fissure
+  // (`_damageDecal`, le premier `DS_Decals` sous elle) que `ShipComponent.Awake`
+  // ETEINT, et que le premier coup rallume. Le moteur doit donc savoir quel
+  // noeud est quelle piece : leurs quinze GameObject s'appellent tous
+  // « DamageSiteContainer », et c'est l'identifiant qui les distingue — le
+  // meme que `gameplay.json` donne aux pieces et a leurs volumes (docs/132).
+  const piecesVaisseau = new Set();
+  if (ctx.behaviours) {
+    for (const { obj } of ctx.behaviours(["ShipComponent", "EngineComponent"])) {
+      piecesVaisseau.add(ctx.ownerId(obj));
+    }
+  }
+
   // --- noeuds ---
   const nodeIndex = new Map();
   const skinnedNodes = [];
@@ -696,6 +709,7 @@ export function exportSubtree(ctx, rootGid, label, {
       node.extras = { ...(node.extras || {}), inactive: true };
       stats.inactive = (stats.inactive || 0) + 1;
     }
+    if (piecesVaisseau.has(gid)) node.extras = { ...(node.extras || {}), piece: gid };
     if (animOf.has(gid)) animatedRoots.push([tid, gid]);
     const kids = (childrenOf.get(tid) || [])
       .map((c) => emitNode(c, depth + 1)).filter((k) => k !== null);

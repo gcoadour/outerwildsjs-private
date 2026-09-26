@@ -109,7 +109,7 @@ portage.
 | textures qui défilent | 44 extraites, 27 rattachées et 23 en mouvement |
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
-| réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement ; **dehors**, en visant la pièce à trois unités — chaque volume répare sa pièce, s'allume avec elle et s'éteint dans le vaisseau ([`132`](132-comparaison-native.md)) |
+| réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement ; **dehors**, en visant la pièce à trois unités — chaque volume répare sa pièce, s'allume avec elle et s'éteint dans le vaisseau ; **les dégâts vivent sur les quinze pièces**, doublons de `_damagedParts` compris ([`132`](132-comparaison-native.md)) |
 | **la queue de `refait.mjs`** | un avis en cours fait tomber le suivant, un teleporteur met 0,5 s, les meteores lisent le champ A LEUR position ([`121`](121-avis.md)) |
 | **les jumelles du sablier** | aucun primaire : elles tournent l'une autour de l'autre a 31,65, dans le repere de leur barycentre ([`120`](120-jumelles.md)) |
 | **ce que le predateur entend** | cible sous 200 unites quel que soit le volume, trouble au-dela si le volume passe DIX — et dix n'est atteint qu'en diagonale ([`119`](119-bruit.md)) |
@@ -364,9 +364,11 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   nommait aucun fichier `.wav`, parce que l'extension venait de `m_Format`, qui
   ne dit rien du conteneur ([`43`](43-pnj-son-decollage.md) §3.1). Corrigé :
   16 Ogg, 20 WAV. Le gain, lui, reste à mesurer dans un navigateur.
-- **`_vanishEffectPrefab`**, et **les pièces du vaisseau sans géométrie
-  propre** : une pièce morte se lit dans son état, elle ne se voit pas sur la
-  coque.
+- **`_vanishEffectPrefab`**.
+- ~~**Les pièces du vaisseau sans géométrie propre**~~ **Fermé**
+  ([`132`](132-comparaison-native.md)) : chaque pièce a sa fissure
+  (`_damageDecal`), éteinte au réveil et rallumée par le coup. Le portage
+  dessinait les quinze sur un vaisseau intact.
 - **Le portrait n'a pas d'interface propre.** La manette, elle, est lue
   ([`35-monde.md`](35-monde.md) §7).
 

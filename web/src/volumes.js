@@ -139,6 +139,9 @@ export function repairVolumes(gameplay) {
       // droite). Les reacteurs de gauche et de droite n'ont que cette
       // position-la.
       piece: c.piece ? c.piece.nom : null,
+      // Le nom ne distingue rien (quinze « DamageSiteContainer ») : c'est
+      // l'identifiant qui designe la piece que ce volume repare.
+      pieceId: c.piece ? c.piece.id ?? null : null,
       location: c.piece
         ? (Object.entries(LOCATIONS).find(([, bit]) => bit === c.piece.alerte) || [null])[0]
         : null,

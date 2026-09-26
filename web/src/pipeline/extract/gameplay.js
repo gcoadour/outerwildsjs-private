@@ -89,6 +89,10 @@ const PLACED = [
                 // lettres dans son commentaire : « elle passe par
                 // EngineComponent, qui n'est pas lu ».
                 "EngineComponent",
+                // Et les cinq pieces de coque, qui ne sont PAS des reacteurs :
+                // `_components` les prend toutes (GetComponentsInChildren), et
+                // la plus proche du choc peut etre l'une d'elles.
+                "ShipComponent",
                 // Le pivot des tornades : une lente culbute dont la vitesse est
                 // TIREE au reveil, pas serialisee.
                 "TornadoPivotController",
@@ -284,7 +288,7 @@ export function extractGameplay(ctx) {
   const pieceAuDessus = (gid) => {
     let g = gid;
     for (let i = 0; i < 8 && g; i++) {
-      if (pieces.has(g)) return { nom: ctx.name(g), ...pieces.get(g) };
+      if (pieces.has(g)) return { nom: ctx.name(g), id: g, ...pieces.get(g) };
       const t = ctx.transformOf.get(g);
       const par = t && t.m_Father ? ctx.env.deref(t.m_Father, ctx.env.get(ctx.sceneFile)) : null;
       const pt = par ? ctx.env.read(par) : null;
@@ -324,6 +328,10 @@ export function extractGameplay(ctx) {
       const t = ctx.transformOf.get(gid);
       if (t && t.m_LocalScale) entry.localScale = Math.round(t.m_LocalScale.x * 1e4) / 1e4;
     }
+
+    // Les quinze pieces s'appellent toutes « DamageSiteContainer » : seul
+    // l'identifiant du GameObject relie un volume a SA piece.
+    if (cls === "ShipComponent" || cls === "EngineComponent") entry.id = gid;
 
     if (cls === "RepairVolume") {
       const piece = pieceAuDessus(gid);

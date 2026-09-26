@@ -62,7 +62,7 @@ import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
 import { SolarMap, mapMarkers, AccesCarte, VueCarte, MAP as REGLES_CARTE, qRot, qMul } from "./map.js";
-import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
+import { shipComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
 import { elevators, Elevator, LaunchTerminal, launchTerminals,
@@ -1394,6 +1394,7 @@ async function boot() {
   // --- vaisseau ---
   let ship = null;
   let shipStart = [0, 0, 0];
+  const fissuresPieces = [];
   {
     const entry = entryForBody(geo, home.name);
     const node = entry ? findBodyNode(entry, "Ship_Body") : null;
@@ -1409,6 +1410,22 @@ async function boot() {
         }
       }
       MeshLOD.pin(node);
+      // LES FISSURES DE LA COQUE. Chaque piece porte sa decalcomanie
+      // (`_damageDecal`, le premier `DS_Decals` sous elle) : `Awake` l'ETEINT,
+      // `ApplyDamageForce` la rallume, `OnCompleteRepair` l'eteint. Le portage
+      // dessinait les quinze sur un vaisseau intact (docs/132).
+      for (const n of node.getDescendants(false)) {
+        const e = n.metadata && n.metadata.gltf && n.metadata.gltf.extras;
+        if (!e || e.piece == null) continue;
+        const pile = [n];
+        let fissure = null;
+        while (pile.length && !fissure) {
+          const x = pile.shift();
+          if (x.name === "Decals") fissure = x;
+          else pile.unshift(...x.getChildren());
+        }
+        if (fissure) { fissure.setEnabled(false); fissuresPieces.push({ id: e.piece, noeud: fissure }); }
+      }
     }
     const spawnWorld = shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
@@ -1419,10 +1436,10 @@ async function boot() {
       ship = new Ship((gameplay.singletons.ShipThrusterModel || {}).fields || {},
                       node, local,
                       (gameplay.singletons.ShipDamageController || {}).fields || {},
-                      // Les dix reacteurs : c'est par eux que le build choisit
-                      // la piece touchee — la plus proche du point d'impact, et
-                      // non celle que designe une normale.
-                      engineComponents(gameplay));
+                      // Les quinze pieces, dans le repere du vaisseau : le
+                      // build choisit la plus proche du point d'impact, et non
+                      // celle que designe une normale.
+                      shipComponents(gameplay, shipRest, shipRestRot));
       // Les trois capteurs de pad, en offsets du repere du vaisseau. L'origine
       // est la position de REPOS de `Ship_Body`, pas le point d'apparition :
       // s'en tromper mettait les jambes a 171 unites de la coque.
@@ -4015,6 +4032,15 @@ async function boot() {
         player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
+      // Une fissure par piece touchee, tant qu'elle n'est pas reparee.
+      if (fissuresPieces.length && ship.damage) {
+        for (const f of fissuresPieces) {
+          if (f.piece === undefined) f.piece = ship.damage.composants.find((c) => c.id === f.id) || null;
+          const voir = !!f.piece && f.piece.totalDamage > 0;
+          if (f.noeud.isEnabled(false) !== voir) f.noeud.setEnabled(voir);
+        }
+        window.__fissures = fissuresPieces.filter((f) => f.noeud.isEnabled(false)).length;
+      }
       // --- reparation, DEHORS ---
       //
       // `RepairVolume` : chaque volume est l'enfant de la piece qu'il repare,
@@ -4030,14 +4056,19 @@ async function boot() {
         const ax = ship.axes;
         const actifs = [];
         for (const r of shipRepairs) {
-          const loc = r.volume.location;
-          const part = loc ? avarie.parts[loc] : null;
+          // LA piece du volume, par son identifiant : quinze pieces portent le
+          // meme nom. Sans identifiant (ancienne extraction), la premiere de
+          // la position.
+          const part = r.piece !== undefined ? r.piece
+            : (r.piece = avarie.composants.find((c) => r.volume.pieceId != null
+                ? c.id === r.volume.pieceId : c.location === r.volume.location) || null);
           if (!part) continue;
           // `ApplyDamageForce` : `_repairVolume.ResetVolume()` — un nouveau
           // coup remet l'avancement a zero.
           if (part.totalDamage > (r.dommageVu ?? 0)) r.reset();
           r.dommageVu = part.totalDamage;
-          if (!(part.totalDamage > 0 || part.dead) || ship.boarded) continue;
+          // Le volume est allume tant que sa piece est dans `_damagedParts`.
+          if (!avarie.estEndommagee(part) || ship.boarded) continue;
           if (!r.offset) {
             let d = [r.volume.position[0] - shipRest[0], r.volume.position[1] - shipRest[1],
                      r.volume.position[2] - shipRest[2]];
@@ -4082,7 +4113,7 @@ async function boot() {
           }
           if (en_cours.update(dt)) {
             // `OnCompleteRepair` : la piece du volume, et elle seule.
-            const piece = avarie.repair(en_cours.volume.location);
+            const piece = avarie.repair(en_cours.piece);
             if (piece) console.log(`reparation : ${piece} remise en etat`);
             const fin = sonsUI.finishRepair(!!zoneOxygene);
             if (fin) audio.playOneShot(fin.file, { volume: fin.volume });

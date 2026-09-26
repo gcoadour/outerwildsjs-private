@@ -1098,10 +1098,51 @@ plus abîmée d'abord. Dans le build :
   style des invites, cinquante pixels au-dessus du centre ;
 - l'achever répare **sa** pièce, et elle seule (`OnCompleteRepair`).
 
-Le portage suit désormais ces règles. Il garde sa simplification des dégâts
-par position (avant, arrière, haut, gauche, droite) : un volume y répare la
-position de sa pièce. L'extraction rattache chaque volume à sa pièce ; la
-position du volume suit la pose du vaisseau. Mesuré dans Chromium : un coup à
-l'avant et à gauche allume six volumes — celui de l'avant, les cinq réacteurs
-de gauche —, le joueur posé devant le nez vise l'avant, « 40% », « 57% »,
-« 97% », et l'avant revient à neuf, la gauche restant abîmée.
+Le portage suit désormais ces règles. L'extraction rattache chaque volume à sa
+pièce par l'identifiant du GameObject — les quinze s'appellent toutes
+`DamageSiteContainer` — et la position du volume suit la pose du vaisseau.
+Mesuré dans Chromium : le joueur posé devant le nez vise l'avant, « 40% »,
+« 57% », « 97% », et l'avant revient à neuf, la gauche restant abîmée.
+
+### Les dégâts vivent sur les pièces, pas sur les positions
+
+Le portage ramenait les dégâts à cinq positions — avant, arrière, haut,
+gauche, droite — et ne lisait, pour choisir la pièce touchée, que les dix
+réacteurs : un choc sur le nez allait au réacteur le plus proche. Le build
+prend les **quinze** (`GetComponentsInChildren<ShipComponent>`), et les
+positions ne sont que ce que le casque en montre. Relu dans l'IL
+d'`OnImpact` et d'`OnCompleteRepair`, trois conséquences de jeu :
+
+- **la pièce retouchée compte double.** `_damagedParts` est une liste où la
+  pièce entre à chaque coup, sans `Contains`, et `RecalculateShipDamge` somme
+  sur la liste. Deux chocs à 100 u/s sur le même réacteur (25,9 chacun) font
+  un cumul de 2 × 51,9 = 103,7 : le vaisseau explose au **deuxième** choc. Le
+  portage, qui sommait les pièces, attendait le quatrième ;
+- **le partage se fait par entrée.** Au-delà de trois entrées, un choc se
+  répartit `v / n` sur chacune, et une pièce présente deux fois prend deux
+  parts ;
+- **le voyant tombe avec la dernière pièce.** Réparer un réacteur de gauche
+  laisse l'alerte « gauche » allumée tant qu'un autre l'est encore ; et une
+  buse coupée (`DisableThruster`) ne se rallume pas à la réparation —
+  `EnableThruster` n'est appelé nulle part. `_disableDamagedThrusters` vaut
+  faux dans ce build : aucune buse ne se coupe, mais la poussée passe par
+  les deux buses de chaque sens, pour moitié chacune, comme
+  `FireTranslationalThrusters`.
+
+Mesuré dans Chromium : un choc sur le nez et un autre sur le réacteur
+`Left` allument **deux** volumes, celui de l'avant et celui de ce réacteur —
+le portage par position en allumait six.
+
+### Les fissures de la coque
+
+Chaque pièce porte une décalcomanie de fissure — `_damageDecal`, le premier
+`DS_Decals` sous elle — que `ShipComponent.Awake` **éteint**, que
+`ApplyDamageForce` rallume et qu'`OnCompleteRepair` éteint de nouveau. Les
+quinze GameObject sont actifs dans la scène : c'est le script qui les cache.
+Le portage, qui dessinait la scène telle quelle, montrait **quatorze
+fissures sur un vaisseau intact** (la quinzième est sous un nœud inactif).
+
+L'exportateur marque désormais le nœud de chaque pièce de son identifiant
+(`extras.piece`, le même que `gameplay.json`), et le moteur y trouve la
+fissure. Mesuré dans Chromium : aucune sur la coque intacte, deux après un
+choc sur le nez et un sur le réacteur `Left`, aucune après la boucle.
