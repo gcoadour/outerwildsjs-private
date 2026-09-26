@@ -1132,3 +1132,17 @@ d'`OnImpact` et d'`OnCompleteRepair`, trois conséquences de jeu :
 Mesuré dans Chromium : un choc sur le nez et un autre sur le réacteur
 `Left` allument **deux** volumes, celui de l'avant et celui de ce réacteur —
 le portage par position en allumait six.
+
+### Les fissures de la coque
+
+Chaque pièce porte une décalcomanie de fissure — `_damageDecal`, le premier
+`DS_Decals` sous elle — que `ShipComponent.Awake` **éteint**, que
+`ApplyDamageForce` rallume et qu'`OnCompleteRepair` éteint de nouveau. Les
+quinze GameObject sont actifs dans la scène : c'est le script qui les cache.
+Le portage, qui dessinait la scène telle quelle, montrait **quatorze
+fissures sur un vaisseau intact** (la quinzième est sous un nœud inactif).
+
+L'exportateur marque désormais le nœud de chaque pièce de son identifiant
+(`extras.piece`, le même que `gameplay.json`), et le moteur y trouve la
+fissure. Mesuré dans Chromium : aucune sur la coque intacte, deux après un
+choc sur le nez et un sur le réacteur `Left`, aucune après la boucle.

@@ -364,9 +364,11 @@ Tout est vérifié au chiffre, rien ne l'est au rendu.
   nommait aucun fichier `.wav`, parce que l'extension venait de `m_Format`, qui
   ne dit rien du conteneur ([`43`](43-pnj-son-decollage.md) §3.1). Corrigé :
   16 Ogg, 20 WAV. Le gain, lui, reste à mesurer dans un navigateur.
-- **`_vanishEffectPrefab`**, et **les pièces du vaisseau sans géométrie
-  propre** : une pièce morte se lit dans son état, elle ne se voit pas sur la
-  coque.
+- **`_vanishEffectPrefab`**.
+- ~~**Les pièces du vaisseau sans géométrie propre**~~ **Fermé**
+  ([`132`](132-comparaison-native.md)) : chaque pièce a sa fissure
+  (`_damageDecal`), éteinte au réveil et rallumée par le coup. Le portage
+  dessinait les quinze sur un vaisseau intact.
 - **Le portrait n'a pas d'interface propre.** La manette, elle, est lue
   ([`35-monde.md`](35-monde.md) §7).
 

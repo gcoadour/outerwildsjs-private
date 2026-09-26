@@ -525,6 +525,21 @@ console.log("     champs avec volume mesure:", volumes,
   const coup = nez.impact(40, null, [avant.position[0], avant.position[1], avant.position[2] + 1]);
   check("un choc devant touche la piece de l'avant", coup.location, "avant");
   check("qui n'est pas un reacteur", coup.piece.moteur, false);
+
+  // LES FISSURES. Chaque piece porte un `DS_Decals` que `Awake` eteint et que
+  // le premier coup rallume ; le moteur doit trouver la piece dans le glTF, et
+  // c'est l'identifiant pose par l'exportateur qui la lui designe.
+  const [coque] = findRoots(ctx, ["Ship_Body"]);
+  const vg = exportSubtree(ctx, coque.gid, "vaisseau", { emitImage: () => {}, maxTexture: 16 });
+  const noeudsPiece = vg.gltf.nodes.filter((n) => n.extras && n.extras.piece != null);
+  check("quinze noeuds de piece dans le glTF du vaisseau", noeudsPiece.length, 15);
+  check("les memes identifiants que gameplay.json",
+        noeudsPiece.every((n) => pieces.some((c) => c.id === n.extras.piece)), true);
+  const fissureSous = (n) => (n.children || []).some((k) => {
+    const c = vg.gltf.nodes[k];
+    return c.name === "Decals" || fissureSous(c);
+  });
+  check("et une fissure sous chacun", noeudsPiece.every(fissureSous), true);
 }
 
 // --- ce que l'audit a mesure, garde en invariant ---

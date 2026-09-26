@@ -1394,6 +1394,7 @@ async function boot() {
   // --- vaisseau ---
   let ship = null;
   let shipStart = [0, 0, 0];
+  const fissuresPieces = [];
   {
     const entry = entryForBody(geo, home.name);
     const node = entry ? findBodyNode(entry, "Ship_Body") : null;
@@ -1409,6 +1410,22 @@ async function boot() {
         }
       }
       MeshLOD.pin(node);
+      // LES FISSURES DE LA COQUE. Chaque piece porte sa decalcomanie
+      // (`_damageDecal`, le premier `DS_Decals` sous elle) : `Awake` l'ETEINT,
+      // `ApplyDamageForce` la rallume, `OnCompleteRepair` l'eteint. Le portage
+      // dessinait les quinze sur un vaisseau intact (docs/132).
+      for (const n of node.getDescendants(false)) {
+        const e = n.metadata && n.metadata.gltf && n.metadata.gltf.extras;
+        if (!e || e.piece == null) continue;
+        const pile = [n];
+        let fissure = null;
+        while (pile.length && !fissure) {
+          const x = pile.shift();
+          if (x.name === "Decals") fissure = x;
+          else pile.unshift(...x.getChildren());
+        }
+        if (fissure) { fissure.setEnabled(false); fissuresPieces.push({ id: e.piece, noeud: fissure }); }
+      }
     }
     const spawnWorld = shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
@@ -4014,6 +4031,15 @@ async function boot() {
         }
         player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
+      }
+      // Une fissure par piece touchee, tant qu'elle n'est pas reparee.
+      if (fissuresPieces.length && ship.damage) {
+        for (const f of fissuresPieces) {
+          if (f.piece === undefined) f.piece = ship.damage.composants.find((c) => c.id === f.id) || null;
+          const voir = !!f.piece && f.piece.totalDamage > 0;
+          if (f.noeud.isEnabled(false) !== voir) f.noeud.setEnabled(voir);
+        }
+        window.__fissures = fissuresPieces.filter((f) => f.noeud.isEnabled(false)).length;
       }
       // --- reparation, DEHORS ---
       //

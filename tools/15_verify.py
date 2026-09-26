@@ -2168,6 +2168,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         # du POINT d'impact parmi quinze. Un choc sur le nez et un autre sur un
         # reacteur de gauche allument DEUX volumes — le portage, qui comptait
         # par position, en allumait six.
+        fissures_avant = page.evaluate("() => window.__fissures")
         page.evaluate("""() => { const d = window.__shipRef && window.__shipRef.damage; if (!d) return;
           window.__shipRef.boarded = false;
           const nez = d.composants.find((c) => c.location === 'avant');
@@ -2177,13 +2178,21 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.wait_for_timeout(1500)
         rep_actifs = page.evaluate("""() => { const r = window.__reparations; if (!r) return null;
           const c = {}; for (const v of r.actifs) c[v.repair.volume.location] = (c[v.repair.volume.location] || 0) + 1;
-          return { c, pieces: window.__shipRef.damage.composants.length }; }""")
+          return { c, pieces: window.__shipRef.damage.composants.length,
+                   fissures: window.__fissures }; }""")
         if rep_actifs is not None:
             rep.eq("quinze pieces au vaisseau, dix reacteurs et cinq de coque",
                    rep_actifs["pieces"], 15)
             rep.eq("reparation : deux volumes allumes, ceux des deux pieces touchees",
                    rep_actifs["c"], {"avant": 1, "gauche": 1})
         page.evaluate("() => { const d = window.__shipRef && window.__shipRef.damage; if (d) d.reset(); }")
+        # Les fissures de la coque suivent les pieces : `Awake` les eteint toutes,
+        # un coup rallume celle de sa piece. Le portage dessinait les quinze.
+        page.wait_for_timeout(1500)
+        fissures_apres = page.evaluate("() => window.__fissures")
+        if rep_actifs is not None and fissures_avant is not None:
+            rep.eq("fissures : aucune sur la coque intacte, deux apres deux coups, aucune apres la boucle",
+                   [fissures_avant, rep_actifs["fissures"], fissures_apres], [0, 2, 0])
 
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #
