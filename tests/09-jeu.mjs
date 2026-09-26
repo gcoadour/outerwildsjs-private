@@ -6132,11 +6132,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("brulant, elle bute", thermTime(400), 1);
   check("et un froid negatif ne la renverse pas", thermTime(-5), 0);
   // Le baton est DEHORS au premier instant : `Awake` met deux clips a la queue.
-  const baton = new Baton();
-  check("le baton commence dehors", baton.out, true);
-  check("et sort avant d'attendre", baton.clip, "PullOut");
+  // `_isOut` vaut FAUX dans la scene : `Awake` joue `idle`, le baton est
+  // range, et ses lumieres restent eteintes (docs/132).
+  const range = new Baton();
+  check("le baton commence range", range.out, false);
+  check("sur la pose idle", range.clip, "idle");
+  check("lumieres eteintes", range.lights, false);
+  check("et pas de thermometre", range.canTherm, false);
+  range.toggle();
+  check("le feu le sort", range.out, true);
+  check("par PullOut, et rien a la suite", range.queue.join(","), "PullOut");
+  check("et les lumieres s'allument", range.lights, true);
+  // Une instance ou `_isOut` serait vrai sortirait au reveil.
+  const baton = new Baton({ isOut: true, lightsOn: true });
+  check("_isOut vrai : dehors", baton.out, true);
+  check("et sort d'abord", baton.clip, "PullOut");
   baton.update(0.016, { playing: false });
-  check("le clip fini, il attend", baton.clip, "idle");
+  check("le clip fini, il garde sa pose", baton.clip, "PullOut");
   baton.toggle();
   check("le ranger le range", baton.out, false);
   check("et joue PutBack", baton.clip, "PutBack");
@@ -6148,12 +6160,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le ressortir le ressort", baton.out, true);
   check("les lumieres reviennent", baton.lights, true);
   // Manger range le baton TOUT SEUL.
-  const mange = new Baton();
+  const mange = new Baton({ isOut: true });
   mange.update(0.016, { eaten: true });
   check("manger range le baton", mange.out, false);
   check("il s'en souvient", mange.putAwayOnce, true);
   // La flamme ne se voit que baton dehors et animation finie.
-  const flamme = new Baton();
+  const flamme = new Baton({ isOut: true });
   flamme.update(0.016, { playing: true });
   check("pas de flamme pendant la sortie", flamme.flame, false);
   flamme.update(0.016, { playing: false });

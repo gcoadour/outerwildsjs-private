@@ -199,15 +199,20 @@ try {
   // SCENARIO 4: BATON DE GUIMAUVE & SOIN
   // ==========================================
   console.log("\n--- Scenario 4: Guimauve et feu de camp ---");
-  const stickInit = await page.evaluate(() => window.__mains?.baton?.out);
-  assert("Baton sorti au depart (conformite alpha Awake)", stickInit === true);
+  // `_isOut` est faux dans la scene : `Awake` joue `idle`, le baton est range
+  // et ses lumieres eteintes (docs/132).
+  const stickInit = await page.evaluate(() => ({ out: window.__mains?.baton?.out, lights: window.__mains?.baton?.lights }));
+  assert("Baton range au depart, lumieres eteintes (Awake, _isOut faux)", stickInit.out === false && stickInit.lights === false);
 
-  // Toggle stick (put away)
+  // Toggle stick (pull out)
+  await page.evaluate(() => window.__mains?.baton?.toggle());
+  const stickOut = await page.evaluate(() => window.__mains?.baton?.out);
+  assert("Baton sorti apres toggle", stickOut === true);
+
+  // Toggle stick (put away), puis ressorti pour la suite
   await page.evaluate(() => window.__mains?.baton?.toggle());
   const stickAway = await page.evaluate(() => window.__mains?.baton?.out);
   assert("Baton range apres toggle", stickAway === false);
-
-  // Toggle stick (pull out)
   await page.evaluate(() => window.__mains?.baton?.toggle());
   const stickBack = await page.evaluate(() => window.__mains?.baton?.out);
   assert("Baton resorti", stickBack === true);

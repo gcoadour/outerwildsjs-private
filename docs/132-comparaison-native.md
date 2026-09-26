@@ -1188,3 +1188,25 @@ souris :
 commandes du vaisseau, du roulis et du modèle réduit, qui n'ont pas été
 relues. Mesuré dans Chromium, manette simulée : 160 degrés par seconde à
 fond, 80 à mi-course, 60 de tangage à mi-course.
+
+### Le bâton part rangé
+
+Premier parcours refait aux flèches, dans les deux versions : trois secondes
+de marche tout droit depuis le réveil mènent contre la roche, à droite de la
+tour. L'alpha y montre une paroi brune uniforme ; le portage, **une tache
+orange à cœur clair**, à 0,2 unité de l'œil. C'étaient les deux lumières du
+bâton à guimauve, `MallowLight` (portée 1,21) et `ThermLight` (0,16),
+accrochées au regard et **allumées depuis le réveil**.
+
+La lecture de `MarshmallowStick.Awake` était fausse : « deux clips à la
+queue, `PullOut` puis `idle`, donc le bâton est dehors ». L'IL écrit une
+alternative — `PullOut` si `_isOut`, `idle` sinon — et la scène pose `_isOut`
+à **faux**. Les lumières, qu'`Awake` ne touche pas, gardent leur `m_Enabled`
+sérialisé : éteint. Le test de `tests/05` le vérifiait déjà (« part
+éteinte »), pendant que le moteur les allumait : l'invariant gardait la
+scène, pas le portage. Il garde maintenant les deux.
+
+Deux conséquences de plus : `ToggleStick(true)` ne joue que `PullOut` —
+rien ne suit, le bâton garde la dernière pose —, et les quatre clips sont en
+`Once`. Le portage enchaînait `idle` en boucle après `PullOut`, et relançait
+un clip dès qu'il s'arrêtait.

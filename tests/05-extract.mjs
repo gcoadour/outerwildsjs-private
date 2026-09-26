@@ -1803,6 +1803,7 @@ check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
     const v = lampes.get(d.name);
     check(`${d.name} est ponctuelle`, v.m_Type, 2);
     check(`${d.name} part eteinte`, !!v.m_Enabled, false);
+    check(`et le portage le sait pour ${d.name}`, d.enabled, !!v.m_Enabled);
     check(`portee de ${d.name}`, Number(v.m_Range.toFixed(3)), d.range);
     check(`intensite de ${d.name}`, Number(v.m_Intensity.toFixed(3)), d.intensity);
   }

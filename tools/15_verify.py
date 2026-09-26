@@ -2279,8 +2279,23 @@ def _run(url, heavy, profil=None, zip_path=None):
         # moteur, aux valeurs du prefabrique (`STICK_LIGHTS`).
         rep.eq("et ses deux lumieres", mains["lumieres"], 2)
         rep.at_least("avec de la geometrie", mains["maillages"], 5)
-        rep.eq("le baton commence dehors", mains["dehors"], True)
-        # `V` le range, et le build joue alors `PutBack`.
+        # `_isOut` est FAUX dans la scene : le baton part range, sur `idle`, et
+        # ses deux lumieres eteintes. Allumees, collees au regard, elles
+        # faisaient une tache orange sur toute paroi proche (docs/132).
+        depart = page.evaluate("""() => { const b = window.__mains.baton;
+          const objet = window.__mains.enMain.get('marshmallowstick');
+          return { dehors: b.out, clip: b.clip,
+                   allumees: objet ? objet.lumieres.filter((l) => l.isEnabled()).length : -1 }; }""")
+        rep.eq("le baton commence range, sur idle, lumieres eteintes",
+               [depart["dehors"], depart["clip"], depart["allumees"]], [False, "idle", 0])
+        # `V` le sort : `PullOut` seul, et les lumieres s'allument.
+        page.keyboard.press("KeyV")
+        page.wait_for_timeout(600)
+        sorti = page.evaluate("""() => { const b = window.__mains.baton;
+          return { dehors: b.out, clip: b.clip, lumieres: b.lights }; }""")
+        rep.eq("V sort le baton, par PullOut, lumieres allumees",
+               [sorti["dehors"], sorti["clip"], sorti["lumieres"]], [True, "PullOut", True])
+        # Et le range : le build joue alors `PutBack`.
         page.keyboard.press("KeyV")
         page.wait_for_timeout(600)
         range_ = page.evaluate("""() => { const b = window.__mains.baton;
@@ -2288,9 +2303,6 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("V range le baton", range_["dehors"], False)
         rep.eq("et joue PutBack", range_["clip"], "PutBack")
         rep.eq("les lumieres s'eteignent", range_["lumieres"], False)
-        page.keyboard.press("KeyV")
-        page.wait_for_timeout(600)
-        rep.eq("V le ressort", page.evaluate("() => window.__mains.baton.out"), True)
 
         # --- viser un referentiel (docs/62-visee.md) ----------------------------
         #

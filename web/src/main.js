@@ -1713,7 +1713,10 @@ async function boot() {
     (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
   // L'etat du baton : sorti ou range, ce qui se joue, ou en est l'aiguille.
-  const baton = new BatonGuimauve();
+  // `_isOut` et les lumieres : ce que la scene pose, le baton RANGE.
+  const baton = new BatonGuimauve({
+    isOut: !!((((gameplay.placed || {}).MarshmallowStick || [])[0] || {}).fields || {})._isOut,
+    lightsOn: STICK_LIGHTS.some((d) => d.enabled) });
   // Les deux objets tenus, une fois charges : { racine, groupes, lumieres }.
   const enMain = new Map();
 
@@ -1808,10 +1811,16 @@ async function boot() {
         }
       }
     }
+    // Un clip se lance QUAND il devient le clip voulu, une fois : les quatre
+    // sont en `Once`, et le baton garde la derniere pose. Le relancer des
+    // qu'il s'arrete le faisait sortir en boucle ; boucler `idle` apres
+    // `PullOut` le rangeait sitot sorti.
     const voulu = etat.clip;
+    const neuf = objet.clipLance !== voulu;
+    objet.clipLance = voulu;
     for (const [nom, g] of objet.parNom) {
       if (nom === "Therm") continue;
-      if (nom === voulu) { if (!g.isPlaying) g.play(nom === "idle"); }
+      if (nom === voulu) { if (neuf) g.play(false); }
       else if (g.isPlaying) g.stop();
     }
     const therm = objet.parNom.get("Therm");
@@ -5764,8 +5773,8 @@ async function boot() {
         }
       } else grillageRompu = false;
     }
-    // Le baton a guimauve, tel que le build le joue : deux clips a la queue au
-    // reveil, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
+    // Le baton a guimauve, tel que le build le joue : range au reveil (`idle`),
+    // `PullOut` au feu, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
     // chaleur — vitesse zero, pose choisie a la main (docs/64-mains.md).
     {
       const objet = enMain.get("marshmallowstick");
