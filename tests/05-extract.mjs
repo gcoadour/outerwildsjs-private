@@ -980,6 +980,20 @@ console.log("     sources avec courbe echantillonnee:", courbes,
         dlg.stats["conversations a controleur"], 4);
   check("et toutes les conversations sont jouables",
         dlg.stats["conversations jouables"], 14);
+  // `ProcessXMLDialogues`, lu cote a cote avec l'alpha (docs/132) : les
+  // reponses sont le `<talk>` imbrique de chaque option, et une replique peut
+  // enchainer sur un autre noeud.
+  const bigDay = Object.values(dlg.trees).find((t) => t.name === "BigDay");
+  check("BigDay : trois reponses, avec leur texte",
+        bigDay.branches["1"].options.map((o) => o.text).join(" | "),
+        "All systems go! | You sound excited enough for both of us. | You're SURE you fixed the retro rockets?");
+  check("... numerotees par leur id", bigDay.branches["1"].options.map((o) => o.id).join(","), "1,2,3");
+  check("la reponse 4 enchaine sur le noeud 5", bigDay.branches["4"].goto, "5");
+  check("on commence au noeud 1", bigDay.start, "1");
+  const toutes = Object.values(dlg.trees).flatMap((t) => Object.values(t.branches));
+  check("toutes les options ont un texte", toutes.flatMap((b) => b.options).filter((o) => !o.text).length, 0);
+  check("quinze repliques enchainent", toutes.filter((b) => b.goto).length, 15);
+  check("une replique par noeud", toutes.filter((b) => b.talk.length !== 1).length, 0);
 
   const curator = dlg.conversations.find((c) => c.character === "Curator");
   check("le Conservateur est bien la", !!curator, true);

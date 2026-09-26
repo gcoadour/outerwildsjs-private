@@ -27,6 +27,12 @@ const TEXTURES = [
   // huit dixiemes de seconde ou le blanc monte. Le portage faisait un fondu au
   // blanc nu, faute de l'avoir extraite (docs/98-flashback.md).
   "FinalFlashbackImage",
+  // `DialogueGUI.ShowDialogueBox` et ses deux mises en page : le fond court
+  // sans options, le fond large avec, le bandeau du nom (qui sert aussi de
+  // curseur d'option), le bouton « Next / Close », l'icone du curseur, et la
+  // barre des panneaux de musee (docs/132).
+  "Short_Dialog_BG", "Dialog_Choice_BG", "NPC_Name_BG",
+  "Short_Dialog_Btn", "White_Dialog_Btn", "LocationText_Bar",
 ];
 
 // Polices du jeu, par role.

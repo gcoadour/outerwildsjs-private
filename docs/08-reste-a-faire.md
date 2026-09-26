@@ -45,7 +45,8 @@ portage.
 | déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
 | ressources | oxygène, carburant, santé, intégrité |
 | vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
-| détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ([`132`](132-comparaison-native.md)) |
+| détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ; invite « ⓧ Talk » du build ([`132`](132-comparaison-native.md)) |
+| dialogue | arbres lus comme `ProcessXMLDialogues` (premier enfant, `goto`, réponses imbriquées, choix par `id`) ; mise en page IMGUI de `DialogueGUI` ; W/S et E comme `ConversationInput` — comparé à l'alpha réplique par réplique ([`132`](132-comparaison-native.md)) |
 | audio spatial | 92 sources, 31 clips, instanciation à la volée |
 | particules | 135 systèmes, 15 textures, budget de 14 simultanés |
 | atmosphères et soleil | shaders maison, 122 shaders classés |

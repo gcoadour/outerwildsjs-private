@@ -14,22 +14,45 @@ import { parseXML } from "./xml.js";
 import { round, refKey } from "./context.js";
 
 const textOf = (el) => el.text.split(/\s+/).filter(Boolean).join(" ") || null;
+/** `XmlNode.InnerText` : le texte de l'element ET de ses descendants. */
+const innerText = (el) => [el.text, ...el.children.map(innerText)].join(" ")
+  .split(/\s+/).filter(Boolean).join(" ") || null;
 
+/**
+ * Un noeud, tel que `Conversation.ProcessXMLDialogues` le lit.
+ *
+ * Trois choses que le portage lisait autrement, et qui se voyaient cote a
+ * cote avec l'alpha (docs/132) :
+ *
+ *   _dialogueTreeToDisplay = item.FirstChild.InnerText
+ *     le PREMIER enfant seul — une replique par noeud, decoupee en pages a `@` ;
+ *   if (item.FirstChild.Attributes["goto"] != null) ... _noOfOptions = -90 - goto
+ *     une replique peut ENCHAINER sur un autre noeud (quinze le font) : « Next »,
+ *     puis ce noeud-la. Le portage fermait la conversation ;
+ *   _optionsToDisplay += item2.FirstChild.InnerText
+ *     le texte d'une option est son premier enfant — un `<talk>` imbrique dans
+ *     les trente-six options du build. Le portage lisait le texte PROPRE de
+ *     l'option, vide : toutes les reponses s'affichaient « … ».
+ *
+ * Et `selectOption(bouton)` choisit l'option dont l'`id` vaut le numero du
+ * bouton, pas son rang.
+ */
 function parseBranch(el) {
   const node = { id: el.attrs.id || null,
                  eventbased: el.attrs.eventbased === "true",
-                 kind: el.tag.toLowerCase(), talk: [], options: [] };
+                 kind: el.tag.toLowerCase(), talk: [], options: [], goto: null };
+  const first = el.children[0] || null;
+  const t = first ? innerText(first) : textOf(el);
+  if (t) node.talk.push(t);
+  if (first && first.attrs.goto) node.goto = first.attrs.goto;
   for (const child of el.children) {
     const tag = child.tag.toLowerCase();
-    if (tag === "talk") {
-      const t = textOf(child);
-      if (t) node.talk.push(t);
-    } else if (tag === "options") {
-      for (const opt of child.children) {
-        node.options.push({ text: textOf(opt), goto: opt.attrs.goto || null });
-      }
-    } else if (tag === "option") {
-      node.options.push({ text: textOf(child), goto: child.attrs.goto || null });
+    const opts = tag === "options" ? child.children : tag === "option" ? [child] : [];
+    for (const opt of opts) {
+      const premier = opt.children[0] || null;
+      node.options.push({ id: opt.attrs.id || null,
+                          text: premier ? innerText(premier) : textOf(opt),
+                          goto: opt.attrs.goto || null });
     }
   }
   return node;
@@ -55,6 +78,10 @@ export function parseDialogueTree(xml) {
   };
   walk(root);
 
+  // `_prevConvoNo` nait a « 1 » et y revient a chaque sortie : une
+  // conversation commence TOUJOURS au noeud 1, quel que soit l'attribut
+  // `start` (que douze arbres posent sur leur racine, ou il ne dit rien).
+  if (branches["1"]) start = "1";
   if (start === null) start = Object.keys(branches)[0] ?? null;
   return { start, branches, characters };
 }

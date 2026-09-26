@@ -104,7 +104,7 @@ import { ATTERRISSAGE, rollMode, orbitSpeed, project,
          limitOrbitThrust, allowLandingMode, LandingView } from "../web/src/landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
          modelLandingSpots, modelShipBody,
-         rocketKids } from "../web/src/modelship.js";
+         rocketKids, estEnfant } from "../web/src/modelship.js";
 import { QUANTIQUE, QuantumObject as ObjetQuantique, planarQuantumObjects,
          quantumStatues, locksOnSnapshot, collapsesOnFlashlightOff,
          statueParts, planarCandidate, slopeOK } from "../web/src/quantumobj.js";
@@ -140,7 +140,7 @@ import { AUTOPILOT_MESSAGES, maxPriority } from "../web/src/hud.js";
 import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          brakingDistance, flyStep, autopilotRotation,
          autopilotMessageKey } from "../web/src/autopilot.js";
-import { paginate } from "../web/src/dialogueui.js";
+import { paginate, dispositionDialogue, GEOMETRIE } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer } from "../web/src/physics.js";
@@ -587,6 +587,88 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     { x: village[0], y: village[1], z: village[2] },
     { directional: [cratere], shiftOf: decale });
   check("et c'est lui qui donne le bas", g && [g.dir.x, g.dir.y, g.dir.z].join(","), "0,0,1");
+}
+
+// Slate n'est pas l'enfant aux fusees : les zones portent toutes le meme nom
+// (docs/132).
+{
+  const enfant = { name: "ConversationZone", position: [12, 25.8, -8720] };
+  const slate = { name: "ConversationZone", position: [4.37, -31.8, -8720.98],
+                  controller: { kind: "RocketScientistConvoController" } };
+  const kid = { name: "ConversationZone", position: [12, 25.8, -8720],
+                controller: { kind: "RocketKidConvoController" } };
+  check("le meme nom ne fait pas l'enfant", estEnfant(slate, enfant), false);
+  check("le controleur, si", estEnfant(kid, enfant), true);
+  check("sans controleur, la position",
+        estEnfant({ name: "ConversationZone", position: [12, 25.8, -8720] }, enfant), true);
+}
+
+// La mise en page de `DialogueGUI`, en pixels, contre la capture de l'alpha a
+// 640 x 360 (docs/132) : fond court a x = -130, nom qui finit a 572, options
+// a 440 et icone du curseur a 402 quand il y a des reponses.
+{
+  const r = (x) => Math.round(x);
+  const sans = dispositionDialogue(640, 360, { character: "Rocket Scientist", lines: ["Hey"],
+    options: [], atEnd: false }, () => 200);
+  check("a 640 px, l'echelle du jeu", sans.echelle, 0.5);
+  const plein = dispositionDialogue(1280, 720, { character: "Rocket Scientist", lines: ["Hey"],
+    options: [], atEnd: false }, () => 200);
+  check("a 1 280 px, les pixels du jeu", plein.echelle, 1);
+  check("fond court a x = W/2 - 450", r(plein.fond.x), 190);
+  check("... et a y = H - 310,4", Math.round(plein.fond.y * 10) / 10, 409.6);
+  check("le fond court est Short_Dialog_BG", plein.fond.tex, "Short_Dialog_BG");
+  check("le nom finit a 61,3 + 641 du fond", r(plein.nom.x + plein.nom.w - plein.fond.x), 702);
+  check("son bandeau est a sa taille, cale a droite",
+        r(plein.bandeau.x + plein.bandeau.w), r(plein.nom.x + plein.nom.w));
+  check("le texte d'un personnage est aligne a droite", plein.texte.align, "right");
+  check("« Next » tant qu'il reste a dire", plein.choix.texte, "Next");
+  // En pixels d'alpha (echelle 1 sur un ecran de 640) : on recalcule a 640 de
+  // large en logique, ce que fait l'alpha sans reduire.
+  const alpha = (v) => dispositionDialogue(1280, 720, v, () => 180);
+  const a1 = alpha({ character: "Rocket Scientist", lines: ["x"], options: [], atEnd: true });
+  check("fond de l'alpha a -130 sur 640 (decale de 320)", r(a1.fond.x - 320), -130);
+  check("nom de l'alpha qui finit a 572 sur 640", r(a1.nom.x + a1.nom.w - 320), 572);
+  check("« Close » a la fin", a1.choix.texte, "Close");
+  const a2 = alpha({ character: "Rocket Scientist", lines: ["So how are you feeling?"],
+    options: [{ text: "All systems go!" }, { text: "You sound excited" }], atEnd: true, curseur: 1 });
+  check("avec des reponses, Dialog_Choice_BG", a2.fond.tex, "Dialog_Choice_BG");
+  check("options a 440 sur 640", r(a2.options.x - 320), 440);
+  check("icone du curseur a 402 sur 640", r(a2.icone.x - 320), 402);
+  check("un cran de 35 par option", r(a2.curseur.y - (a2.fond.y + 94.487)), 35);
+  check("le curseur couvre l'option la plus longue, plus l'ecart des ancres",
+        Math.round((a2.curseur.w - 180) * 100) / 100, 38.45);
+  check("pas de bouton quand on choisit", a2.choix, undefined);
+  const pan = alpha({ character: "", lines: ["texte"], options: [], atEnd: false, sign: true });
+  check("un panneau a son propre fond", pan.fond.tex, "LocationText_BG");
+  check("et son texte aligne a gauche", pan.texte.align, "left");
+  const doigt = dispositionDialogue(900, 400, { character: "R", lines: ["x"],
+    options: [{ text: "a" }], atEnd: true }, () => 50, { reserve: 150, cible: 44 });
+  check("au doigt, le fond s'arrete avant le losange",
+        doigt.echelle * (doigt.fond.x + doigt.fond.w) <= 900 - 150, true);
+  check("et une option fait un doigt", doigt.ligne * doigt.echelle >= 44, true);
+}
+
+// `Conversation` : une replique enchaine (`goto`), une option se choisit par
+// son id (docs/132).
+{
+  const tree = { start: "1", branches: {
+    "1": { id: "1", talk: ["So how are you feeling?"], goto: null,
+           options: [{ id: "1", text: "All systems go!", goto: "4" },
+                     { id: "2", text: "You sound excited", goto: "2" }] },
+    "2": { id: "2", talk: ["Are you kidding?"], goto: "5", options: [] },
+    "4": { id: "4", talk: ["I'm glad you're excited"], goto: "5", options: [] },
+    "5": { id: "5", talk: ["Anyway, the launch codes"], goto: null, options: [] } } };
+  const d = new DialogueSystem({ trees: { t: tree }, conversations: [] });
+  d.open({ name: "ConversationZone", character: "Rocket Scientist", tree: "t" });
+  check("la reponse porte son texte", d.view.options[0].text, "All systems go!");
+  d.choose(0);
+  check("le bouton 1 suit l'option d'id 1", d.view.lines.join(" "), "I'm glad you're excited");
+  check("une replique qui enchaine dit « Next »", d.view.atEnd, false);
+  d.advance();
+  check("... et enchaine sur le noeud 5", d.view.lines.join(" "), "Anyway, the launch codes");
+  check("le noeud 5 finit", d.view.atEnd, true);
+  d.advance();
+  check("puis la conversation se ferme", d.active, null);
 }
 
 // Le halo du `GlowEffect` recoit la teinte BRUTE : (255, 100, 100) a la mort

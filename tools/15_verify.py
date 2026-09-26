@@ -2329,18 +2329,21 @@ def _run(url, heavy, profil=None, zip_path=None):
             while (dial.view && !dial.view.atEnd) dial.advance();
             if (!dial.view) continue;              // branche close sans reponse
             dlgUI.render(dial.view, false);
-            const boite = document.querySelector('.dlg-box').getBoundingClientRect();
+            const boite = document.querySelector('.dlg-fond').getBoundingClientRect();
             const face = document.querySelector('.tc-face').getBoundingClientRect();
             const cible = (el) => {
               if (!el || el.hidden) return null;
               const r = el.getBoundingClientRect();
               const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+              // Le bouton porte une icone et un texte : ce qu'on touche peut
+              // etre l'un des deux, et c'est toujours le bouton.
+              const b = e && e.closest && e.closest('.dlg-choix');
               return { h: Math.round(r.height),
-                       sous: e ? String(e.className || e.tagName) : 'rien' };
+                       sous: b ? 'dlg-choix' : e ? String(e.className || e.tagName) : 'rien' };
             };
             dlg = { chevauche: boite.right > face.left && boite.bottom > face.top,
-                    option: cible(document.querySelector('.dlg-option')),
-                    next: cible(document.querySelector('.dlg-next')) };
+                    option: cible(document.querySelector('.dlg-opt')),
+                    next: cible(document.querySelector('.dlg-choix')) };
             if (dlg.option) break;     // une conversation a reponses suffit
           }
 
@@ -2356,7 +2359,7 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (plusLong && dial.read(plusLong)) {
             const v = dial.view;
             dlgUI.render(v, !!v.sign);
-            const boite = document.querySelector('.dlg-box');
+            const boite = document.querySelector('.dlg-imgui');
             let appuis = 0;
             while (dial.active && appuis < 40) { dial.advance(); appuis += 1; }
             lecture = {
@@ -2369,7 +2372,7 @@ def _run(url, heavy, profil=None, zip_path=None):
               panneau: v.sign === true,
               style: boite.classList.contains('dlg-sign'),
               options: v.options.length,
-              texteAffiche: document.querySelector('.dlg-text').textContent.length,
+              texteAffiche: document.querySelector('.dlg-texte').textContent.length,
               appuis,
               ferme: dial.active === null,
               // Rien n'est perdu : la somme des mots des pages est celle du
@@ -2448,12 +2451,12 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("la boite de dialogue ne passe plus sous le losange d'action",
                    dlg["chevauche"], False)
             rep.eq("ce que le doigt touche sur une option, c'est l'option",
-                   dlg["option"]["sous"], "dlg-option dlg-sel")
+                   dlg["option"]["sous"], "dlg-opt dlg-sel")
             rep.eq("une option fait la taille d'un doigt",
                    dlg["option"]["h"] >= 36, True)
             if dlg["next"]:
                 rep.eq("et « Next » est bien « Next », pas le bouton derriere",
-                       dlg["next"]["sous"], "dlg-next")
+                       dlg["next"]["sous"], "dlg-choix")
                 rep.eq("« Next » fait la taille d'un doigt",
                        dlg["next"]["h"] >= 40, True)
 

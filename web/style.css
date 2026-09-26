@@ -50,44 +50,33 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
    du dialogue etaient donc recouvertes par le manche gauche. Mesure :
    `elementFromPoint` au centre d'une option rendait `tc-zone-move`
    (docs/95-pnj-au-doigt.md). */
+/* LE DIALOGUE EST UN IMGUI, pas une boîte : `DialogueGUI` pose des textures à
+   des ancres calculées sur l'écran, en pixels, corps 30 (dialogueui.js,
+   `dispositionDialogue`). La couche couvre l'écran ; la scène est à l'échelle
+   du jeu jusqu'à 1 280 px de large, réduite en dessous. */
 #dialogue {
-  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
-  z-index: 6; pointer-events: none;
+  position: fixed; inset: 0; z-index: 6; pointer-events: none; overflow: hidden;
 }
-.dlg-box {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 16px 20px; box-sizing: border-box;
-  background: rgba(8, 12, 20, .9);
-  border: 1px solid rgba(255, 217, 160, .35);
-  border-left: 3px solid #ffd9a0;
-  font-family: "OW Dialogue", ui-monospace, Menlo, monospace; color: #e8eef8;
+.dlg-imgui { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.dlg-imgui > * { position: absolute; margin: 0; box-sizing: border-box; }
+/* Une règle d'auteur (`display: flex`) l'emporte sur l'attribut `hidden` :
+   on lui rend la main, comme dans `#ui`. */
+.dlg-imgui [hidden] { display: none !important; }
+.dlg-tex { display: block; }
+/* `GetPromptGUIStyle(30, blanc)` : Gill Sans MT, blanc, sans ombre. Le nom est
+   en Gill Sans MT Bold, aligné à droite sur son bandeau `NPC_Name_BG`. */
+.dlg-nom, .dlg-texte, .dlg-opts, .dlg-choix {
+  font-family: "OW Dialogue", sans-serif; font-size: 30px; line-height: 35px;
+  color: #fff; white-space: pre-wrap;
 }
-.dlg-name {
-  /* GetPromptGUIStyleCharacterName : Gill Sans MT Bold */
-  font-family: "OW Name", "OW Dialogue", monospace;
-  color: #ffd9a0; letter-spacing: .04em;
-  border-bottom: 1px solid rgba(255, 217, 160, .2); padding-bottom: 6px;
-}
-.dlg-text { white-space: pre-wrap; line-height: 1.55; }
-/*
- * `_isMuseumSign` : `DialogueBox` reçoit une chaîne vide en guise de nom, et
- * `DialogueGUI` dessine un autre fond. Ce n'est pas quelqu'un qui parle, c'est
- * quelque chose qu'on lit — 70 caractères par ligne au lieu de 50, et le nom de
- * l'objet en sobre.
- */
-.dlg-sign { border-left-color: #9fb3cc; }
-.dlg-sign .dlg-name { color: #9fb3cc; font-style: italic; }
-.dlg-options { display: flex; flex-direction: column; gap: 2px; }
-.dlg-option {
-  color: #9fb3cc; padding: 2px 6px;
-  /* #dialogue laisse passer les clics ; les options, elles, les prennent */
-  pointer-events: auto; cursor: pointer;
-}
-.dlg-sel { color: #fff; background: rgba(255, 217, 160, .16); }
-.dlg-next {
-  align-self: flex-end; color: #7f8a9e;
-  pointer-events: auto; cursor: pointer;
-}
+.dlg-nom { font-family: "OW Name", "OW Dialogue", sans-serif; text-align: right; white-space: nowrap; }
+.dlg-texte { white-space: pre; }
+.dlg-opt { height: var(--ligne, 35px); line-height: 35px; white-space: nowrap;
+  pointer-events: auto; cursor: pointer; }
+/* GUIContent(texte, image) : l'image à gauche, à la hauteur de la case. */
+.dlg-choix { display: flex; align-items: center; gap: 4px; white-space: nowrap;
+  pointer-events: auto; cursor: pointer; }
+.dlg-choix-icone { height: 35px; width: 35px; }
 #help { margin-top: 4px; color: #7f8a9e; }
 #help b { color: #aab6cc; font-weight: 600; }
 #help-touch { display: none; margin-top: 4px; color: #7f8a9e; }
@@ -581,29 +570,9 @@ body.touch .ow-prompts-left {
    « Next », pose en bas a droite, tombait pile sur le bouton « descendre »,
    qui prenait l'appui. Elle s'ancre donc a GAUCHE, et sa largeur est bornee
    par la place qui reste (`DialogueUI.reserve`). */
-body.touch #dialogue {
-  left: calc(10px + env(safe-area-inset-left)); bottom: 66px;
-  transform: none;
-}
-/* Une cible de doigt fait au moins 44 px : c'est la regle des boutons
-   tactiles, et le dialogue ne l'avait jamais suivie — ses options faisaient
-   20 px de haut, et son « Next » 29 x 16. */
-body.touch .dlg-options { gap: 4px; }
-/* La hauteur ETAIT une somme : 9 px de marge en haut, 9 en bas, et la hauteur
-   de ligne de la police au milieu. Elle dépassait 36 px quand « Gill Sans MT »
-   était chargée, et retombait dessous quand le navigateur lui substituait autre
-   chose — une mesure qui dépend d'un fichier de police téléchargé n'est pas une
-   règle, c'est une coïncidence. On la pose donc. */
-body.touch .dlg-option {
-  padding: 9px 10px; min-height: 44px;
-  display: flex; align-items: center;
-}
-body.touch .dlg-next {
-  display: flex; align-items: center; justify-content: center;
-  min-width: 78px; min-height: 40px; margin-top: 4px;
-  border: 1px solid rgba(255, 217, 160, .45); border-radius: 8px;
-  color: #ffd9a0;
-}
+/* Au doigt, la mise en page reste celle du jeu : `dispositionDialogue` borne
+   l'échelle avant le losange d'action et grandit lignes et bouton jusqu'à la
+   taille d'un doigt (docs/95-pnj-au-doigt.md). */
 body.touch #computer {
   top: 12%; width: min(560px, 68vw); padding: 12px 16px;
 }

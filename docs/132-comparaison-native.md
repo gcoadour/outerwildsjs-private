@@ -506,11 +506,11 @@ de cliquer — viser le vide ne vise plus rien.
 Sous Xvfb, **la souris de l'alpha est inutilisable** : dès que la fenêtre a
 le focus — au chargement ou en pleine partie —, le premier mouvement de souris
 envoie la caméra en NaN. On ne tourne donc pas la tête de l'alpha ; on vise en
-se déplaçant, par pas chassés et pas en avant tenus au clavier. Cela suffit
-pour la marche, le saut et la mise en place, pas pour viser une capsule de
-cinquante centimètres à deux pas : la conversation n'a pas pu être ouverte
-côté alpha, et la règle du rayon (dix unités, `_interactRange`) repose sur
-l'IL, pas sur une capture.
+se déplaçant, par pas chassés et pas en avant tenus au clavier. C'est lent,
+mais cela suffit, y compris pour viser une capsule de cinquante centimètres :
+une fois le cadrage du réveil connu (section « Le cratère »), Slate se vise
+en contournant le feu par la droite. Voir « Parler, côte à côte, pour de
+bon » plus bas.
 
 ## Le menu de pause, côte à côte
 
@@ -708,3 +708,51 @@ alors que le sol près du feu est, lui, déjà aussi clair. L'écart n'est donc
 pas un facteur global sur la lumière. Une anomalie à creuser : la boîte
 englobante du villageois reste dans la pose de liaison, à plusieurs
 centaines d'unités de son corps.
+
+## Parler, côte à côte, pour de bon
+
+Au clavier seul, l'alpha finit par montrer Slate sous le réticule : l'invite
+**« ⓧ Talk »** apparaît au centre, E ouvre la conversation. La même séquence
+dans le portage (`node scripts/pw-dialogue.mjs <dossier> 1280 720`) a sorti
+quatre écarts, et le premier était grave.
+
+- **Slate récitait le texte d'un autre.** `convo.name === enfant.name` : les
+  quatorze zones s'appellent toutes `ConversationZone`, et chaque
+  conversation passait pour celle de l'enfant aux fusées. Slate disait
+  `Hobbyist_Intro` (« tu voulais t'entraîner à atterrir ? ») au lieu de
+  `BigDay`. L'enfant se reconnaît maintenant à son contrôleur
+  (`estEnfant`).
+- **Les réponses étaient vides, les enchaînements coupés.**
+  `Conversation.ProcessXMLDialogues`, lu dans ILSpy : un nœud affiche son
+  PREMIER enfant (`FirstChild.InnerText`) ; une réplique peut porter un
+  `goto` — quinze le font — qui mène au nœud suivant après « Next » ; le
+  texte d'une option est son `<talk>` imbriqué, et les trente-six options du
+  build en ont un ; `selectOption` choisit par `id` ; une conversation
+  commence toujours au nœud 1. Le portage lisait le texte propre des
+  options (vide, affiché « … ») et fermait la conversation au bout d'une
+  réplique qui enchaînait.
+- **L'interface n'était pas celle du jeu.** `DialogueGUI` est un IMGUI : des
+  textures posées à des ancres calculées sur l'écran, en pixels, corps 30 —
+  `Short_Dialog_BG` sans réponses, `Dialog_Choice_BG` avec, le nom aligné à
+  droite sur `NPC_Name_BG`, le texte d'un personnage aligné à droite, le
+  curseur `NPC_Name_BG` + `White_Dialog_Btn` qui descend de 35 pixels par
+  option, le bouton `Short_Dialog_Btn` « Next » ou « Close ».
+  `dispositionDialogue` (`dialogueui.js`) refait ces ancres ; sur la capture
+  de l'alpha à 640 × 360, le nom finit à x = 572, les options commencent à
+  440 et l'icône du curseur à 402, et ce sont les invariants de
+  `tests/09-jeu.mjs`. Seul écart assumé : sous 1 280 pixels de large la
+  scène se réduit, là où l'alpha sort de l'écran par la gauche.
+- **Les commandes.** `chooseResponse` est l'axe `moveZ` (W/S) et
+  `advanceText` la touche d'interaction : E choisit l'option sous le
+  curseur, qui ne boucle pas et repart de la première à chaque boîte. Le
+  portage ne lisait que les flèches et Entrée, et E restait sans effet
+  devant des réponses. L'invite « Talk » manquait aussi : son texte est un
+  champ (`InteractVolume._prompt`), pas un littéral, et le catalogue des
+  invites ne lit que des littéraux ; elle disparaît maintenant pendant la
+  conversation (`_hasInteracted`), comme dans l'alpha.
+
+La séquence est désormais la même des deux côtés : « Hey, you ready to get
+this thing off the ground? » (Next), « So how are you feeling? » et ses trois
+réponses, « All systems go! » choisi à E, « I'm glad you're excited… »
+(Next), « Anyway, you just need those launch codes… » (Close), et l'invite
+revient.

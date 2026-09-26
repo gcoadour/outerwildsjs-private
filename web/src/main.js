@@ -92,7 +92,7 @@ import { loadCommandes, decoupeImage } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
-         modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
+         modelLandingSpots, modelShipBody, rocketKids, estEnfant } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod, bodySpin } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
          dominantField } from "./gravity.js";
@@ -1766,8 +1766,17 @@ async function boot() {
 
   // Invite du catalogue du jeu, par « Classe.champ ». Les textes ne sont pas
   // reecrits ici : ils viennent tels quels de data/interface/interface.json.
+  // Les invites dont le texte est un CHAMP et non un litteral echappent au
+  // catalogue, qui ne lit que des `ldstr`. La premiere d'entre elles est celle
+  // de tout interactif : `InteractVolume.Awake` fait `new ScreenPrompt(
+  // XboxButton.X, _prompt)`, et `_prompt` vaut « Talk » sur les quatorze
+  // zones de conversation. Sans elle, viser Slate n'affichait RIEN, la ou
+  // l'alpha montre « (X) Talk » sous le reticule (docs/132).
+  const HORS_CATALOGUE = {
+    "InteractVolume._screenPrompt": { priority: 0, button: "X" },
+  };
   const P = (key, text) => {
-    const p = prompts && prompts.get(key);
+    const p = (prompts && prompts.get(key)) || HORS_CATALOGUE[key] || null;
     if (!p) return null;
     return { text: text || p.text, priority: p.priority, button: p.button };
   };
@@ -2998,9 +3007,17 @@ async function boot() {
       settingsUI.render();
     }
     if (dialogue.active) {
+      // `ConversationInput.chooseResponse` est l'axe `moveZ` : W monte d'une
+      // option, S descend, un cran par appui (`_cursorLocationChanged`). Le
+      // portage ne lisait que les fleches ; elles restent, pour la croix de
+      // la manette. Le choix, lui, passe par `advanceText`, la touche
+      // d'interaction (plus bas) ; Entree reste un raccourci.
       const n = (dialogue.view && dialogue.view.options.length) || 0;
-      if (code === "ArrowUp") dlgUI.moveCursor(-1, n);
-      if (code === "ArrowDown") dlgUI.moveCursor(1, n);
+      const cz = cmds.get("Move Z");
+      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1
+        : !cz ? 0 : cz.pos.codes.includes(code) ? 1 : cz.neg.codes.includes(code) ? -1 : 0;
+      if (z > 0) dlgUI.moveCursor(-1, n);
+      if (z < 0) dlgUI.moveCursor(1, n);
       if (code === "Enter" && n) optionPressed = dlgUI.cursor + 1;
     }
   }
@@ -3925,7 +3942,15 @@ async function boot() {
       }
     }
     if (interactPressed) {
-      if (dialogue.active) {
+      if (dialogue.active && dialogue.view && dialogue.view.options.length) {
+        // `DialogueGUI.Update` : devant des options, `advanceText` CHOISIT
+        // celle du curseur (`OnDialogueInput(_optionNo + 1)`). Le portage
+        // appelait `advance()`, qui ne fait rien devant des options : la
+        // conversation restait bloquee sur la touche du jeu (docs/132).
+        optionPressed = dlgUI.cursor + 1;
+        bipUI("AdvanceText");
+        interactPressed = false;
+      } else if (dialogue.active) {
         const avant = dialogue.active;
         dialogue.advance();
         // Deux clips differents : avancer CLIQUE, finir a son propre son.
@@ -3943,7 +3968,7 @@ async function boot() {
         // les crashs passent avant, donc se planter cinq fois puis reussir une
         // fois vous vaut le reproche (docs/78-modele.md).
         let arbre = null;
-        if (enfant && convo.name === enfant.name) {
+        if (estEnfant(convo, enfant)) {
           const choix = compteurEnfant.tree();
           if (choix && enfant.trees[choix]) {
             arbre = enfant.trees[choix];
@@ -4445,8 +4470,12 @@ async function boot() {
       // L'invite empruntee est celle de l'interaction, avec son icone et sa
       // priorite ; le MOT, lui, est du portage — `Conversation` ne construit
       // pas de `ScreenPrompt` dans l'alpha, et on ne pretend pas le contraire.
-      const centre = focus ? P("InteractVolume._screenPrompt",
-                               focus.prompt || focus.name)
+      // `UpdatePromptDisplay` : l'invite ne s'affiche que tant qu'on n'a PAS
+      // interagi (`!_hasInteracted`). Une conversation ouverte la retire ; le
+      // portage la laissait sous le reticule pendant tout le dialogue.
+      const centre = (focus && dialogue.active) ? null
+        : focus ? P("InteractVolume._screenPrompt",
+                    focus.prompt || focus.name)
         : (convo && !dialogue.active)
           ? P("InteractVolume._screenPrompt",
               `Parler a ${convo.character || convo.name}`)
@@ -4616,7 +4645,7 @@ async function boot() {
       // `_isMuseumSign` vient maintenant de la vue : un objet lisible le porte
       // toujours (`DialogueBox(..., true)`), une conversation selon sa zone.
       const v = dialogue.view;
-      dlgUI.render(v, !!(v && v.sign));
+      dlgUI.render(v);
     }
 
     // --- secteurs ---
