@@ -163,8 +163,13 @@ export class Commandes {
         : p.axis !== undefined ? { axis: p.axis, invert: !!p.invert }
         : { button: p.button });
       let neg = def.neg || [], pos = def.pos || [], pad = normPad(def.pad);
+      // Ce que le regard lit de l'axe : la sensibilite de la souris (`Yaw_Key`,
+      // 0,1 par pixel) et la zone morte du manche (`Yaw_PC`, 0,25).
+      let souris = null, zoneMorte = null;
       if (source && source[nom]) {
         const k = source[nom].Key, pc = source[nom].PC;
+        if (k && k.kind === "mouseMove") souris = k.sensitivity ?? null;
+        if (pc && pc.kind === "padAxis") zoneMorte = pc.dead ?? null;
         if (k && k.kind === "buttons") { neg = k.neg; pos = k.pos; }
         if (pc && pc.kind === "padAxis") pad = normPad({ axis: pc.axis, invert: pc.invert });
         else if (pc && pc.kind === "buttons") {
@@ -173,7 +178,7 @@ export class Commandes {
         }
       }
       this.canaux.set(nom, { nom, neg: ranger(neg), pos: ranger(pos), pad,
-                             mouseLook: def.mouse ?? null });
+                             mouseLook: def.mouse ?? null, souris, zoneMorte });
     }
     for (const [nom, def] of Object.entries(AJOUTS)) {
       this.canaux.set(nom, { nom, neg: ranger([]), pos: ranger(def.pos),

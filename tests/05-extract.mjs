@@ -44,6 +44,7 @@ import { extractInput } from "../web/src/pipeline/extract/input.js";
 import { clipLoops, HELD_ROOTS, exportSubtree, findRoots } from "../web/src/pipeline/extract/gltf.js";
 import { STICK_LIGHTS, THERM_HEAT_SPAN } from "../web/src/held.js";
 import { Commandes, COMMANDES } from "../web/src/input.js";
+import { regardDuBuild, REGARD } from "../web/src/regard.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -1606,6 +1607,20 @@ check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
 // `decoupeImage` (input.js) prend pour borne, et le repli doit la dire aussi.
 check("le pas maximal d'une image", inp.maxTimestep, 1);
 check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
+
+// LE REGARD (regard.js) : la souris compte 0,1 par pixel, le manche a une zone
+// morte de 0,25, et le tangage court a 120 degres par seconde, borne a 80.
+{
+  const r3 = (v) => Math.round(v * 1000) / 1000;
+  const cmdsBuild = new Commandes(inp);
+  const r = regardDuBuild(gp, cmdsBuild);
+  const lu = (o) => [o.souris, o.zoneMorte, o.turnRate, o.sensitivityY, o.maxDegreesY,
+                     o.minDegreesY, o.telescopeTurn, o.telescopeSens].map(r3).join(",");
+  check("regard : souris, zone morte, lacet, tangage, bornes, lunette",
+        lu(r), "0.1,0.25,160,120,80,-80,0.5,0.5");
+  check("le tangage a la meme souris que le lacet", r3(cmdsBuild.get("Pitch").souris), 0.1);
+  check("et le repli dit la meme chose que le build", lu(REGARD), lu(r));
+}
 
 // A12 : L'ECRAN-TITRE, dans la scene de `mainData` (docs/131-ecran-titre.md).
 // `GUIText` et `GUITexture` n'avaient pas de structure : l'oracle d'abord.

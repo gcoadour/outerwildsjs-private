@@ -726,6 +726,43 @@ try {
   assert("Bruit acoustique maximal du vaisseau à pleine poussée (10 u)", noiseTest.loudNoise === 10);
   assert("Silence acoustique du vaisseau à poussée nulle (0 u)", noiseTest.silentNoise === 0);
 
+  // ==========================================
+  // SCENARIO 21: LE REGARD A LA VITESSE DU BUILD
+  // ==========================================
+  // Un manche a fond tourne de `_turnRate` (160 degres/s) ; a mi-course, passe
+  // la zone morte de 0,25, de la moitie ; il leve la tete de `_sensitivityY`
+  // (120 degres/s). L'alpha, ses axes de regard mis aux fleches
+  // (scripts/alpha-clavier.mjs), fait un tour en 2,25 s (docs/132).
+  console.log("\n--- Scenario 21: Vitesse du regard, manette ---");
+  await page.evaluate(() => {
+    const faux = { id: "faux", index: 0, connected: true, mapping: "standard",
+                   axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
+    window.__fauxPad = faux;
+    window.__vraiesManettes = navigator.getGamepads;
+    navigator.getGamepads = () => [faux];
+  });
+  const taux = async (axe, v) => {
+    await page.evaluate(([i, v]) => { window.__fauxPad.axes[i] = v; }, [axe, v]);
+    const t0 = await page.evaluate(() => window.__loop.elapsed);
+    await page.waitForFunction((t) => window.__loop.elapsed >= t, t0 + 0.6, { timeout: 120000, polling: 20 });
+    const a = await page.evaluate(() => ({ t: window.__loop.elapsed, ...window.__regardCam() }));
+    await page.waitForFunction((t) => window.__loop.elapsed >= t, a.t + 0.4, { timeout: 120000, polling: 20 });
+    const b = await page.evaluate(() => ({ t: window.__loop.elapsed, ...window.__regardCam() }));
+    await page.evaluate((i) => { window.__fauxPad.axes[i] = 0; }, axe);
+    await page.waitForTimeout(1000);
+    const k = 180 / Math.PI / (b.t - a.t);
+    return { lacet: (b.yaw - a.yaw) * k, tangage: (b.pitch - a.pitch) * k };
+  };
+  const plein = await taux(2, 1);
+  const moitie = await taux(2, 0.625);
+  // A mi-course aussi : a fond, la borne de 80 degres tomberait dans la mesure.
+  await page.evaluate(() => window.__look(window.__regardCam().yaw, 1.2));
+  const leve = await taux(3, -0.625);
+  await page.evaluate(() => { navigator.getGamepads = window.__vraiesManettes; });
+  assert("Manche a fond : 160 degres de lacet par seconde", Math.abs(plein.lacet - 160) < 1, `(${plein.lacet.toFixed(1)})`);
+  assert("A mi-course, passe la zone morte : 80", Math.abs(moitie.lacet - 80) < 1, `(${moitie.lacet.toFixed(1)})`);
+  assert("Manche leve a mi-course : 60 degres de tangage par seconde, vers le haut", Math.abs(leve.tangage + 60) < 1, `(${leve.tangage.toFixed(1)})`);
+
   await context.close();
 } finally {
   server.close();

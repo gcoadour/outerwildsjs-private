@@ -91,6 +91,7 @@ import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes, decoupeImage } from "./input.js";
+import { regardDuBuild, pasDeRegard, borneTangage } from "./regard.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
@@ -3245,6 +3246,40 @@ async function boot() {
    * lunette — le portage n'avait pas ce ralenti (docs/36-audit.md §1.1).
    */
   const TURN = (player.c.turnRate ?? 160) * Math.PI / 180;
+  // A PIED, LE REGARD SUIT LE BUILD (regard.js) : les pixels de souris et le
+  // manche s'accumulent sur l'image, et la boucle les convertit une fois,
+  // avec la duree de l'image. Le chemin en pixels ci-dessous ne sert plus
+  // qu'aux commandes du vaisseau, du roulis et du modele reduit.
+  const cfgRegard = regardDuBuild(gameplay, cmds);
+  const fovInitial = camera.fov;
+  const regardAttente = { dx: 0, dy: 0, padX: 0, padY: 0 };
+  // Le manche, rendu en pixels pour ce chemin-la seulement : il n'a pas ete
+  // relu, et garde l'equivalence qu'il avait (900 pixels par seconde).
+  const PAD_EN_PIXELS = 900;
+  const regardAPied = () =>
+    !(consoles.active && consoles.active.flight && modele)
+    && !(ship && ship.boarded)
+    && !rollMode(!!(cmds && cmds.held("Swap Roll/Yaw", { keys })), false);
+  function appliquerRegard(dtImage) {
+    const r = regardAttente;
+    const dx = r.dx, dy = r.dy;
+    r.dx = 0; r.dy = 0;
+    if (!(dx || dy || r.padX || r.padY)) return;
+    if (alignement.locked || snapRegard !== null) return;
+    if (!regardAPied()) {
+      const pas = PAD_EN_PIXELS * Math.min(dtImage, 0.05);
+      if (r.padX || r.padY) look(r.padX * pas, r.padY * pas, 1);
+      return;
+    }
+    const d = pasDeRegard({
+      sourisDx: dx, sourisDy: dy, padX: r.padX, padY: r.padY, dt: dtImage,
+      sensibilite: settings.lookFactor(), fovRatio: camera.fov / fovInitial,
+      lunette: !!(telescope && telescope.active), combinaison: !!equipment.suit,
+    }, cfgRegard);
+    yaw += d.dYaw;
+    pitch = borneTangage(pitch + d.dPitch, cfgRegard);
+  }
+  window.__regardBuild = { cfg: cfgRegard, attente: regardAttente };
   function look(dx, dy, gain = 1) {
     // §T `_isInputLocked` : pendant que le jeu vous retourne, il vous prend les
     // commandes du regard. C'est le seul moment ou elles ne repondent plus, et
@@ -3284,6 +3319,11 @@ async function boot() {
       rollInput += dx * k * gain * Math.abs(f) * atterrissage.flipRollFactor;
       return;
     }
+    if (!(ship && ship.boarded)) {
+      regardAttente.dx += dx * gain;
+      regardAttente.dy += dy * gain;
+      return;
+    }
     yaw += dx * k * gain * Math.abs(f);
     pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * k * gain * f));
   }
@@ -3313,7 +3353,7 @@ async function boot() {
   const padHeld = new Set();
   const pad = new GamepadControls({
     onKey: command,
-    onLook: (dx, dy) => look(dx, dy, 1),
+    onLookAxes: (x, y) => { regardAttente.padX = x; regardAttente.padY = y; },
     onHold: (codes) => { padHeld.clear(); for (const c of codes) padHeld.add(c); },
   });
   window.__pad = pad;
@@ -3421,6 +3461,8 @@ async function boot() {
       (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
       cmds.maxTimestep);
     const now = performance.now() / 1000;
+    // Le regard de l'image, avant les pas : `UpdateInput` est dans `Update`.
+    appliquerRegard(n * h);
     // `Time.time` : l'horloge de l'image, avancee une fois pour toutes AVANT
     // les sous-pas. Les minuteries des scripts `Update` s'y lisent.
     horlogeImage += n * h;

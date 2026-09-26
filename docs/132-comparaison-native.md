@@ -1146,3 +1146,45 @@ L'exportateur marque désormais le nœud de chaque pièce de son identifiant
 (`extras.piece`, le même que `gameplay.json`), et le moteur y trouve la
 fissure. Mesuré dans Chromium : aucune sur la coque intacte, deux après un
 choc sur le nez et un sur le réacteur `Left`, aucune après la boucle.
+
+## Le regard aux flèches, et la vitesse du build
+
+Toute la chaîne tour, terminal, vaisseau, carte restait hors d'atteinte de
+l'alpha au clavier : son regard n'a que la souris, et la souris l'envoie en
+NaN sous Xvfb. Or ce qui lie la souris au regard est une **donnée** : les axes
+`Yaw_Key` et `Pitch_Key` de l'`InputManager`, de genre `mouseMove`.
+`scripts/alpha-clavier.mjs` en fait une copie **locale** où ces deux axes sont
+des axes à boutons — flèches gauche/droite et bas/haut —, et où la lunette et
+le verrou, qui n'étaient que des clics, reçoivent `t` et `g`.
+`ALPHA_CLAVIER=1 scripts/alpha.sh start` pose la copie le temps du chargement,
+puis remet l'original. L'`InputManager` modifié est ajouté en fin de fichier ;
+seule son entrée de table change.
+
+Un axe à boutons vaut −1, 0 ou 1 : tenu, il vaut un manche à fond. Et c'est
+une mesure. Tenir la flèche droite **2,25 s fait un tour complet** dans
+l'alpha, 1,125 s un demi-tour : 160 degrés par seconde, le `_turnRate` de
+`PlayerCharacterController`.
+
+Le portage, lui, ne suivait pas le build sur ce point, ni au manche ni à la
+souris :
+
+- **au manche**, « 900 pixels de souris par seconde », une zone morte de
+  0,18 et une courbe cubique. Le build n'a ni courbe ni pixels :
+  `Input.GetAxis` rend la déflexion, zone morte de **0,25** passée, et
+  `PlayerCharacterController.FixedUpdate` tourne de
+  `axe × _turnRate × fixedDeltaTime` — 160 degrés par seconde à fond, 80 à
+  mi-course. Le tangage court à `_sensitivityY`, **120** degrés par seconde,
+  dans `PlayerCameraController.UpdateInput` ;
+- **à la souris**, `_turnRate` degrés pour une largeur d'écran. Dans le build,
+  un pixel vaut 0,1 d'axe (la `sensitivity` de l'axe `mouseMove`), puis la même
+  vitesse × la durée de l'image : 0,27 degré de lacet et 0,2 de tangage par
+  pixel à 60 images par seconde, et davantage quand l'image ralentit — le
+  build est ainsi, le portage aussi désormais ;
+- **la borne** du tangage était 86 degrés ; `_maxDegreesY` vaut **80** ;
+- le zoom ralentit les deux par le rapport des champs, et la lunette de
+  moitié (`_telescopeTurnScalar`, `_telescopeSensitivityScalar`).
+
+`regard.js` porte ces règles, à pied. Le chemin en pixels reste celui des
+commandes du vaisseau, du roulis et du modèle réduit, qui n'ont pas été
+relues. Mesuré dans Chromium, manette simulée : 160 degrés par seconde à
+fond, 80 à mi-course, 60 de tangage à mi-course.

@@ -3,6 +3,8 @@
 # comparer au portage : captures d'ecran et touches envoyees par xdotool.
 #
 #   scripts/alpha.sh start            lance l'alpha sur :99 (1280x720)
+#   ALPHA_CLAVIER=1 ... start         ... le regard aux fleches, la lunette a t,
+#                                     le verrou a g (scripts/alpha-clavier.mjs)
 #   scripts/alpha.sh shot <fichier>   capture l'ecran
 #   scripts/alpha.sh key <touche...>  envoie des touches (noms xdotool)
 #   scripts/alpha.sh clic <x> <y>     clic gauche tenu
@@ -20,9 +22,19 @@ case "${1:-}" in
   start)
     pgrep -f "Xvfb $DISPLAY" >/dev/null || { Xvfb "$DISPLAY" -screen 0 1280x720x24 +extension GLX >/dev/null 2>&1 & sleep 2; }
     chmod +x "$GAME"
+    DATA="${GAME}_Data/mainData"
+    if [ -n "${ALPHA_CLAVIER:-}" ]; then
+      # Le regard de l'alpha n'a que la souris, et la souris la casse sous
+      # Xvfb : une copie LOCALE de l'InputManager lui donne des touches, le
+      # temps du chargement, puis l'original est remis.
+      [ -f work/mainData.origine ] || cp "$DATA" work/mainData.origine
+      node scripts/alpha-clavier.mjs work/mainData.origine work/mainData.clavier
+      cp work/mainData.clavier "$DATA"
+    fi
     LIBGL_ALWAYS_SOFTWARE=1 "$GAME" -screen-width "${ALPHA_W:-1280}" -screen-height "${ALPHA_H:-720}" \
       -screen-fullscreen 0 -logFile "$PWD/work/alpha.log" >/dev/null 2>&1 &
     echo $! > work/alpha.pid
+    if [ -n "${ALPHA_CLAVIER:-}" ]; then sleep 20; cp work/mainData.origine "$DATA"; fi
     echo "alpha lancee (pid $(cat work/alpha.pid))"
     ;;
   shot) import -window root "${2:-work/alpha.png}" ;;
