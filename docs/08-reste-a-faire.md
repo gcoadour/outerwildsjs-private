@@ -42,7 +42,7 @@ portage.
 | géométrie des 7 corps | complète, 69 Mo en glTF |
 | matériaux et textures | 251 matériaux, 200 textures, normales désentrelacées |
 | collision | Havok, colliders trimesh du corps ancré |
-| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
+| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout, et frottement **nul** en course et en l'air — le joueur gravit les pentes raides comme dans l'alpha (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
 | ressources | oxygène, carburant, santé, intégrité |
 | vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
 | détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ; invite « ⓧ Talk » du build ([`132`](132-comparaison-native.md)) |
@@ -68,7 +68,7 @@ portage.
 | connaissance | codes, exploration et boucle persistants et signifiants |
 | outils | télescope ×6 et lanceur de sonde, 3/6 savoirs gagnables |
 | interface de dialogue | proportions du build, curseur, sondes rendues |
-| jauges et invites | textures du casque, 46 invites triées par priorité |
+| jauges et invites | textures du casque, 46 invites triées par priorité ; celle des codes de lancement cinq secondes seulement, comme `LaunchCodePromptController` ([`132`](132-comparaison-native.md)) |
 | brouillards | Dark Bramble et coque quantique, masquage et lumières |
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
 | minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |

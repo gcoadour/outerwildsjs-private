@@ -1020,3 +1020,30 @@ image — et non plus la sphère de la surface haute, qui le posait au-dessus du
 fond du cratère. Mesuré dans Chromium : 2,4 u/s² de montée, cinq unités de
 hauteur en deux secondes, la chute, le crash compté par l'enfant, et le
 modèle qui reste où il est tombé.
+
+## Un même parcours au clavier, dans les deux versions
+
+Au clavier seul, on ne tourne pas, mais on avance, recule et se déporte. Même
+départ (« Skip Intro », boucle à 38 s), mêmes touches, mêmes durées — reculer
+2 s, droite 2 s, avancer 2,5 s, gauche 2,5 s —, une image après chacune
+(`work/alpha-route.sh`, `work/pw-route.mjs`, hors dépôt). Deux écarts.
+
+**Le joueur ne gravissait pas la paroi du cratère.** À droite du feu, le sol
+monte à 45 puis 55 degrés. L'alpha y grimpe — l'image suivante voit le
+terminal d'en haut — ; le portage glissait le long de la paroi à 1,6 u/s.
+Le corps physique du joueur avait un frottement de 0,9 en permanence. Le
+build en change à chaque pas : `CharacterMovementModel.Awake` crée trois
+matériaux, et en course comme en l'air le frottement est **nul**, combiné au
+**minimum** — nul contre tout. Poussé à l'horizontale à 25 u/s² (0,5 par pas
+de 0,02 s) contre une pente sans frottement, le corps se redresse en montée,
+plus vite que les 9,8 u/s² de pesanteur le long de la pente. Le frottement
+debout (1, au maximum) était déjà tenu à part (`pasAuSol`) ; le `Rigidbody`
+du joueur n'a pas non plus de traînée. Après correction, les deux parcours
+finissent au même endroit : face au rocher, puis contre le pilier de la tour.
+
+**« Launch Codes Aquired » restait à l'écran.** L'alpha n'affiche rien sur
+ce parcours ; le portage portait le bandeau du bas du début à la fin.
+`LaunchCodePromptController` ne le montre que **cinq secondes** : après
+`LearnLaunchCodes`, ou — « Launch Codes Remembered » — cinq secondes après le
+réveil de la **deuxième** boucle, et d'aucune autre. Le portage le montrait
+tant qu'on connaissait les codes (`InviteCodes`, hud.js).

@@ -23,7 +23,7 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout, CROSSHAIR, crosshairPixels } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
@@ -2161,6 +2161,8 @@ async function boot() {
   // le compteur persiste doit etre RESTAURE au demarrage : sans cela, la
   // premiere synchronisation ecrasait la valeur sauvegardee par un zero
   loop.loopCount = pdata.loopCount || 0;
+  const inviteCodes = new InviteCodes();
+  inviteCodes.debutBoucle(loop.loopCount + 1, performance.now() / 1000);
   const spawn0 = { x: player.pos.x, y: player.pos.y, z: player.pos.z };
   // §N La PREMIERE image aussi : le joueur se reveille sur un sol qui tourne,
   // et `MatchInitialMotion` lui en donne la vitesse. Sans cela le tout premier
@@ -2412,6 +2414,7 @@ async function boot() {
       // `LaunchTerminal.OnLearnLaunchCodes` : c'est la connaissance qui pose
       // l'invite, et non l'inverse.
       console.log(`codes de lancement appris — terminal :${terminal.learnCodes()}`);
+      inviteCodes.apprend(performance.now() / 1000);
     }
   };
   window.__respawn = respawn;
@@ -4790,11 +4793,12 @@ async function boot() {
       // En bas : les codes de lancement, dont le texte change d'une boucle a
       // l'autre — « Aquired » la premiere fois (la faute est celle du jeu),
       // « Remembered » ensuite.
+      // Cinq secondes apres l'avoir appris, ou au reveil de la deuxieme
+      // boucle — pas en permanence (hud.js, `InviteCodes`).
       const codes = prompts.get("LaunchCodePromptController._codePrompt");
+      const quelCode = inviteCodes.update(now);
       prompts.set("bottom",
-        (pdata.knowsLaunchCodes && codes)
-          ? [{ text: codes.texts[loop.loopCount > 0 ? 1 : 0], priority: 0 }]
-          : [], now);
+        (quelCode !== null && codes) ? [{ text: codes.texts[quelCode], priority: 0 }] : [], now);
     }
 
     const hud2 = document.getElementById("hud2");
@@ -5800,6 +5804,8 @@ async function boot() {
       fxMort = false;
       // Le reveil : le glow blanc a 3 qui retombe au noir en trois secondes.
       fx.startOfTimeLoop(now);
+      // `LaunchCodePromptController.Awake` : la scene est rechargee.
+      inviteCodes.debutBoucle(loop.loopCount + 1, now);
       etatJoueur.dead = false;
     }
     // L'immersion : `OnEnterWaterZone` / `OnExitWaterZone`. Le portage sait

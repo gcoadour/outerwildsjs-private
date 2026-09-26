@@ -88,7 +88,7 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "../web/src/consoles.js";
 import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
-import { crosshairPixels, CROSSHAIR } from "../web/src/hud.js";
+import { crosshairPixels, CROSSHAIR, InviteCodes } from "../web/src/hud.js";
 import { actifsSeulement } from "../web/src/config.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
@@ -761,6 +761,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         invitesConsoleModele(0.5).join(","), "_exitPrompt,_upThrustPrompt,_downThrustPrompt,_horizontalThrustPrompt");
   check("console : deplace, Reset seul", invitesConsoleModele(3).join(","), "_resetPrompt");
   check("detecteur : le champ a 0,8", graviteModele({ direction: [0, 0, 1], magnitude: 12 }, 0.8).map((x) => Math.round(x * 10) / 10).join(","), "0,0,9.6");
+}
+
+// `LaunchCodePromptController` : cinq secondes, pas davantage (docs/132).
+{
+  const c = new InviteCodes();
+  c.debutBoucle(1, 0);
+  check("codes : rien au reveil de la premiere boucle", c.update(3), null);
+  check("... ni plus tard", c.update(8), null);
+  c.apprend(10);
+  check("codes appris : « Aquired »", c.update(12), 0);
+  check("... cinq secondes seulement", c.update(15.5), null);
+  c.debutBoucle(2, 100);
+  check("deuxieme boucle : rien pendant cinq secondes", c.update(104), null);
+  check("... puis « Remembered »", c.update(105.5), 1);
+  check("... cinq secondes", c.update(111), null);
+  c.debutBoucle(3, 200);
+  check("troisieme boucle : plus rien", c.update(206), null);
 }
 
 // Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue

@@ -694,6 +694,13 @@ def _run(url, heavy, profil=None, zip_path=None):
                  .filter(n => !n.querySelector('.ow-prompt-btn'))
                  .map(n => n.textContent.trim())"""),
                [])
+        # `LaunchCodePromptController` : l'invite du bas vit cinq secondes, et
+        # le portage la gardait tant qu'on savait les codes (docs/132). Bien
+        # apres le reveil et sans rien apprendre, le bas est vide.
+        rep.eq("pas d'invite des codes en permanence",
+               page.evaluate("""() => [...document.querySelectorAll(
+                   '.ow-prompts-bottom .ow-prompt')].map(n => n.textContent.trim())"""),
+               [])
         page.evaluate("() => window.__map.pan(-0.5, -0.5, 1)")
         rep.check("le deplacement de la carte suit la distance de zoom",
                   page.evaluate("() => Math.abs(window.__map.focal[0]) > 1000"),
