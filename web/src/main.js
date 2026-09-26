@@ -74,7 +74,7 @@ import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState, PLAYER_FALLBACK } from "./player.js";
 import { applyGameShaders, updateGameShaders, toLegacyMaterials, gltfEnGamma } from "./shaders/index.js";
-import { EchangeSoleil, IMPOSTEURS, poseImposteur } from "./imposteur.js";
+import { EchangeSoleil, imposteursDuBuild, poseImposteur } from "./imposteur.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
@@ -85,7 +85,7 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody, hideUnrendered, propagerExtras, hiddenMesh,
-         disableInactive, underInactive } from "./physics.js";
+         disableInactive, underInactive, ombresDuRenderer } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
@@ -135,7 +135,7 @@ import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
          SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap,
-         patchAttenuationUnity, falloffUnity, layerMaskFor, applyLayers,
+         patchAttenuationUnity, patchCookieUnity, falloffUnity, layerMaskFor, applyLayers,
          masqueCamera, CALQUE_SONDE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { champEtoiles, creerVoute } from "./etoiles.js";
@@ -657,6 +657,8 @@ async function boot() {
   // lumieres posees, les reglages de rendu, les champs de force directionnels,
   // les volumes de fluide et les zones d'oxygene. Voir docs/34-actions.md.
   const lighting = await loadLighting();
+  // Le cookie des spots d'Unity, avant que le premier spot ne compile.
+  patchCookieUnity(BABYLON, lighting.cookieSpot);
   // Le ciel du build : la voute tourne vers l'etoile, et c'est elle qui
   // fait le jour et la nuit (docs/41-ciel.md).
   const skyData = await loadSky();
@@ -1032,13 +1034,14 @@ async function boot() {
   // Les spots de l'imposteur ne passent pas par le budget de `LightField`,
   // qui ne garde que les lumieres proches du joueur : ils sont a cinq cents
   // unites, et ils eclairent toute la planete (imposteur.js).
-  const nomsImposteurs = new Set(IMPOSTEURS.map((i) => i.lumiere));
+  const imposteurs = imposteursDuBuild(lighting.lights);
   const placedLights = new LightField(BABYLON, scene,
-    (lighting.lights || []).filter((l) => l !== soleilDuBuild && !nomsImposteurs.has(l.name)));
+    (lighting.lights || []).filter((l) => l !== soleilDuBuild && !imposteurs.includes(l)));
+  // Le pas du spot ombre de l'imposteur, en unites : 0,06 degre vu du centre,
+  // soit un trentieme de seconde de la course de l'etoile.
+  const PAS_OMBRE_IMPOSTEUR = 0.5;
   const spotsImposteurs = new Map();
-  for (const imp of IMPOSTEURS) {
-    const l = (lighting.lights || []).find((x) => x.name === imp.lumiere);
-    if (!l) continue;
+  for (const l of imposteurs) {
     const node = placedLights.createNode(l);
     if (!node) continue;
     node.includeOnlyWithLayerMask = layerMaskFor(l.cullingMask);
@@ -1048,7 +1051,40 @@ async function boot() {
     // midi restait la nuit (docs/132) : il passe devant.
     node.renderPriority = 3;
     node.setEnabled(false);
-    spotsImposteurs.set(imp.lumiere, { imp, l, node });
+    spotsImposteurs.set(`${l.body}/${l.name}`, { l, node, groupe: null });
+  }
+  // La couronne de Timber Hearth : huit spots sans ombre, qui ne tiennent pas
+  // dans le budget d'un materiau (`lightCap` : dix sous SwiftShader, huit sous
+  // ANGLE) a cote du spot central, du feu et de l'ambiance. L'eclairage
+  // « clusterise » de Babylon les range dans UNE lumiere, et passe par le meme
+  // `computeSpotLighting` — donc par l'attenuation d'Unity. Sans son support
+  // (flottants de rendu absents), les spots restent separes et le budget
+  // garde les plus prioritaires.
+  if (BABYLON.ClusteredLightContainer) {
+    const parCorps = new Map();
+    for (const e of spotsImposteurs.values()) {
+      if (e.l.shadows > 0) continue;
+      if (!parCorps.has(e.l.body)) parCorps.set(e.l.body, []);
+      parCorps.get(e.l.body).push(e);
+    }
+    for (const [corps, liste] of parCorps) {
+      if (liste.length < 2) continue;
+      try {
+        for (const e of liste) e.node.setEnabled(true);
+        if (!liste.every((e) => BABYLON.ClusteredLightContainer.IsLightSupported(e.node))) {
+          for (const e of liste) e.node.setEnabled(false);
+          continue;
+        }
+        const c = new BABYLON.ClusteredLightContainer(`couronne_${corps}`,
+          liste.map((e) => e.node), scene);
+        c.includeOnlyWithLayerMask = layerMaskFor(liste[0].l.cullingMask);
+        c.renderPriority = 3;
+        c.setEnabled(false);
+        for (const e of liste) e.groupe = c;
+      } catch (err) {
+        console.warn("couronne de l'imposteur :", err && err.message);
+      }
+    }
   }
   // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
   // .Enable` que sous trente pour cent de coque, et une lumiere que rien n'a
@@ -1148,7 +1184,8 @@ async function boot() {
   let shaderCounts = {};
   // `SunlightSwapper` : l'echange de calques de Timber Hearth et de Brittle
   // Hollow, et les spots de leur soleil de substitution (imposteur.js).
-  const echanges = new Map(IMPOSTEURS.map((i) => [i.corps, new EchangeSoleil(i.corps)]));
+  const echanges = new Map([...new Set(imposteurs.map((l) => l.body))]
+    .map((c) => [c, new EchangeSoleil(c)]));
   window.__imposteur = { echanges, ombres: new Map() };
   const store = new GeometryStore(BABYLON, scene, (entry) => {
     // `GetComponentsInChildren<Transform>` : ce qui est SOUS le corps, et pas
@@ -6820,50 +6857,73 @@ async function boot() {
     // calque `UseSunImposter`.
     {
       const etoile = bodies.find((b) => (b.gravity.surfaceAcceleration || 0) >= 50);
-      for (const { imp, l, node } of spotsImposteurs.values()) {
-        const ech = echanges.get(imp.corps);
+      let bascule = false;
+      for (const { l, node, groupe } of spotsImposteurs.values()) {
+        const ech = echanges.get(l.body);
         const actif = !!(ech && ech.dedans);
-        if (node.isEnabled() !== actif) {
-          node.setEnabled(actif);
-          // Rallumee, une lumiere se range en QUEUE de la liste de chaque
-          // maillage (`_resyncLightSource`), quelle que soit sa priorite : on
-          // refait les listes dans l'ordre trie de la scene.
-          for (const m of scene.meshes) if (m._resyncLightSources) m._resyncLightSources();
-        }
-        const corps = bodies.find((b) => b.bodyName === imp.corps);
+        const interrupteur = groupe || node;
+        if (interrupteur.isEnabled() !== actif) { interrupteur.setEnabled(actif); bascule = true; }
+        const corps = bodies.find((b) => b.bodyName === l.body);
         if (!actif || !corps || !etoile) continue;
-        const pose = poseImposteur(corps.position, etoile.position, imp.distance);
+        const pose = poseImposteur(corps.position, etoile.position, l.pivot);
         if (!pose) continue;
+        const ombres = window.__imposteur.ombres;
+        // La carte d'ombre et la lumiere qui la lit doivent avoir la MEME pose.
+        // Une carte refaite toutes les six images suffisait a soixante images
+        // par seconde ; a deux (SwiftShader), six images font trois secondes,
+        // le spot avait tourne de cinq degres et le sol s'ombrait lui-meme en
+        // entier (docs/132). Le spot ne bouge donc que par pas : quand il s'est
+        // deplace de plus d'une demi-unite, dans le monde OU par rapport au
+        // relief qui tourne, on le repose et la carte se refait avec lui.
+        const gen = ombres.get(l.name);
+        if (gen) {
+          const P = new BABYLON.Vector3(...pose.position);
+          const ref = ech.meshes.length ? ech.meshes[0].mesh : null;
+          const loc = ref ? BABYLON.Vector3.TransformCoordinates(P, ref.getWorldMatrix().clone().invert()) : P;
+          const avant = gen.__pose;
+          if (avant && BABYLON.Vector3.Distance(avant.monde, P) < PAS_OMBRE_IMPOSTEUR &&
+              BABYLON.Vector3.Distance(avant.local, loc) < PAS_OMBRE_IMPOSTEUR) continue;
+          gen.__pose = { monde: P, local: loc };
+          gen.getShadowMap().resetRefreshCounter();
+        }
         node.position.set(...pose.position);
         if (node.direction) node.direction.set(...pose.direction);
-        const ombres = window.__imposteur.ombres;
-        if (ech.meshes.length && BABYLON.ShadowGenerator && !ombres.has(imp.lumiere)) {
+        // Seul le spot central porte des ombres ; la couronne n'en a pas.
+        if (l.shadows > 0 && ech.meshes.length && BABYLON.ShadowGenerator && !ombres.has(l.name)) {
           try {
             // La profondeur de la carte ne couvre que le CORPS : de la face
             // eclairee a la face nuit, soit la distance du spot au centre plus
             // ou moins le rayon. Etalee de 1 a 600, elle rendait le relief en
             // marches d'escalier noires.
             const R = ((corps.gravity && corps.gravity.upperSurfaceRadius) || 200) * 1.3;
-            node.shadowMinZ = Math.max(1, imp.distance - R);
-            node.shadowMaxZ = imp.distance + R;
+            const distance = Math.hypot(...l.pivot.position);
+            node.shadowMinZ = Math.max(1, distance - R);
+            node.shadowMaxZ = distance + R;
             // `m_Resolution` 3 : « tres haute », 2 048 pour un spot dans Unity 4.
             const g = new BABYLON.ShadowGenerator(2048, node);
             g.bias = 0.002;
             g.normalBias = 0.01;
             if ("usePercentageCloserFiltering" in g) g.usePercentageCloserFiltering = true;
             g.setDarkness(1 - ((l.ombre && l.ombre.force) ?? 1));
-            // L'etoile tourne de deux degres par seconde : une carte toutes les
-            // six images suffit, et le relief du corps ne bouge pas.
-            g.getShadowMap().refreshRate = 6;
+            // Rendue une fois, puis refaite a chaque pas du spot (ci-dessus).
+            g.getShadowMap().refreshRate = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+            // Porter et recevoir, renderer par renderer (`m_CastShadows`,
+            // `m_ReceiveShadows`), comme au titre : les branches des pins ne
+            // recoivent pas l'ombre, et les recevoir les noircissait.
             for (const { mesh } of ech.meshes) {
               if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) continue;
-              g.addShadowCaster(mesh, false);
-              mesh.receiveShadows = true;
+              const o = ombresDuRenderer(mesh);
+              if (o.porte) g.addShadowCaster(mesh, false);
+              mesh.receiveShadows = o.recoit;
             }
-            ombres.set(imp.lumiere, g);
-          } catch (e) { ombres.set(imp.lumiere, null); }
+            ombres.set(l.name, g);
+          } catch (e) { ombres.set(l.name, null); }
         }
       }
+      // Rallumee, une lumiere se range en QUEUE de la liste de chaque maillage
+      // (`_resyncLightSource`), quelle que soit sa priorite : on refait les
+      // listes dans l'ordre trie de la scene, une fois pour toute la couronne.
+      if (bascule) for (const m of scene.meshes) if (m._resyncLightSources) m._resyncLightSources();
     }
     // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
     // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne

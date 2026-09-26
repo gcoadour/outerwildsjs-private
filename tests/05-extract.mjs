@@ -351,6 +351,38 @@ check("CoreLight : une ombre a 0,7",
       (lighting.lights.find((l) => l.name === "CoreLight") || {}).ombre?.force, 0.7);
 check("quatre lumieres du monde portent une ombre",
       lighting.lights.filter((l) => l.ombre).length, 4);
+// Le cookie par defaut des spots, lu dans `unity default resources` : plat
+// jusqu'aux six dixiemes du rayon, puis nul au bord (docs/132).
+{
+  const c = lighting.cookieSpot || [];
+  check("cookie des spots : 33 echantillons", c.length, 33);
+  check("plein au centre", c[0], 1);
+  check("plat jusqu'a r = 0,59", c.slice(0, 20).every((x) => x === 1), true);
+  check("a r = 0,8125, la moitie", c[26], 0.5176);
+  check("presque nul au bord", c[32] < 0.02, true);
+}
+// Sous les pivots `LookAtSun` : le spot central et sa couronne de huit sur
+// Timber Hearth, un seul spot sur Brittle Hollow (docs/132).
+{
+  // Plus une directionnelle de test, eteinte, qui reste eteinte.
+  check("une lumiere du pivot est eteinte : la directionnelle de test",
+        lighting.lights.filter((l) => l.pivot && !l.enabled).map((l) => `${l.name}/${l.type}`).join(","),
+        "Directional light/directional");
+  const piv = lighting.lights.filter((l) => l.pivot && l.enabled);
+  check("neuf lumieres allumees sous le pivot de Timber Hearth",
+        piv.filter((l) => l.body === "TimberHearth_Body").length, 9);
+  check("une sous celui de Brittle Hollow",
+        piv.filter((l) => l.body === "BrittleHollow_Body").map((l) => l.name).join(","), "SunImposterLight");
+  const c = piv.find((l) => l.name === "SunImposter_Center");
+  check("le spot central, a 491,3 sur l'avant du pivot", c && c.pivot.position.join(","), "0,0,491.313");
+  check("... tourne vers le centre", c && c.pivot.direction.map((x) => Math.round(x) + 0).join(","), "0,0,-1");
+  const top = piv.find((l) => l.name === "TopLight");
+  check("TopLight : 391,2 de l'axe, 371,2 en avant", top && top.pivot.position.join(","), "-391.204,0,371.199");
+  check("... incline de trente degres vers l'axe", top && top.pivot.direction.map((x) => Math.round(x * 1000) / 1000).join(","), "0.5,0,-0.866");
+  check("la couronne est sans ombre, a 5,25",
+        piv.filter((l) => l.body === "TimberHearth_Body" && l.name !== "SunImposter_Center")
+          .every((l) => l.shadows === 0 && l.intensity === 5.25 && l.spotAngle === 85), true);
+}
 check("les RenderSettings de la scene sont lus", !!lighting.settings, true);
 // Ce qui fait VIVRE ces lumieres : trois comportements que le portage ne lisait
 // pas (docs/42-lumieres.md). Une lumiere sans eux garde l'intensite serialisee.

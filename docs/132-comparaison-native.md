@@ -835,3 +835,66 @@ les lumières d'un maillage que si `scene.requireLightSorting` est posé : le
 spot, rallumé en entrant dans le secteur, était ajouté en fin de liste, onzième
 pour sept emplacements. Le tri est posé, et la liste de chaque maillage est
 refaite à chaque bascule.
+
+### Le plein jour : la couronne du pivot, le cookie, la fin de portée
+
+Au réveil, la lumière était juste ; à midi, le village restait deux fois trop
+sombre (sol 53 contre 86). Quatre causes, trouvées l'une après l'autre en
+isolant chaque lumière sur la même image.
+
+**La couronne.** Mesuré au point près, le spot central frappait le terminal et
+la tour par la tranche (N·L de 0,1 : le soleil est au zénith), là où l'alpha
+les éclaire de face. Le spot central n'est pas seul : `SunImposterPivot` porte
+**huit autres spots**, en couronne — TopLight, LeftLight … BottomRightLight, à
+391 unités de l'axe et 371 en avant, inclinés de trente degrés vers lui,
+intensité 5,25, cône de 85 degrés, sans ombre. L'extraction les exportait à
+leur pose monde du fichier, et le portage n'en faisait rien. Elle garde
+désormais, pour toute lumière enfant d'un `LookAtSun`, sa pose **locale**
+(`pivot`) ; `imposteur.js` la recompose dans le repère de `LookAt(soleil)`,
+haut du monde conservé comme le fait Unity. Neuf spots de plus ne tiennent pas
+dans le budget d'un matériau Babylon (dix lumières sous SwiftShader, huit sous
+ANGLE) : la couronne est rangée dans un `ClusteredLightContainer`, qui compte
+pour une seule lumière et passe par le même `computeSpotLighting`.
+
+**La carte d'ombre en retard.** La couronne branchée, le spot central
+n'apportait plus rien au sol : zone d'ombre et zone éclairée valaient
+pareil. Sa carte d'ombre était refaite toutes les six images — assez à
+soixante images par seconde, mais le Chromium de mesure en fait deux : six
+images, trois secondes, cinq degrés de course de l'étoile, et le sol
+s'ombrait lui-même en entier. Le spot ne bouge plus que **par pas** : quand
+il s'est déplacé d'une demi-unité, dans le monde ou par rapport au relief,
+on le repose et la carte se refait avec lui. Carte et lumière ont toujours la
+même pose, à toute cadence.
+
+**Le cookie.** Un spot d'Unity 4 n'a pas d'exposant : il multiplie son
+atténuation par la texture `Soft` de `unity default resources` (128 × 128,
+Alpha8), projetée sur le cône — plate jusqu'aux six dixièmes du rayon, nulle
+au bord. Babylon prend cos² de l'angle. L'extraction relève le profil radial
+de `Soft` (33 échantillons) et `patchCookieUnity` le met à la place, lu en
+`tan(angle) / tan(demi-cône)`, la projection d'Unity.
+
+**La fin de portée.** Restait la couronne deux fois trop forte, et le spot
+central une fois et demie trop faible — l'alpha le dit dans ses propres
+ombres : au sol, à 81 s, 88 au soleil et 42 à l'ombre du spot central. Le
+village est à 73 % de la portée du spot central et à 92 % de celle de la
+couronne. La table d'atténuation d'Unity n'est pas `1 / (1 + 25 x²)` jusqu'au
+bout : de 0,8 à 1, elle est multipliée par une rampe linéaire en carré de la
+distance, `(1 − x²) / 0,36`, jusqu'à zéro. Le portage ne l'avait pas, et
+c'était aussi ce qui éclairait trop, la nuit, les arbres à la limite des
+lampes du village.
+
+Même cadrage, même instant de boucle, alpha / portage (terminal, tour, sol
+éclairé, sol à droite — où tombe l'ombre de 81 s —, arbres) :
+
+| instant | terminal | tour | sol | sol à droite | arbres |
+|---|---|---|---|---|---|
+| 20 s | 45 / 55 | 36 / 44 | 9 / 12 | 4 / 6 | 5 / 16 |
+| 60 s | 79 / 85 | 59 / 63 | 50 / 49 | 46 / 46 | 45 / 43 |
+| 81 s | 98 / 89 | 63 / 67 | 88 / 90 | 42 / 46 | 45 / 52 |
+| 93 s | 103 / 88 | 68 / 65 | 89 / 90 | 87 / 88 | 43 / 51 |
+| 103 s | 87 / 92 | 68 / 70 | 56 / 56 | 59 / 67 | 51 / 49 |
+| 120 s | 70 / 83 | 50 / 58 | 40 / 44 | 34 / 38 | 33 / 28 |
+
+À 20 s, le terminal de l'alpha oscille de 45 à 58 avec le vacillement du feu
+(moyenne 51). L'écran-titre, qui ne vit que de ponctuelles, n'en sort que plus
+juste : image entière 9,4 / 12,4 / 5,8 contre 9,4 / 12,5 / 5,9.

@@ -545,6 +545,34 @@ def _run(url, heavy, profil=None, zip_path=None):
                                    "b => window.__sectors.fileFor(b)).length +"
                                    " window.__sectors.extras.length"), 10)
 
+        # --- le soleil de substitution ---------------------------------------
+        # Au reveil, le joueur est dans le secteur de Timber Hearth : le spot
+        # central de `SunImposterPivot` est allume, et sa couronne de huit
+        # spots aussi — rangee dans UNE lumiere clusterisee quand le moteur le
+        # permet (docs/132). Sans la couronne, midi sortait deux fois trop
+        # sombre.
+        imp = page.evaluate("""() => {
+          const s = window.__scene || BABYLON.Engine.LastCreatedScene;
+          const c = s.lights.find(l => l.name === 'couronne_TimberHearth_Body');
+          const seuls = s.lights.filter(l => /^ow_(Top|Bottom|Left|Right)\\w*Light$/.test(l.name));
+          const centre = s.lights.find(l => l.name === 'ow_SunImposter_Center');
+          return {centre: !!(centre && centre.isEnabled()),
+                  couronne: c ? (c.lights || c._lights).length : seuls.length,
+                  allumee: c ? c.isEnabled() : seuls.every(l => l.isEnabled())};
+        }""")
+        rep.eq("spot central de l'imposteur allume au reveil", imp["centre"], True)
+        rep.eq("couronne de l'imposteur : huit spots", imp["couronne"], 8)
+        rep.eq("... allumee au reveil", imp["allumee"], True)
+        # Les spots lisent le cookie `Soft` d'Unity, pas l'exposant de Babylon,
+        # et l'attenuation s'eteint en fin de portee (docs/132).
+        lum = page.evaluate("""() => {
+          const k = BABYLON.Effect.IncludesShadersStore.lightsFragmentFunctions || '';
+          return {exposant: k.includes('attenuation*=getAttenuation(cosAngle'),
+                  fondu: k.includes('/0.36)')};
+        }""")
+        rep.eq("spots : plus d'exposant de Babylon", lum["exposant"], False)
+        rep.eq("attenuation : le fondu de fin de portee d'Unity", lum["fondu"], True)
+
         # --- animations ------------------------------------------------------
         anim = page.evaluate("""() => {
           const s = window.__scene || BABYLON.Engine.LastCreatedScene;

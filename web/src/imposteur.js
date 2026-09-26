@@ -25,6 +25,12 @@
 //     Timber Hearth, `SunImposterLight` a 1 375 pour Brittle Hollow, tournes
 //     d'un demi-tour vers le centre — suivent. Intensite 8, cone de 45 et 35
 //     degres, et des OMBRES : la planete eteint elle-meme sa face nuit.
+//
+// Le pivot de Timber Hearth porte aussi une COURONNE de huit spots sans ombre
+// (TopLight ... BottomRightLight : intensite 5,25, cone de 85 degres), a 391
+// unites de l'axe, inclines de trente degres vers lui. Ce sont eux qui
+// eclairent les faces verticales et le pourtour du jour : sans eux, a midi, le
+// terminal et la tour ne prenaient le spot central que par la tranche.
 
 /** Les deux calques que l'echange connait, par leur numero dans `TagManager`. */
 export const CALQUE_DEFAUT = 0;
@@ -43,33 +49,62 @@ export function coucheApresEchange(couche, dedans) {
 }
 
 /**
- * Pose d'un spot de l'imposteur : `LookAt(soleil)` sur le pivot, puis le spot a
- * `distance` sur l'avant du pivot, tourne vers le centre.
+ * Le repere du pivot apres `Transform.LookAt(soleil)` : l'avant vers l'etoile,
+ * le haut aussi pres que possible de `Vector3.up` du monde — c'est le second
+ * argument par defaut de `LookAt`. Droite = haut x avant, haut = avant x
+ * droite, comme `Quaternion.LookRotation`.
  *
- * @param centre   centre du corps (repere courant)
- * @param soleil   centre de l'etoile (meme repere)
- * @param distance position locale du spot sur l'avant du pivot
- * @returns { position, direction } ou null si l'etoile est au centre
+ * @returns { droite, haut, avant } ou null si l'etoile est au centre
  */
-export function poseImposteur(centre, soleil, distance) {
+export function repereRegard(centre, soleil) {
   const d = [soleil[0] - centre[0], soleil[1] - centre[1], soleil[2] - centre[2]];
   const n = Math.hypot(d[0], d[1], d[2]);
   if (!(n > 1e-6)) return null;
-  const u = [d[0] / n, d[1] / n, d[2] / n];
+  const f = [d[0] / n, d[1] / n, d[2] / n];
+  // Haut du monde colineaire a l'avant : `LookRotation` garde alors l'axe X,
+  // on en fait autant.
+  let r = [f[2], 0, -f[0]];                   // (0,1,0) x f
+  let nr = Math.hypot(r[0], r[1], r[2]);
+  if (!(nr > 1e-6)) { r = [1, 0, 0]; nr = 1; }
+  r = [r[0] / nr, r[1] / nr, r[2] / nr];
+  const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
+  return { droite: r, haut: u, avant: f };
+}
+
+const dansRepere = (b, v) => [
+  b.droite[0] * v[0] + b.haut[0] * v[1] + b.avant[0] * v[2],
+  b.droite[1] * v[0] + b.haut[1] * v[1] + b.avant[1] * v[2],
+  b.droite[2] * v[0] + b.haut[2] * v[1] + b.avant[2] * v[2],
+];
+
+/**
+ * Pose d'un spot accroche au pivot : sa position et sa direction LOCALES
+ * (`pivot` de l'extraction), recomposees dans le repere de `LookAt(soleil)`.
+ *
+ * @param centre centre du corps (repere courant)
+ * @param soleil centre de l'etoile (meme repere)
+ * @param local  { position, direction } dans le repere du pivot
+ * @returns { position, direction } ou null si l'etoile est au centre
+ */
+export function poseImposteur(centre, soleil, local) {
+  const b = repereRegard(centre, soleil);
+  if (!b) return null;
+  const p = dansRepere(b, local.position);
   return {
-    position: [centre[0] + u[0] * distance, centre[1] + u[1] * distance, centre[2] + u[2] * distance],
-    direction: [-u[0], -u[1], -u[2]],
+    position: [centre[0] + p[0], centre[1] + p[1], centre[2] + p[2]],
+    direction: dansRepere(b, local.direction),
   };
 }
 
 /**
- * Les spots de l'imposteur, tels que la scene les pose : nom de la lumiere,
- * corps porteur, distance au centre sur l'avant du pivot.
+ * Les spots du soleil de substitution : toute lumiere que l'extraction a
+ * trouvee sous un pivot `LookAtSun`. Neuf sur Timber Hearth — le spot central
+ * et sa couronne de huit —, un sur Brittle Hollow.
  */
-export const IMPOSTEURS = [
-  { lumiere: "SunImposter_Center", corps: "TimberHearth_Body", distance: 491.3126 },
-  { lumiere: "SunImposterLight", corps: "BrittleHollow_Body", distance: 1374.998 },
-];
+export function imposteursDuBuild(lights) {
+  // Le pivot porte aussi une directionnelle de test, eteinte dans le build.
+  return (lights || []).filter((l) => l && l.pivot && l.body && l.enabled !== false);
+}
 
 /**
  * L'echange de calques pour un corps : les maillages sous lui, leur calque

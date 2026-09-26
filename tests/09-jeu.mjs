@@ -140,13 +140,13 @@ import { AUTOPILOT_MESSAGES, maxPriority } from "../web/src/hud.js";
 import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          brakingDistance, flyStep, autopilotRotation,
          autopilotMessageKey } from "../web/src/autopilot.js";
-import { coucheApresEchange, poseImposteur, EchangeSoleil, IMPOSTEURS, CALQUE_IMPOSTEUR } from "../web/src/imposteur.js";
+import { coucheApresEchange, poseImposteur, repereRegard, imposteursDuBuild, EchangeSoleil, CALQUE_IMPOSTEUR } from "../web/src/imposteur.js";
 import { gltfEnGamma } from "../web/src/shaders/index.js";
 import { paginate, dispositionDialogue, GEOMETRIE } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer, propagerExtras } from "../web/src/physics.js";
-import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE } from "../web/src/lights.js";
+import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE, cookieGLSL, patchCookieUnity } from "../web/src/lights.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
@@ -673,17 +673,57 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("puis la conversation se ferme", d.active, null);
 }
 
+// Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue
+// aussi en JavaScript (docs/132).
+{
+  // Un profil a la forme de `Soft` : plat, puis une pente, puis zero.
+  const profil = Array.from({ length: 33 }, (_, i) => (i <= 20 ? 1 : Math.max(0, 1 - (i - 20) / 12)));
+  const expr = cookieGLSL(profil);
+  const mix = (a, b, t) => a + (b - a) * t;
+  const cookie = (r) => Function("mix", "r", `return ${expr};`)(mix, r);
+  check("cookie : plein au centre", cookie(0), 1);
+  check("cookie : plein jusqu'a la fin du plat", cookie(0.6), 1);
+  check("cookie : interpole entre deux echantillons",
+        Math.round(cookie((20.5) / 32) * 1000) / 1000, Math.round((1 - 0.5 / 12) * 1000) / 1000);
+  check("cookie : nul au bord du cone", cookie(1), 0);
+  check("cookie : nul au-dela", cookie(1.5), 0);
+  check("cookie : sans profil, pas d'expression", cookieGLSL(null), null);
+  const store = { lightsFragmentFunctions:
+    "x;attenuation*=getAttenuation(cosAngle,lightData.w);return y;" };
+  check("patch : la decroissance de Babylon est remplacee",
+        patchCookieUnity({ Effect: { IncludesShadersStore: store } }, profil), true);
+  check("patch : plus d'exposant", store.lightsFragmentFunctions.includes("getAttenuation"), false);
+  check("patch : r = tan(angle) / tan(demi-cone)",
+        store.lightsFragmentFunctions.includes("(sqrt(max(0.,1.-c_*c_))/c_)/(sqrt(1.-w_*w_)/w_)"), true);
+}
+
 // Le soleil de substitution de Timber Hearth (`SunlightSwapper`, `LookAtSun`,
 // docs/132).
 {
   check("dans le secteur, le calque 0 passe au 12", coucheApresEchange(0, true), CALQUE_IMPOSTEUR);
   check("un autre calque ne bouge pas", coucheApresEchange(15, true), 15);
   check("en sortant, le 12 revient au 0", coucheApresEchange(12, false), 0);
-  const p = poseImposteur([0, 0, -8593], [0, 0, 0], 491.3126);
+  const centre = { position: [0, 0, 491.313], direction: [0, 0, -1] };
+  const p = poseImposteur([0, 0, -8593], [0, 0, 0], centre);
   check("le spot est sur l'axe du soleil, a 491 du centre", Math.round(p.position[2]), -8102);
-  check("et regarde le centre", p.direction.join(","), "0,0,-1");
-  check("les deux imposteurs du build", IMPOSTEURS.map((x) => x.corps).join(","),
-        "TimberHearth_Body,BrittleHollow_Body");
+  check("et regarde le centre", p.direction.map((x) => Math.round(x)).join(","), "0,0,-1");
+  // `LookAt` garde le haut du monde : etoile a l'est (+x), l'avant est +x, la
+  // droite -z (haut x avant), le haut reste +y.
+  const b = repereRegard([0, 0, 0], [10, 0, 0]);
+  check("LookAt : l'avant vers l'etoile", b.avant.join(","), "1,0,0");
+  check("LookAt : la droite, haut x avant", b.droite.map((x) => Math.round(x) + 0).join(","), "0,0,-1");
+  check("LookAt : le haut du monde conserve", b.haut.map((x) => Math.round(x) + 0).join(","), "0,1,0");
+  check("LookAt : etoile au zenith, repere quand meme", !!repereRegard([0, 0, 0], [0, 5, 0]), true);
+  // TopLight : (-391,2 ; 0 ; 371,2) dans le pivot, tourne vers l'axe.
+  const top = poseImposteur([0, 0, 0], [0, 0, 100],
+    { position: [-391.204, 0, 371.199], direction: [0.5, 0, -0.86603] });
+  check("la couronne tourne avec le pivot", top.position.map((x) => Math.round(x)).join(","), "-391,0,371");
+  const top2 = poseImposteur([0, 0, 0], [100, 0, 0],
+    { position: [-391.204, 0, 371.199], direction: [0.5, 0, -0.86603] });
+  check("... et suit l'etoile", top2.position.map((x) => Math.round(x) + 0).join(","), "371,0,391");
+  check("seules les lumieres d'un pivot sont des imposteurs",
+        imposteursDuBuild([{ name: "a", body: "X", pivot: centre }, { name: "b", body: "X" },
+                           { name: "c", body: "X", pivot: centre, enabled: false }]).length, 1);
   const m1 = { layerMask: 1 }, m2 = { layerMask: 1 << 15 };
   const e = new EchangeSoleil("TimberHearth_Body");
   e.ajouter([m1, m2]);
@@ -8182,6 +8222,11 @@ check("jamais sous quatre", lightCap(6), 4);
 check("au pied de la lumiere, deux fois sa couleur", attenuationUnity(0, 10), 2);
 check("a la moitie de la portee, 2/7,25", attenuationUnity(5, 10).toFixed(4), "0.2759");
 check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
+// La fin de portee : pleine jusqu'a 0,8, puis une rampe en carre de la distance.
+check("a 0,8 de la portee, pas encore de fondu", attenuationUnity(8, 10).toFixed(4), (2 / 17).toFixed(4));
+check("a 0,9, le fondu : (1 - 0,81) / 0,36 de 2/21,25",
+      attenuationUnity(9, 10).toFixed(4), (2 / 21.25 * 0.19 / 0.36).toFixed(4));
+check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
 
 // `SpacesuitAudioController` : FadeIn(5) hors de l'oxygene, FadeOut(5) dedans.
 {
