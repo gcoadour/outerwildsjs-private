@@ -1294,3 +1294,39 @@ C'est désormais le chemin du portage, et la touche ajoutée n'existe plus.
 Mesuré dans Chromium : « Boot Up », assis à `ShipComputer`, l'écran sur
 Timber Hearth « [records available] » ; D passe à « UNEXPLORED » ; Q relève
 le joueur et éteint l'écran.
+
+### Les consoles de l'observatoire, et l'appui déjà servi
+
+Les deux consoles déportées — « Fly Model Ship », « Establish Satellite
+Link » — sont des `InteractZone`. Le portage les prenait **et** les lâchait
+aussi par la touche `Landing Camera`, qui à pied est `Alt Probe` : près d'une
+console, le tir en arrière de la sonde prenait la console. Et il affichait
+pour toutes deux une **vue déportée** dans un coin de l'écran — pour le
+modèle réduit, une caméra posée… sur le vrai vaisseau ; pour le satellite,
+une caméra posée sur la console qui visait le centre de la planète. Le build
+n'a rien de tel :
+
+- le **modèle réduit** se regarde par le verrou du regard
+  (`LockOn(_modelShipBody, 5, zoom, 1)`), depuis la console ;
+- le **satellite** prend des **instantanés**. `SatelliteSnapshotController` :
+  l'écran de l'observatoire montre une carte postale au repos
+  (`_splashTexture`), le schéma du satellite une fois la console prise
+  (`_diagramTexture`) ; `Probe` rend la caméra du satellite **une fois**,
+  sa lumière allumée le temps du rendu, dans la texture de l'écran —
+  `Alt Probe` la même, tournée d'un demi-tour — et en gris (`GrayscaleEffect`
+  à fond). `Cancel` rend la carte postale et rallume la salle.
+
+Les deux textures n'étaient portées par aucun matériau, donc jamais
+extraites ; elles le sont. L'avant d'Unity, lu sur le nœud glTF de
+`SatelliteCamera`, est l'opposé de son `+Z` Babylon : le premier instantané
+montre Timber Hearth, le second la lune. Au passage, le tir en arrière de la
+sonde était coupé partout (`!consoles.count`, le nombre de consoles du
+monde, toujours non nul).
+
+Et une règle de l'`InteractVolume`, que le portage n'avait pas :
+**`_hasInteracted`**. Un appui pris retire l'invite du centre et rend le
+volume sourd aux appuis suivants, jusqu'à `ResetInteraction` — que chaque
+script appelle à sa sortie (quitter la console, l'ordinateur, le siège,
+l'ascenseur arrivé, la trappe refermée), ou que la perte de focus déclenche
+quand `_resetOnLoseFocus` le veut. Le portage laissait « Establish Satellite
+Link » sous le réticule pendant qu'on regardait l'écran.

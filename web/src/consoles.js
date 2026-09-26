@@ -441,32 +441,6 @@ export class RemoteConsoles {
     this.active = this.nearest(world) || null;
     return this.active;
   }
-
-  /**
-   * Ce que la camera deportee regarde, dans le repere courant.
-   *
-   * La console de vol suit le vaisseau et regarde devant lui ; le satellite
-   * reste ou il est et vise le corps le plus proche. Le format est celui d'une
-   * sonde, pour que `ProbeCamera` les affiche sans rien savoir d'elles.
-   *
-   * @param frame decalage monde -> repere courant
-   */
-  view(frame = [0, 0, 0], { ship = null, body = null } = {}) {
-    const c = this.active;
-    if (!c) return null;
-    if (c.flight) {
-      if (!ship) return null;
-      const v = [ship.vel.x, ship.vel.y, ship.vel.z];
-      const L = Math.hypot(...v);
-      return { pos: [ship.pos.x, ship.pos.y, ship.pos.z],
-               vel: L > 0.1 ? v : [0, 0, 1] };
-    }
-    const p = [c.position[0] - frame[0], c.position[1] - frame[1],
-               c.position[2] - frame[2]];
-    const t = body ? body.position : [0, 0, 0];
-    const d = [t[0] - p[0], t[1] - p[1], t[2] - p[2]];
-    return { pos: p, vel: Math.hypot(...d) > 1e-3 ? d : [0, 0, 1] };
-  }
 }
 
 /**

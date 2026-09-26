@@ -260,6 +260,34 @@ export class Interactables {
   }
 
   /**
+   * `InteractVolume._hasInteracted`, pour les zones et la borne.
+   *
+   * Un appui ACCEPTE met le volume en « deja servi » : son invite se retire,
+   * et les appuis suivants ne font plus rien, jusqu'a `ResetInteraction` — que
+   * le script appelle a sa sortie (quitter la console, se lever), ou que la
+   * perte de focus declenche quand `_resetOnLoseFocus` le demande. Le portage
+   * laissait l'invite sous le reticule et reprenait chaque appui (docs/132).
+   */
+  suivreFocus(focus) {
+    const avant = this.focusPrecedent || null;
+    if (avant && avant !== focus && avant.resetOnLoseFocus !== false) avant.interagi = false;
+    this.focusPrecedent = focus || null;
+  }
+
+  /** L'appui est-il pris ? Il met le volume en « deja servi ». */
+  appui(item) {
+    if (!item || item.interagi) return false;
+    item.interagi = true;
+    return true;
+  }
+
+  /** `ResetInteraction`. */
+  reinitialiser(item) { if (item) item.interagi = false; }
+
+  /** `UpdatePromptDisplay` : l'invite tant qu'on n'a pas interagi. */
+  inviteVisible(item) { return !!item && !item.interagi; }
+
+  /**
    * Cible visee : l'objet le plus proche dans sa portee, devant le joueur.
    * @param origin position du joueur dans le repere courant
    * @param frameOffset decalage monde -> repere (positions des objets)

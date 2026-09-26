@@ -1055,6 +1055,57 @@ def _run(url, heavy, profil=None, zip_path=None):
                    [ordi_d - ordi["index"], ordi_q["open"], ordi_q["assis"]], [1, False, None])
             rep.eq("au poste avec : « Buckle Up », et l'on s'assoit", [avec, assis], [["Buckle Up"], True])
 
+        # --- la console du satellite : des instantanes (docs/132) ----------------
+        #
+        # « Establish Satellite Link » : l'ecran passe de la carte postale au
+        # schema, `Probe` y pose un instantane de la camera du satellite, et
+        # `Cancel` rend la carte postale. Plus de vue deportee dans un coin.
+        sat = page.evaluate("""() => {
+          const z = window.__interactables.items.find((i) => i.kind === "zone" && i.name === "ProjectorControls");
+          if (!z || !window.__satellite || !window.__versCadre) return null;
+          const agg = window.__player.body;
+          window.__retourSat = { p: agg.transformNode.position.clone(), regard: window.__regardCam() };
+          const P = window.__versCadre(z.world, z.body);
+          agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+          const m = BABYLON.EngineStore.LastCreatedScene.getMeshByName("Projection");
+          return { repos: m && m.material && m.material.diffuseTexture ? m.material.diffuseTexture.name : null };
+        }""")
+        if sat:
+            ecran = lambda: page.evaluate("""() => { const m = BABYLON.EngineStore.LastCreatedScene.getMeshByName("Projection");
+              return m && m.material && m.material.diffuseTexture ? m.material.diffuseTexture.name : null; }""")
+            try:
+                page.wait_for_function("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].some((n) => n.offsetParent)", timeout=10000)
+            except Exception:
+                pass
+            sat_invite = page.evaluate("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].map((n) => n.textContent.trim())")
+            for _ in range(4):
+                page.keyboard.down("KeyE"); page.wait_for_timeout(600); page.keyboard.up("KeyE"); page.wait_for_timeout(2000)
+                if page.evaluate("() => !!window.__tools.consoles.active"):
+                    break
+            sat_pris = page.evaluate("""() => ({ active: window.__tools.consoles.active ? window.__tools.consoles.active.name : null,
+              centre: [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].map((n) => n.textContent.trim()),
+              gauche: [...document.querySelectorAll('.ow-prompts-left .ow-prompt')].map((n) => n.textContent.trim()) })""")
+            ecran_pris = ecran()
+            page.evaluate("() => window.__satellite.instantane(false)")
+            page.wait_for_timeout(1500)
+            ecran_photo = ecran()
+            page.keyboard.down("KeyQ"); page.wait_for_timeout(600); page.keyboard.up("KeyQ"); page.wait_for_timeout(2000)
+            sat_lache = page.evaluate("() => !!window.__tools.consoles.active")
+            ecran_lache = ecran()
+            page.evaluate("""() => { const r = window.__retourSat, agg = window.__player.body;
+              agg.transformNode.position.copyFrom(r.p); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); window.__look(r.regard.yaw, r.regard.pitch); }""")
+            page.wait_for_timeout(1500)
+            nom = lambda t: (t or "").split("/")[-1].split(".")[0]
+            rep.eq("le satellite : carte postale au repos, « Establish Satellite Link »",
+                   [nom(sat["repos"]), sat_invite], ["PostcardsFromSpacePSD", ["Establish Satellite Link"]])
+            rep.eq("prise : le schema, plus d'invite au centre, Leave / Rearview / Snapshots",
+                   [sat_pris["active"], nom(ecran_pris), sat_pris["centre"], sat_pris["gauche"]],
+                   ["ProjectorControls", "SatelliteDiagramPSD", [], ["Leave", "Take Rearview Snapshots", "Take Snapshots"]])
+            rep.eq("Probe pose l'instantane sur l'ecran, Cancel rend la carte postale",
+                   [ecran_photo, sat_lache, nom(ecran_lache)], ["satelliteSnapshot", False, "PostcardsFromSpacePSD"])
+
         # --- degats du vaisseau -------------------------------------------------
         # Les valeurs de l'alpha eteignent les degats localises : on verifie que
         # c'est bien CE qu'on lit dans le build, pas une hypothese du portage.

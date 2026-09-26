@@ -2508,6 +2508,10 @@ async function boot() {
   const estPoste = (f) => !!f && f.kind === "zone" && f.name === "FlightConsole"
     && f.body === "Ship_Body";
   const invitePoste = () => (equipment.suit ? "Buckle Up" : "Suit Required");
+  // Les volumes dont l'etat `_hasInteracted` est tenu : zones et borne.
+  const volumeGere = (f) => !!f && (f.kind === "zone" || !!f.terminal);
+  const zoneEn = (w) => interactables.items.find((i) => i.kind === "zone" && w
+    && Math.hypot(i.world[0] - w[0], i.world[1] - w[1], i.world[2] - w[2]) < 0.05) || null;
   let focusPrecedent = null;
 
   // §O LES PHARES DU VAISSEAU. Le portage n'en avait aucun : `shiplightRange`
@@ -2694,6 +2698,118 @@ async function boot() {
       console.warn("FadeLight : aucune lumiere a sa position");
     }
   }
+  // --- LE SATELLITE PHOTOGRAPHIE, L'ECRAN MONTRE (docs/132) ---
+  //
+  // `SatelliteSnapshotController` ne transmet pas une vue : il prend des
+  // INSTANTANES. La console prise, l'ecran de l'observatoire passe de sa carte
+  // postale (`_splashTexture`) au schema du satellite (`_diagramTexture`) ;
+  // `Probe` rend la camera du satellite une fois, lumiere allumee le temps du
+  // rendu, dans la texture de l'ecran — `Alt Probe` la meme, tournee d'un
+  // demi-tour. Et en gris : la camera porte un `GrayscaleEffect` a fond. Le
+  // portage montrait a la place, dans un coin, une camera posee sur la console
+  // qui visait le centre de la planete.
+  const satData = (iface && iface.satellite) || {};
+  const satCamData = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => c.name === "SatelliteCamera") || null;
+  const satReglages = reglagesDe(camerasDuBuild, "SatelliteCamera");
+  const satLumiere = (lighting.lights || []).find((l) => l.name === "SatelliteCamera") || null;
+  // `Awake` : `_satelliteCamera.light.enabled = false`.
+  placedLights.allumeScript("SatelliteCamera", false);
+  const texSat = {};
+  const texteSat = (cle) => {
+    if (!satData[cle]) return null;
+    if (!texSat[cle]) texSat[cle] = new BABYLON.Texture(`data/interface/${satData[cle]}`, scene);
+    return texSat[cle];
+  };
+  let rttSat = null, camSat = null, lumSat = null;
+  function ecranSatellite(tex) {
+    const m = scene.getMeshByName("Projection");
+    if (!m || !m.material || !tex) return false;
+    const mat = m.material;
+    if (mat.diffuseTexture !== undefined) mat.diffuseTexture = tex;
+    if (mat.albedoTexture !== undefined) mat.albedoTexture = tex;
+    if (mat.emissiveTexture !== undefined) mat.emissiveTexture = tex;
+    return true;
+  }
+  function instantaneSatellite(arriere) {
+    const n = scene.getTransformNodeByName("SatelliteCamera");
+    if (!n) return false;
+    if (!camSat) {
+      camSat = new BABYLON.FreeCamera("satelliteCamera", BABYLON.Vector3.Zero(), scene);
+      camSat.fov = ((satCamData && satCamData.fov) || 70) * Math.PI / 180;
+      camSat.minZ = (satCamData && satCamData.near) || 0.8;
+      camSat.maxZ = (satCamData && satCamData.far) || 20000;
+      camSat.fovMode = BABYLON.Camera.FOVMODE_VERTICAL_FIXED;
+      // `CustomAspectRatio` : la camera a ses proportions forcees.
+      const ratio = (satReglages && satReglages.aspectRatio) || 1;
+      rttSat = new BABYLON.RenderTargetTexture("satelliteSnapshot",
+        { width: 512, height: Math.round(512 / ratio) }, scene, false);
+      rttSat.activeCamera = camSat;
+      rttSat.renderList = null;
+      // `GrayscaleEffect`, amount 1 : l'image est en niveaux de gris.
+      rttSat.addPostProcess(new BABYLON.BlackAndWhitePostProcess("satelliteGris", 1, null, null,
+                                                                  scene.getEngine()));
+      // Rendue par la scene, UNE fois par instantane : un `render()` a la main
+      // passait avant que les effets soient compiles, et sortait noir.
+      rttSat.refreshRate = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+      scene.customRenderTargets.push(rttSat);
+      // La lumiere de la camera : allumee le temps du rendu, et lui seul.
+      rttSat.onBeforeRenderObservable.add(() => { if (lumSat) lumSat.setEnabled(true); });
+      rttSat.onAfterRenderObservable.add(() => { if (lumSat) lumSat.setEnabled(false); });
+    }
+    n.computeWorldMatrix(true);
+    const p = n.getAbsolutePosition();
+    // L'avant d'Unity, rendu par le noeud du glTF (docs/132).
+    let d = n.getDirection(BABYLON.Axis.Z).scale(SENS_SATELLITE);
+    // `_initCamLocalRot + (0, 180, 0)` : un demi-tour autour du haut local.
+    if (arriere) d = d.scale(-1);
+    camSat.position.copyFrom(p);
+    camSat.upVector = n.getDirection(BABYLON.Axis.Y);
+    camSat.setTarget(p.add(d));
+    if (satLumiere && !lumSat) {
+      // `_satelliteCamera.light` : eteinte hors du rendu.
+      lumSat = new BABYLON.SpotLight("satelliteFlash", p.clone(), d.clone(),
+                                     (satLumiere.spotAngle || 59) * Math.PI / 180, 1, scene);
+      lumSat.intensity = satLumiere.intensity ?? 2;
+      lumSat.range = satLumiere.range ?? 400;
+      lumSat.setEnabled(false);
+    }
+    if (lumSat) { lumSat.position.copyFrom(p); lumSat.direction.copyFrom(d); }
+    rttSat.resetRefreshCounter();
+    ecranSatellite(rttSat);
+    const son = (events.of("SatelliteSnapshotController") || { clips: {} }).clips._snapshotSound;
+    if (son) audio.playOneShot(son);
+    console.log(`annonce : RenderSnapshot${arriere ? " (arriere)" : ""}`);
+    return true;
+  }
+  // `SatelliteSnapshotController.Update`, sortie par `Cancel`.
+  function quitterSatellite() {
+    const c = consoles.active;
+    consoles.active = null;
+    // `_interactVolume.ResetInteraction()`.
+    if (c) interactables.reinitialiser(zoneEn(c.position));
+    if (fadeLight && fadeCible) {
+      fadeLight.fadeIntensity(fadeCible.intensity ?? 1, SATELLITE_FADE, performance.now() / 1000);
+    }
+    ecranSatellite(texteSat("splash"));
+    console.log("console lachee");
+  }
+  const SENS_SATELLITE = -1;
+  // `Awake` pose la carte postale sur l'ecran ; la geometrie arrive apres le
+  // demarrage, on la pose donc des qu'elle est la.
+  let ecranPret = false, essaisEcran = 0;
+  // La console posee sur une zone : meme position, au centieme pres.
+  const consoleDeZone = (f) => (f && f.kind === "zone" && f.world)
+    ? consoles.consoles.find((c) => c.position && Math.hypot(c.position[0] - f.world[0],
+        c.position[1] - f.world[1], c.position[2] - f.world[2]) < 0.05) || null
+    : null;
+  window.__satellite = { instantane: instantaneSatellite, ecran: ecranSatellite, texte: texteSat,
+                         quitter: quitterSatellite };
+  // Sonde : une position de repos, ramenee dans le repere de travail.
+  window.__versCadre = (w, body) => {
+    const dec = decalageDuCorps(body, framePos) || [0, 0, 0];
+    return [0, 1, 2].map((k) => w[k] + dec[k] - framePos[k]);
+  };
   window.__tools = { telescope, probes, probeCam, consoles, fadeLight };
   // Les options de dialogue sont touchables : au clavier on les choisit au
   // chiffre ou au curseur, au doigt on les vise directement.
@@ -3050,6 +3166,8 @@ async function boot() {
   // leve du point d'accrochage de l'ordinateur.
   function quitterOrdinateur() {
     computer.open = false;
+    interactables.reinitialiser(interactables.items.find((i) => i.kind === "zone"
+      && i.name === "ShipComputer" && i.body === "Ship_Body"));
     if (pointsAttache.current && pointsAttache.current.name === "ShipComputer") {
       pointsAttache.detach([0, 0, 0]);
     }
@@ -3121,6 +3239,13 @@ async function boot() {
       }
       if (est("Cancel") && computer.cancel() === "ferme") quitterOrdinateur();
     }
+    // La console du satellite : `Probe` photographie, `Alt Probe` photographie
+    // en arriere, `Cancel` lache (`SatelliteSnapshotController.Update`).
+    if (consoles.active && !consoles.active.flight) {
+      if (est("Probe")) instantaneSatellite(false);
+      else if (est("Alt Probe")) instantaneSatellite(true);
+      if (est("Cancel")) quitterSatellite();
+    }
     if (consoles.active && consoles.active.flight && est("Cancel")) {
       const socle = reposModeleCadre(framePos);
       const d = Math.hypot(modele.pos[0] - socle[0], modele.pos[1] - socle[1],
@@ -3138,9 +3263,12 @@ async function boot() {
         if (s) audio.playOneShot(s.file, { volume: s.volume });
         console.log("annonce : RespawnModelShip");
       } else {
+        const c = consoles.active;
         consoles.toggle([player.pos.x + framePos[0],
                          player.pos.y + framePos[1],
                          player.pos.z + framePos[2]]);
+        // `ExitRemoteFlightConsole` : `_interactVolume.ResetInteraction()`.
+        if (c) interactables.reinitialiser(zoneEn(c.position));
       }
     }
     // §Q LA LUNETTE FAIT TAIRE LE MONDE, et l'assise la laisse regarder.
@@ -3188,18 +3316,6 @@ async function boot() {
         autopilot.matchVelocity(lockOn.current.body);
         console.log("vue d'atterrissage : egalisation automatique");
       }
-    } else if (est("Landing Camera") && consoles.count) {
-      const c = consoles.toggle([player.pos.x + framePos[0],
-                                 player.pos.y + framePos[1],
-                                 player.pos.z + framePos[2]]);
-      // §S La salle s'eteint pendant qu'on regarde la projection, et se
-      // rallume quand on lache. Deux secondes dans les deux sens.
-      if (fadeLight && fadeCible) {
-        const t = performance.now() / 1000;
-        const vise = (c && !c.flight) ? 0 : (fadeCible.intensity ?? 1);
-        fadeLight.fadeIntensity(vise, SATELLITE_FADE, t);
-      }
-      console.log(c ? `console prise : ${c.name}` : "console lachee");
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
     // Dans le build, c'est OWInput.interact (E) qui la mange ; le portage avait
@@ -4250,6 +4366,8 @@ async function boot() {
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
+          // `ExitFlightConsole` : `_interactVolume.ResetInteraction()`.
+          interactables.reinitialiser(interactables.items.find(estPoste));
           const sonDeboucle = sonsUI.unbuckle();
           if (sonDeboucle) audio.playOneShot(sonDeboucle.file, { volume: sonDeboucle.volume });
           // `ExitFlightConsole` : la vue d'atterrissage tombe en se levant, et
@@ -4277,7 +4395,8 @@ async function boot() {
           const a = ship.axes;
           player.pos.x += a.up[0] * 4; player.pos.y += a.up[1] * 4;
           player.pos.z += a.up[2] * 4;
-        } else if (estPoste(focusPrecedent) && equipment.suit) {
+        } else if (estPoste(focusPrecedent) && equipment.suit
+                   && interactables.appui(focusPrecedent)) {
           ship.boarded = true;
           const sonBoucle = sonsUI.buckleUp();
           if (sonBoucle) audio.playOneShot(sonBoucle.file, { volume: sonBoucle.volume });
@@ -4405,6 +4524,7 @@ async function boot() {
                                   visesParRayon ? camera.position : null,
                                   [up.x, up.y, up.z]);
     }
+    interactables.suivreFocus(focus);
     focusPrecedent = focus;
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
@@ -4504,9 +4624,16 @@ async function boot() {
         }
       } else if (interactPressed && !dialogue.active && focus
                  && (focus.kind === "zone" || focus.kind === "interact" || focus.kind === "terminal" || focus.kind === "observatoryMap")) {
+        // Un volume DEJA SERVI ne repond plus, jusqu'a `ResetInteraction`.
+        let appuiPris = true;
+        if (volumeGere(focus) && !estPoste(focus) && !interactables.appui(focus)) {
+          appuiPris = false;
+          interactPressed = false;
+        } else
         // Le poste de pilotage sans combinaison : `ResetInteraction`, et rien
         // d'autre — ni siege ni accroche. Avec, l'embarquement l'a deja pris.
         if (estPoste(focus)) {
+          interactables.reinitialiser(focus);
           interactPressed = false;
         } else
         // La borne de lancement : actionne la tour ou refuse selon les codes
@@ -4523,6 +4650,8 @@ async function boot() {
           } else if (r === "refuse") {
             bipUI("PlayNegativeUISound");
             console.log("tour de lancement : codes inconnus");
+            // `ResetInteraction` : sans les codes, la borne se laisse reessayer.
+            interactables.reinitialiser(focus);
             interactPressed = false;
           }
         } else if (focus.kind === "observatoryMap") {
@@ -4544,18 +4673,24 @@ async function boot() {
             if (sb) audio.playOneShot(sb.file, { volume: sb.volume });
             console.log("annonce : EnterShipComputer");
           }
-        } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
-          // La console de projection du satellite
-          const c = consoles.toggle([player.pos.x + framePos[0],
-                                     player.pos.y + framePos[1],
-                                     player.pos.z + framePos[2]]);
-          if (fadeLight && fadeCible) {
-            const t = performance.now() / 1000;
-            const vise = (c && !c.flight) ? 0 : (fadeCible.intensity ?? 1);
-            fadeLight.fadeIntensity(vise, SATELLITE_FADE, t);
+        } else if (consoleDeZone(focus)) {
+          // LES DEUX CONSOLES DEPORTEES se prennent a leur zone — « Fly Model
+          // Ship », « Establish Satellite Link » — et se lachent par `Cancel`.
+          // Un second appui ne les lache pas : `OnPressInteract` n'a qu'un
+          // sens. Le portage les prenait et les lachait aussi par la touche
+          // `Landing Camera`, qui a pied est `Alt Probe` (docs/132).
+          const c = consoleDeZone(focus);
+          if (!consoles.active) {
+            consoles.active = c;
+            if (!c.flight) {
+              // `OnPressInteract` : la salle s'eteint en deux secondes, l'ecran
+              // passe au schema du satellite.
+              if (fadeLight && fadeCible) fadeLight.fadeIntensity(0, SATELLITE_FADE, performance.now() / 1000);
+              ecranSatellite(texteSat("diagram"));
+            }
+            console.log(`console prise : ${c.name}`);
           }
-          console.log(c ? `console prise : ${c.name}` : "console lachee");
-          interactPressed = false;
+          if (!c.flight) interactPressed = false;
         } else if (/hatch/i.test(focus.prompt || "") && trappe.pressInteract()) {
           // `HatchController.OnPressInteract` : la zone « Open Hatch » ne pose
           // pas de point d'accrochage, elle RETIRE un collider. C'est la seule
@@ -4568,7 +4703,7 @@ async function boot() {
           }
           interactPressed = false;
         }
-        const point = estPoste(focus) ? null : pointsAttache.at(focus.world, 2);
+        const point = (!appuiPris || estPoste(focus)) ? null : pointsAttache.at(focus.world, 2);
         if (point && point !== siegePilotage) {
           lacetSiege = yaw;
           const demande = pointsAttache.attach(point, {
@@ -4914,8 +5049,6 @@ async function boot() {
       //
       // Une console a camera deportee se prend en main de la meme facon qu'un
       // interactif : elle emprunte donc la meme invite, avec son nom.
-      const nearConsole = (!focus && !consoles.active && consoles.count)
-        ? consoles.nearest(playerW) : null;
       // §PNJ UN PERSONNAGE A PORTEE S'ANNONCE AU CENTRE, comme un objet vise.
       // Il ne se disait qu'en fin du bandeau d'etat — lequel, au doigt, tient
       // sur une ligne coupee aux 60 % de l'ecran : l'invite « parler a » y
@@ -4931,12 +5064,13 @@ async function boot() {
       const centre = (focus && dialogue.active) ? null
         // `InteractReceiver.Init("Repair", ...)` : l'invite du volume vise.
         : reparationVisee_ ? P("InteractVolume._screenPrompt", "Repair")
+        // `UpdatePromptDisplay` : plus d'invite une fois le volume servi.
+        : (focus && volumeGere(focus) && !interactables.inviteVisible(focus)) ? null
         : focus ? P("InteractVolume._screenPrompt",
                     estPoste(focus) ? invitePoste() : (focus.prompt || focus.name))
         : (convo && !dialogue.active)
           ? P("InteractVolume._screenPrompt",
               `Parler a ${convo.character || convo.name}`)
-        : nearConsole ? P("InteractVolume._screenPrompt", `${nearConsole.name} (R)`)
         : null;
       prompts.set("center", (centre && !guiMode.hidden) ? [centre] : [], now);
 
@@ -4957,6 +5091,13 @@ async function boot() {
         const d = Math.hypot(modele.pos[0] - socle[0], modele.pos[1] - socle[1],
                              modele.pos[2] - socle[2]);
         for (const k of invitesConsoleModele(d)) left.push(P(`RemoteFlightConsole.${k}`));
+      } else if (consoles.active && !consoles.active.flight) {
+        // `SatelliteSnapshotController.OnPressInteract` : Leave, Take Rearview
+        // Snapshots, Take Snapshots, a gauche.
+        for (const k of ["_exitPrompt", "_rearviewPrompt", "_forwardPrompt"]) {
+          const q = P(`SatelliteSnapshotController.${k}`);
+          if (q) left.push(q);
+        }
       } else if (computer.open) {
         // `EnterShipComputer` : Cancel, Select, Navigate, a gauche.
         for (const k of ["_cancelPrompt", "_selectPrompt", "_navigatePrompt"]) {
@@ -5090,7 +5231,7 @@ async function boot() {
       if (player.fluid) bits.push(
         `dans ${player.fluid.volume.name} (${player.fluid.depth.toFixed(0)} u)`);
       if (zone) bits.push(`oxygene : ${zone.name}`);
-      if (consoles.active) bits.push(`console : ${consoles.active.name} — R pour lacher`);
+      if (consoles.active) bits.push(`console : ${consoles.active.name} — Q pour lacher`);
       if (marshmallow.gone) bits.push("guimauve perdue");
       else if (marshmallow.toast > 0) bits.push(
         `guimauve ${(marshmallow.toast * 100).toFixed(0)} %` +
@@ -5594,8 +5735,9 @@ async function boot() {
     // est ouverte, la touche porte le zoom : les deux ne peuvent pas servir
     // ensemble, et le build non plus ne les melange pas (`_telescopeInputs`
     // n'a pas la sonde).
+    // Aux consoles, la touche est a elles : `Probe` y photographie.
     const probeHeld = (cmds.held("Probe", etatCmd) || !!ax.probe)
-      && !telescope.active;
+      && !telescope.active && !consoles.active;
     // La sonde se RAMASSE (docs/46, lot 7) : `ExpeditionGear` la debloque, dans
     // la cabine du vaisseau. Sans elle, la touche ne lance rien — c'est la
     // progression du build, et le portage donnait tout au premier instant.
@@ -5638,7 +5780,9 @@ async function boot() {
     const champ = player.field;
     probes.update(dt,
       { launch: probeHeld && !!equipment.probe, retrieve: probeHeld,
-        alt: cmds.held("Alt Probe", etatCmd) && !consoles.count },
+        // `!consoles.count` : le NOMBRE de consoles, donc toujours vrai des
+        // qu'il y en a une dans le monde — le tir en arriere ne partait jamais.
+        alt: cmds.held("Alt Probe", etatCmd) && !consoles.active },
       { pos: [player.pos.x, player.pos.y, player.pos.z],
         forward: [fwd.x, fwd.y, fwd.z],
         playerForward: [fwd.x, fwd.y, fwd.z],
@@ -5715,15 +5859,13 @@ async function boot() {
       }
     }
     syncProbes();
-    // La vue deportee est la meme, avec une autre cible : une console prise en
-    // main passe devant la sonde, qui n'est pas ce qu'on regarde a ce
-    // moment-la.
-    const remoteView = consoles.view(anchorPos,
-      { ship, body: player.field && player.field.body });
+    // La vue de la sonde, et elle seule : les consoles deportees n'ont pas de
+    // camera a l'ecran dans le build — le modele se regarde par le verrou du
+    // regard, le satellite par ses instantanes sur l'ecran (docs/132).
     // La touche `altProbe` (R dans le build) montre l'arriere : c'est la seule
     // vue utile une fois la sonde plantee.
-    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last),
-                    !remoteView && cmds.held("Alt Probe", etatCmd) && !consoles.count);
+    probeCam.update(guiMode.hidden ? null : probes.last,
+                    cmds.held("Alt Probe", etatCmd) && !consoles.active);
 
     // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
     if (player.field) {
@@ -5883,6 +6025,7 @@ async function boot() {
       mangeCetteImage = false;
       if (objet) syncBaton(objet, baton, chaleurBaton);
     }
+    if (!ecranPret && (++essaisEcran % 30 === 0)) ecranPret = ecranSatellite(texteSat("splash"));
     // Assis a l'ordinateur, ou pas d'ordinateur : se lever autrement (la mort,
     // la boucle) l'eteint aussi.
     if (computer.open && !(pointsAttache.current && pointsAttache.current.name === "ShipComputer")) {
@@ -6596,6 +6739,11 @@ async function boot() {
           const clip = (events.of("HatchController") || { clips: {} })
             .clips._closeHatchClip;
           if (franchi === "entre" && clip) audio.playOneShot(clip);
+          // `CloseHatch` : `_interactVolume.ResetInteraction()`.
+          if (franchi === "entre") {
+            interactables.reinitialiser(interactables.items.find((i) => i.kind === "zone"
+              && i.name === "HatchControls"));
+          }
           trappe.drain();
           for (const e of trappe.events.splice(0)) {
             console.log(`annonce : ${e}`);
@@ -6810,6 +6958,8 @@ async function boot() {
         if (pointsAttache.current === elAttach) {
           pointsAttache.detach([0, 0, 0]);
         }
+        // `Elevator` a l'arrivee : `_interactVolume.ResetInteraction()`.
+        interactables.reinitialiser(zoneAscenseur);
         if (a.data.stopClip) audio.playOneShot(a.data.stopClip);
       }
     }

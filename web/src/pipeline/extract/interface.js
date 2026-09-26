@@ -31,6 +31,11 @@ const TEXTURES = [
   // sans options, le fond large avec, le bandeau du nom (qui sert aussi de
   // curseur d'option), le bouton « Next / Close », l'icone du curseur, et la
   // barre des panneaux de musee (docs/132).
+  // `SatelliteSnapshotController` : l'ecran de l'observatoire montre sa carte
+  // postale au repos (`_splashTexture`), le schema du satellite une fois la
+  // console prise (`_diagramTexture`). Aucun materiau ne les porte : seul le
+  // script les pose, et elles n'etaient donc jamais extraites (docs/132).
+  "PostcardsFromSpacePSD", "SatelliteDiagramPSD",
   "Short_Dialog_BG", "Dialog_Choice_BG", "NPC_Name_BG",
   "Short_Dialog_Btn", "White_Dialog_Btn", "LocationText_Bar",
 ];
@@ -186,6 +191,12 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
       },
     },
     fonts,
+    // L'ecran de la console du satellite : carte postale au repos, schema une
+    // fois la console prise.
+    satellite: {
+      splash: written.PostcardsFromSpacePSD || null,
+      diagram: written.SatelliteDiagramPSD || null,
+    },
     // SettingsMenu.UpdateOptionText et Axis. La sensibilite est un entier de 1 a
     // 10 qui BOUCLE (11 ramene a 1), 5 etant le neutre : l'axe vaut
     // brut x inversion x sensibilite / 5.

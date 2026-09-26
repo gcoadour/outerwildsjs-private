@@ -166,6 +166,7 @@ portage.
 | vérification avec le build | **267/267** ([`81`](81-invulnerable.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
+| **consoles de l'observatoire** | prises à leur zone, lâchées par `Cancel` ; le satellite prend des instantanés gris sur l'écran (carte postale, schéma, avant, arrière) ; plus de vue déportée inventée ; `_hasInteracted` retire l'invite d'un volume servi ([`132`](132-comparaison-native.md)) |
 | **ordinateur de bord** | dans la cabine, à sa zone « Boot Up » : assis, regard verrouillé sur l'écran, touches de `ComputerInput` (Interact, Cancel, Move X) ; la touche ajoutée depuis le poste n'existe plus ([`132`](132-comparaison-native.md)) |
 | **embarquer** | à pied : colliders animés du vaisseau, paquetage par sa zone « Gear Up », poste par la sienne (« Suit Required » / « Buckle Up »), borne visée à deux pas qui allume la tour en vert ; la trappe fermée barre l'entrée — son collider n'avait pas de maillage à voir ([`132`](132-comparaison-native.md)) |
 | **vitesse du regard** | à pied, celle du build : 160 °/s de lacet et 120 de tangage à fond de manche, zone morte 0,25, souris à 0,1 d'axe par pixel, tangage borné à 80° ; l'alpha se pilote aux flèches (`scripts/alpha-clavier.mjs`, [`132`](132-comparaison-native.md)) |

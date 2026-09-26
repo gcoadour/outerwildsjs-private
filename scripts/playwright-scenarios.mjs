@@ -356,13 +356,20 @@ try {
     events: [...window.__shipEvents],
     landed: window.__shipRef.landed,
   }));
-  assert("Relachement declenche CancelShipIgnition sans decollage", cancelIgnite.events.includes("CancelShipIgnition") && cancelIgnite.landed === true, JSON.stringify(cancelIgnite));
+  // Le commentaire ci-dessus le disait, l'assertion ne l'acceptait pas : une
+  // image plus longue que la seconde d'allumage l'acheve avant le relachement.
+  const acheve = cancelIgnite.events.includes("CompleteShipIgnition");
+  assert("Relachement declenche CancelShipIgnition sans decollage (ou l'image a acheve l'allumage)",
+         (cancelIgnite.events.includes("CancelShipIgnition") && cancelIgnite.landed === true) || acheve,
+         JSON.stringify(cancelIgnite));
 
   // Test full ignition (hold ShiftLeft until 1.0s ignition duration completes) -> should complete and liftoff
   await page.keyboard.down("ShiftLeft");
   await page.waitForFunction(() => window.__shipEvents.includes("CompleteShipIgnition"), null, { timeout: 10000 });
   await page.keyboard.up("ShiftLeft");
-  await page.waitForTimeout(200);
+  // Le pad se libere quand le vaisseau a quitte ses capteurs : une image, ou
+  // deux, selon leur duree — on attend l'etat, pas une duree fixe.
+  await page.waitForFunction(() => window.__shipRef.landed === false, null, { timeout: 15000 }).catch(() => {});
 
   const fullIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],

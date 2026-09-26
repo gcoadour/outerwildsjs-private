@@ -2266,13 +2266,10 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const rc = new RemoteConsoles(list);
   check("hors de portee, rien a prendre", rc.nearest([0, 0, 100]), null);
   check("a portee de la main", rc.nearest([0, 0, 4]).name, "Console");
-  check("aucune vue tant qu'on n'a rien pris", rc.view([0, 0, 0], {}), null);
+  // Plus de « vue deportee » : le build n'en a pas — le modele se regarde par
+  // le verrou du regard, le satellite par ses instantanes (docs/132).
   check("prise en main", rc.toggle([0, 0, 4]).name, "Console");
-  const ship = { pos: { x: 10, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 5 } };
-  const v = rc.view([0, 0, 0], { ship });
-  check("la console de vol suit le vaisseau", v.pos.join(","), "10,0,0");
-  check("... et regarde devant lui", v.vel.join(","), "0,0,5");
-  check("meme touche, on lache", rc.toggle([0, 0, 4]), null);
+  check("et on lache", rc.toggle([0, 0, 4]), null);
 }
 
 // --- niveau de detail lu dans le build -----------------------------------
@@ -4422,6 +4419,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("mais elle suit le vaisseau",
           cat.focus({ x: 500, y: 0, z: 1.2 }, [0, 0, 0], versPlusZ,
                     () => [500, 0, 0], null, haut).prompt, "Gear Up");
+  }
+  // `InteractVolume._hasInteracted` : un appui pris retire l'invite et
+  // rend sourd aux suivants, jusqu'a `ResetInteraction` ou la perte de focus.
+  {
+    const cat = new Interactables({ placed: { InteractZone: [
+      { name: "A", position: [0, 0, 0], fields: { _prompt: "A", _resetOnLoseFocus: true } },
+      { name: "B", position: [9, 0, 0], fields: { _prompt: "B", _resetOnLoseFocus: false } },
+    ] } });
+    const [a, b] = cat.items;
+    cat.suivreFocus(a);
+    check("l'invite se montre avant l'appui", cat.inviteVisible(a), true);
+    check("le premier appui est pris", cat.appui(a), true);
+    check("l'invite se retire", cat.inviteVisible(a), false);
+    check("le second appui ne fait rien", cat.appui(a), false);
+    cat.suivreFocus(null);
+    check("perdre le focus remet A a zero (_resetOnLoseFocus)", cat.inviteVisible(a), true);
+    cat.suivreFocus(b); cat.appui(b); cat.suivreFocus(null);
+    check("mais pas B, qui ne se remet pas en perdant le focus", cat.inviteVisible(b), false);
+    cat.reinitialiser(b);
+    check("ResetInteraction, si", cat.inviteVisible(b), true);
   }
   // Le volume d'une zone, contre la capsule du joueur.
   {
