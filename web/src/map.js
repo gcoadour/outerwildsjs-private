@@ -20,12 +20,200 @@ export const MAP = {
   fitFactor: 0.7,
   // `_lastPlayAudioTime + 10f` : le son d'ouverture a dix secondes de garde.
   audioCooldown: 10,
-  // La duree passee par l'appelant, et celle que la cible IMPOSE.
-  zoomDuration: 1,
+  // La duree passee par l'appelant — `EnterMapView(2f, 0,02f, ...)` a la
+  // touche, `(10f, 0,01f)` depuis l'observatoire —, et celle que la cible
+  // IMPOSE. Le portage ecrivait 1 : une duree qu'il ne jouait pas.
+  zoomDuration: 2,
+  rotationRate: 0.02,
+  observatoryZoomDuration: 10,
+  observatoryRotationRate: 0.01,
   targetZoomDuration: 0.6,
-  // Le champ de la camera du joueur, dont depend le cadrage.
-  fov: 70,
+  // Le champ dont depend le cadrage : `base.camera.fieldOfView`, celui de
+  // `MapCamera` (60), et non celui du joueur (70) que le portage prenait.
+  fov: 60,
+  // `MapCamera` : plan lointain, plan proche de depart et sa course.
+  far: 100000,
+  nearStart: 0.1,
+  nearTravel: 5,
 };
+
+// --- la camera de la carte : `MapController.LateUpdate` -----------------------
+//
+// La carte du build n'est pas un dessin : c'est `MapCamera`, une vraie camera
+// (champ de 60 degres, plan lointain a 100 000) qui s'eleve de l'oeil du joueur
+// jusqu'a la vue plongeante sur le plan du systeme. `LateUpdate`, a chaque
+// image de carte :
+//
+//   t = SmoothStep(0, 1, (Time.time - _initZoomTime) / _zoomDuration)
+//   camera.nearClipPlane = 0,1 + 5 t
+//   si t >= 0,5 : _focalOffset.xz += pan x _zoomDistance x dt
+//   position = Lerp(joueur, soleil + _focalOffset + (0, _zoomDistance, 0), t)
+//   r = FromToRotation(avant, bas) x rotation
+//   rotation = Lerp(rotation, r, t)
+//   r = FromToRotation(haut, +Z) x r
+//   rotation = Slerp(rotation, r, _rotationRate)
+//
+// A la touche, `doRotation` est faux : la rotation de depart est deja la vue
+// plongeante, haut de l'ecran vers +Z. Depuis l'observatoire, elle part du
+// regard du joueur. Le portage ouvrait un calque dessine par-dessus la scene,
+// d'un coup.
+
+/** `Mathf.SmoothStep(0, 1, t)`. */
+export function smoothStep01(t) {
+  const u = Math.max(0, Math.min(1, t));
+  return -2 * u * u * u + 3 * u * u;
+}
+
+// Quaternions (x, y, z, w), conventions d'Unity — celles de Babylon aussi,
+// les deux reperes etant de main gauche.
+export function qMul(a, b) {
+  const [ax, ay, az, aw] = a, [bx, by, bz, bw] = b;
+  return [aw * bx + ax * bw + ay * bz - az * by,
+          aw * by - ax * bz + ay * bw + az * bx,
+          aw * bz + ax * by - ay * bx + az * bw,
+          aw * bw - ax * bx - ay * by - az * bz];
+}
+
+export function qRot(q, v) {
+  const [x, y, z, w] = q;
+  const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + (y * tz - z * ty),
+          v[1] + w * ty + (z * tx - x * tz),
+          v[2] + w * tz + (x * ty - y * tx)];
+}
+
+const unitaire = (v) => { const n = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / n, v[1] / n, v[2] / n]; };
+const qNorm = (q) => { const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1; return q.map((x) => x / n); };
+
+/** `Quaternion.FromToRotation(de, vers)`. */
+export function qFromTo(de, vers) {
+  const a = unitaire(de), b = unitaire(vers);
+  const d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (d < -0.999999) {
+    // Demi-tour : n'importe quel axe orthogonal fait l'affaire.
+    let ax = [0, -a[2], a[1]];
+    if (Math.hypot(ax[0], ax[1], ax[2]) < 1e-6) ax = [-a[2], 0, a[0]];
+    ax = unitaire(ax);
+    return [ax[0], ax[1], ax[2], 0];
+  }
+  return qNorm([a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0], 1 + d]);
+}
+
+/** `Quaternion.Lerp` : interpolation normalisee, par le plus court chemin. */
+export function qLerp(a, b, t) {
+  const u = Math.max(0, Math.min(1, t));
+  const s = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]) < 0 ? -1 : 1;
+  return qNorm(a.map((x, i) => x * (1 - u) + s * b[i] * u));
+}
+
+/** `Quaternion.Slerp`. */
+export function qSlerp(a, b, t) {
+  const u = Math.max(0, Math.min(1, t));
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  let bb = b;
+  if (d < 0) { d = -d; bb = b.map((x) => -x); }
+  if (d > 0.9995) return qLerp(a, bb, u);
+  const th = Math.acos(d), sn = Math.sin(th);
+  const ka = Math.sin((1 - u) * th) / sn, kb = Math.sin(u * th) / sn;
+  return a.map((x, i) => x * ka + bb[i] * kb);
+}
+
+/** `Quaternion.LookRotation(avant, haut)`. */
+export function qLookRotation(avant, haut) {
+  const f = unitaire(avant);
+  let r = [haut[1] * f[2] - haut[2] * f[1], haut[2] * f[0] - haut[0] * f[2],
+           haut[0] * f[1] - haut[1] * f[0]];
+  if (Math.hypot(r[0], r[1], r[2]) < 1e-9) return qFromTo(AVANT_Z, f);
+  r = unitaire(r);
+  const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
+  // Colonnes : droite, haut, avant.
+  const m00 = r[0], m01 = u[0], m02 = f[0];
+  const m10 = r[1], m11 = u[1], m12 = f[1];
+  const m20 = r[2], m21 = u[2], m22 = f[2];
+  const tr = m00 + m11 + m22;
+  let q;
+  if (tr > 0) {
+    const k = Math.sqrt(tr + 1) * 2;
+    q = [(m21 - m12) / k, (m02 - m20) / k, (m10 - m01) / k, 0.25 * k];
+  } else if (m00 > m11 && m00 > m22) {
+    const k = Math.sqrt(1 + m00 - m11 - m22) * 2;
+    q = [0.25 * k, (m01 + m10) / k, (m02 + m20) / k, (m21 - m12) / k];
+  } else if (m11 > m22) {
+    const k = Math.sqrt(1 + m11 - m00 - m22) * 2;
+    q = [(m01 + m10) / k, 0.25 * k, (m12 + m21) / k, (m02 - m20) / k];
+  } else {
+    const k = Math.sqrt(1 + m22 - m00 - m11) * 2;
+    q = [(m02 + m20) / k, (m12 + m21) / k, 0.25 * k, (m10 - m01) / k];
+  }
+  return qNorm(q);
+}
+
+const BAS = [0, -1, 0], AVANT_Z = [0, 0, 1], HAUT_Y = [0, 1, 0];
+const identite = (v) => v;
+
+export class VueCarte {
+  constructor() {
+    this.open = false;
+    this.rotation = [0, 0, 0, 1];
+    this.position = [0, 0, 0];
+    this.near = MAP.nearStart;
+    this.t = 0;
+    this.initTime = 0;
+    this.zoomDuration = MAP.zoomDuration;
+    this.rotationRate = MAP.rotationRate;
+    this.promptsShown = false;
+  }
+
+  /**
+   * `EnterMapView`. `regard` est la rotation de la camera active : avec
+   * `doRotation`, on part de ce regard tourne vers le bas ; sans, de la vue
+   * plongeante, haut de l'ecran vers +Z.
+   */
+  entrer({ now, zoomDuration = MAP.zoomDuration, rotationRate = MAP.rotationRate,
+           doRotation = false, regard = [0, 0, 0, 1], versRepere = identite }) {
+    this.open = true;
+    this.initTime = now;
+    this.zoomDuration = zoomDuration;
+    this.rotationRate = rotationRate;
+    this.promptsShown = false;
+    this.t = 0;
+    // Le bas et l'avant du MONDE, exprimes dans le repere de travail — qui
+    // tourne avec le corps ancre (spin.js). `Vector3.down` n'est le bas du
+    // repere qu'a l'instant zero.
+    const bas = versRepere(BAS);
+    this.rotation = doRotation
+      ? qMul(qFromTo(qRot(regard, AVANT_Z), bas), regard)
+      : qLookRotation(bas, versRepere(AVANT_Z));
+  }
+
+  sortir() { this.open = false; this.promptsShown = false; this.t = 0; }
+
+  /**
+   * Une image de `LateUpdate`, pour la camera. `zoom` et `focal` sont ceux de
+   * `SolarMap` : la distance, et le decalage (x, z) du point vise depuis le
+   * Soleil.
+   *
+   * @returns { t, position, rotation, near, montrer } — `montrer` vaut vrai a
+   *          l'image ou les invites apparaissent (t atteint 1).
+   */
+  etape(now, joueur, soleil, zoom, focal, versRepere = identite) {
+    const t = smoothStep01((now - this.initTime) / (this.zoomDuration || 1));
+    this.t = t;
+    this.near = MAP.nearStart + t * MAP.nearTravel;
+    const d = versRepere([focal[0], zoom, focal[1]]);
+    const vers = [soleil[0] + d[0], soleil[1] + d[1], soleil[2] + d[2]];
+    this.position = joueur.map((x, i) => x + (vers[i] - x) * t);
+    let r = qMul(qFromTo(qRot(this.rotation, AVANT_Z), versRepere(BAS)), this.rotation);
+    this.rotation = qLerp(this.rotation, r, t);
+    // `transform.up` : celui de la rotation DEJA interpolee, pas celui de r.
+    r = qMul(qFromTo(qRot(this.rotation, HAUT_Y), versRepere(AVANT_Z)), r);
+    this.rotation = qSlerp(this.rotation, r, this.rotationRate);
+    let montrer = false;
+    if (!this.promptsShown && t >= 1) { this.promptsShown = true; montrer = true; }
+    return { t, position: this.position, rotation: this.rotation, near: this.near, montrer };
+  }
+}
 // MapMarker et IconGenerator.GenerateSquareBracket
 export const MARKER_ICON = 20;
 export const MARKER_LINE = 1;
@@ -334,17 +522,24 @@ export class SolarMap {
    * @param now    secondes, pour la garde du son
    * @returns { annonces, sonne, zoomDuration }
    */
-  enterMapView(player, target = null, now = 0, fov = MAP.fov) {
+  enterMapView(player, target = null, now = 0, fov = MAP.fov, soleil = [0, 0, 0],
+               duree = MAP.zoomDuration) {
     this.open = true;
     this.canvas.hidden = false;
-    let duree = MAP.zoomDuration;
+    // `_cometPathDegrees = 0` : l'ellipse de la comete se redessine a chaque
+    // ouverture, dix degres par image (`MapOpenGL.OnEnterMapView`).
+    this.cometDeg = 0;
+    // `_focalOffset` est un DECALAGE depuis le Soleil (`_focalTransform`). Le
+    // portage tenait un point absolu de son repere flottant — ancre sur le
+    // corps du joueur : sans cible, la carte se centrait sur la planete du
+    // joueur, et non sur l'etoile.
     if (target && player) {
       const d = Math.hypot(target[0] - player[0], target[1] - player[1],
                            target[2] - player[2]);
       const demi = Math.tan(0.5 * fov * Math.PI / 180);
       this.zoom = Math.max(d / (demi || 1) * MAP.fitFactor, MAP.minZoom);
-      this.focal = [player[0] + (target[0] - player[0]) * 0.5,
-                    player[2] + (target[2] - player[2]) * 0.5];
+      this.focal = [player[0] - soleil[0] + (target[0] - player[0]) * 0.5,
+                    player[2] - soleil[2] + (target[2] - player[2]) * 0.5];
       duree = MAP.targetZoomDuration;
     } else {
       this.zoom = MAP.defaultZoom;
@@ -401,6 +596,9 @@ export class SolarMap {
    * constante A L'ECRAN quel que soit le niveau de zoom.
    */
   pan(ax, az, dt) {
+    // `if (t >= 0,5f)` : pas de deplacement pendant la premiere moitie de la
+    // montee de la camera.
+    if (this.panLocked) return;
     this.focal[0] += Math.max(-1, Math.min(1, ax)) * this.zoom * dt;
     this.focal[1] += Math.max(-1, Math.min(1, az)) * this.zoom * dt;
   }
@@ -419,6 +617,105 @@ export class SolarMap {
    * @param playerPos position du joueur dans le repere courant
    * @param shipPos   position du vaisseau, ou null
    */
+  /**
+   * La carte VUE PAR LA CAMERA : `MapOpenGL.OnPostRender` et `MapMarker`.
+   *
+   * `projeter(p)` rend [x, y, z] ecran de `WorldToScreenPoint` — x, y en pixels
+   * du canevas (y vers le bas), z la profondeur devant la camera. La scene est
+   * dessinee dessous par le moteur ; ce calque ne pose que les cercles, la
+   * comete et les marqueurs, sur fond transparent.
+   *
+   *   - chaque cercle est centre sur le Soleil A L'ECRAN, de rayon la distance
+   *     ECRAN du corps au Soleil, trace de cinq degres en cinq degres. Pendant
+   *     la montee de la camera, ce sont donc des cercles d'ecran qui ne
+   *     suivent pas encore le plan du systeme — comme dans l'alpha ;
+   *   - l'ellipse de la comete se dessine dix degres par image, en partant de
+   *     180 degres, a partir de trois points projetes ;
+   *   - un marqueur : crochet blanc de 20 pixels et libelle de 14, a la
+   *     couleur de son type, teste par `markerVisible` avec la PROFONDEUR
+   *     camera — le portage lui passait la distance au joueur.
+   */
+  drawProjete(projeter, playerPos, shipPos, derelict = false) {
+    this.player = playerPos || null;
+    this.derelict = !!derelict;
+    if (!this.open) return;
+    const c = this.canvas, ctx = c.getContext("2d");
+    const w = c.width = c.clientWidth, h = c.height = c.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    const soleil = this.bodies.find((b) => /sun/i.test(b.bodyName || b.name || ""));
+    const alpha = this.orbitAlpha ?? ORBIT_ALPHA;
+    if (soleil) {
+      const S = projeter(soleil.position);
+      ctx.lineWidth = 1;
+      const couleurDe = new Map();
+      for (const o of this.orbits) couleurDe.set(o.body, orbitStyle(o.rgb, alpha));
+      for (const b of this.bodies) {
+        const style = couleurDe.get(b.bodyName) || couleurDe.get(b.name);
+        if (!style) continue;
+        const P = projeter(b.position);
+        const r = Math.hypot(P[0] - S[0], P[1] - S[1]);
+        if (!(r > 0.5) || r > Math.max(w, h) * 50) continue;
+        ctx.strokeStyle = style;
+        ctx.beginPath();
+        for (let j = 0; j <= 360; j += 5) {
+          const f = j * Math.PI / 180;
+          const x = S[0] + r * Math.cos(f), y = S[1] - r * Math.sin(f);
+          if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      // `CometPath` : le centre de l'ellipse (le Soleil decale du foyer), son
+      // extremite en x (moins le demi-grand axe) et en z (plus le petit). Le
+      // calcul se fait en y MONTANT, comme l'ecran d'Unity.
+      const sp = soleil.position, fd = fociDistance();
+      const V2 = projeter([sp[0] - fd, sp[1], sp[2]]);
+      const V3 = projeter([sp[0] - fd - COMET_ELLIPSE.a, sp[1], sp[2]]);
+      const V4 = projeter([sp[0], sp[1], sp[2] + COMET_ELLIPSE.b]);
+      const deg = this.cometDeg || 0;
+      if (deg > 0) {
+        ctx.strokeStyle = orbitStyle(this.cometColor, alpha);
+        ctx.beginPath();
+        const y2 = h - V2[1], y4 = h - V4[1];
+        for (let i = 0; i <= deg; i += 5) {
+          const f = (i + 180) * Math.PI / 180;
+          const x = V2[0] + (V2[0] - V3[0]) * Math.cos(f);
+          const y = h - (y2 + (y2 - y4) * Math.sin(f));
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      if (this.cometDeg < 360) this.cometDeg = (this.cometDeg || 0) + 10;
+    }
+
+    this.hits = [];
+    const P = playerPos ? projeter([playerPos.x, playerPos.y, playerPos.z]) : null;
+    const V = shipPos ? projeter([shipPos.x, shipPos.y, shipPos.z]) : null;
+    const places = [];
+    for (const b of this.bodies) {
+      const m = this.markers.get(b.name) || this.markers.get(b.bodyName);
+      if (m) places.push({ m, pos: b.position, body: b });
+    }
+    for (const m of this.markers.values()) {
+      if (m.type === "Player" && P) places.push({ m, pos: [playerPos.x, playerPos.y, playerPos.z] });
+      if (m.type === "Ship" && V) places.push({ m, pos: [shipPos.x, shipPos.y, shipPos.z] });
+    }
+    ctx.font = `${MARKER_FONT}px "OW Dialogue", ui-monospace, monospace`;
+    for (const { m, pos, body } of places) {
+      const E = projeter(pos);
+      const dec = { type: m.type, maxDistance: m.maxDistance ?? MARKER_MAX_DISTANCE[m.type] ?? 5000 };
+      if (!markerVisible(dec, E, P, V, this.derelict)) continue;
+      this.bracket(ctx, E[0], E[1], "#ffffff", MARKER_ICON);
+      ctx.fillStyle = m.color || COLORS[m.type] || COLORS.Default;
+      ctx.fillText(" " + m.label, E[0] + MARKER_ICON / 2, E[1] + 4);
+      if (body && this.selected === body) {
+        ctx.strokeStyle = "#ffd9a0"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(E[0], E[1], MARKER_ICON, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+      if (body) this.hits.push({ body, x: E[0], y: E[1], r: MARKER_ICON / 2 });
+    }
+  }
+
   draw(playerPos, shipPos, derelict = false) {
     this.player = playerPos || null;
     this.derelict = !!derelict;
@@ -427,9 +724,12 @@ export class SolarMap {
     const w = c.width = c.clientWidth, h = c.height = c.clientHeight;
     const scale = Math.min(w, h) / (this.zoom * 2);
     const cx = w / 2, cy = h / 2;
-    // le decalage du point vise recentre toute la projection
-    const px = (p) => [cx + (p[0] - this.focal[0]) * scale,
-                       cy + (p[2] - this.focal[1]) * scale];
+    // Le repli sans camera : une projection plane. Le point vise est un
+    // decalage depuis le Soleil, comme `_focalOffset`.
+    const sol = this.bodies.find((b) => /sun/i.test(b.bodyName || b.name || ""));
+    const o = sol ? sol.position : [0, 0, 0];
+    const px = (p) => [cx + (p[0] - o[0] - this.focal[0]) * scale,
+                       cy + (p[2] - o[2] - this.focal[1]) * scale];
 
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = "rgba(6,9,16,.92)";

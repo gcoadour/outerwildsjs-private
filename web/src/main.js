@@ -61,7 +61,7 @@ import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "
 import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
-import { SolarMap, mapMarkers, AccesCarte } from "./map.js";
+import { SolarMap, mapMarkers, AccesCarte, VueCarte, MAP as REGLES_CARTE, qRot } from "./map.js";
 import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
@@ -2639,6 +2639,66 @@ async function boot() {
   // Les treize marqueurs que le build pose, avec leurs vrais noms de jeu.
   const marqueurs = mapMarkers(gameplay);
   const accesCarte = new AccesCarte();
+  // `MapCamera` : la carte est une CAMERA qui s'eleve de l'oeil du joueur
+  // (map.js, `VueCarte`). Le portage la tient avec la camera du joueur, dont
+  // il retient les reglages le temps de la carte — c'est aussi ce que fait le
+  // build pour le son, en passant l'ecoute a la camera de la carte.
+  const vueCarte = new VueCarte();
+  const camCarteBuild = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => (c.roles || []).includes("carte")) || null;
+  const reglagesCarte = {
+    fov: ((camCarteBuild && camCarteBuild.fov) || REGLES_CARTE.fov) * Math.PI / 180,
+    far: (camCarteBuild && camCarteBuild.far) || REGLES_CARTE.far,
+    masque: masqueCamera(camCarteBuild ? camCarteBuild.cullingMask : null),
+  };
+  let cameraAvantCarte = null;
+  // Le monde vu du repere de travail, qui tourne avec le corps ancre : le bas
+  // de la carte est `Vector3.down` du MONDE (spin.js).
+  const versRepereCarte = (v) => (anchorBody ? spins.toFrame(anchorBody, v) : v);
+  const depuisRepereCarte = (v) => (anchorBody ? spins.fromFrame(anchorBody, v) : v);
+  const etoileCarte = () => bodies.find((b) => ((b.gravity || {}).surfaceAcceleration || 0) >= 50) || null;
+  /**
+   * `EnterMapView`. Le cadrage joueur-cible se mesure dans le repere, puis se
+   * ramene aux axes du monde : `_focalOffset` y vit, le deplacement aussi.
+   */
+  function ouvrirCarte({ observatoire = false } = {}) {
+    const now = performance.now() / 1000;
+    const etoile = etoileCarte();
+    const sp = etoile ? etoile.position : [0, 0, 0];
+    const rel = (p) => depuisRepereCarte([p[0] - sp[0], p[1] - sp[1], p[2] - sp[2]]);
+    const cible = observatoire ? null : solarMap.selected;
+    const r = solarMap.enterMapView(rel([player.pos.x, player.pos.y, player.pos.z]),
+                                    cible ? rel(cible.position) : null, now,
+                                    REGLES_CARTE.fov, [0, 0, 0],
+                                    observatoire ? REGLES_CARTE.observatoryZoomDuration
+                                                 : REGLES_CARTE.zoomDuration);
+    const regard = new BABYLON.Quaternion();
+    camera.getWorldMatrix().decompose(undefined, regard);
+    vueCarte.entrer({ now, zoomDuration: r.zoomDuration,
+                      rotationRate: observatoire ? REGLES_CARTE.observatoryRotationRate
+                                                 : REGLES_CARTE.rotationRate,
+                      doRotation: observatoire,
+                      regard: [regard.x, regard.y, regard.z, regard.w],
+                      versRepere: versRepereCarte });
+    if (!cameraAvantCarte) {
+      cameraAvantCarte = { fov: camera.fov, minZ: camera.minZ, maxZ: camera.maxZ,
+                           layerMask: camera.layerMask };
+    }
+    return r;
+  }
+  /** `ExitMapView` : la camera du joueur retrouve ses reglages. */
+  function fermerCarte() {
+    if (solarMap.open) solarMap.exitMapView();
+    accesCarte.sortie();
+    vueCarte.sortir();
+    solarMap.panLocked = false;
+    if (cameraAvantCarte) {
+      camera.rotationQuaternion = null;
+      Object.assign(camera, cameraAvantCarte);
+      cameraAvantCarte = null;
+    }
+  }
+  window.__vueCarte = vueCarte;
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF, marqueurs);
   // §V LES ORBITES ONT UNE COULEUR CHACUNE (docs/100-carte.md). `MapOpenGL`
@@ -2887,13 +2947,9 @@ async function boot() {
     // La touche ne repond que si `MapController` est allume : combinaison sur
     // le dos, ou carte ouverte depuis l'observatoire (map.js, `AccesCarte`).
     if ((est("Map") || code === "KeyM") && accesCarte.actif) {
-      if (solarMap.open) { solarMap.exitMapView(); accesCarte.sortie(); }
+      if (solarMap.open) fermerCarte();
       else {
-        const cible = solarMap.selected;
-        const moi = [player.pos.x + framePos[0], player.pos.y + framePos[1],
-                     player.pos.z + framePos[2]];
-        const r = solarMap.enterMapView(moi, cible ? cible.position : null,
-                                        performance.now() / 1000);
+        const r = ouvrirCarte();
         // Le son d'ouverture est celui de la source du `MapController`, pas un
         // clip d'interface : s'il n'est pas extrait, la garde de dix secondes
         // reste vraie et rien ne joue.
@@ -3539,7 +3595,7 @@ async function boot() {
       if (death.dead && !modes.mort) {
         modes.annonce("PlayerDeath");
         // `MapController.OnPlayerDeath` : la carte se ferme et s'eteint.
-        if (solarMap.open) solarMap.exitMapView();
+        fermerCarte();
         accesCarte.mort();
       }
       else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
@@ -3760,11 +3816,32 @@ async function boot() {
     // LOCALE : le decalage etait applique sur Y du repere de travail, ce qui
     // ne vaut qu'au pole nord du corps ancre. Ailleurs il portait la camera
     // de cote, et sous l'equateur sud, sous les pieds du joueur.
-    camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
-                        player.pos.y + up.y * EYE_HEIGHT,
-                        player.pos.z + up.z * EYE_HEIGHT);
-    camera.upVector = up;
-    camera.setTarget(camera.position.add(fwd));
+    if (vueCarte.open) {
+      // `MapController.LateUpdate` : la camera monte de l'oeil vers la vue
+      // plongeante. Le haut de la camera est pose a chaque image : Babylon ne
+      // le retourne avec la rotation que quand sa composante z change.
+      const etoile = etoileCarte();
+      const e = vueCarte.etape(performance.now() / 1000,
+                               [player.pos.x, player.pos.y, player.pos.z],
+                               etoile ? etoile.position : [0, 0, 0],
+                               solarMap.zoom, solarMap.focal, versRepereCarte);
+      solarMap.panLocked = e.t < 0.5;
+      camera.position.set(e.position[0], e.position[1], e.position[2]);
+      if (!camera.rotationQuaternion) camera.rotationQuaternion = new BABYLON.Quaternion();
+      camera.rotationQuaternion.set(e.rotation[0], e.rotation[1], e.rotation[2], e.rotation[3]);
+      const h = qRot(e.rotation, [0, 1, 0]);
+      camera.upVector = new BABYLON.Vector3(h[0], h[1], h[2]);
+      camera.minZ = e.near;
+      camera.maxZ = reglagesCarte.far;
+      camera.fov = reglagesCarte.fov;
+      camera.layerMask = reglagesCarte.masque;
+    } else {
+      camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
+                          player.pos.y + up.y * EYE_HEIGHT,
+                          player.pos.z + up.z * EYE_HEIGHT);
+      camera.upVector = up;
+      camera.setTarget(camera.position.add(fwd));
+    }
 
     // le soleil eclaire depuis sa position monde, geometrie visible ou non
     const star = entries.find((e) => e.isStar);
@@ -4200,10 +4277,7 @@ async function boot() {
           // SANS cadrer de cible — l'observatoire montre le systeme entier.
           // (L'appel visait une methode `ouvre` que `SolarMap` n'a jamais eue.)
           accesCarte.depuisObservatoire();
-          if (!solarMap.open) {
-            solarMap.enterMapView([player.pos.x + framePos[0], player.pos.y + framePos[1],
-                                   player.pos.z + framePos[2]], null, performance.now() / 1000);
-          }
+          if (!solarMap.open) ouvrirCarte({ observatoire: true });
           interactPressed = false;
         } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
           // La console de projection du satellite
@@ -4510,7 +4584,7 @@ async function boot() {
       }
       // `Minimap` dit si la carte existe, `MinimapHUD` si on la voit : deux
       // composants dans le build, deux appels ici.
-      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden,
+      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden && !vueCarte.open,
                                                 hasMinimap: equipment.minimap }));
       if (minimap.on && secMaj) {
         // Tout se compare AU REPOS du secteur : c'est le seul repere ou sa
@@ -4586,8 +4660,11 @@ async function boot() {
       // et seule la plus haute reste affichee.
       const left = [];
       if (solarMap && solarMap.open) {
-        left.push(P("MapController._closePrompt"), P("MapController._zoomPrompt"),
-                  P("MapController._panPrompt"));
+        // `AddScreenPrompt` quand t atteint 1 : pas pendant la montee.
+        if (vueCarte.promptsShown || !vueCarte.open) {
+          left.push(P("MapController._closePrompt"), P("MapController._zoomPrompt"),
+                    P("MapController._panPrompt"));
+        }
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
       } else if (ship && ship.boarded) {
@@ -4737,7 +4814,21 @@ async function boot() {
       if (focus) bits.push(focus.kind === "readable"
         ? `E pour lire ${focus.name}` : (focus.prompt || focus.name));
       hud2.textContent = bits.join("   ·   ");
-      solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
+      if (vueCarte.open) {
+        // `WorldToScreenPoint` de la camera de la carte, sa pose de l'image.
+        const tm = camera.getViewMatrix(true).multiply(camera.getProjectionMatrix(true));
+        const vp = new BABYLON.Viewport(0, 0, solarMap.canvas.clientWidth,
+                                        solarMap.canvas.clientHeight);
+        const avant = camera.getDirection(BABYLON.Axis.Z);
+        const projeter = (p) => {
+          const v = new BABYLON.Vector3(p[0], p[1], p[2]);
+          const e = BABYLON.Vector3.Project(v, BABYLON.Matrix.IdentityReadOnly, tm, vp);
+          return [e.x, e.y, BABYLON.Vector3.Dot(v.subtract(camera.position), avant)];
+        };
+        solarMap.drawProjete(projeter, player.pos, ship ? ship.pos : null, dansEpave);
+      } else {
+        solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
+      }
     }
     {
       // `_isMuseumSign` vient maintenant de la vue : un objet lisible le porte
@@ -5124,18 +5215,20 @@ async function boot() {
     const zoomAxe = telescope.active
       ? ((cmds.held("Zoom In", etatCmd) ? 1 : 0)
          - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
-    camera.fov = telescope.update(dt, zoomAxe);
+    // Carte ouverte, c'est `MapCamera` qui fixe champ et plan proche.
+    const fovLunette = telescope.update(dt, zoomAxe);
+    if (!vueCarte.open) camera.fov = fovLunette;
     // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
     // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
     // image que l'assise, et la meme dependance a la cadence.
-    if (verrouFOV !== null && !telescope.active) {
+    if (verrouFOV !== null && !telescope.active && !vueCarte.open) {
       const vise = verrouFOV * Math.PI / 180;
       camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
     }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
-    camera.minZ = telescope.nearClip;
+    if (!vueCarte.open) camera.minZ = telescope.nearClip;
     // La lunette a un corps et un verre dans le build : on les montre quand
     // elle sert, et le portage ne montrait rien. `TelescopeGUI.LateUpdate` la
     // fait GROSSIR avec le champ — quatre fois plus grande a soixante degres
@@ -6120,7 +6213,10 @@ async function boot() {
     // portage affichait l'oxygene et le carburant en permanence, casque ote,
     // au village, ou il n'y a rien a afficher. Et le mode d'affichage les
     // efface sans effacer l'etat : en sortir les rend a ce qu'elles etaient.
-    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden);
+    // `HUDCameraScript.OnSwitchActiveCamera` : si la camera active n'est pas
+    // `MainCamera` — la carte —, la camera du casque s'eteint, et avec elle
+    // jauges, silhouette de la combinaison et minicarte.
+    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden && !vueCarte.open);
     {
       const euler = ((-pitch * 180 / Math.PI) % 360 + 360) % 360;
       casque.update(dt, input.right || 0, 0, euler);

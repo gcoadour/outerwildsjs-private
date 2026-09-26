@@ -647,7 +647,32 @@ def _run(url, heavy, profil=None, zip_path=None):
         # La carte est sur ENTREE dans le build (canal `Map`), pas sur M
         # (docs/61-commandes.md).
         page.keyboard.press("Enter")
-        page.wait_for_timeout(1200)
+        # `MapCamera` monte de l'oeil a la vue plongeante en deux secondes
+        # (`SmoothStep`), et les invites n'arrivent qu'a la fin de la montee.
+        page.wait_for_timeout(300)
+        rep.eq("pendant la montee, pas encore d'invite de carte",
+               page.evaluate("() => window.__vueCarte.t < 1 ? "
+                             "[...document.querySelectorAll('.ow-prompts-left .ow-prompt')]"
+                             ".map(n=>n.textContent.trim()).filter(t => /Map|Zoom|Pan/.test(t)) : []"),
+               [])
+        page.wait_for_timeout(2500)
+        vue = page.evaluate("""() => {
+          const c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
+          const s = window.__map.bodies.find((b) => /sun/i.test(b.bodyName || b.name || ''));
+          const avant = c.getDirection(BABYLON.Axis.Z);
+          return { t: window.__vueCarte.t, fov: Math.round(c.fov * 180 / Math.PI),
+                   hauteur: s ? Math.round(Math.hypot(c.position.x - s.position[0],
+                     c.position.y - s.position[1], c.position.z - s.position[2])) : null,
+                   plonge: s ? Math.round(BABYLON.Vector3.Dot(avant.normalize(),
+                     c.position.subtract(new BABYLON.Vector3(...s.position)).normalize()) * 100) / 100 : null,
+                   casque: [...document.querySelectorAll('#ui .ow-res')]
+                     .some((e) => !e.hidden && getComputedStyle(e).display !== 'none') };
+        }""")
+        rep.eq("la camera de la carte est montee", vue["t"], 1)
+        rep.eq("au champ de `MapCamera`", vue["fov"], 60)
+        rep.eq("a quarante mille du Soleil, sans cible", vue["hauteur"], 40000)
+        rep.eq("et le regarde droit dessous", vue["plonge"], -1.0)
+        rep.eq("la camera du casque s'eteint avec la carte", vue["casque"], False)
         rep.eq("la carte, elle, en pose trois",
                page.evaluate("() => [...document.querySelectorAll("
                              "'.ow-prompts-left .ow-prompt')].map(n=>n.textContent.trim())"),
@@ -695,6 +720,9 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.evaluate("() => window.__map.recenter()")
         page.keyboard.press("Enter")
         page.wait_for_timeout(600)
+        rep.eq("la carte fermee, la camera du joueur retrouve son champ",
+               page.evaluate("() => Math.round(BABYLON.EngineStore.LastCreatedScene"
+                             ".activeCamera.fov * 180 / Math.PI)"), 70)
         if not combi_avant:
             # La combinaison ote : `OnRemoveSuit` eteint la carte de nouveau.
             page.evaluate("() => { window.__lots.equipment.suit = false; }")

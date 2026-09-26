@@ -18,7 +18,7 @@ import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
          COMET_ELLIPSE, fociDistance, orbitStyle, SolarMap,
-         MAP, AccesCarte } from "../web/src/map.js";
+         MAP, AccesCarte, VueCarte, smoothStep01, qRot, qLookRotation } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
@@ -694,6 +694,48 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("carte : le meme etat de combinaison ne la rallume pas", a.actif, false);
   a.porte(false); a.porte(true);
   check("carte : un nouveau SuitUp, si", a.actif, true);
+}
+
+// `MapCamera` : la camera qui monte de l'oeil a la vue plongeante
+// (`MapController.LateUpdate`, docs/132).
+{
+  check("SmoothStep : 0, puis 0,5 a mi-course, puis 1", [smoothStep01(0), smoothStep01(0.5), smoothStep01(2)].join(","), "0,0.5,1");
+  check("LookRotation(+Z, +Y) est l'identite", qLookRotation([0, 0, 1], [0, 1, 0]).map((x) => Math.round(x)).join(","), "0,0,0,1");
+  const v = new VueCarte();
+  v.entrer({ now: 10 });
+  const r = (a) => a.map((x) => Math.round(x) + 0).join(",");
+  let e = v.etape(10, [100, 0, 50], [0, 0, 0], 40000, [0, 0]);
+  check("carte : au depart, la camera est au joueur", r(e.position), "100,0,50");
+  check("... et regarde deja vers le bas", r(qRot(e.rotation, [0, 0, 1])), "0,-1,0");
+  check("... le haut de l'ecran vers +Z", r(qRot(e.rotation, [0, 1, 0])), "0,0,1");
+  check("... plan proche a 0,1", Math.round(e.near * 100) / 100, 0.1);
+  e = v.etape(11, [100, 0, 50], [0, 0, 0], 40000, [0, 0]);
+  check("carte : a mi-duree, a mi-hauteur (SmoothStep)", r(e.position), "50,20000,25");
+  check("... sans invite encore", e.montrer, false);
+  e = v.etape(12, [100, 0, 50], [0, 0, 0], 40000, [0, 0]);
+  check("carte : a deux secondes, au-dessus du Soleil", r(e.position), "0,40000,0");
+  check("... plan proche a 5,1", Math.round(e.near * 100) / 100, 5.1);
+  check("... et les invites arrivent", e.montrer, true);
+  check("... une seule fois", v.etape(13, [0, 0, 0], [0, 0, 0], 40000, [0, 0]).montrer, false);
+  // Le repere de travail tourne avec le corps ancre : le bas du MONDE n'y est
+  // plus forcement le bas. Un quart de tour autour de Y.
+  const tourne = (w) => [w[2], w[1], -w[0]];
+  const v2 = new VueCarte();
+  v2.entrer({ now: 0, versRepere: tourne });
+  e = v2.etape(5, [0, 0, 0], [0, 0, 0], 40000, [1000, 0], tourne);
+  check("carte : le decalage du point vise suit les axes du monde", r(e.position), "0,40000,-1000");
+  check("... et le haut de l'ecran, le +Z du monde", r(qRot(e.rotation, [0, 1, 0])), "1,0,0");
+  // Depuis l'observatoire : on part du regard, qui se tourne vers le bas.
+  const v3 = new VueCarte();
+  v3.entrer({ now: 0, doRotation: true, regard: [0, 0, 0, 1] });
+  check("carte d'observatoire : le regard horizontal bascule vers le bas",
+        r(qRot(v3.rotation, [0, 0, 1])), "0,-1,0");
+  // Le point vise est un decalage depuis le Soleil.
+  const m = new SolarMap({ hidden: true }, []);
+  m.enterMapView([5000, 0, 0], [7000, 0, 0], 0, 60, [1000, 0, 0]);
+  check("carte : le milieu joueur-cible, compte depuis le Soleil", m.focal.join(","), "5000,0");
+  m.panLocked = true; m.pan(1, 0, 1);
+  check("carte : pas de deplacement pendant la premiere moitie de la montee", m.focal.join(","), "5000,0");
 }
 
 // Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue
@@ -1631,6 +1673,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   field.advance(1);
   check("... et le sens : un demi-tour retourne l'axe",
         round(field.toFrame(anchor, [1000, 0, 0])[0], 3), -1000);
+  // L'inverse, pour la carte : du repere vers le monde, puis retour.
+  const aller = field.toFrame(anchor, [3, 4, 5]);
+  check("fromFrame defait toFrame", field.fromFrame(anchor, aller).map((x) => round(x, 6)).join(","), "3,4,5");
   field.advance(2);   // on revient ou l'on etait
 
   // Cycle jour/nuit : le soleil passe sous l'horizon local a mi-tour.
@@ -4748,8 +4793,10 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
           MAP.targetZoomDuration);
     // Assez loin pour que le cadrage l'emporte sur le minimum.
     m.enterMapView([0, 0, 0], [0, 0, 40000], 200);
+    // `base.camera.fieldOfView` : celui de `MapCamera`, 60 degres — et non
+    // les 70 du joueur que le portage prenait.
     check("a quarante mille, le cadrage l'emporte",
-          Math.round(m.zoom), Math.round(40000 / Math.tan(35 * Math.PI / 180) * 0.7));
+          Math.round(m.zoom), Math.round(40000 / Math.tan(30 * Math.PI / 180) * 0.7));
     check("et le milieu suit en z", m.focal.join(","), "0,20000");
   }
   // ET LE SOLEIL EST BIEN A UN FOYER. La verification tient en une addition :

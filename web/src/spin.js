@@ -125,17 +125,20 @@ export class SpinField {
     return rotateAbout(vec, s.axis, -this.angles.get(body));
   }
 
-  // L'inverse — du repere tournant vers le monde — n'existe plus ici.
-  //
-  // Il etait ecrit, eprouve, et appele par personne. La raison est dans la
-  // convention elle-meme : TOUT vit dans le repere ancre. `reframe` y met les
-  // corps, le joueur y marche, Havok y pose ses colliders, et rien n'en sort
-  // jamais. Un inverse sans sortie est une reponse a une question que ce
-  // portage ne pose pas.
-  //
-  // Ce qu'il gardait — que `toFrame` est bien une ROTATION et dans le bon
-  // sens — est garde autrement : un quart de tour envoie l'axe X sur +Z, un
-  // demi-tour l'envoie sur -X, et la norme ne bouge pas.
+  /**
+   * L'inverse : du repere tournant vers le monde.
+   *
+   * Il avait ete retire, faute d'appelant — TOUT vit dans le repere ancre. La
+   * carte en est un : `MapController` compte son point vise en axes du MONDE
+   * (`_focalOffset`, deplace le long de x et de z), et la camera de la carte
+   * regarde le bas du monde, pas celui du repere. Le cadrage joueur-cible, lui,
+   * se mesure dans le repere : il faut en sortir (docs/132).
+   */
+  fromFrame(body, vec) {
+    const s = this.spins.get(body);
+    if (!s) return vec;
+    return rotateAbout(vec, s.axis, this.angles.get(body));
+  }
 
   /** Vecteur rotation du repere ancre sur ce corps, ou null. */
   omega(body) {

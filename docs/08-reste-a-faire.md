@@ -61,7 +61,7 @@ portage.
 | secteurs | **tout le système chargé derrière le titre** et visible de loin, comme `level0` ; « à portée » par secteur ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md), [`132`](132-comparaison-native.md)) |
 | poids au démarrage | 47 Mo de tampons pour les huit lots, chargés pendant que le titre tourne |
 | pilote auto et dégâts | 4 phases, seuils d'impact 15/30/300 |
-| carte du système | orbites, marqueurs, sélection de cible |
+| carte du système | **`MapCamera`** : la caméra monte de l'œil à la vue plongeante sur le Soleil (`SmoothStep`, 2 s), orbites et comète en cercles d'écran, marqueurs du build à la profondeur caméra, casque éteint ; ouverte seulement combinaison sur le dos ([`132`](132-comparaison-native.md)) |
 | shaders du jeu | **203 affectations**, tous les shaders utilisés couverts |
 | skinning | 55 squelettes, 33 maillages skinnés, décodage direct |
 | animations | 34 animations, 8 148 canaux, Mecanim compris (mesure) |

@@ -939,7 +939,47 @@ méthode que `SolarMap` n'a jamais eue : l'interaction levait une erreur. Elle
 ouvre désormais la carte comme `OnTriggerObservatoryMap`, sans cadrer de
 cible — le système entier.
 
-Reste l'animation : dans le build, la carte n'est pas un dessin mais la
-**caméra du jeu** qui s'élève de l'œil du joueur jusqu'à la vue plongeante,
-en `SmoothStep` sur deux secondes (dix depuis l'observatoire, 0,6 avec une
-cible). Le portage l'affiche d'un coup, en surimpression.
+### La carte est une caméra
+
+Dans le build, la carte n'est pas un dessin : c'est `MapCamera` (champ de 60,
+plan lointain à 100 000) qui s'élève de l'œil du joueur jusqu'à la vue
+plongeante, en `SmoothStep` sur deux secondes (dix depuis l'observatoire, 0,6
+avec une cible), plan proche de 0,1 à 5,1. Le portage ouvrait d'un coup un
+calque opaque, dessiné à plat par-dessus la scène. Relu dans l'IL
+(`MapController.LateUpdate`, `MapOpenGL.OnPostRender`, `MapMarker`), il
+manquait bien plus que l'animation :
+
+- **le centre** : `_focalOffset` est un décalage depuis le **Soleil**. Le
+  portage tenait un point absolu de son repère flottant, ancré sur le corps
+  du joueur : sans cible, la carte se centrait sur Timber Hearth ;
+- **le cadrage d'une cible** se calcule avec le champ de `MapCamera` (60) et
+  non celui du joueur (70) : 48 497 unités de hauteur à 40 000 de distance,
+  pas 39 988 ;
+- **la durée** à la touche est de deux secondes (`EnterMapView(2f, …)`) ; le
+  portage écrivait 1, sans la jouer ;
+- **les orbites** sont des cercles d'écran : centrés sur le Soleil **projeté**,
+  de rayon la distance **à l'écran** du corps au Soleil. Pendant la montée,
+  ils ne suivent pas encore le plan du système — c'est l'alpha ;
+- **l'ellipse de la comète** se dessine dix degrés par image, à chaque
+  ouverture ;
+- **les marqueurs** se testent sur la **profondeur caméra** (`_screenPos.z`),
+  pas sur la distance au joueur, et portent les noms du build — « You Are
+  Here », « Ship » — là où le portage écrivait « vous » et « vaisseau » ;
+- **le casque s'éteint** : `HUDCameraScript.OnSwitchActiveCamera` coupe la
+  caméra du casque dès que la caméra active n'est plus `MainCamera`. Jauges,
+  silhouette de la combinaison et minicarte disparaissent ; les invites et
+  les marqueurs, dessinés par `OnGUI`, restent ;
+- **les invites** « Close Map », « Zoom In/Out », « Pan View » n'arrivent
+  qu'en fin de montée, et le déplacement n'est permis qu'à mi-course.
+
+La carte du portage est désormais la caméra du joueur, pilotée par
+`VueCarte` (map.js) le temps de la carte, puis rendue à ses réglages. Un
+piège : le repère de travail **tourne** avec le corps ancré (spin.js). Le bas
+de la carte est `Vector3.down` du monde, et le décalage du point visé vit
+dans les axes du monde ; l'inverse de `toFrame`, retiré faute d'appelant, est
+revenu pour cela.
+
+L'alpha ne s'est pas laissée photographier carte ouverte : il lui faut la
+combinaison, qui est dans le vaisseau, derrière le terminal que le clavier
+seul n'atteint pas. La carte du portage est donc refaite sur l'IL, sans
+image de l'alpha pour la juger.
