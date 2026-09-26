@@ -2162,21 +2162,27 @@ def _run(url, heavy, profil=None, zip_path=None):
             # fuit — le signe qu'on interpole vers une cible qui bouge seule.
             rep.eq("et il est aligne, au repos", redresse["ecartCourant"] < 1, True)
 
-        # --- la reparation, dehors (docs/132) ----------------------------------
+        # --- la reparation, dehors, piece par piece (docs/132) -----------------
         #
-        # `RepairVolume` s'allume avec SA piece : un coup a l'avant et a gauche
-        # allume le volume de l'avant et les cinq reacteurs de gauche, et rien
-        # d'autre. Le portage reparait au poste de pilotage.
+        # `RepairVolume` s'allume avec SA piece, et la piece est la plus proche
+        # du POINT d'impact parmi quinze. Un choc sur le nez et un autre sur un
+        # reacteur de gauche allument DEUX volumes — le portage, qui comptait
+        # par position, en allumait six.
         page.evaluate("""() => { const d = window.__shipRef && window.__shipRef.damage; if (!d) return;
           window.__shipRef.boarded = false;
-          d._blesse(d.parts.avant, 'avant', 40); d._blesse(d.parts.gauche, 'gauche', 60); }""")
+          const nez = d.composants.find((c) => c.location === 'avant');
+          const gauche = d.composants.find((c) => c.thruster === 'Left');
+          if (nez) d.impact(40, null, nez.position);
+          if (gauche) d.impact(60, null, gauche.position); }""")
         page.wait_for_timeout(1500)
         rep_actifs = page.evaluate("""() => { const r = window.__reparations; if (!r) return null;
           const c = {}; for (const v of r.actifs) c[v.repair.volume.location] = (c[v.repair.volume.location] || 0) + 1;
-          return c; }""")
+          return { c, pieces: window.__shipRef.damage.composants.length }; }""")
         if rep_actifs is not None:
-            rep.eq("reparation : six volumes allumes, ceux des pieces touchees",
-                   rep_actifs, {"avant": 1, "gauche": 5})
+            rep.eq("quinze pieces au vaisseau, dix reacteurs et cinq de coque",
+                   rep_actifs["pieces"], 15)
+            rep.eq("reparation : deux volumes allumes, ceux des deux pieces touchees",
+                   rep_actifs["c"], {"avant": 1, "gauche": 1})
         page.evaluate("() => { const d = window.__shipRef && window.__shipRef.damage; if (d) d.reset(); }")
 
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------

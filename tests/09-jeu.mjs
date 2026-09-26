@@ -121,7 +121,7 @@ import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
          SHOCKWAVE_RADIUS, shockwaveRadius, Effondrement, EFFONDREMENT_SURFACE,
          EFFONDREMENT_COURONNE, effondrementsDuBuild } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
-import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
+import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER, shipComponents,
          engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
 import { Ship, spinStep, quatRotate, terminalAngularSpeed,
          IGNITION_DURATION, shipNoise, SHIP_NOISE } from "../web/src/ship.js";
@@ -1053,43 +1053,72 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // / (300-30) — et meurt au quatrieme. Avec la courbe de coque inventee que ce
   // portage avait, la coque mourait AVANT, et `_disableDamagedThrusters` ne
   // pouvait donc jamais couper quoi que ce soit (docs/113-seuil.md).
+  // Un reacteur arriere gauche, un arriere droit : les deux buses que
+  // `FireTranslationalThrusters` consulte pour pousser en avant.
+  const arrieres = engineComponents({ placed: { EngineComponent: [
+    { name: "BL", position: [-1, 0, -3], fields: { _thrusterLocation: 4, _alertLocation: 8 } },
+    { name: "BR", position: [1, 0, -3], fields: { _thrusterLocation: 9, _alertLocation: 16 } },
+  ] } });
   const use = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
                                _mediumImpactThreshold: 30,
-                               _disableDamagedThrusters: true });
-  for (let i = 0; i < 4; i++) use.impact(100, [0, 0, -1]);
-  check("piece morte apres quatre chocs", use.parts.arriere.dead, true);
-  check("le propulseur coupe est hors service", use.thrustFactor("arriere"), 0);
-  check("les autres poussent encore", use.thrustFactor("avant"), 1);
+                               _disableDamagedThrusters: true }, arrieres);
+  for (let i = 0; i < 4; i++) use.impact(100, null, [-1, 0, -3]);
+  check("piece morte apres quatre chocs", use.composants[0].dead, true);
+  // Une buse sur deux : la moitie de la poussee, pas zero.
+  check("le propulseur coupe ote sa moitie", use.poussee("z", 1), 0.5);
+  check("les autres poussent encore", use.poussee("z", -1), 1);
+  check("et l'axe lateral ne consulte aucune buse", use.poussee("x", 1), 1);
   check("et le vaisseau, lui, n'a pas explose", use.destroyed, false);
+  // `EnableThruster` n'est appele nulle part : reparer ne rallume pas la buse.
+  use.repair(use.composants[0]);
+  check("la reparation ne rallume pas la buse", use.poussee("z", 1), 0.5);
+  use.reset();
+  check("la boucle, si", use.poussee("z", 1), 1);
 
   const sansOption = new ShipDamage({ _shipTotalHealth: 1e9, _instantDeathSpeed: 300,
                                       _mediumImpactThreshold: 30,
                                       _disableDamagedThrusters: false });
   for (let i = 0; i < 4; i++) sansOption.impact(100, [0, 0, -1]);
   check("sans _disableDamagedThrusters, la piece morte ne coupe rien",
-        sansOption.thrustFactor("arriere"), 1);
+        sansOption.poussee("z", 1), 1);
 
   // LES DEUX MORTS. Le choc unique trop violent, et l'usure cumulee.
   const perdu = new ShipDamage({ _instantDeathSpeed: 300 });
   perdu.impact(301, [0, -1, 0]);
   check("mort instantanee au-dela de 300 u/s", perdu.destroyed, true);
-  check("un vaisseau detruit ne pousse plus", perdu.thrustFactor("arriere"), 0);
+  check("un vaisseau detruit ne pousse plus", perdu.poussee("z", 1), 0);
   perdu.reset();
   check("la boucle le rend entier", perdu.destroyed, false);
   check("et efface son alerte", perdu.mask, 0);
 
   const usure = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300,
                                  _mediumImpactThreshold: 30 });
-  // `Abs(_currentShipDamage) > _shipTotalHealth` : le cumul des `_totalDamage`
-  // des pieces, et rien d'autre. A 100 u/s chaque choc coute 25,93 ; il en faut
-  // quatre pour passer cent.
-  for (let i = 0; i < 3; i++) usure.impact(100, [0, 0, -1]);
-  check("trois chocs ne suffisent pas", usure.destroyed, false);
-  check("et l'integrite est ce qui reste avant le cumul fatal",
-        round(usure.integrity, 1), round(100 - 3 * 100 * 70 / 270, 1));
+  // `Abs(_currentShipDamage) > _shipTotalHealth`, ou le cumul se fait sur la
+  // LISTE `_damagedParts` — et une piece retouchee y rentre une seconde fois.
+  // A 100 u/s chaque choc coute 25,93 ; deux sur la meme piece font
+  // 2 x 51,85 = 103,7, et le vaisseau explose des le deuxieme.
   usure.impact(100, [0, 0, -1]);
-  check("le cumul au-dela de la sante totale, si", usure.destroyed, true);
+  check("un choc ne suffit pas", usure.destroyed, false);
+  check("et l'integrite est ce qui reste avant le cumul fatal",
+        round(usure.integrity, 1), round(100 - 100 * 70 / 270, 1));
+  usure.impact(100, [0, 0, -1]);
+  check("la meme piece retouchee compte double", usure.endommagees.length, 2);
+  check("et le cumul passe cent au deuxieme choc", usure.destroyed, true);
   check("et l'integrite est tombee a zero", usure.integrity, 0);
+  // Sur deux pieces differentes, pas de doublon : deux chocs ne tuent pas.
+  const deux = new ShipDamage({ _shipTotalHealth: 100, _instantDeathSpeed: 300,
+                                _mediumImpactThreshold: 30 });
+  deux.impact(100, [0, 0, -1]); deux.impact(100, [0, 0, 1]);
+  check("deux pieces differentes, deux chocs : le vaisseau tient", deux.destroyed, false);
+
+  // Au-dela de trois ENTREES, le partage se fait par entree : une piece
+  // presente deux fois prend deux parts.
+  const doublon = new ShipDamage({ _shipTotalHealth: 1e9, _mediumImpactThreshold: 30 });
+  doublon.impact(40, [0, 0, -1]); doublon.impact(40, [0, 0, -1]); doublon.impact(40, [0, 0, 1]);
+  const arr0 = doublon.parts.arriere.totalDamage, av0 = doublon.parts.avant.totalDamage;
+  doublon.impact(60, [0, 1, 0]);
+  check("la piece en double prend deux parts", round(doublon.parts.arriere.totalDamage - arr0, 4), 40);
+  check("l'autre, une", round(doublon.parts.avant.totalDamage - av0, 4), 20);
 
   // Reparer retire la position de l'alerte.
   const repare = new ShipDamage({ _shipTotalHealth: 1e9,
@@ -1098,6 +1127,34 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("l'alerte est levee", repare.covers("arriere"), true);
   repare.repair("arriere");
   check("et la reparation la retire", repare.covers("arriere"), false);
+
+  // PIECE PAR PIECE. Deux reacteurs du meme cote : en reparer un ne leve pas
+  // l'alerte tant que l'autre est abime (`OnCompleteRepair` ne fait tomber le
+  // bit que si aucune autre piece abimee ne le porte).
+  const cote = engineComponents({ placed: { EngineComponent: [
+    { id: 11, name: "DamageSiteContainer(Engine)", position: [-3, 0, 0], fields: { _thrusterLocation: 0, _alertLocation: 8 } },
+    { id: 12, name: "DamageSiteContainer(Engine)", position: [-3, 0, 3], fields: { _thrusterLocation: 1, _alertLocation: 8 } },
+  ] } });
+  const g2 = new ShipDamage({ _shipTotalHealth: 1e9, _mediumImpactThreshold: 30 }, cote);
+  g2.impact(40, null, [-3, 0, 0.2]); g2.impact(40, null, [-3, 0, 2.9]);
+  check("deux pieces a gauche", g2.endommagees.map((c) => c.id).join(","), "11,12");
+  check("reparer par identifiant rend la position", g2.repair(11), "gauche");
+  check("l'autre reste abimee, l'alerte aussi", g2.covers("gauche"), true);
+  check("et elle seule reste allumee", g2.estEndommagee(g2.composants[1]), true);
+  g2.repair(12);
+  check("la derniere reparee leve l'alerte", g2.covers("gauche"), false);
+  check("rien a reparer ensuite", g2.repair(12), null);
+
+  // Les positions des pieces ramenees dans le repere du vaisseau au repos.
+  const locales = shipComponents({ placed: {
+    ShipComponent: [{ id: 1, name: "DamageSiteContainer", position: [10, 20, 35],
+                      fields: { _alertLocation: 1, _impactThreshold: 80 } }] } },
+    [10, 20, 30], [-Math.SQRT1_2, 0, 0, Math.SQRT1_2]);
+  check("une piece de coque n'est pas un reacteur", locales[0].moteur, false);
+  // -90 degres autour de x au repos : le haut du vaisseau pointe vers le -z
+  // du monde, et un point a +5 en z du monde est donc a -5 sur son haut.
+  check("sa position passe dans le repere du vaisseau",
+        locales[0].position.map((v) => round(v, 4) + 0).join(","), "0,-5,0");
 }
 
 // --- limite de poussee du secteur ---------------------------------------

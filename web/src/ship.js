@@ -366,10 +366,12 @@ export class Ship {
         : { fwd: [basis.fwd.x, basis.fwd.y, basis.fwd.z],
             right: [basis.right.x, basis.right.y, basis.right.z],
             up: [basis.up.x, basis.up.y, basis.up.z] };
-      const fw = input.forward * this.damage.thrustFactor(input.forward > 0 ? "arriere" : "avant");
-      const rt = input.right * this.damage.thrustFactor(input.right > 0 ? "gauche" : "droite");
+      // `FireTranslationalThrusters` : deux buses par sens, chacune pour
+      // moitie ; l'axe lateral n'en consulte aucune.
+      const fw = input.forward * this.damage.poussee("z", input.forward);
+      const rt = input.right * this.damage.poussee("x", input.right);
       const vertical = this.ignition(dt, input.up ? 1 : 0);
-      const vz = (vertical > 0 && this.damage.thrustFactor("bas")) ? vertical : 0;
+      const vz = vertical > 0 ? vertical * this.damage.poussee("y", 1) : 0;
       // La poussee est rassemblee en UNE acceleration avant d'etre appliquee :
       // c'est la seule facon d'en ecreter la part tangentielle en mode
       // atterrissage, ou le build refuse de vous laisser gagner de la vitesse

@@ -10,6 +10,7 @@ import { extractComponents } from "../web/src/pipeline/extract/components.js";
 import { extractSolarSystem } from "../web/src/pipeline/extract/solar.js";
 import { buildOrbits, advance, currentPosition } from "../web/src/orbits.js";
 import { extractGameplay } from "../web/src/pipeline/extract/gameplay.js";
+import { shipComponents, ShipDamage } from "../web/src/shipdamage.js";
 import { sandColumns, sandFunnels, funnelActive, markCrushing } from "../web/src/sand.js";
 import { destructionVolumes, repairVolumes, destroyedBy, hazardVolumes,
          zeroGFields, probePrompts,
@@ -503,6 +504,27 @@ console.log("     champs avec volume mesure:", volumes,
         ["gauche", "droite", "arriere", "haut", "avant"].map((k) => parPosition[k] || 0).join(","), "5,5,2,2,1");
   check("une sphere d'un metre autour de chacun",
         duVaisseau.every((v) => Math.abs(v.rayon - 1.017) < 0.01), true);
+
+  // LES QUINZE PIECES, et pas les seuls reacteurs : `_components` les prend
+  // toutes. Chaque volume designe la sienne par l'identifiant du GameObject,
+  // puisqu'elles s'appellent toutes « DamageSiteContainer ».
+  const sb = gp.singletons.ShipBody;
+  const pieces = shipComponents(gp, sb.position, sb.rotation);
+  check("quinze pieces au vaisseau", pieces.length, 15);
+  check("dont cinq de coque, a l'arriere, en haut et devant",
+        pieces.filter((c) => !c.moteur).map((c) => c.location).sort().join(","),
+        "arriere,arriere,avant,haut,haut");
+  check("chaque volume du vaisseau designe une piece distincte",
+        new Set(duVaisseau.map((v) => v.pieceId)).size, 15);
+  check("et chaque identifiant est celui d'une piece",
+        duVaisseau.every((v) => pieces.some((c) => c.id === v.pieceId)), true);
+  // Un choc sur le nez touche la piece de l'avant, et non un reacteur : le
+  // portage, qui ne lisait que les dix reacteurs, n'avait pas de nez.
+  const avant = pieces.find((c) => c.location === "avant");
+  const nez = new ShipDamage(gp.singletons.ShipDamageController.fields, pieces);
+  const coup = nez.impact(40, null, [avant.position[0], avant.position[1], avant.position[2] + 1]);
+  check("un choc devant touche la piece de l'avant", coup.location, "avant");
+  check("qui n'est pas un reacteur", coup.piece.moteur, false);
 }
 
 // --- ce que l'audit a mesure, garde en invariant ---
