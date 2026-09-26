@@ -3036,6 +3036,15 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("avec les deux annonces du build", att2["annonces"],
                    ["SwitchActiveCamera", "EnterLandingView"])
             rep.eq("et le jeu de commandes change", att2["mode"], "atterrissage")
+            # Et c'est une CAMERA : `LandingCam`, sous le vaisseau, champ de
+            # 100 degres, qui regarde vers le bas (docs/132).
+            vue_att = page.evaluate("""() => { const c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
+              const s = window.__shipRef, d = c.getDirection(BABYLON.Axis.Z), u = s.axes.up;
+              return { fov: Math.round(c.fov * 180 / Math.PI),
+                       bas: d.x * -u[0] + d.y * -u[1] + d.z * -u[2] > 0.9,
+                       pres: Math.hypot(c.position.x - s.pos.x, c.position.y - s.pos.y, c.position.z - s.pos.z) < 5 }; }""")
+            rep.eq("la vue est celle de LandingCam : 100 degres, vers le bas, sous la coque",
+                   [vue_att["fov"], vue_att["bas"], vue_att["pres"]], [100, True, True])
             page.keyboard.press("KeyR")
             page.wait_for_timeout(300)
             att3 = page.evaluate("() => ({ on: window.__atterrissage.on,"

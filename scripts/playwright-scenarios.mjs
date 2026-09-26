@@ -366,10 +366,11 @@ try {
   // Test full ignition (hold ShiftLeft until 1.0s ignition duration completes) -> should complete and liftoff
   await page.keyboard.down("ShiftLeft");
   await page.waitForFunction(() => window.__shipEvents.includes("CompleteShipIgnition"), null, { timeout: 10000 });
-  await page.keyboard.up("ShiftLeft");
-  // Le pad se libere quand le vaisseau a quitte ses capteurs : une image, ou
-  // deux, selon leur duree — on attend l'etat, pas une duree fixe.
+  // L'allumage acheve, c'est la POUSSEE qui decolle : on la tient jusqu'a ce
+  // que les capteurs lachent la plateforme. Relachee aussitot, le vaisseau
+  // restait pose quand l'image etait courte.
   await page.waitForFunction(() => window.__shipRef.landed === false, null, { timeout: 15000 }).catch(() => {});
+  await page.keyboard.up("ShiftLeft");
 
   const fullIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],

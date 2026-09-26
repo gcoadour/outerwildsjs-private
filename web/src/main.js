@@ -2746,9 +2746,12 @@ async function boot() {
         { width: 512, height: Math.round(512 / ratio) }, scene, false);
       rttSat.activeCamera = camSat;
       rttSat.renderList = null;
-      // `GrayscaleEffect`, amount 1 : l'image est en niveaux de gris.
-      rttSat.addPostProcess(new BABYLON.BlackAndWhitePostProcess("satelliteGris", 1, null, null,
-                                                                  scene.getEngine()));
+      // `GrayscaleEffect`, amount 1 : l'image est en niveaux de gris ; puis le
+      // `NoiseEffect` monochrome — grain et rayures de pellicule.
+      rttSat.useCameraPostProcesses = true;
+      new BABYLON.BlackAndWhitePostProcess("satelliteGris", 1, camSat, null, scene.getEngine());
+      effetsSecondaires(BABYLON, camSat, scene.getEngine(), "film",
+                        { noise: satReglages && satReglages.noise });
       // Rendue par la scene, UNE fois par instantane : un `render()` a la main
       // passait avant que les effets soient compiles, et sortait noir.
       rttSat.refreshRate = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
@@ -3120,6 +3123,24 @@ async function boot() {
   // La vue d'atterrissage : une camera, un regard, et des commandes qui
   // changent de main (docs/87-atterrissage.md).
   const atterrissage = new LandingView();
+  // LA VUE D'ATTERRISSAGE EST UNE CAMERA. `UpdateLandingMode`, 0,45 s apres
+  // l'appui : `_landingCam.enabled = true; _playerCam.enabled = false`, et
+  // `SwitchActiveCamera`. `LandingCam` est posee sous le cockpit et regarde
+  // sous le vaisseau, champ de 100 degres. Le portage gardait la camera du
+  // joueur, basculee de 70 degres — on voyait le tableau de bord, pas le sol
+  // (docs/132). Comme la carte, on mene la camera du joueur a sa place.
+  const donneesCamAtterrissage = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => c.name === "LandingCam") || { fov: 100, near: 0.5, far: 50000 };
+  let noeudCamAtterrissage;
+  let maxZAvantAtterrissage = null;
+  let grainAtterrissage = null, grainPose = false;
+  const enVueAtterrissage = () => {
+    if (!(atterrissage.on && ship && ship.boarded)) return false;
+    if (noeudCamAtterrissage === undefined) {
+      noeudCamAtterrissage = scene.getTransformNodeByName("LandingCam") || null;
+    }
+    return !!noeudCamAtterrissage;
+  };
   window.__atterrissage = atterrissage;
   // Le regard vise par la bascule, en radians, ou null. Le build appelle
   // `SnapToDegrees(0, -70, 140)` : lacet ZERO, tangage -70, a 140 degres par
@@ -3826,10 +3847,8 @@ async function boot() {
         // (huit canaux, pas de sonde ni de carte), la console du satellite en
         // pose trois — annuler, photographier, photographier en arriere.
         //
-        // `EnterLandingView`, la caméra d'atterrissage du vaisseau, n'a pas
-        // d'equivalent ici : ce portage n'a pas de vue d'atterrissage separee,
-        // et son canal « Landing Camera » bascule les consoles deportees. Son
-        // ensemble est donc lu, garde, et sans appelant — dit plutot qu'omis.
+        // `EnterLandingView` passe par son annonce, plus haut : la vue
+        // d'atterrissage est desormais une camera (docs/132).
         ["satellite", !!(consoles.active && !consoles.active.flight)],
         ["modele", !!(consoles.active && consoles.active.flight)],
         ["ordinateur", !!computer.open],
@@ -4136,7 +4155,34 @@ async function boot() {
       camera.maxZ = reglagesCarte.far;
       camera.fov = reglagesCarte.fov;
       camera.layerMask = reglagesCarte.masque;
+    } else if (enVueAtterrissage()) {
+      // `NoiseAndGrain`, force 4 : le grain de la camera d'atterrissage, pose
+      // sur la camera du joueur le temps de la vue.
+      if (!grainAtterrissage) {
+        grainAtterrissage = effetsSecondaires(BABYLON, camera, scene.getEngine(), "grain",
+                                              reglagesDe(camerasDuBuild, "LandingCam") || {});
+      } else if (!grainPose && grainAtterrissage) camera.attachPostProcess(grainAtterrissage);
+      grainPose = true;
+      const n = noeudCamAtterrissage;
+      n.computeWorldMatrix(true);
+      const p = n.getAbsolutePosition();
+      // L'avant d'Unity est l'oppose du +Z du noeud glTF (comme la camera du
+      // satellite).
+      const avant = n.getDirection(BABYLON.Axis.Z).scale(-1);
+      camera.rotationQuaternion = null;
+      camera.position.copyFrom(p);
+      camera.upVector = n.getDirection(BABYLON.Axis.Y);
+      camera.setTarget(p.add(avant));
+      camera.fov = (donneesCamAtterrissage.fov || 100) * Math.PI / 180;
+      camera.minZ = donneesCamAtterrissage.near || 0.5;
+      if (maxZAvantAtterrissage === null) maxZAvantAtterrissage = camera.maxZ;
+      camera.maxZ = donneesCamAtterrissage.far || 50000;
     } else {
+      if (maxZAvantAtterrissage !== null) {
+        camera.maxZ = maxZAvantAtterrissage;
+        maxZAvantAtterrissage = null;
+      }
+      if (grainPose && grainAtterrissage) { camera.detachPostProcess(grainAtterrissage); grainPose = false; }
       camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
                           player.pos.y + up.y * EYE_HEIGHT,
                           player.pos.z + up.z * EYE_HEIGHT);
@@ -5002,7 +5048,7 @@ async function boot() {
       }
       // `Minimap` dit si la carte existe, `MinimapHUD` si on la voit : deux
       // composants dans le build, deux appels ici.
-      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden && !vueCarte.open,
+      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden && !vueCarte.open && !enVueAtterrissage(),
                                                 hasMinimap: equipment.minimap }));
       if (minimap.on && secMaj) {
         // Tout se compare AU REPOS du secteur : c'est le seul repere ou sa
@@ -5656,18 +5702,18 @@ async function boot() {
          - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
     // Carte ouverte, c'est `MapCamera` qui fixe champ et plan proche.
     const fovLunette = telescope.update(dt, zoomAxe);
-    if (!vueCarte.open) camera.fov = fovLunette;
+    if (!vueCarte.open && !enVueAtterrissage()) camera.fov = fovLunette;
     // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
     // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
     // image que l'assise, et la meme dependance a la cadence.
-    if (verrouFOV !== null && !telescope.active && !vueCarte.open) {
+    if (verrouFOV !== null && !telescope.active && !vueCarte.open && !enVueAtterrissage()) {
       const vise = verrouFOV * Math.PI / 180;
       camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
     }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
-    if (!vueCarte.open) camera.minZ = telescope.nearClip;
+    if (!vueCarte.open && !enVueAtterrissage()) camera.minZ = telescope.nearClip;
     // La lunette a un corps et un verre dans le build : on les montre quand
     // elle sert, et le portage ne montrait rien. `TelescopeGUI.LateUpdate` la
     // fait GROSSIR avec le champ — quatre fois plus grande a soixante degres
@@ -6663,7 +6709,9 @@ async function boot() {
     // `HUDCameraScript.OnSwitchActiveCamera` : si la camera active n'est pas
     // `MainCamera` — la carte —, la camera du casque s'eteint, et avec elle
     // jauges, silhouette de la combinaison et minicarte.
-    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden && !vueCarte.open);
+    // `HUDCameraScript.OnSwitchActiveCamera` : hors de `MainCamera` — la carte,
+    // la camera d'atterrissage —, le casque s'eteint.
+    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden && !vueCarte.open && !enVueAtterrissage());
     {
       const euler = ((-pitch * 180 / Math.PI) % 360 + 360) % 360;
       casque.update(dt, input.right || 0, 0, euler);

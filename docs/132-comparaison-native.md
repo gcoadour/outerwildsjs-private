@@ -1330,3 +1330,20 @@ script appelle à sa sortie (quitter la console, l'ordinateur, le siège,
 l'ascenseur arrivé, la trappe refermée), ou que la perte de focus déclenche
 quand `_resetOnLoseFocus` le veut. Le portage laissait « Establish Satellite
 Link » sous le réticule pendant qu'on regardait l'écran.
+
+### La vue d'atterrissage est une caméra
+
+`FlightConsole.UpdateLandingMode`, 0,45 s après l'appui :
+`_landingCam.enabled = true; _playerCam.enabled = false`, puis
+`SwitchActiveCamera`. `LandingCam` est posée sous le cockpit et regarde sous
+le vaisseau, champ de 100 degrés, plan proche à 0,5, avec un `NoiseAndGrain`
+de force 4. Le portage avait la bascule, le délai, les annonces et le roulis
+inversé — mais gardait la caméra du joueur, pivotée de 70 degrés : on voyait
+le tableau de bord, pas le sol. La caméra du joueur est désormais menée à la
+place de `LandingCam` le temps de la vue, avec son grain, comme la carte mène
+la sienne ; le casque s'éteint (`HUDCameraScript`). Mesuré dans Chromium :
+champ de 100, 0,66 unité du centre du vaisseau, regard sur la plateforme
+sous la coque.
+
+Le satellite reçoit de même son `NoiseEffect` monochrome — grain et rayures —
+par-dessus le gris.
