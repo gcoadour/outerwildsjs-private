@@ -993,6 +993,25 @@ def _run(url, heavy, profil=None, zip_path=None):
             paquetage = invites()
             appui()
             combi = page.evaluate("() => window.__lots.equipment.suit")
+            # L'ordinateur de bord, a sa zone « Boot Up » : on s'y assied, ses
+            # touches sont celles de `ComputerInput` (Move X, Interact,
+            # Cancel), et Cancel fait se lever.
+            page.evaluate("() => window.__placerZone('ShipComputer')")
+            attendre_invite()
+            ordi_invite = invites()
+            for _ in range(4):
+                appui()
+                if page.evaluate("() => window.__consoles.computer.open"):
+                    break
+            ordi = page.evaluate("""() => ({ open: window.__consoles.computer.open,
+              index: window.__consoles.computer.index,
+              assis: window.__assise.points.current ? window.__assise.points.current.name : null,
+              gauche: [...document.querySelectorAll('.ow-prompts-left .ow-prompt')].map((n) => n.textContent.trim()) })""")
+            page.keyboard.down("KeyD"); page.wait_for_timeout(600); page.keyboard.up("KeyD"); page.wait_for_timeout(1500)
+            ordi_d = page.evaluate("() => window.__consoles.computer.index")
+            page.keyboard.down("KeyQ"); page.wait_for_timeout(600); page.keyboard.up("KeyQ"); page.wait_for_timeout(2000)
+            ordi_q = page.evaluate("""() => ({ open: window.__consoles.computer.open,
+              assis: window.__assise.points.current ? window.__assise.points.current.name : null })""")
             page.evaluate("() => window.__placerZone('FlightConsole')")
             attendre_invite()
             avec = invites()
@@ -1029,6 +1048,11 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("au poste sans combinaison : « Suit Required », et l'on ne s'assoit pas",
                    [sans, assis_sans], [["Suit Required"], False])
             rep.eq("au paquetage : « Gear Up », et la combinaison", [paquetage, combi], [["Gear Up"], True])
+            rep.eq("a l'ordinateur : « Boot Up », on s'y assied, ecran allume",
+                   [ordi_invite, ordi["open"], ordi["assis"]], [["Boot Up"], True, "ShipComputer"])
+            rep.eq("ses invites : Cancel, Select, Navigate", ordi["gauche"], ["Cancel", "Select", "Navigate"])
+            rep.eq("D parcourt (Move X), Q fait se lever (Cancel)",
+                   [ordi_d - ordi["index"], ordi_q["open"], ordi_q["assis"]], [1, False, None])
             rep.eq("au poste avec : « Buckle Up », et l'on s'assoit", [avec, assis], [["Buckle Up"], True])
 
         # --- degats du vaisseau -------------------------------------------------

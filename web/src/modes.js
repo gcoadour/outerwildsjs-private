@@ -112,8 +112,8 @@ export function canaux(mode) {
 export const SAUVEGARDENT = new Set(["carte", "dialogue", "menu", "lunette",
                                      "ordinateur", "atterrissage", "satellite"]);
 
-/** Les cinq canaux qu'aucun mode du jeu ne rend inaccessibles nulle part. */
-export const AJOUTS_HORS_MODE = new Set(["Ship Computer", "Marshmallow",
+/** Les quatre canaux qu'aucun mode du jeu ne rend inaccessibles nulle part. */
+export const AJOUTS_HORS_MODE = new Set(["Marshmallow",
                                          "Stick", "Display Mode",
                                          "Recenter Map"]);
 

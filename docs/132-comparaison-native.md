@@ -1277,3 +1277,20 @@ la trappe fermée barre l'entrée, et l'ouvrir la retire.
 Mesuré dans Chromium : au poste sans combinaison, « Suit Required » et l'on
 ne s'assoit pas ; au paquetage, « Gear Up » et la combinaison ; au poste,
 « Buckle Up », et l'on s'assoit.
+
+### L'ordinateur de bord, dans la cabine
+
+Le portage n'ayant « pas d'intérieur », il ouvrait l'ordinateur de bord
+d'une touche à lui (`N`), depuis le poste de pilotage, et le parcourait aux
+flèches, Entrée et Retour arrière. Le build le pose dans la cabine :
+`ShipComputer` est une zone « Boot Up » ; y appuyer assied le joueur à son
+point d'accrochage, verrouille le regard sur l'écran (`LockOn(_targetPoint,
+1, zoom, 8)`) et pose trois invites à gauche, Cancel, Select, Navigate. Ses
+touches sont celles de `ComputerInput` : **Interact** choisit, **Cancel**
+revient d'un niveau puis fait se lever, **Move X** parcourt — au premier
+niveau seulement, le second n'écoute que Cancel.
+
+C'est désormais le chemin du portage, et la touche ajoutée n'existe plus.
+Mesuré dans Chromium : « Boot Up », assis à `ShipComputer`, l'écran sur
+Timber Hearth « [records available] » ; D passe à « UNEXPLORED » ; Q relève
+le joueur et éteint l'écran.

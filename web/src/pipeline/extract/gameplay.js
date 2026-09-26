@@ -96,6 +96,9 @@ const PLACED = [
                 // `_components` les prend toutes (GetComponentsInChildren), et
                 // la plus proche du choc peut etre l'une d'elles.
                 "ShipComponent",
+                // L'ordinateur de bord : son `_targetPoint`, l'ecran que le
+                // regard vise quand on s'y assied (`LockOn(..., 1, zoom, 8)`).
+                "ShipComputer",
                 // Le pivot des tornades : une lente culbute dont la vitesse est
                 // TIREE au reveil, pas serialisee.
                 "TornadoPivotController",

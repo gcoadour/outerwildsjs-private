@@ -66,16 +66,14 @@ export const COMMANDES = {
 /**
  * Ce que le portage ajoute, faute d'equivalent dans le build.
  *
- * Cinq choses seulement, et elles sont nommees ici plutot que dispersees
- * dans `main.js` : l'ordinateur de bord se consulte a l'interieur du vaisseau,
- * que ce portage n'a pas ; la guimauve se mange au feu de camp ; sortir le
+ * Quatre choses seulement, et elles sont nommees ici plutot que dispersees
+ * dans `main.js` : la guimauve se mange au feu de camp ; sortir le
  * baton est appele par le tutoriel, qui n'est pas porte ; le mode d'affichage
  * est un outil de mise au point ; recentrer la carte n'a pas de canal parce que
  * le build recentre autrement. Aucune n'est dans l'alpha, et on ne pretend pas
  * le contraire.
  */
 export const AJOUTS = {
-  "Ship Computer": { pos: ["n"] },
   Marshmallow: { pos: ["b"] },
   // Sortir ou ranger le baton a guimauve. `ToggleStick` n'a pas de canal dans
   // l'alpha, et docs/64 en concluait que le tutoriel du feu de camp, non porte,

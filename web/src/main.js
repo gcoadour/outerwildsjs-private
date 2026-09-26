@@ -1751,6 +1751,8 @@ async function boot() {
     : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
+  // L'ecran que le regard vise, assis a l'ordinateur.
+  const cibleOrdinateur = ((((gameplay.placed || {}).ShipComputer || [])[0] || {}).targets || {})._targetPoint || null;
   const flashlight = new Flashlight(BABYLON, scene,
     (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
@@ -3044,6 +3046,16 @@ async function boot() {
    * plutot que `code === "KeyT"`. Les touches viennent alors de
    * `data/input.json`, et les changer ne demande pas de toucher a ce fichier.
    */
+  // `ExitComputerConsole` : l'ecran s'eteint, le regard se libere, et l'on se
+  // leve du point d'accrochage de l'ordinateur.
+  function quitterOrdinateur() {
+    computer.open = false;
+    if (pointsAttache.current && pointsAttache.current.name === "ShipComputer") {
+      pointsAttache.detach([0, 0, 0]);
+    }
+    console.log("annonce : ExitShipComputer");
+  }
+
   function command(code) {
     const est = (canal) => {
       const c = cmds.get(canal);
@@ -3089,27 +3101,25 @@ async function boot() {
       // bruit a l'aller et au retour.
       bipUI(flashlight.toggle() ? "TurnOnFlashlight" : "TurnOffFlashlight");
     }
-    // L'ordinateur de bord ne se consulte qu'a l'interieur du vaisseau ; ce
-    // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
-    // Le build n'a pas de canal pour lui : c'est un ajout, et `AJOUTS` le dit.
-    if (est("Ship Computer") && ship && ship.boarded) {
-      const openAvant = computer.open;
-      computer.open = !computer.open;
-      if (!openAvant && computer.open) {
-        const s = sonsUI.shipComputerBoot();
-        if (s) audio.playOneShot(s.file, { volume: s.volume });
-      }
-    }
+    // L'ORDINATEUR DE BORD, `ShipComputer.Update`. Ses touches sont celles de
+    // `ComputerInput` : Interact choisit, Cancel revient d'un niveau ou fait
+    // se lever, Move X parcourt — au premier niveau seulement, le second
+    // n'ecoute que Cancel. Le portage l'ouvrait d'une touche a lui depuis le
+    // poste de pilotage, « faute d'interieur », et le parcourait aux fleches,
+    // Entree et Retour arriere ; il s'ouvre desormais a sa zone « Boot Up »,
+    // dans la cabine (docs/132).
     if (computer.open) {
-      if (code === "ArrowLeft") { computer.move(-1); bipUI("AdvanceText"); }
-      if (code === "ArrowRight") { computer.move(1); bipUI("AdvanceText"); }
-      if (code === "Enter" || code === "Space") {
-        const cur = computer.current;
-        computer.select();
-        if (cur && cur.revealed) bipUI("PlayAffirmativeUISound");
-        else bipUI("PlayNegativeUISound");
+      const mx = cmds.get("Move X");
+      if (computer.zoom === 1 && mx && mx.neg.codes.includes(code)) computer.move(-1);
+      else if (computer.zoom === 1 && mx && mx.pos.codes.includes(code)) computer.move(1);
+      if (est("Interact")) {
+        // La touche est a l'ordinateur : ni se lever, ni rien d'autre.
+        interactPressed = false;
+        const r = computer.select();
+        if (r === "ouvre") bipUI("PlayAffirmativeUISound");
+        else if (r === "refus") bipUI("PlayNegativeUISound");
       }
-      if (code === "Backspace" || est("Cancel")) computer.cancel();
+      if (est("Cancel") && computer.cancel() === "ferme") quitterOrdinateur();
     }
     if (consoles.active && consoles.active.flight && est("Cancel")) {
       const socle = reposModeleCadre(framePos);
@@ -4524,6 +4534,16 @@ async function boot() {
           accesCarte.depuisObservatoire();
           if (!solarMap.open) ouvrirCarte({ observatoire: true });
           interactPressed = false;
+        } else if (focus.kind === "zone" && focus.name === "ShipComputer"
+                   && focus.body === "Ship_Body") {
+          // `ShipComputer.OnPressInteract` -> `EnterShipComputer` : on s'assied
+          // (le point d'accrochage ci-dessous), l'ecran s'allume.
+          if (!computer.open) {
+            computer.open = true;
+            const sb = sonsUI.shipComputerBoot();
+            if (sb) audio.playOneShot(sb.file, { volume: sb.volume });
+            console.log("annonce : EnterShipComputer");
+          }
         } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
           // La console de projection du satellite
           const c = consoles.toggle([player.pos.x + framePos[0],
@@ -4629,6 +4649,10 @@ async function boot() {
         // pas non plus.
         surCible = { position: parle.position, body: parle.body };
         reglage = { offset: [0, 0.5, 0], followRate: 3, useZoom: true, zoomSpeed: 1 };
+      } else if (computer.open && cibleOrdinateur) {
+        // `ShipComputer.EnterShipComputer` : `LockOn(_targetPoint, 1, zoom, 8)`.
+        surCible = { position: cibleOrdinateur.position, body: cibleOrdinateur.body };
+        reglage = { offset: [0, 0, 0], followRate: 1, useZoom: true, zoomSpeed: 8 };
       } else if (consoles.active) {
         const c = consoles.active;
         // La console de vol regarde le VAISSEAU MODELE, le satellite son ECRAN.
@@ -4933,6 +4957,12 @@ async function boot() {
         const d = Math.hypot(modele.pos[0] - socle[0], modele.pos[1] - socle[1],
                              modele.pos[2] - socle[2]);
         for (const k of invitesConsoleModele(d)) left.push(P(`RemoteFlightConsole.${k}`));
+      } else if (computer.open) {
+        // `EnterShipComputer` : Cancel, Select, Navigate, a gauche.
+        for (const k of ["_cancelPrompt", "_selectPrompt", "_navigatePrompt"]) {
+          const q = P(`ShipComputer.${k}`);
+          if (q) left.push(q);
+        }
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
       } else if (ship && ship.boarded) {
@@ -5853,7 +5883,11 @@ async function boot() {
       mangeCetteImage = false;
       if (objet) syncBaton(objet, baton, chaleurBaton);
     }
-    if (!(ship && ship.boarded)) computer.open = false;
+    // Assis a l'ordinateur, ou pas d'ordinateur : se lever autrement (la mort,
+    // la boucle) l'eteint aussi.
+    if (computer.open && !(pointsAttache.current && pointsAttache.current.name === "ShipComputer")) {
+      computer.open = false;
+    }
     if (computerEl) {
       computerEl.hidden = !computer.open || guiMode.hidden;
       if (computer.open) {

@@ -5996,7 +5996,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   const cmd = new Commandes(null);
   check("sans data/input.json, on se sait repli", cmd.fallback, true);
   check("vingt-deux canaux du build", Object.keys(COMMANDES).length, 22);
-  check("et cinq ajouts nommes", Object.keys(AJOUTS).length, 5);
+  // L'ordinateur de bord n'en est plus un : il s'ouvre a sa zone « Boot Up »,
+  // dans la cabine, comme dans le build (docs/132).
+  check("et quatre ajouts nommes", Object.keys(AJOUTS).length, 4);
   check("dont sortir le baton, qui n'a pas de canal dans l'alpha",
         !!AJOUTS.Stick, true);
   // Les trois boutons de souris, que le portage n'avait pas.
