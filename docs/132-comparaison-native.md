@@ -898,3 +898,48 @@ Même cadrage, même instant de boucle, alpha / portage (terminal, tour, sol
 À 20 s, le terminal de l'alpha oscille de 45 à 58 avec le vacillement du feu
 (moyenne 51). L'écran-titre, qui ne vit que de ponctuelles, n'en sort que plus
 juste : image entière 9,4 / 12,4 / 5,8 contre 9,4 / 12,5 / 5,9.
+
+### La flamme du feu, et le piège des deux images par seconde
+
+Capturée par le Chromium de mesure, la flamme du feu de camp sortait rose
+(bleu 70 à 110 sur les pixels les plus clairs, contre 20 à 40 dans l'alpha).
+La texture (`fire3`, DXT1 orange) et le dégradé de vie (bleu, orange, rouge
+sombre) étaient pourtant ceux du build. C'est la cadence : à deux images par
+seconde, trente particules naissent à la fois, toutes au même âge, et la
+flamme n'est plus qu'un échantillon de trois âges. En forçant un pas de
+1/60 s (`scene.getAnimationRatio = () => 1`, une minute et demie pour
+atteindre le régime), la flamme est orange-jaune à la base et rouge au-dessus,
+comme dans l'alpha (bleu 56 contre 19 à 32) ; il reste un cœur un peu plus
+jaune. Toute comparaison de particules se fait à ce pas-là.
+
+## La tour et la carte, au clavier seul
+
+L'alpha, sous Xvfb, ne se pilote qu'au clavier : toute entrée de souris
+envoie sa caméra en NaN (écran noir), y compris un déplacement relatif de
+trois pixels. On ne peut donc ni lever ni baisser le regard.
+
+**Le terminal de lancement est hors d'atteinte ainsi, dans les deux
+versions.** Son volume d'interaction est une sphère de 0,42 posée à 1,44 au
+centre du pupitre ; l'œil est à 2,2 au-dessus des pieds. Centré sur le pupitre
+à moins d'un mètre, le rayon du regard passe au-dessus. C'est la géométrie du
+build, que le portage reprend : il faut baisser les yeux. La chaîne tour,
+ascenseur, vaisseau ne se compare donc pas au clavier.
+
+**La carte, si — et l'alpha refuse de l'ouvrir.** Au feu de camp, Entrée ne
+fait rien. `MapController` est **éteint** dans la scène (`m_Enabled` 0),
+`Awake` le laisse éteint, et c'est son `LateUpdate` qui lit la touche :
+seuls `OnSuitUp` et `OnTriggerObservatoryMap` l'allument ; `OnRemoveSuit`, la
+mort, et la sortie d'une carte d'observatoire sans combinaison l'éteignent.
+Le portage ouvrait la carte partout. `AccesCarte` (map.js) refait la règle ;
+le contrôle navigateur vérifie qu'Entrée n'ouvre rien sans combinaison, et
+que l'ôter l'éteint.
+
+Au passage, la maquette de l'observatoire appelait `solarMap.ouvre()`, une
+méthode que `SolarMap` n'a jamais eue : l'interaction levait une erreur. Elle
+ouvre désormais la carte comme `OnTriggerObservatoryMap`, sans cadrer de
+cible — le système entier.
+
+Reste l'animation : dans le build, la carte n'est pas un dessin mais la
+**caméra du jeu** qui s'élève de l'œil du joueur jusqu'à la vue plongeante,
+en `SmoothStep` sur deux secondes (dix depuis l'observatoire, 0,6 avec une
+cible). Le portage l'affiche d'un coup, en surimpression.

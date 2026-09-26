@@ -18,7 +18,7 @@ import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
          COMET_ELLIPSE, fociDistance, orbitStyle, SolarMap,
-         MAP } from "../web/src/map.js";
+         MAP, AccesCarte } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
@@ -671,6 +671,29 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le noeud 5 finit", d.view.atEnd, true);
   d.advance();
   check("puis la conversation se ferme", d.active, null);
+}
+
+// `MapController.enabled` : la carte ne repond qu'a la combinaison, ou depuis
+// l'observatoire (docs/132).
+{
+  const a = new AccesCarte();
+  check("carte : eteinte au reveil, sans combinaison", a.actif, false);
+  a.porte(true);
+  check("carte : SuitUp l'allume", a.actif, true);
+  a.porte(false);
+  check("carte : RemoveSuit l'eteint", a.actif, false);
+  a.depuisObservatoire();
+  check("carte : l'observatoire l'allume sans combinaison", a.actif, true);
+  a.sortie();
+  check("carte : en sortir sans combinaison l'eteint", a.actif, false);
+  a.porte(true); a.depuisObservatoire(); a.sortie();
+  check("carte : en sortir combinaison sur le dos la garde", a.actif, true);
+  a.mort();
+  check("carte : la mort l'eteint, meme combinaison sur le dos", a.actif, false);
+  a.porte(true);
+  check("carte : le meme etat de combinaison ne la rallume pas", a.actif, false);
+  a.porte(false); a.porte(true);
+  check("carte : un nouveau SuitUp, si", a.actif, true);
 }
 
 // Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue

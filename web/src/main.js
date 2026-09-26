@@ -61,7 +61,7 @@ import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "
 import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
-import { SolarMap, mapMarkers } from "./map.js";
+import { SolarMap, mapMarkers, AccesCarte } from "./map.js";
 import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
@@ -2638,6 +2638,7 @@ async function boot() {
   const autopilot = ship ? new Autopilot(ship, declared.frames) : null;
   // Les treize marqueurs que le build pose, avec leurs vrais noms de jeu.
   const marqueurs = mapMarkers(gameplay);
+  const accesCarte = new AccesCarte();
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF, marqueurs);
   // §V LES ORBITES ONT UNE COULEUR CHACUNE (docs/100-carte.md). `MapOpenGL`
@@ -2667,6 +2668,7 @@ async function boot() {
   if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
   window.__dlgUI = dlgUI;   // sonde de verification : le dialogue au doigt
   window.__map = solarMap;
+  window.__accesCarte = accesCarte;
   window.__autopilot = autopilot;
   window.__ship = !!ship;
   window.__shipRef = ship;   // sonde de verification
@@ -2882,8 +2884,10 @@ async function boot() {
     // `EnterMapView` / `ExitMapView` : ouvrir avec une cible visee vous CADRE
     // tous les deux, et le son d'ouverture a dix secondes de garde
     // (docs/117-carte.md).
-    if (est("Map") || code === "KeyM") {
-      if (solarMap.open) solarMap.exitMapView();
+    // La touche ne repond que si `MapController` est allume : combinaison sur
+    // le dos, ou carte ouverte depuis l'observatoire (map.js, `AccesCarte`).
+    if ((est("Map") || code === "KeyM") && accesCarte.actif) {
+      if (solarMap.open) { solarMap.exitMapView(); accesCarte.sortie(); }
       else {
         const cible = solarMap.selected;
         const moi = [player.pos.x + framePos[0], player.pos.y + framePos[1],
@@ -3532,7 +3536,12 @@ async function boot() {
         console.log(modeAtt === "enter"
           ? `mode atterrissage : ${cibleAtt.name}` : "mode atterrissage quitte");
       }
-      if (death.dead && !modes.mort) modes.annonce("PlayerDeath");
+      if (death.dead && !modes.mort) {
+        modes.annonce("PlayerDeath");
+        // `MapController.OnPlayerDeath` : la carte se ferme et s'eteint.
+        if (solarMap.open) solarMap.exitMapView();
+        accesCarte.mort();
+      }
       else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
     }
 
@@ -4187,7 +4196,14 @@ async function boot() {
         } else if (focus.kind === "observatoryMap") {
           // La maquette du systeme solaire a l'observatoire ouvre la carte
           events.fire(OBSERVATORY_EVENTS.triggerMap);
-          solarMap.ouvre();
+          // `OnTriggerObservatoryMap` : allume la carte, et `EnterMapView`
+          // SANS cadrer de cible — l'observatoire montre le systeme entier.
+          // (L'appel visait une methode `ouvre` que `SolarMap` n'a jamais eue.)
+          accesCarte.depuisObservatoire();
+          if (!solarMap.open) {
+            solarMap.enterMapView([player.pos.x + framePos[0], player.pos.y + framePos[1],
+                                   player.pos.z + framePos[2]], null, performance.now() / 1000);
+          }
           interactPressed = false;
         } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
           // La console de projection du satellite
@@ -6095,6 +6111,7 @@ async function boot() {
     // [70, 280] est celle qu'on ne peut pas atteindre, et le suivi vertical y
     // est bride.
     player.setSuit(equipment.suit);
+    accesCarte.porte(!!equipment.suit);
     if (equipment.suit && !casque.worn && casque.state !== 0) casque.suitUp();
     if (!equipment.suit && casque.worn) casque.removeSuit();
     // §U LES JAUGES SONT SUR LA VISIERE. `HUDCameraScript` les eteint a

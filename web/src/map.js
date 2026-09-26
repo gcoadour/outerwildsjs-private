@@ -181,6 +181,59 @@ function markerType(body) {
   return "Moon";
 }
 
+/**
+ * Quand la touche de la carte repond : `MapController.enabled`.
+ *
+ * Le composant est ETEINT dans la scene (`m_Enabled` 0) et `Awake` le laisse
+ * eteint ; c'est son `LateUpdate` qui lit la touche, si bien qu'eteint, la
+ * touche ne fait rien. L'alpha, mesuree au feu de camp : Entree n'ouvre rien
+ * (docs/132). Le portage ouvrait la carte partout, combinaison ou non.
+ *
+ *   OnSuitUp                  enabled = true ;  _isWearingSuit = true
+ *   OnRemoveSuit              enabled = false ; _isWearingSuit = false
+ *   OnTriggerObservatoryMap   enabled = true ;  _isObservatoryMap = true
+ *   ExitMapView               si observatoire et sans combinaison : enabled = false
+ *   OnPlayerDeath             ExitMapView() ; enabled = false
+ *
+ * La mort eteint la carte meme combinaison sur le dos : elle ne se rallume
+ * qu'au prochain `SuitUp`, et la boucle suivante rend le paquetage a la
+ * cabine de toute facon.
+ */
+export class AccesCarte {
+  constructor() {
+    this.actif = false;
+    this.combinaison = false;
+    this.observatoire = false;
+  }
+
+  /** Suit l'etat de la combinaison, et n'agit que sur ses FRONTS. */
+  porte(combinaison) {
+    if (combinaison === this.combinaison) return;
+    this.combinaison = combinaison;
+    this.actif = combinaison;
+  }
+
+  /** `OnTriggerObservatoryMap`, avant `EnterMapView(10, 0,01)`. */
+  depuisObservatoire() {
+    this.actif = true;
+    this.observatoire = true;
+  }
+
+  /** `ExitMapView`, sa partie qui touche a `enabled`. */
+  sortie() {
+    if (this.observatoire) {
+      if (!this.combinaison) this.actif = false;
+      this.observatoire = false;
+    }
+  }
+
+  /** `OnPlayerDeath`. La sortie de carte est a la charge de l'appelant. */
+  mort() {
+    this.sortie();
+    this.actif = false;
+  }
+}
+
 export class SolarMap {
   constructor(canvas, bodies, playerData = null, sectorOf = {}, markers = []) {
     this.canvas = canvas;

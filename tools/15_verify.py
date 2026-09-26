@@ -632,6 +632,17 @@ def _run(url, heavy, profil=None, zip_path=None):
                }"""),
                ["OW Dialogue", "OW Helmet", "OW Menu", "OW Name"])
 
+        # La carte ne repond qu'une fois `MapController` allume : combinaison
+        # sur le dos (`OnSuitUp`). Au feu de camp, dans l'alpha, Entree n'ouvre
+        # rien (docs/132).
+        combi_avant = page.evaluate("() => !!window.__lots.equipment.suit")
+        if not combi_avant:
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(600)
+            rep.eq("sans combinaison, Entree n'ouvre pas la carte",
+                   page.evaluate("() => !!window.__map.open"), False)
+            page.evaluate("() => { window.__lots.equipment.suit = true; }")
+            page.wait_for_timeout(1500)
         # les invites de la carte, de priorite 2, doivent evincer les autres.
         # La carte est sur ENTREE dans le build (canal `Map`), pas sur M
         # (docs/61-commandes.md).
@@ -684,6 +695,12 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.evaluate("() => window.__map.recenter()")
         page.keyboard.press("Enter")
         page.wait_for_timeout(600)
+        if not combi_avant:
+            # La combinaison ote : `OnRemoveSuit` eteint la carte de nouveau.
+            page.evaluate("() => { window.__lots.equipment.suit = false; }")
+            page.wait_for_timeout(1500)
+            rep.eq("combinaison otee, la carte s'eteint",
+                   page.evaluate("() => window.__accesCarte.actif"), False)
 
         # --- reglages ----------------------------------------------------------
         wrap = page.evaluate("""() => {
