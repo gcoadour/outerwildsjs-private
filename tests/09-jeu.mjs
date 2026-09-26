@@ -140,6 +140,8 @@ import { AUTOPILOT_MESSAGES, maxPriority } from "../web/src/hud.js";
 import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          brakingDistance, flyStep, autopilotRotation,
          autopilotMessageKey } from "../web/src/autopilot.js";
+import { coucheApresEchange, poseImposteur, EchangeSoleil, IMPOSTEURS, CALQUE_IMPOSTEUR } from "../web/src/imposteur.js";
+import { gltfEnGamma } from "../web/src/shaders/index.js";
 import { paginate, dispositionDialogue, GEOMETRIE } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
@@ -669,6 +671,37 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le noeud 5 finit", d.view.atEnd, true);
   d.advance();
   check("puis la conversation se ferme", d.active, null);
+}
+
+// Le soleil de substitution de Timber Hearth (`SunlightSwapper`, `LookAtSun`,
+// docs/132).
+{
+  check("dans le secteur, le calque 0 passe au 12", coucheApresEchange(0, true), CALQUE_IMPOSTEUR);
+  check("un autre calque ne bouge pas", coucheApresEchange(15, true), 15);
+  check("en sortant, le 12 revient au 0", coucheApresEchange(12, false), 0);
+  const p = poseImposteur([0, 0, -8593], [0, 0, 0], 491.3126);
+  check("le spot est sur l'axe du soleil, a 491 du centre", Math.round(p.position[2]), -8102);
+  check("et regarde le centre", p.direction.join(","), "0,0,-1");
+  check("les deux imposteurs du build", IMPOSTEURS.map((x) => x.corps).join(","),
+        "TimberHearth_Body,BrittleHollow_Body");
+  const m1 = { layerMask: 1 }, m2 = { layerMask: 1 << 15 };
+  const e = new EchangeSoleil("TimberHearth_Body");
+  e.ajouter([m1, m2]);
+  e.poser(true);
+  check("entrer : le Default passe a UseSunImposter", m1.layerMask, 1 << 12);
+  check("IgnoreSun reste IgnoreSun", m2.layerMask, 1 << 15);
+  check("entrer deux fois ne change rien", e.poser(true), false);
+  e.poser(false);
+  check("sortir : retour au Default", m1.layerMask, 1);
+  // Les textures glTF en gamma : le chargeur ne doit pas les decoder en lineaire.
+  const vus = [];
+  const B = { SceneLoader: { OnPluginActivatedObservable: { add: (f) => vus.push(f) } } };
+  gltfEnGamma.pose = false;
+  check("l'observateur se pose", gltfEnGamma(B), true);
+  const loader = { name: "gltf", useSRGBBuffers: true };
+  vus[0](loader);
+  check("le chargeur glTF n'utilise plus de tampon sRGB", loader.useSRGBBuffers, false);
+  gltfEnGamma.pose = false;
 }
 
 // Le halo du `GlowEffect` recoit la teinte BRUTE : (255, 100, 100) a la mort

@@ -73,7 +73,8 @@ import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState, PLAYER_FALLBACK } from "./player.js";
-import { applyGameShaders, updateGameShaders, toLegacyMaterials } from "./shaders/index.js";
+import { applyGameShaders, updateGameShaders, toLegacyMaterials, gltfEnGamma } from "./shaders/index.js";
+import { EchangeSoleil, IMPOSTEURS, poseImposteur } from "./imposteur.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
@@ -265,6 +266,8 @@ async function boot() {
   const engine = new BABYLON.Engine(canvas, true,
     { stencil: true, audioEngine: true }, true);
   addEventListener("resize", () => engine.resize());
+  // Avant tout chargement de glTF, titre compris : les textures en gamma.
+  gltfEnGamma(BABYLON);
   // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
   // prend le relais — et elle se sait repli, comme `config.js`.
   const cmds = await loadCommandes();
@@ -1119,7 +1122,22 @@ async function boot() {
   // approche (voir sectors.js). Un corps pas encore la montre sa sphere de
   // substitution, exactement comme un corps sans geometrie exportee.
   let shaderCounts = {};
+  // `SunlightSwapper` : l'echange de calques de Timber Hearth et de Brittle
+  // Hollow, et les spots de leur soleil de substitution (imposteur.js).
+  const echanges = new Map(IMPOSTEURS.map((i) => [i.corps, new EchangeSoleil(i.corps)]));
+  window.__imposteur = { echanges, ombres: new Map() };
   const store = new GeometryStore(BABYLON, scene, (entry) => {
+    // `GetComponentsInChildren<Transform>` : ce qui est SOUS le corps, et pas
+    // son voisin de lot (Attlerock partage le fichier de Timber Hearth).
+    for (const [corps, ech] of echanges) {
+      const racine = (entry.meshes || []).map((m) => m.parent).concat(entry.root ? [entry.root] : [])
+        .flatMap((n) => { const out = []; for (let x = n; x; x = x.parent) out.push(x); return out; })
+        .find((n) => n && n.name === corps);
+      const noeud = racine || scene.getTransformNodeByName(corps) || scene.getMeshByName(corps);
+      if (!noeud) continue;
+      const sous = (entry.meshes || []).filter((m) => m !== noeud && m.isDescendantOf && m.isDescendantOf(noeud));
+      if (sous.length) ech.ajouter(sous);
+    }
     // tout ce qui, avant, se faisait une fois pour toutes au demarrage
     const counts = applyGameShaders(BABYLON, scene, entry.meshes);
     for (const [k, v] of Object.entries(counts)) {
@@ -4010,6 +4028,8 @@ async function boot() {
       : null);
     const secMaj = secteurDe(playerW);
     secteurMajeur = secMaj;
+    // `OnOccupantEnterSector(Player)` / `OnOccupantExitSector(Player)`.
+    for (const [corps, ech] of echanges) ech.poser(!!(secMaj && secMaj.body === corps));
     // LES SEUILS : on n'y est pas « dedans », on les a franchis dans un sens.
     //
     // Les deux comptes se tiennent ici parce que l'invite de lampe, plus haut
@@ -6768,6 +6788,41 @@ async function boot() {
       fadeCible.intensity = fadeLight.update(performance.now() / 1000);
     }
     placedLights.update(player.pos, anchorPos, (x) => decalageDuCorps(x.body, anchorPos));
+    // `LookAtSun` : les spots de l'imposteur suivent l'etoile, a leur distance
+    // du centre, tournes vers lui ; et ils portent des ombres (`m_Shadows`
+    // doux, force 1) — c'est la planete qui eteint sa face nuit.
+    {
+      const etoile = bodies.find((b) => (b.gravity.surfaceAcceleration || 0) >= 50);
+      for (const imp of IMPOSTEURS) {
+        let node = null, lum = null;
+        for (const [l, n] of placedLights.live) if (l.name === imp.lumiere) { lum = l; node = n; break; }
+        const corps = bodies.find((b) => b.bodyName === imp.corps);
+        if (!node || !corps || !etoile) continue;
+        const pose = poseImposteur(corps.position, etoile.position, imp.distance);
+        if (!pose) continue;
+        node.position.set(...pose.position);
+        if (node.direction) node.direction.set(...pose.direction);
+        const ech = echanges.get(imp.corps);
+        const ombres = window.__imposteur.ombres;
+        if (ech && ech.meshes.length && BABYLON.ShadowGenerator && ombres.get(imp.lumiere) !== node) {
+          try {
+            const g = new BABYLON.ShadowGenerator(1024, node);
+            g.bias = 0.0008;
+            g.setDarkness(1 - ((lum.ombre && lum.ombre.force) ?? 1));
+            const carte = g.getShadowMap();
+            // L'etoile tourne de deux degres par seconde : une carte tous les
+            // six images suffit, et le relief du corps ne bouge pas.
+            carte.refreshRate = 6;
+            for (const { mesh } of ech.meshes) {
+              if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) continue;
+              g.addShadowCaster(mesh, false);
+              mesh.receiveShadows = true;
+            }
+            ombres.set(imp.lumiere, node);
+          } catch (e) { ombres.set(imp.lumiere, node); }
+        }
+      }
+    }
     // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
     // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne
     // vacille pas se remarque (docs/42-lumieres.md).

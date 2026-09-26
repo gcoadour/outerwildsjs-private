@@ -756,3 +756,61 @@ this thing off the ground? » (Next), « So how are you feeling? » et ses trois
 réponses, « All systems go! » choisi à E, « I'm glad you're excited… »
 (Next), « Anyway, you just need those launch codes… » (Close), et l'invite
 revient.
+
+## La lumière du réveil, expliquée
+
+Deux causes, trouvées une fois le cadrage commun, et qui se compensaient en
+partie — c'est ce qui les rendait si difficiles à isoler.
+
+### Les textures des glTF étaient décodées en linéaire
+
+Le chargeur glTF de Babylon crée ses textures de couleur en **tampon sRGB**
+(`useSRGBBuffers`) : le processeur graphique les convertit en linéaire à
+chaque lecture. C'est juste pour du PBR ; c'est faux pour les
+`StandardMaterial` de `toLegacyMaterials`, qui calculent en gamma comme les
+shaders d'Unity 4. Une demi-teinte à 0,5 arrivait à 0,21. Basculer
+`gammaSpace` ne changeait rien — le format interne était déjà choisi — et
+c'est pour cela que les essais précédents (« ni gamma ni traitement
+d'image ») concluaient à tort. `gltfEnGamma` coupe l'option sur le
+chargeur avant tout import, titre compris.
+
+L'écran-titre, qui n'avait que cette cause, tombe juste : image entière
+9,8 / 12,6 / 5,8 contre 9,4 / 12,5 / 5,9 dans l'alpha, à la même seconde de
+rotation.
+
+### Le soleil de Timber Hearth est un imposteur
+
+Corriger les textures rendait la tour, le sol et les arbres **trop** clairs.
+Isolée lumière par lumière, la tour du portage recevait 43 du feu, 11 de
+l'ambiance et **32 du soleil** — alors que le soleil est à trente-cinq degrés
+sous l'horizon. `SunLight` est une ponctuelle sans ombre : elle éclaire tout
+ce qui se tourne vers elle, face nuit comprise. Dans l'alpha, la tour vaut
+50, soit le feu et l'ambiance seuls.
+
+Le build a un composant pour cela, que le portage ne lisait pas :
+`SunlightSwapper`, posé sur `TimberHearth_Body` et `BrittleHollow_Body`.
+Quand le joueur entre dans le secteur majeur, tout ce qui est au calque
+`Default` sous le corps passe à `UseSunImposter` (12), que le masque de
+`SunLight` exclut ; en sortant, l'inverse. La planète est alors éclairée par
+les spots de `SunImposterPivot`, que `LookAtSun` tourne vers l'étoile à
+chaque image — `SunImposter_Center` à 491,3 unités du centre, intensité 8,
+cône de 45 degrés, **avec des ombres** : c'est la planète qui éteint sa face
+nuit. `imposteur.js` refait l'échange de calques et la pose des spots ; le
+relief du corps porte l'ombre (carte de 1 024, rafraîchie toutes les six
+images, l'étoile ne tournant que de deux degrés par seconde).
+
+Mesure au réveil, alpha / portage :
+
+| zone | alpha | portage |
+|---|---|---|
+| terminal de lancement | 61 / 49 / 31 | 61 / 49 / 36 |
+| Slate | 113 / 55 / 18 | 99 / 49 / 17 |
+| tour | 50 / 34 / 17 | 50 / 36 / 21 |
+| sol, arbres | 9 / 7 / 3 ; 10 / 7 / 5 | 18 / 11 / 6 ; 17 / 14 / 7 |
+
+Il reste le sol et les feuillages lointains, un peu plus clairs dans le
+portage — le terrain répète sa texture cinquante fois, et le feuillage a son
+propre shader (`DoubleSidedCutoutBumpedDiffuse`) — mais la lumière du
+village, elle, est celle de l'alpha. Le soleil suit aussi le même horaire des
+deux côtés : nuit au réveil, plein jour vers quatre-vingt-dix secondes,
+nuit de nouveau vers cent trente-cinq.

@@ -671,7 +671,10 @@ def _run(url, heavy, profil=None, zip_path=None):
         # --- consoles et objets de bord ---------------------------------------
         cons = page.evaluate("""() => {
           const c = window.__consoles.computer, m = window.__consoles.marshmallow;
-          m.held = true; m.toast = 0;
+          // Une guimauve ENTIERE : pres du feu, la partie a pu en bruler une,
+          // et les premieres secondes compteraient alors son retour
+          // (`gone`, `respawn`) au lieu de la griller.
+          m.held = true; m.toast = 0; m.gone = false; m.goneFor = 0;
           for (let i = 0; i < 3; i++) m.update(1, 100);
           return {notices: c.records.length,
                   avecTexte: c.records.filter(r => r.text && r.text.length > 20).length,
