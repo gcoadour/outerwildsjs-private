@@ -102,7 +102,9 @@ const borne = (v, m) => Math.max(-m, Math.min(m, v));
  * pousse.
  *
  *   translation locale = (thrustX, thrustUp - thrustDown, thrustZ)
- *   rotation locale    = (-pitch, 0, -roll)       // le lacet n'est pas lu
+ *                        // ReadTranslationalInput
+ *   rotation locale    = (-pitch, 0, -roll)       // ReadRotationalInput :
+ *                        // le lacet n'est pas lu
  *   acceleration       = entree x max, bornee axe par axe a +/- max,
  *                        dans le repere du modele (`AddLocalAcceleration`)
  *
