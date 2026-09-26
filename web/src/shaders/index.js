@@ -80,7 +80,12 @@ function sansEclairage(BABYLON, mat) {
  */
 function applyCutout(BABYLON, mat) {
   mat.backFaceCulling = false;
-  mat.twoSidedLighting = true;
+  // `Cull Off` sans `VFACE` — aucun shader du build n'en lit : la face
+  // arriere est eclairee avec la normale de la face AVANT. Une feuille vue
+  // de dos, tournee vers le feu, reste donc dans l'ombre. `twoSidedLighting`
+  // retourne la normale et eclaire les deux faces : de nuit, les pins du
+  // camp sortaient verts la ou l'alpha les laisse noirs (docs/132).
+  mat.twoSidedLighting = false;
   if ("transparencyMode" in mat) {
     mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATEST;
   }
@@ -159,7 +164,9 @@ function applySelfIllum(BABYLON, mat) {
  */
 function applyLitAlpha(BABYLON, mat) {
   mat.backFaceCulling = false;
-  mat.twoSidedLighting = true;
+  // Meme regle que la vegetation : pas de `VFACE`, la face arriere garde la
+  // normale avant.
+  mat.twoSidedLighting = false;
   mat.disableDepthWrite = true;
   const tex = mat.albedoTexture || mat.diffuseTexture;
   if (tex) {

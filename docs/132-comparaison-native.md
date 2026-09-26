@@ -1047,3 +1047,35 @@ ce parcours ; le portage portait le bandeau du bas du début à la fin.
 `LearnLaunchCodes`, ou — « Launch Codes Remembered » — cinq secondes après le
 réveil de la **deuxième** boucle, et d'aucune autre. Le portage le montrait
 tant qu'on connaissait les codes (`InviteCodes`, hud.js).
+
+### La nuit des pins, et midi
+
+Sur le même parcours, de nuit, les pins du camp sortaient verts dans le
+portage et noirs dans l'alpha (arbres 16 contre 5 à vingt secondes). Isolée
+lumière par lumière — en bloquant l'intensité de chaque lumière, la boucle
+de jeu la réécrivant à chaque image —, l'ambiance donnait 4,6 : l'alpha
+entier. Le reste venait du feu et des lampes, huit, sur des feuilles qui lui
+tournent le dos.
+
+Les deux shaders de la végétation (`DoubleSidedCutoutDiffuse`,
+`DoubleSidedCutoutBumpedDiffuse`) sont en `Cull Off`, et **aucun shader du
+build ne lit `VFACE`** : la face arrière est éclairée avec la normale de la
+face avant. Babylon, avec `twoSidedLighting`, retourne la normale et éclaire
+les deux faces. Coupée, la nuit tombe à 7 contre 5.
+
+Midi, alors, montait à 77 contre 43. La même famille de shaders couvre aussi
+l'ascenseur, les passerelles, les colonnes — la tour — ; et la végétation
+n'était pas ombrée. `m_ReceiveShadows` est faux sur ses renderers, et le
+portage l'honorait depuis peu. Or la caméra du jeu est en **Deferred
+Lighting**, où Unity 4 ne lit pas ce drapeau : tout ce qui passe par le
+tampon de lumière reçoit l'ombre. Les pins ombrés, midi tombe à 44 contre 43.
+L'écran-titre, dont la caméra est aussi en différé, suit la même règle.
+
+| instant | terminal | tour | sol | sol à droite | arbres |
+|---|---|---|---|---|---|
+| 20 s | 45 / 49 | 36 / 39 | 9 / 11 | 4 / 6 | 5 / 7 |
+| 60 s | 79 / 79 | 59 / 59 | 50 / 47 | 46 / 44 | 45 / 44 |
+| 81 s | 98 / 89 | 63 / 65 | 88 / 89 | 42 / 45 | 45 / 48 |
+| 93 s | 103 / 89 | 68 / 66 | 89 / 90 | 87 / 89 | 43 / 44 |
+| 103 s | 87 / 86 | 68 / 66 | 56 / 55 | 59 / 67 | 51 / 53 |
+| 120 s | 70 / 70 | 50 / 51 | 40 / 42 | 34 / 38 | 33 / 36 |

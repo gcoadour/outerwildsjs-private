@@ -342,13 +342,16 @@ export class TitleScreen {
             if (!(x.l.shadows > 0)) continue;
             try {
               const g = ombreUnity(B, new B.ShadowGenerator(512, x.node), x.node, x.l.ombre);
-              // Chaque renderer dit s'il porte et s'il recoit l'ombre : les
-              // branches des pins n'en recoivent pas (extract/gltf.js).
+              // Chaque renderer dit s'il PORTE l'ombre (extract/gltf.js). Qu'il
+              // la recoive, Unity 4 ne le demande pas en Deferred Lighting :
+              // `m_ReceiveShadows` n'y est pas lu, tout ce qui passe par le
+              // tampon de lumiere est ombre — les branches des pins comprises
+              // (docs/132).
               for (const m of res.meshes) {
                 if (m.getTotalVertices && m.getTotalVertices() > 0) {
                   const o = ombresDuRenderer(m);
                   if (o.porte) g.addShadowCaster(m, false);
-                  m.receiveShadows = o.recoit;
+                  m.receiveShadows = true;
                 }
               }
               x.ombres = g;

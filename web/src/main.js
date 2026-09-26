@@ -7132,14 +7132,15 @@ async function boot() {
             g.setDarkness(1 - ((l.ombre && l.ombre.force) ?? 1));
             // Rendue une fois, puis refaite a chaque pas du spot (ci-dessus).
             g.getShadowMap().refreshRate = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
-            // Porter et recevoir, renderer par renderer (`m_CastShadows`,
-            // `m_ReceiveShadows`), comme au titre : les branches des pins ne
-            // recoivent pas l'ombre, et les recevoir les noircissait.
+            // PORTER, renderer par renderer (`m_CastShadows`). RECEVOIR, tous :
+            // la camera du jeu est en Deferred Lighting, ou Unity 4 ne lit pas
+            // `m_ReceiveShadows`. Honorer le drapeau laissait les pins en plein
+            // soleil a midi — 77 contre 43 dans l'alpha ; ombres, 48 (docs/132).
             for (const { mesh } of ech.meshes) {
               if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) continue;
               const o = ombresDuRenderer(mesh);
               if (o.porte) g.addShadowCaster(mesh, false);
-              mesh.receiveShadows = o.recoit;
+              mesh.receiveShadows = true;
             }
             ombres.set(l.name, g);
           } catch (e) { ombres.set(l.name, null); }

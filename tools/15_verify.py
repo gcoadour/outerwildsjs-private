@@ -572,6 +572,16 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         rep.eq("spots : plus d'exposant de Babylon", lum["exposant"], False)
         rep.eq("attenuation : le fondu de fin de portee d'Unity", lum["fondu"], True)
+        # `Cull Off` sans `VFACE` : la face arriere garde la normale avant. Et
+        # en Deferred Lighting, tout recoit l'ombre (docs/132).
+        faces = page.evaluate("""() => {
+          const s = BABYLON.EngineStore.LastCreatedScene;
+          const m = s.materials.filter((x) => { const e = x.metadata && x.metadata.gltf && x.metadata.gltf.extras;
+            return e && /DoubleSidedCutout/.test(e.unityShader || ''); });
+          return { n: m.length, deux: m.filter((x) => x.twoSidedLighting).length };
+        }""")
+        rep.at_least("materiaux double face lus", faces["n"], 5)
+        rep.eq("aucun n'eclaire sa face arriere a l'envers", faces["deux"], 0)
 
         # --- animations ------------------------------------------------------
         anim = page.evaluate("""() => {
@@ -1554,6 +1564,9 @@ def _run(url, heavy, profil=None, zip_path=None):
           const r = window.__resources, m = window.__consoles.marshmallow;
           const avant = r.health;
           r.health = 20;
+          // Une guimauve PRESENTE : laissee au feu plus tot dans la visite,
+          // elle a pu bruler et disparaitre — un etat du moment, pas du soin.
+          m.gone = false; m.goneFor = 0;
           m.held = true; m.toast = 1;                 // assez grillee
           const mange = m.eat();
           const apres = r.health;
