@@ -148,7 +148,11 @@ const PLACED = [
                 // Le vaisseau miniature de l'observatoire : sa piste, son
                 // crash, et l'enfant qui compte les deux (docs/78-modele.md).
                 "ModelShipLandingSpot", "ModelShipCrashBehavior",
-                "RocketKidConvoController"];
+                "RocketKidConvoController",
+                // Et ce qui le fait tomber : un detecteur qui ne voit QU'UN
+                // champ, `CraterField`, a 0,8 de sa force — sans quoi ses
+                // douze de poussee ne le decolleraient pas (docs/132).
+                "SingleFieldDetector"];
 
 /**
  * Classes qu'on ne connait pas par leur nom exact.
@@ -217,8 +221,11 @@ const WANT_VOLUME = new RegExp([
 // recepteur sur le corps qui arrive. On ne debarque pas dans la direction ou
 // l'on marchait, on debarque tourne vers ce que le recepteur regarde
 // (docs/111-passages.md).
+// `ModelShipCrashBehavior` : le vaisseau miniature. Il pousse le long de SES
+// axes, et `RespawnModelShip` lui rend la rotation de `RocketSpawn` — qui est
+// celle de sa pose dans la scene (docs/132).
 const WANT_ROTATION =
-  /^(spawnpoint|shipbody|whiteholevolume|ancientteleportreceiver)$/i;
+  /^(spawnpoint|shipbody|whiteholevolume|ancientteleportreceiver|modelshipcrashbehavior)$/i;
 
 /**
  * Composants dont l'ECHELLE LOCALE est une donnee : `SunExplosionBehavior` et

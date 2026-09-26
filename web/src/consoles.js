@@ -391,10 +391,9 @@ export class Marshmallow {
  * meme raison — l'observatoire tourne avec Timber Hearth. Reposer un objet a
  * zero sur un sol qui bouge le fait glisser.
  *
- * Ce portage ne fait pas encore reapparaitre le modele : `modelShipBody` en
- * lit la pose, et le crash s'annonce, mais rien ne le repose. La loi est
- * relevee ici pour que le jour ou on le fera, la vitesse du point y soit —
- * c'est elle qu'on oublie, pas la position.
+ * `main.js` le repose a `Cancel` quand il est a plus d'une unite de sa place :
+ * position et rotation de `RocketSpawn`, vitesse du point porteur — nulle
+ * dans le repere de Timber Hearth, qui tourne avec l'observatoire.
  */
 export const CONSOLE_REACH = 8;
 

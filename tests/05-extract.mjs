@@ -28,7 +28,7 @@ import { spawnPoints, startPose, walkToShip } from "../web/src/start.js";
 import { planarQuantumObjects, quantumStatues } from "../web/src/quantumobj.js";
 import { remoteConsoles } from "../web/src/consoles.js";
 import { shipProximity } from "../web/src/helmet.js";
-import { modelLandingSpots, modelShipBody,
+import { modelLandingSpots, modelShipBody, poussesModele, detecteurModele,
          rocketKids } from "../web/src/modelship.js";
 import { fluidVolumes, mediumVelocity } from "../web/src/fluids.js";
 import { paginate, LAYOUT } from "../web/src/dialogueui.js";
@@ -247,6 +247,18 @@ check("points d'apparition", n("SpawnPoint"), 16);
   const mod = modelShipBody(gp);
   check("un vaisseau miniature", mod !== null, true);
   check("avec son son de crash", mod.crashSound, "ModelShipCrash_Explosion");
+  // Son orientation de repos : celle de `RocketSpawn`, que `RespawnModelShip`
+  // lui rend (docs/132).
+  check("et son orientation de repos", mod.rotation.map((x) => Math.round(x * 1000) / 1000).join(","),
+        "0.045,0.706,-0.706,-0.045");
+  // SES propulseurs : le seul `ThrusterModel` simple du build.
+  const pm = poussesModele(gp);
+  check("modele : douze de poussee, cinq de rotation, 0,96 d'amortissement",
+        [pm.translation, pm.rotation, Math.round(pm.amortissement * 100) / 100].join(","), "12,5,0.96");
+  // Et ce qui le fait tomber : `CraterField` seul, a 0,8.
+  const dm = detecteurModele(gp);
+  check("modele : un detecteur qui ne voit que le champ du cratere", dm && dm.champ, "CraterField");
+  check("... a huit dixiemes", dm && Math.round(dm.facteur * 100) / 100, 0.8);
   const kid = rocketKids(gp);
   check("un enfant aux fusees", kid.length, 1);
   // Les TROIS arbres sont resolus : c'est ce qui rend la selection possible.

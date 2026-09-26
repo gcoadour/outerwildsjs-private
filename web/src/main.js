@@ -61,7 +61,7 @@ import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "
 import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
-import { SolarMap, mapMarkers, AccesCarte, VueCarte, MAP as REGLES_CARTE, qRot } from "./map.js";
+import { SolarMap, mapMarkers, AccesCarte, VueCarte, MAP as REGLES_CARTE, qRot, qMul } from "./map.js";
 import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
@@ -93,7 +93,9 @@ import { loadCommandes, decoupeImage } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
-         modelLandingSpots, modelShipBody, rocketKids, estEnfant } from "./modelship.js";
+         modelLandingSpots, modelShipBody, rocketKids, estEnfant,
+         poussesModele, voleModele, invitesConsoleModele,
+         detecteurModele, graviteModele } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod, bodySpin } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
          dominantField } from "./gravity.js";
@@ -881,13 +883,36 @@ async function boot() {
   }));
   const enfant = rocketKids(gameplay)[0] || null;
   const compteurEnfant = new RocketKid();
+  const cfgModele = poussesModele(gameplay);
+  const detModele = detecteurModele(gameplay);
+  // Ce que la souris a donne au modele depuis la derniere image : `ShipInput`
+  // lit `Pitch` et `Yaw` — l'axe du roulis est celui du lacet — et la
+  // console garde le regard verrouille sur le modele.
+  const sourisModele = { dx: 0, dy: 0 };
   if (modele) {
     modele.pos = modele.position.slice();
     modele.vel = [0, 0, 0];
-    modele.quat = [0, 0, 0, 1];
+    // L'orientation de repos est celle de `RocketSpawn`, la pose du modele
+    // dans la scene : `RespawnModelShip` la rend a chaque remise en place.
+    modele.quat = (modele.rotation || [0, 0, 0, 1]).slice();
+    modele.reposQuat = modele.quat.slice();
+    modele.omega = [0, 0, 0];
+    modele.pose = true;
     modele.repos = modele.position.slice();
     modele.node = undefined;
   }
+  // LE MODELE VIT DANS LE REPERE DE TRAVAIL, comme le joueur. Sa position etait
+  // tenue en coordonnees « monde » de repos, sans suivre Timber Hearth : pose,
+  // il derivait a la vitesse orbitale de la planete (11 a 35 u/s mesures), et
+  // les rayons du sol partaient d'ailleurs. Son socle est ou le corps porteur
+  // l'a mene — le decalage de ce corps depuis la scene, ramene au repere.
+  const porteurModele = (modele && corpsDuSysteme(modele.body)) ? modele.body
+    : ((pistesModele[0] && pistesModele[0].data.body) || "TimberHearth_Body");
+  function reposModeleCadre(origine) {
+    const dec = decalageDuCorps(porteurModele, origine) || [0, 0, 0];
+    return modele.repos.map((x, i) => x + dec[i] - origine[i]);
+  }
+  function corpsDuSysteme(nom) { return !!nom && bodies.some((b) => b.bodyName === nom); }
   window.__modele = { vaisseau: modele, pistes: pistesModele,
                       enfant: compteurEnfant, arbres: enfant };
   window.__casque = { casque, alarme, voyants, notifications, invitesGuimauve };
@@ -2991,12 +3016,18 @@ async function boot() {
       if (code === "Backspace" || est("Cancel")) computer.cancel();
     }
     if (consoles.active && consoles.active.flight && est("Cancel")) {
-      const d = Math.hypot(modele.pos[0] - modele.repos[0],
-                           modele.pos[1] - modele.repos[1],
-                           modele.pos[2] - modele.repos[2]);
+      const socle = reposModeleCadre(framePos);
+      const d = Math.hypot(modele.pos[0] - socle[0], modele.pos[1] - socle[1],
+                           modele.pos[2] - socle[2]);
       if (d > 1) {
-        modele.pos = modele.repos.slice();
+        // `RespawnModelShip` : position, ROTATION de `_respawnPoint`, vitesse
+        // du point porteur (nulle dans le repere de Timber Hearth), rotation
+        // arretee.
+        modele.pos = socle;
         modele.vel = [0, 0, 0];
+        modele.quat = modele.reposQuat.slice();
+        modele.omega = [0, 0, 0];
+        modele.pose = true;
         const s = sonsUI.modelShipRespawn();
         if (s) audio.playOneShot(s.file, { volume: s.volume });
         console.log("annonce : RespawnModelShip");
@@ -3208,6 +3239,13 @@ async function boot() {
     //   isRollMode = GetButton(swap) ? !rollByDefault : rollByDefault
     // En vue d'atterrissage le defaut s'inverse — le manche ROULE, et c'est la
     // touche alt qui rend le lacet (docs/87-atterrissage.md).
+    // Aux commandes du modele reduit, la souris le fait tourner lui : le
+    // regard reste verrouille sur lui (`LockOn`, docs/78).
+    if (consoles.active && consoles.active.flight && modele) {
+      sourisModele.dx += dx;
+      sourisModele.dy += dy;
+      return;
+    }
     const roulisDefaut = !!(ship && ship.boarded && atterrissage.rollByDefault);
     if (rollMode(!!(cmds && cmds.held("Swap Roll/Yaw", { keys })), roulisDefaut)) {
       // `_flipRollFactor` vaut -1 en vue d'atterrissage : le roulis s'inverse.
@@ -4391,6 +4429,14 @@ async function boot() {
                                : (c.targets && c.targets._projectionScreen);
         surCible = cible ? { position: cible.position, body: cible.body }
                          : { position: c.position, body: c.body || null };
+        // `LockOn(_modelShipBody.transform)` : le regard SUIT le modele, pas son
+        // socle. Sa position du repere, rendue dans la convention « repos +
+        // decalage du porteur » que le verrou relit a chaque image.
+        if (c.flight && modele && modele.pos) {
+          const dec = decalageDuCorps(porteurModele, framePos) || [0, 0, 0];
+          surCible = { position: modele.pos.map((x, i) => x + framePos[i] - dec[i]),
+                       body: porteurModele };
+        }
         reglage = c.flight
           ? { offset: [0, 0, 0], followRate: 5, useZoom: true, zoomSpeed: 1 }
           : { offset: [0, 0, 0], followRate: 1, useZoom: false, zoomSpeed: 1 };
@@ -4665,6 +4711,13 @@ async function boot() {
           left.push(P("MapController._closePrompt"), P("MapController._zoomPrompt"),
                     P("MapController._panPrompt"));
         }
+      } else if (consoles.active && consoles.active.flight && modele) {
+        // `RemoteFlightConsole.Update` : « Reset » quand le modele n'est plus a
+        // sa place, sinon « Exit » et les trois poussees. Priorite 1.
+        const socle = reposModeleCadre(anchorPos);
+        const d = Math.hypot(modele.pos[0] - socle[0], modele.pos[1] - socle[1],
+                             modele.pos[2] - socle[2]);
+        for (const k of invitesConsoleModele(d)) left.push(P(`RemoteFlightConsole.${k}`));
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
       } else if (ship && ship.boarded) {
@@ -6540,51 +6593,85 @@ async function boot() {
     let pousseeModele = [0, 0, 0];
     if (modele) {
       const auxCommandes = !!(consoles.active && consoles.active.flight);
+      // `ModelShipController` : translation (Move X, Move Up - Move Down,
+      // Move Z) et rotation (-Pitch, 0, -Yaw) — la souris, a la sensibilite
+      // 0,1 de l'`InputManager` : un axe de souris est un DEPLACEMENT par
+      // image, pas une position.
+      let entree = { translation: [0, 0, 0], rotation: [0, 0, 0] };
       if (auxCommandes) {
-        const a = {
-          fwd: quatRotate(modele.quat, [0, 0, 1]),
-          right: quatRotate(modele.quat, [1, 0, 0]),
-          up: quatRotate(modele.quat, [0, 1, 0]),
-        };
-        const ax = cmds.axis("Move X", etatCmd);
-        const az = cmds.axis("Move Z", etatCmd);
         const mu = (cmds.held("Move Up", etatCmd) ? 1 : 0)
                  - (cmds.held("Move Down", etatCmd) ? 1 : 0);
-        const p = (ship ? ship.thrust : 50) * 0.4;
-        pousseeModele = [
-          (a.right[0] * ax + a.fwd[0] * az + a.up[0] * mu) * p,
-          (a.right[1] * ax + a.fwd[1] * az + a.up[1] * mu) * p,
-          (a.right[2] * ax + a.fwd[2] * az + a.up[2] * mu) * p,
-        ];
+        const sens = 0.1;
+        const tangage = -sourisModele.dy * sens, roulis = sourisModele.dx * sens;
+        entree = {
+          translation: [cmds.axis("Move X", etatCmd), mu, cmds.axis("Move Z", etatCmd)],
+          rotation: [-tangage, 0, -roulis],
+        };
       }
-      // Le modele vole dans le cratere : `CraterField` le tient comme il tient
-      // le joueur, au repos de Timber Hearth (docs/132).
-      const g = dominantField(bodies, {
-        x: modele.pos[0] - anchorPos[0], y: modele.pos[1] - anchorPos[1],
-        z: modele.pos[2] - anchorPos[2] },
-        { directional: dirFields, polar: polFields, framePos: anchorPos,
-          shiftOf: (v) => decalageDuCorps(v.body, anchorPos) });
-      const avant = modele.vel.slice();
-      for (let i = 0; i < 3; i++) {
-        const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;
-        modele.vel[i] += (pousseeModele[i] + gi) * dt;
-        modele.pos[i] += modele.vel[i] * dt;
-      }
-      // LE SOL. Le modele reduit n'a pas de collider a lui : on le pose sur la
-      // surface du corps dominant, et c'est l'ARRIVEE a cette surface qui donne
-      // la vitesse d'impact — la seule chose dont le seuil de crash a besoin.
-      if (g && g.body && g.body.gravity) {
-        const r = (g.body.gravity.upperSurfaceRadius || 0) + 0.6;
-        const d = [modele.pos[0] - anchorPos[0] - g.body.position[0],
-                   modele.pos[1] - anchorPos[1] - g.body.position[1],
-                   modele.pos[2] - anchorPos[2] - g.body.position[2]];
-        const l = Math.hypot(d[0], d[1], d[2]) || 1;
-        if (l < r) {
+      sourisModele.dx = 0; sourisModele.dy = 0;
+      pousseeModele = voleModele(modele, entree, dt, cfgModele);
+      // SUR SON SUPPORT. Dans le build, le modele est un `Rigidbody` pose sur
+      // son socle : il n'en bouge que pousse. Le portage le laissait tomber des
+      // le chargement — le socle n'a pas de collider pour lui — et il filait a
+      // travers le cratere avant qu'on ait touche a la console.
+      const pousse = entree.translation.some((v) => v !== 0);
+      if (modele.pose && !pousse) {
+        modele.pos = reposModeleCadre(anchorPos);
+        modele.vel = [0, 0, 0];
+        modele.omega = [0, 0, 0];
+        modele.quat = modele.reposQuat.slice();
+      } else {
+        modele.pose = false;
+        // Ce que son `Detector` lui fait sentir : `CraterField`, a 0,8, et
+        // rien d'autre. Sans detecteur extrait, le champ dominant comme avant.
+        const champDet = detModele && detModele.champ
+          ? dirFields.find((f) => f.name === detModele.champ) : null;
+        const g = champDet ? null : dominantField(bodies, {
+          x: modele.pos[0], y: modele.pos[1], z: modele.pos[2] },
+          { directional: dirFields, polar: polFields, framePos: anchorPos,
+            shiftOf: (v) => decalageDuCorps(v.body, anchorPos) });
+        const grav = champDet ? graviteModele(champDet, detModele.facteur)
+          : (g ? [g.dir.x * g.magnitude, g.dir.y * g.magnitude, g.dir.z * g.magnitude] : [0, 0, 0]);
+        const avant = modele.vel.slice();
+        const depart = modele.pos.slice();
+        for (let i = 0; i < 3; i++) {
+          modele.vel[i] += (pousseeModele[i] + grav[i]) * dt;
+          modele.pos[i] += modele.vel[i] * dt;
+        }
+        // LE SOL. Le terrain de Havok d'abord : un rayon le long du trajet de
+        // l'image, prolonge d'une demi-unite — la taille du modele. La sphere
+        // de la surface haute reste le repli sans physique ; elle posait le
+        // modele au-dessus du fond du cratere.
+        let contact = null;
+        const eng = scene.getPhysicsEngine && scene.getPhysicsEngine();
+        const pas = [modele.pos[0] - depart[0], modele.pos[1] - depart[1], modele.pos[2] - depart[2]];
+        const long = Math.hypot(pas[0], pas[1], pas[2]);
+        if (eng && eng.raycast && long > 1e-6) {
+          const u = pas.map((v) => v / long);
+          const de = new BABYLON.Vector3(depart[0], depart[1], depart[2]);
+          const a = de.add(new BABYLON.Vector3(u[0], u[1], u[2]).scale(long + 0.5));
+          try {
+            const hit = eng.raycast(de, a);
+            const q = hit && hit.hasHit ? (hit.hitPointWorld || hit.hitPoint) : null;
+            if (q) {
+              contact = [q.x - u[0] * 0.5, q.y - u[1] * 0.5, q.z - u[2] * 0.5];
+            }
+          } catch (e) { contact = null; }
+        }
+        const gSol = g || (anchorBody && anchorBody.gravity ? { body: anchorBody } : null);
+        if (!contact && gSol && gSol.body && gSol.body.gravity && !eng) {
+          const r = (gSol.body.gravity.upperSurfaceRadius || 0) + 0.6;
+          const d = [modele.pos[0] - gSol.body.position[0], modele.pos[1] - gSol.body.position[1],
+                     modele.pos[2] - gSol.body.position[2]];
+          const l = Math.hypot(d[0], d[1], d[2]) || 1;
+          if (l < r) contact = d.map((v, i) => gSol.body.position[i] + v / l * r);
+        }
+        if (contact) {
           const impact = Math.hypot(avant[0], avant[1], avant[2]);
-          for (let i = 0; i < 3; i++) {
-            modele.pos[i] = anchorPos[i] + g.body.position[i] + d[i] / l * r;
-            modele.vel[i] = 0;
-          }
+          modele.pos = contact;
+          modele.vel = [0, 0, 0];
+          // Le sol arrete aussi la rotation : le modele ne roule pas.
+          modele.omega = [0, 0, 0];
           // `OnImpact` ne fait rien sous DIX : un contact doux n'est pas un
           // crash, et c'est ce qui rend l'atterrissage possible.
           if (crashes(impact)) {
@@ -6595,9 +6682,9 @@ async function boot() {
             const sc = sonsUI.modelShipCrash();
             if (sc) audio.playOneShot(sc.file, { volume: sc.volume });
             else if (modele.crashSound) audio.playOneShot(modele.crashSound);
-            // Il repart de sa place : le build l'y remet par son support.
-            modele.pos = modele.repos.slice();
-            modele.vel = [0, 0, 0];
+            // Et il RESTE ou il est tombe : `OnImpact` ne le deplace pas. C'est
+            // la console qui le remet en place, par « Reset » (`Cancel`). Le
+            // portage le ramenait tout seul a son support.
           }
         }
       }
@@ -6605,13 +6692,13 @@ async function boot() {
       // et 0,01 rad/s — pendant deux dixiemes de seconde.
       for (const p of pistesModele) {
         const dec = decalageDuCorps(p.data.body, anchorPos) || [0, 0, 0];
-        const d = Math.hypot(modele.pos[0] - p.data.position[0] - dec[0],
-                             modele.pos[1] - p.data.position[1] - dec[1],
-                             modele.pos[2] - p.data.position[2] - dec[2]);
+        const d = Math.hypot(modele.pos[0] + anchorPos[0] - p.data.position[0] - dec[0],
+                             modele.pos[1] + anchorPos[1] - p.data.position[1] - dec[1],
+                             modele.pos[2] + anchorPos[2] - p.data.position[2] - dec[2]);
         p.etat.setInside(d < 3);
         // La vitesse est relative a la PLANETE : sur un sol qui tourne, un
         // modele immobile dans le monde ne l'est pas pour la piste.
-        if (p.etat.update(now, Math.hypot(...modele.vel), 0)) {
+        if (p.etat.update(now, Math.hypot(...modele.vel), Math.hypot(...modele.omega))) {
           compteurEnfant.landed();
           console.log("annonce : LandedModelShip");
         }
@@ -6624,9 +6711,28 @@ async function boot() {
         }
       }
       if (modele.node) {
-        modele.node.setAbsolutePosition(new BABYLON.Vector3(
-          modele.pos[0] - anchorPos[0], modele.pos[1] - anchorPos[1],
-          modele.pos[2] - anchorPos[2]));
+        // La pose : celle de repos, tournee de ce que le modele a tourne depuis
+        // (Delta = q . q_repos^-1), autour de son origine, puis portee a sa
+        // position. On passe par les matrices — la racine du glTF est en
+        // miroir, et une rotation de parent ne s'y inverse pas en quaternion.
+        const n = modele.node;
+        if (!modele.W0) modele.W0 = n.computeWorldMatrix(true).clone();
+        const W0 = modele.W0, t0 = W0.getTranslation();
+        const [qx, qy, qz, qw] = modele.reposQuat;
+        const delta = qMul(modele.quat, [-qx, -qy, -qz, qw]);
+        const R = new BABYLON.Matrix();
+        BABYLON.Matrix.FromQuaternionToRef(new BABYLON.Quaternion(...delta), R);
+        const W = W0.multiply(BABYLON.Matrix.Translation(-t0.x, -t0.y, -t0.z))
+          .multiply(R)
+          .multiply(BABYLON.Matrix.Translation(modele.pos[0], modele.pos[1], modele.pos[2]));
+        const parent = n.parent;
+        const local = parent
+          ? W.multiply(parent.computeWorldMatrix(true).clone().invert()) : W;
+        const sc = new BABYLON.Vector3(), rq = new BABYLON.Quaternion(), tr = new BABYLON.Vector3();
+        local.decompose(sc, rq, tr);
+        n.scaling.copyFrom(sc);
+        n.rotationQuaternion = rq;
+        n.position.copyFrom(tr);
       }
     }
     // Les six buses du vaisseau MINIATURE — celui de l'observatoire, pas celui

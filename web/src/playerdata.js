@@ -182,9 +182,7 @@ export function convoControllers(gameplay = {}) {
  *
  * Chaque regle ci-dessous est la transcription d'une methode reelle. Ce qui
  * n'est pas dans le build n'est pas invente : `_crashCount` et `_landCount`
- * comptent les essais du vaisseau miniature, qui n'est pas porte, et restent
- * donc a zero — la regle est ecrite quand meme, pour qu'elle soit juste le jour
- * ou il le sera.
+ * comptent les essais du vaisseau miniature (modelship.js, docs/78).
  *
  * `state` est l'etat de la BOUCLE courante, pas une connaissance : le jeu
  * remet `_hasGivenLaunchCodes` et `_triggerSecondConvo` a faux a chaque

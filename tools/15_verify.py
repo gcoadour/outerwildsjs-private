@@ -1680,6 +1680,18 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         if vol:
             rep.eq("il a une position et une vitesse", vol["bouge"], True)
+        # Et il reste SUR SON SOCLE tant qu'on ne le pousse pas : sa position
+        # derivait a la vitesse orbitale de Timber Hearth, et il quittait
+        # l'observatoire avant qu'on ait touche a la console (docs/132).
+        socle = page.evaluate("""() => {
+          const m = window.__modele;
+          if (!m || !m.vaisseau) return null;
+          const v = m.vaisseau;
+          return { pose: v.pose, vitesse: Math.hypot(...v.vel) };
+        }""")
+        if socle:
+            rep.eq("le modele reste sur son socle", socle["pose"], True)
+            rep.eq("... immobile", socle["vitesse"], 0)
         # L'enfant compte, et les crashs passent avant les reussites.
         kid = page.evaluate("""() => {
           const k = window.__modele.enfant;

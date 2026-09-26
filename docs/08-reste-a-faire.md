@@ -197,7 +197,7 @@ portage.
 | tutoriel de la sonde | lancer depuis une invite les détruit **toutes les quatre** ([`76`](76-proximite.md)) |
 | **sons d'interface** | les 8 de `UIAudioController`, à demi-volume ([`77`](77-sons.md)) |
 | son de réparation | l'air ou le vide, et le vide est le **passe-bas** de l'air ([`77`](77-sons.md)) |
-| **le vaisseau miniature vole** | 3 pistes, crash au-delà de 10 u/s, et il faut être **immobile** pour se poser ([`78`](78-modele.md)) |
+| **le vaisseau miniature vole** | 3 pistes, crash au-delà de 10 u/s, et il faut être **immobile** pour se poser ([`78`](78-modele.md)) ; ses propres propulseurs (12 u/s², rotation à la souris), le champ du cratère à 0,8, un crash qui le laisse où il est tombé, « Reset » et les invites de la console, le socle qui le tient au chargement ([`132`](132-comparaison-native.md)) |
 | l'enfant aux fusées | 3 arbres : 5 crashs valent un reproche, et il passe **avant** la réussite ([`78`](78-modele.md)) |
 | **perdre la gravité** | le regard est **verrouillé** le temps d'être retourné, à 50°/s ([`79`](79-alignement.md)) |
 | invites du sac dorsal | **seulement en apesanteur**, et les 3 poussées seulement à l'entraînement ([`80`](80-invites.md)) |

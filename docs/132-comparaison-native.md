@@ -983,3 +983,40 @@ L'alpha ne s'est pas laissée photographier carte ouverte : il lui faut la
 combinaison, qui est dans le vaisseau, derrière le terminal que le clavier
 seul n'atteint pas. La carte du portage est donc refaite sur l'IL, sans
 image de l'alpha pour la juger.
+
+## Le vaisseau miniature, relu dans l'IL
+
+Le modèle réduit de l'observatoire se pilote depuis une console
+(`RemoteFlightConsole`). L'alpha ne l'atteint pas au clavier seul — la console
+est au fond de l'observatoire —, mais sa lecture a suffi à trouver cinq écarts,
+dont deux visibles dès le chargement.
+
+- **Il quittait son socle au chargement.** Sa position était tenue en
+  coordonnées de repos, sans suivre Timber Hearth qui orbite : posé, il
+  dérivait à la vitesse orbitale de la planète (11 à 35 u/s mesurés), et
+  sortait de l'observatoire avant qu'on ait touché à quoi que ce soit. Il vit
+  désormais dans le repère de travail, comme le joueur, et reste sur son
+  socle tant qu'on ne le pousse pas.
+- **Ses propulseurs sont les siens.** Le seul `ThrusterModel` simple du build
+  est le sien : 12 u/s² de poussée, 5 rad/s² de rotation, amortissement 0,96.
+  Le portage prenait 0,4 fois la poussée du vrai vaisseau, « faute d'un modèle
+  à lui ». Il pousse le long de **ses** axes — l'orientation de repos n'était
+  pas extraite — et tourne à la souris (`Pitch`, et le roulis sur l'axe du
+  lacet, à la sensibilité 0,1 de l'`InputManager`).
+- **Sa gravité est à 0,8.** Son enfant `Detector` porte un
+  `SingleFieldDetector` qui ne voit qu'un champ, `CraterField`, à 0,8 de sa
+  force. 9,6 sous 12 de poussée : il décolle. Avec le champ dominant à pleine
+  force, la poussée l'équilibrait exactement et il ne quittait pas le sol.
+- **Un crash ne le remet pas en place.** `ModelShipCrashBehavior.OnImpact`
+  joue l'explosion et annonce `CrashedModelShip`, rien de plus ; le portage
+  le ramenait tout seul sur son socle. C'est la console qui le fait :
+  « Reset » (`Cancel`) quand il est à plus d'une unité de `RocketSpawn` — et
+  `RespawnModelShip` lui rend aussi sa rotation.
+- **Les invites de la console** manquaient : « Exit », « Upwards Thrust »,
+  « Downwards Thrust », « Horizontal Thrust » à sa place, « Reset » ailleurs.
+
+Le sol, enfin, est celui de Havok — un rayon le long du trajet de chaque
+image — et non plus la sphère de la surface haute, qui le posait au-dessus du
+fond du cratère. Mesuré dans Chromium : 2,4 u/s² de montée, cinq unités de
+hauteur en deux secondes, la chute, le crash compté par l'enfant, et le
+modèle qui reste où il est tombé.

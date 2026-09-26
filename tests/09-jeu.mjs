@@ -104,7 +104,7 @@ import { ATTERRISSAGE, rollMode, orbitSpeed, project,
          limitOrbitThrust, allowLandingMode, LandingView } from "../web/src/landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
          modelLandingSpots, modelShipBody,
-         rocketKids, estEnfant } from "../web/src/modelship.js";
+         rocketKids, estEnfant, voleModele, invitesConsoleModele, graviteModele } from "../web/src/modelship.js";
 import { QUANTIQUE, QuantumObject as ObjetQuantique, planarQuantumObjects,
          quantumStatues, locksOnSnapshot, collapsesOnFlashlightOff,
          statueParts, planarCandidate, slopeOK } from "../web/src/quantumobj.js";
@@ -736,6 +736,31 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("carte : le milieu joueur-cible, compte depuis le Soleil", m.focal.join(","), "5000,0");
   m.panLocked = true; m.pan(1, 0, 1);
   check("carte : pas de deplacement pendant la premiere moitie de la montee", m.focal.join(","), "5000,0");
+}
+
+// Le vaisseau miniature : `ModelShipController`, `ThrusterModel`,
+// `RemoteFlightConsole` (docs/132).
+{
+  const cfg = { translation: 12, rotation: 5, amortissement: 0.96 };
+  const e = { quat: [0, 0, 0, 1], omega: [0, 0, 0] };
+  check("modele : la poussee vers le haut, a douze", voleModele(e, { translation: [0, 1, 0] }, 0.02, cfg).join(","), "0,12,0");
+  check("modele : bornee axe par axe", voleModele(e, { translation: [3, 0, -3] }, 0.02, cfg).join(","), "12,0,-12");
+  const tourne = { quat: [0, 0.7071068, 0, 0.7071068], omega: [0, 0, 0] };   // quart de tour sur Y
+  check("modele : la poussee suit SES axes",
+        voleModele(tourne, { translation: [0, 0, 1] }, 0.02, cfg).map((x) => Math.round(x)).join(","), "12,0,0");
+  const r = { quat: [0, 0, 0, 1], omega: [0, 0, 0] };
+  for (let i = 0; i < 50; i++) voleModele(r, { rotation: [1, 0, 0] }, 0.02, cfg);
+  check("modele : la rotation accelere, et l'amortissement la freine",
+        r.omega[0] > 3 && r.omega[0] < 5, true);
+  const w = r.omega[0];
+  for (let i = 0; i < 50; i++) voleModele(r, {}, 0.02, cfg);
+  check("modele : lachee, elle decroit en 1 / (1 + 0,96 dt)",
+        Math.round(r.omega[0] / w * 1000) / 1000, Math.round(Math.pow(1 / (1 + 0.96 * 0.02), 50) * 1000) / 1000);
+  check("modele : l'orientation reste unitaire", Math.round(Math.hypot(...r.quat) * 1e6) / 1e6, 1);
+  check("console : a sa place, Exit et les trois poussees",
+        invitesConsoleModele(0.5).join(","), "_exitPrompt,_upThrustPrompt,_downThrustPrompt,_horizontalThrustPrompt");
+  check("console : deplace, Reset seul", invitesConsoleModele(3).join(","), "_resetPrompt");
+  check("detecteur : le champ a 0,8", graviteModele({ direction: [0, 0, 1], magnitude: 12 }, 0.8).map((x) => Math.round(x * 10) / 10).join(","), "0,0,9.6");
 }
 
 // Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue
