@@ -1079,3 +1079,29 @@ L'écran-titre, dont la caméra est aussi en différé, suit la même règle.
 | 93 s | 103 / 89 | 68 / 66 | 89 / 90 | 87 / 89 | 43 / 44 |
 | 103 s | 87 / 86 | 68 / 66 | 56 / 55 | 59 / 67 | 51 / 53 |
 | 120 s | 70 / 70 | 50 / 51 | 40 / 42 | 34 / 38 | 33 / 36 |
+
+## La réparation se fait dehors
+
+`RepairVolume`, relu dans l'IL, contredit le portage de bout en bout. Le
+portage réparait **depuis le poste de pilotage**, touche tenue, la pièce la
+plus abîmée d'abord. Dans le build :
+
+- chaque volume est l'**enfant** de la pièce qu'il répare
+  (`ShipComponent.Awake`, `GetRequiredComponentInChildren`) — dix réacteurs
+  et cinq pièces de coque, quinze volumes, chacun sphère d'un mètre ;
+- il ne s'allume que quand **sa** pièce prend un coup (`Activate`,
+  `ResetVolume` : l'avancement repart de zéro à chaque nouveau coup) ;
+- il s'**éteint quand on entre dans le vaisseau** (`OnEnterShip` :
+  `_interactReceiver.Disable()`) : on répare en faisant le tour de la coque ;
+- on le **vise**, à trois unités (`InteractReceiver.Init("Repair", …,
+  _repairDistance)`), touche tenue trois secondes ; « NN% » s'affiche au
+  style des invites, cinquante pixels au-dessus du centre ;
+- l'achever répare **sa** pièce, et elle seule (`OnCompleteRepair`).
+
+Le portage suit désormais ces règles. Il garde sa simplification des dégâts
+par position (avant, arrière, haut, gauche, droite) : un volume y répare la
+position de sa pièce. L'extraction rattache chaque volume à sa pièce ; la
+position du volume suit la pose du vaisseau. Mesuré dans Chromium : un coup à
+l'avant et à gauche allume six volumes — celui de l'avant, les cinq réacteurs
+de gauche —, le joueur posé devant le nez vise l'avant, « 40% », « 57% »,
+« 97% », et l'avant revient à neuf, la gauche restant abîmée.

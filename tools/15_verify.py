@@ -2162,6 +2162,23 @@ def _run(url, heavy, profil=None, zip_path=None):
             # fuit — le signe qu'on interpole vers une cible qui bouge seule.
             rep.eq("et il est aligne, au repos", redresse["ecartCourant"] < 1, True)
 
+        # --- la reparation, dehors (docs/132) ----------------------------------
+        #
+        # `RepairVolume` s'allume avec SA piece : un coup a l'avant et a gauche
+        # allume le volume de l'avant et les cinq reacteurs de gauche, et rien
+        # d'autre. Le portage reparait au poste de pilotage.
+        page.evaluate("""() => { const d = window.__shipRef && window.__shipRef.damage; if (!d) return;
+          window.__shipRef.boarded = false;
+          d._blesse(d.parts.avant, 'avant', 40); d._blesse(d.parts.gauche, 'gauche', 60); }""")
+        page.wait_for_timeout(1500)
+        rep_actifs = page.evaluate("""() => { const r = window.__reparations; if (!r) return null;
+          const c = {}; for (const v of r.actifs) c[v.repair.volume.location] = (c[v.repair.volume.location] || 0) + 1;
+          return c; }""")
+        if rep_actifs is not None:
+            rep.eq("reparation : six volumes allumes, ceux des pieces touchees",
+                   rep_actifs, {"avant": 1, "gauche": 5})
+        page.evaluate("() => { const d = window.__shipRef && window.__shipRef.damage; if (d) d.reset(); }")
+
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #
         # Un vaisseau pose ne decolle pas a l'appui : il s'ALLUME une seconde,

@@ -41,6 +41,7 @@
 import { insideVolume } from "./gravity.js";
 import { restingPoint } from "./frames.js";
 import { entrywayTriggers, attachEntryways } from "./entryways.js";
+import { LOCATIONS } from "./shipdamage.js";
 
 /** Les cinq valeurs de `DeathType`, lues dans l'assembly. */
 export const DEATH_TYPES = ["Default", "Impact", "Asphyxiation", "Energy", "Supernova"];
@@ -133,8 +134,45 @@ export function repairVolumes(gameplay) {
       volume: c.volume || null,
       distance: f._repairDistance ?? 3,
       seconds: f._secondsToRepair ?? 3,
+      // La piece dont il est l'enfant, et la POSITION d'alerte qu'elle porte :
+      // c'est elle que le portage sait reparer (avant, arriere, haut, gauche,
+      // droite). Les reacteurs de gauche et de droite n'ont que cette
+      // position-la.
+      piece: c.piece ? c.piece.nom : null,
+      location: c.piece
+        ? (Object.entries(LOCATIONS).find(([, bit]) => bit === c.piece.alerte) || [null])[0]
+        : null,
+      rayon: (c.volume && c.volume.radius) || 1,
     };
   });
+}
+
+/**
+ * La reparation que le regard designe : `InteractReceiver`, dont `Init` pose
+ * la portee a `_repairDistance` (3). Un rayon depuis la camera ; le premier
+ * volume ACTIF qu'il traverse a portee. Actif : sa position est abimee —
+ * `ApplyDamageForce` fait `_repairVolume.Activate()` — et le joueur n'est pas
+ * dans le vaisseau (`OnEnterShip` : `_interactReceiver.Disable()`).
+ *
+ * @param volumes  [{ repair, centre, rayon, distance }] centres dans le repere
+ * @param oeil     [x, y, z] ; @param avant vecteur unitaire
+ * @returns l'entree visee, ou null
+ */
+export function reparationVisee(volumes, oeil, avant) {
+  let best = null, bestT = Infinity;
+  for (const v of volumes) {
+    const c = v.centre, r = v.rayon;
+    const oc = [oeil[0] - c[0], oeil[1] - c[1], oeil[2] - c[2]];
+    const b = oc[0] * avant[0] + oc[1] * avant[1] + oc[2] * avant[2];
+    const q = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - r * r;
+    const disc = b * b - q;
+    if (disc < 0) continue;
+    // Entree dans la sphere, ou zero si l'oeil y est deja.
+    const t = q <= 0 ? 0 : -b - Math.sqrt(disc);
+    if (t < 0 || t > v.distance || t >= bestT) continue;
+    best = v; bestT = t;
+  }
+  return best;
 }
 
 /**

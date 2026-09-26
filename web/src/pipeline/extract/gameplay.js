@@ -271,6 +271,28 @@ export function extractGameplay(ctx) {
   const named = new Set([...SINGLETONS, ...PLACED]);
   const keep = (cls) => named.has(cls) || PLACED_PATTERNS.some((p) => p.test(cls));
 
+  // Les pieces du vaisseau, par GameObject porteur : chaque `RepairVolume` est
+  // l'ENFANT de la piece qu'il repare (`ShipComponent.Awake` le prend par
+  // `GetRequiredComponentInChildren`). Le portage reparait au poste de
+  // pilotage la piece la plus abimee, faute de ce lien (docs/132).
+  const pieces = new Map();
+  for (const { obj, cls } of ctx.behaviours(["ShipComponent", "EngineComponent"])) {
+    const f = ctx.plain(ctx.scriptFields(obj) || {});
+    pieces.set(ctx.ownerId(obj), { classe: cls, alerte: f._alertLocation ?? 0,
+                                   reacteur: f._thrusterLocation ?? null });
+  }
+  const pieceAuDessus = (gid) => {
+    let g = gid;
+    for (let i = 0; i < 8 && g; i++) {
+      if (pieces.has(g)) return { nom: ctx.name(g), ...pieces.get(g) };
+      const t = ctx.transformOf.get(g);
+      const par = t && t.m_Father ? ctx.env.deref(t.m_Father, ctx.env.get(ctx.sceneFile)) : null;
+      const pt = par ? ctx.env.read(par) : null;
+      g = pt && pt.m_GameObject ? pt.m_GameObject.pathId : 0;
+    }
+    return null;
+  };
+
   for (const { obj, cls } of ctx.behaviours(keep)) {
     const fields = ctx.scriptFields(obj);
     if (!fields) continue;
@@ -301,6 +323,11 @@ export function extractGameplay(ctx) {
     if (WANT_SCALE.test(cls)) {
       const t = ctx.transformOf.get(gid);
       if (t && t.m_LocalScale) entry.localScale = Math.round(t.m_LocalScale.x * 1e4) / 1e4;
+    }
+
+    if (cls === "RepairVolume") {
+      const piece = pieceAuDessus(gid);
+      if (piece) entry.piece = piece;
     }
 
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;

@@ -75,6 +75,7 @@ import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState, PLAYER_FALLBACK } from "./player.js";
 import { applyGameShaders, updateGameShaders, toLegacyMaterials, gltfEnGamma } from "./shaders/index.js";
 import { EchangeSoleil, imposteursDuBuild, poseImposteur } from "./imposteur.js";
+import { reparationVisee } from "./volumes.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
@@ -98,7 +99,7 @@ import { MODELE, ModelLandingSpot, RocketKid, crashes,
          detecteurModele, graviteModele } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod, bodySpin } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
-         dominantField } from "./gravity.js";
+         dominantField, rotateByQuaternion } from "./gravity.js";
 // @autrement Tonemapping : quatre methodes de courbe et de cible de rendu,
 // c'est-a-dire l'implementation d'un shader d'Unity 4. Babylon a la sienne, et
 // c'est elle qu'on regle (docs/103-refait.md).
@@ -2937,6 +2938,17 @@ async function boot() {
   }
   // Avancement de la reparation en cours, pour l'invite a l'ecran.
   let repairFraction = 0;
+  // La reparation visee, et l'instant ou elle s'est achevee (`_repairedTime`).
+  let reparationVisee_ = null, reparationFinie = -Infinity;
+  const hudReparation = (() => {
+    const root = document.getElementById("ui");
+    if (!root) return null;
+    const d = document.createElement("div");
+    d.className = "ow-reparation";
+    d.hidden = true;
+    root.appendChild(d);
+    return d;
+  })();
 
   /**
    * Une commande, designee par son code clavier — ou par « Mouse0 » a
@@ -4003,45 +4015,92 @@ async function boot() {
         player.vel.x = ship.vel.x; player.vel.y = ship.vel.y; player.vel.z = ship.vel.z;
         if (playerAgg) teleportBody(BABYLON, playerAgg, player.pos, false);
       }
-      // --- reparation ---
+      // --- reparation, DEHORS ---
       //
-      // Les dix-huit `RepairVolume` du build sont poses DANS le vaisseau, sur
-      // la piece que chacun repare, et s'atteignent en marchant dans la coque.
-      // Ce portage n'a pas d'interieur : les volumes se ramenent donc a « on
-      // repare depuis le poste de pilotage », une piece a la fois, au rythme du
-      // build (trois secondes par piece). Leur position extraite, elle, ne
-      // vaudrait rien — le vaisseau bouge.
-      if (ship.boarded && shipRepairs.length && ship.damage) {
+      // `RepairVolume` : chaque volume est l'enfant de la piece qu'il repare,
+      // s'allume quand elle prend un coup (`Activate`), et s'eteint quand on
+      // entre dans le vaisseau (`OnEnterShip` : `Disable`). On repare donc en
+      // faisant le TOUR de la coque, en visant la piece a trois unites, touche
+      // tenue trois secondes. Le portage reparait depuis le poste de pilotage,
+      // la piece la plus abimee d'abord — l'inverse (docs/132).
+      repairFraction = 0;
+      reparationVisee_ = null;
+      if (shipRepairs.length && ship.damage && shipRest) {
         const avarie = ship.damage;
-        const abimee = avarie.damaged;
-        const en_cours = shipRepairs.find((r) => !r.done) || null;
-        if (abimee && en_cours) {
+        const ax = ship.axes;
+        const actifs = [];
+        for (const r of shipRepairs) {
+          const loc = r.volume.location;
+          const part = loc ? avarie.parts[loc] : null;
+          if (!part) continue;
+          // `ApplyDamageForce` : `_repairVolume.ResetVolume()` — un nouveau
+          // coup remet l'avancement a zero.
+          if (part.totalDamage > (r.dommageVu ?? 0)) r.reset();
+          r.dommageVu = part.totalDamage;
+          if (!(part.totalDamage > 0 || part.dead) || ship.boarded) continue;
+          if (!r.offset) {
+            let d = [r.volume.position[0] - shipRest[0], r.volume.position[1] - shipRest[1],
+                     r.volume.position[2] - shipRest[2]];
+            if (shipRestRot) {
+              const q = shipRestRot;
+              d = rotateByQuaternion([-q[0], -q[1], -q[2], q[3]], d);
+            }
+            r.offset = d;
+          }
+          const o = r.offset;
+          actifs.push({ repair: r, rayon: r.volume.rayon, distance: r.volume.distance,
+                        centre: [0, 1, 2].map((i) => [ship.pos.x, ship.pos.y, ship.pos.z][i]
+                          + o[0] * ax.right[i] + o[1] * ax.up[i] + o[2] * ax.fwd[i]) });
+        }
+        window.__reparations = { actifs, shipRepairs };
+        const avantCam = camera.getDirection(BABYLON.Axis.Z);
+        const vise = actifs.length && !dialogue.active
+          ? reparationVisee(actifs, [camera.position.x, camera.position.y, camera.position.z],
+                            [avantCam.x, avantCam.y, avantCam.z]) : null;
+        for (const v of actifs) if (v !== vise && v.repair.holding) {
+          v.repair.release();
+          const s = sonsUI.stopRepair();
+          if (s) audio.playOneShot(s.file, { volume: 0 });
+          console.log("annonce : StopRepairing");
+        }
+        if (vise) {
+          const en_cours = vise.repair;
+          reparationVisee_ = vise;
+          // La touche est a la reparation : on n'embarque pas en visant une
+          // piece, meme a portee de la trappe.
+          interactPressed = false;
           const tenaitAvant = en_cours.holding;
           if (cmds.held("Interact", etatCmd)) en_cours.press(); else en_cours.release();
           // §R ON NE REPARE PAS PAREIL DANS LE VIDE. `RepairAudioController`
           // choisit entre `_repairLoop` et `_spaceRepairLoop` selon que le
-          // detecteur d'oxygene trouve quelque chose : reparer sa coque en
-          // apesanteur ne fait pas le meme bruit que la reparer au village, et
-          // le build a enregistre les deux (docs/77-sons.md).
+          // detecteur d'oxygene trouve quelque chose (docs/77-sons.md).
           if (en_cours.holding !== tenaitAvant) {
-            const air = !!(zoneOxygene || (ship && ship.boarded));
+            const air = !!zoneOxygene;
             const s = en_cours.holding ? sonsUI.startRepair(air) : sonsUI.stopRepair();
             if (s) audio.playOneShot(s.file, { volume: en_cours.holding ? 0.6 : 0 });
             console.log(`annonce : ${en_cours.holding ? "StartRepairing" : "StopRepairing"}`);
           }
           if (en_cours.update(dt)) {
-            const piece = avarie.repair();
+            // `OnCompleteRepair` : la piece du volume, et elle seule.
+            const piece = avarie.repair(en_cours.volume.location);
             if (piece) console.log(`reparation : ${piece} remise en etat`);
-            // `OnFinishRepairing` : la boucle s'ARRETE net, et un coup la
-            // remplace — l'un ou l'autre selon l'air, la aussi.
-            const fin = sonsUI.finishRepair(!!(zoneOxygene || ship.boarded));
+            const fin = sonsUI.finishRepair(!!zoneOxygene);
             if (fin) audio.playOneShot(fin.file, { volume: fin.volume });
             console.log("annonce : FinishRepairing");
-            en_cours.reset();
+            reparationFinie = now;
           }
           repairFraction = en_cours.fraction;
-        } else repairFraction = 0;
-      } else repairFraction = 0;
+        }
+      }
+      if (hudReparation) {
+        // `RepairVolume.OnGUI` : « NN% », au style des invites, cinquante
+        // pixels au-dessus du centre — tant qu'on vise et jusqu'a trois
+        // secondes apres la fin.
+        const montre = !!reparationVisee_ && !guiMode.hidden
+          && (reparationVisee_.repair.fraction < 1 || now < reparationFinie + 3);
+        hudReparation.hidden = !montre;
+        if (montre) hudReparation.textContent = `${Math.round(reparationVisee_.repair.fraction * 100)}%`;
+      }
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
@@ -4695,6 +4754,8 @@ async function boot() {
       // interagi (`!_hasInteracted`). Une conversation ouverte la retire ; le
       // portage la laissait sous le reticule pendant tout le dialogue.
       const centre = (focus && dialogue.active) ? null
+        // `InteractReceiver.Init("Repair", ...)` : l'invite du volume vise.
+        : reparationVisee_ ? P("InteractVolume._screenPrompt", "Repair")
         : focus ? P("InteractVolume._screenPrompt",
                     focus.prompt || focus.name)
         : (convo && !dialogue.active)

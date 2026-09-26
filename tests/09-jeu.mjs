@@ -53,7 +53,7 @@ import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAccelerati
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
          hatchControllers, Hatch, BLINK } from "../web/src/attachments.js";
 import { DEATH_TYPES, deathCause, destructionVolumes, destroyedBy,
-         repairVolumes, Repair } from "../web/src/volumes.js";
+         repairVolumes, Repair, reparationVisee } from "../web/src/volumes.js";
 import { ambienceZones, zonesActives, isDay,
          AmbienceMixer } from "../web/src/ambience.js";
 import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
@@ -778,6 +778,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("... cinq secondes", c.update(111), null);
   c.debutBoucle(3, 200);
   check("troisieme boucle : plus rien", c.update(206), null);
+}
+
+// `RepairVolume` / `InteractReceiver` : on vise la piece, a trois unites.
+{
+  const v = (c) => ({ centre: c, rayon: 1, distance: 3 });
+  check("reparation : la piece devant, a portee", !!reparationVisee([v([0, 0, 3])], [0, 0, 0], [0, 0, 1]), true);
+  check("reparation : trop loin, rien", reparationVisee([v([0, 0, 5])], [0, 0, 0], [0, 0, 1]), null);
+  check("reparation : a cote du regard, rien", reparationVisee([v([3, 0, 2])], [0, 0, 0], [0, 0, 1]), null);
+  check("reparation : dans le dos, rien", reparationVisee([v([0, 0, -2])], [0, 0, 0], [0, 0, 1]), null);
+  check("reparation : la plus proche des deux",
+        reparationVisee([v([0, 0, 3.5]), v([0, 0, 2])], [0, 0, 0], [0, 0, 1]).centre.join(","), "0,0,2");
+  check("reparation : l'oeil dans la sphere, elle est visee", !!reparationVisee([v([0, 0, 0.5])], [0, 0, 0], [0, 0, 1]), true);
 }
 
 // Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue
