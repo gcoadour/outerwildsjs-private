@@ -214,10 +214,23 @@ export function createPlayerBody(BABYLON, scene, renderPos, radius = 0.6) {
     "playerBody", { diameter: radius * 2, segments: 8 }, scene);
   mesh.isVisible = false;
   mesh.position.set(renderPos.x, renderPos.y, renderPos.z);
+  // LE MATERIAU DE LA COURSE. `CharacterMovementModel.Awake` en cree trois ;
+  // en course et en l'air, le frottement est NUL, combine au MINIMUM — donc
+  // nul contre tout. Le portage posait 0,9 en permanence : contre la paroi du
+  // cratere, le joueur glissait le long d'une pente de 55 degres a 1,6 u/s,
+  // la ou l'alpha la gravit — la poussee horizontale d'un corps sans
+  // frottement s'y redresse en montee (docs/132). Le frottement DEBOUT (1,
+  // au maximum) est tenu par `pasAuSol`, et ne doit pas compter deux fois.
+  // Et le `Rigidbody` du joueur n'a pas de trainee (`m_Drag` 0).
   const agg = new BABYLON.PhysicsAggregate(
     mesh, BABYLON.PhysicsShapeType.SPHERE,
-    { mass: 70, restitution: 0, friction: 0.9 }, scene);
-  agg.body.setLinearDamping(0.1);
+    { mass: 70, restitution: 0, friction: 0 }, scene);
+  try {
+    agg.shape.material = { friction: 0, staticFriction: 0, restitution: 0,
+                           frictionCombine: BABYLON.PhysicsMaterialCombineMode.MINIMUM,
+                           restitutionCombine: BABYLON.PhysicsMaterialCombineMode.MINIMUM };
+  } catch (e) { /* moteur sans materiau : le frottement nul des options reste */ }
+  agg.body.setLinearDamping(0);
   agg.body.setAngularDamping(20);
   return agg;
 }

@@ -502,13 +502,12 @@ export class SolarMap {
    *
    * Le point vise est le MILIEU du segment joueur-cible, et la distance de
    * camera est celle qui les tient juste a l'image, a sept dixiemes pres —
-   * avec un champ de 70 degres, `tan(35°)` vaut 0,7002, si bien que la demi-
-   * etendue vue est a un millieme pres la distance qui vous separe. Le
-   * cadrage n'est pas un reglage : il tombe de la geometrie.
+   * Le champ est celui de `MapCamera`, 60 degres : `tan(30°)` vaut 0,577, et
+   * la demi-etendue vue fait 1,21 fois la distance qui vous separe. Le cadrage
+   * n'est pas un reglage : il tombe de la geometrie.
    *
-   * Et le zoom dure 0,6 s dans ce cas-la, quelle que soit la duree demandee.
-   * Ce portage ouvre la carte d'un coup ; la valeur est relevee ici pour que
-   * l'animation, le jour ou elle vient, n'ait pas a etre devinee.
+   * Et le zoom dure 0,6 s dans ce cas-la, quelle que soit la duree demandee ;
+   * c'est `VueCarte` qui la joue.
    *
    * LE SON A DIX SECONDES DE GARDE :
    *

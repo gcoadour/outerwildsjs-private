@@ -42,7 +42,7 @@ portage.
 | géométrie des 7 corps | complète, 69 Mo en glTF |
 | matériaux et textures | 251 matériaux, 200 textures, normales désentrelacées |
 | collision | Havok, colliders trimesh du corps ancré |
-| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
+| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout, et frottement **nul** en course et en l'air — le joueur gravit les pentes raides comme dans l'alpha (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
 | ressources | oxygène, carburant, santé, intégrité |
 | vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
 | détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ; invite « ⓧ Talk » du build ([`132`](132-comparaison-native.md)) |
@@ -68,7 +68,7 @@ portage.
 | connaissance | codes, exploration et boucle persistants et signifiants |
 | outils | télescope ×6 et lanceur de sonde, 3/6 savoirs gagnables |
 | interface de dialogue | proportions du build, curseur, sondes rendues |
-| jauges et invites | textures du casque, 46 invites triées par priorité |
+| jauges et invites | textures du casque, 46 invites triées par priorité ; celle des codes de lancement cinq secondes seulement, comme `LaunchCodePromptController` ([`132`](132-comparaison-native.md)) |
 | brouillards | Dark Bramble et coque quantique, masquage et lumières |
 | croûte de Brittle Hollow | 122 fragments : 72 tombent, 50 se brisent |
 | minicarte | globe du secteur, traces de 100 points, **éteinte dans les trois secteurs qui ne la portent pas** |
@@ -109,7 +109,7 @@ portage.
 | textures qui défilent | 44 extraites, 27 rattachées et 23 en mouvement |
 | sable des jumelles | **60 → 290 et 300 → 66 entre la 2e et la 17e minute**, entonnoir compris |
 | volumes de destruction | 6 volumes, la cause de mort lue dans le build, sonde épargnée par 4 |
-| réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement |
+| réparation du vaisseau | 18 volumes, maintien à 3 s, l'avancement survit au relâchement ; **dehors**, en visant la pièce à trois unités — chaque volume répare sa pièce, s'allume avec elle et s'éteint dans le vaisseau ([`132`](132-comparaison-native.md)) |
 | **la queue de `refait.mjs`** | un avis en cours fait tomber le suivant, un teleporteur met 0,5 s, les meteores lisent le champ A LEUR position ([`121`](121-avis.md)) |
 | **les jumelles du sablier** | aucun primaire : elles tournent l'une autour de l'autre a 31,65, dans le repere de leur barycentre ([`120`](120-jumelles.md)) |
 | **ce que le predateur entend** | cible sous 200 unites quel que soit le volume, trouble au-dela si le volume passe DIX — et dix n'est atteint qu'en diagonale ([`119`](119-bruit.md)) |
@@ -197,7 +197,7 @@ portage.
 | tutoriel de la sonde | lancer depuis une invite les détruit **toutes les quatre** ([`76`](76-proximite.md)) |
 | **sons d'interface** | les 8 de `UIAudioController`, à demi-volume ([`77`](77-sons.md)) |
 | son de réparation | l'air ou le vide, et le vide est le **passe-bas** de l'air ([`77`](77-sons.md)) |
-| **le vaisseau miniature vole** | 3 pistes, crash au-delà de 10 u/s, et il faut être **immobile** pour se poser ([`78`](78-modele.md)) |
+| **le vaisseau miniature vole** | 3 pistes, crash au-delà de 10 u/s, et il faut être **immobile** pour se poser ([`78`](78-modele.md)) ; ses propres propulseurs (12 u/s², rotation à la souris), le champ du cratère à 0,8, un crash qui le laisse où il est tombé, « Reset » et les invites de la console, le socle qui le tient au chargement ([`132`](132-comparaison-native.md)) |
 | l'enfant aux fusées | 3 arbres : 5 crashs valent un reproche, et il passe **avant** la réussite ([`78`](78-modele.md)) |
 | **perdre la gravité** | le regard est **verrouillé** le temps d'être retourné, à 50°/s ([`79`](79-alignement.md)) |
 | invites du sac dorsal | **seulement en apesanteur**, et les 3 poussées seulement à l'entraînement ([`80`](80-invites.md)) |

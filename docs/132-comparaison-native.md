@@ -983,3 +983,125 @@ L'alpha ne s'est pas laissée photographier carte ouverte : il lui faut la
 combinaison, qui est dans le vaisseau, derrière le terminal que le clavier
 seul n'atteint pas. La carte du portage est donc refaite sur l'IL, sans
 image de l'alpha pour la juger.
+
+## Le vaisseau miniature, relu dans l'IL
+
+Le modèle réduit de l'observatoire se pilote depuis une console
+(`RemoteFlightConsole`). L'alpha ne l'atteint pas au clavier seul — la console
+est au fond de l'observatoire —, mais sa lecture a suffi à trouver cinq écarts,
+dont deux visibles dès le chargement.
+
+- **Il quittait son socle au chargement.** Sa position était tenue en
+  coordonnées de repos, sans suivre Timber Hearth qui orbite : posé, il
+  dérivait à la vitesse orbitale de la planète (11 à 35 u/s mesurés), et
+  sortait de l'observatoire avant qu'on ait touché à quoi que ce soit. Il vit
+  désormais dans le repère de travail, comme le joueur, et reste sur son
+  socle tant qu'on ne le pousse pas.
+- **Ses propulseurs sont les siens.** Le seul `ThrusterModel` simple du build
+  est le sien : 12 u/s² de poussée, 5 rad/s² de rotation, amortissement 0,96.
+  Le portage prenait 0,4 fois la poussée du vrai vaisseau, « faute d'un modèle
+  à lui ». Il pousse le long de **ses** axes — l'orientation de repos n'était
+  pas extraite — et tourne à la souris (`Pitch`, et le roulis sur l'axe du
+  lacet, à la sensibilité 0,1 de l'`InputManager`).
+- **Sa gravité est à 0,8.** Son enfant `Detector` porte un
+  `SingleFieldDetector` qui ne voit qu'un champ, `CraterField`, à 0,8 de sa
+  force. 9,6 sous 12 de poussée : il décolle. Avec le champ dominant à pleine
+  force, la poussée l'équilibrait exactement et il ne quittait pas le sol.
+- **Un crash ne le remet pas en place.** `ModelShipCrashBehavior.OnImpact`
+  joue l'explosion et annonce `CrashedModelShip`, rien de plus ; le portage
+  le ramenait tout seul sur son socle. C'est la console qui le fait :
+  « Reset » (`Cancel`) quand il est à plus d'une unité de `RocketSpawn` — et
+  `RespawnModelShip` lui rend aussi sa rotation.
+- **Les invites de la console** manquaient : « Exit », « Upwards Thrust »,
+  « Downwards Thrust », « Horizontal Thrust » à sa place, « Reset » ailleurs.
+
+Le sol, enfin, est celui de Havok — un rayon le long du trajet de chaque
+image — et non plus la sphère de la surface haute, qui le posait au-dessus du
+fond du cratère. Mesuré dans Chromium : 2,4 u/s² de montée, cinq unités de
+hauteur en deux secondes, la chute, le crash compté par l'enfant, et le
+modèle qui reste où il est tombé.
+
+## Un même parcours au clavier, dans les deux versions
+
+Au clavier seul, on ne tourne pas, mais on avance, recule et se déporte. Même
+départ (« Skip Intro », boucle à 38 s), mêmes touches, mêmes durées — reculer
+2 s, droite 2 s, avancer 2,5 s, gauche 2,5 s —, une image après chacune
+(`work/alpha-route.sh`, `work/pw-route.mjs`, hors dépôt). Deux écarts.
+
+**Le joueur ne gravissait pas la paroi du cratère.** À droite du feu, le sol
+monte à 45 puis 55 degrés. L'alpha y grimpe — l'image suivante voit le
+terminal d'en haut — ; le portage glissait le long de la paroi à 1,6 u/s.
+Le corps physique du joueur avait un frottement de 0,9 en permanence. Le
+build en change à chaque pas : `CharacterMovementModel.Awake` crée trois
+matériaux, et en course comme en l'air le frottement est **nul**, combiné au
+**minimum** — nul contre tout. Poussé à l'horizontale à 25 u/s² (0,5 par pas
+de 0,02 s) contre une pente sans frottement, le corps se redresse en montée,
+plus vite que les 9,8 u/s² de pesanteur le long de la pente. Le frottement
+debout (1, au maximum) était déjà tenu à part (`pasAuSol`) ; le `Rigidbody`
+du joueur n'a pas non plus de traînée. Après correction, les deux parcours
+finissent au même endroit : face au rocher, puis contre le pilier de la tour.
+
+**« Launch Codes Aquired » restait à l'écran.** L'alpha n'affiche rien sur
+ce parcours ; le portage portait le bandeau du bas du début à la fin.
+`LaunchCodePromptController` ne le montre que **cinq secondes** : après
+`LearnLaunchCodes`, ou — « Launch Codes Remembered » — cinq secondes après le
+réveil de la **deuxième** boucle, et d'aucune autre. Le portage le montrait
+tant qu'on connaissait les codes (`InviteCodes`, hud.js).
+
+### La nuit des pins, et midi
+
+Sur le même parcours, de nuit, les pins du camp sortaient verts dans le
+portage et noirs dans l'alpha (arbres 16 contre 5 à vingt secondes). Isolée
+lumière par lumière — en bloquant l'intensité de chaque lumière, la boucle
+de jeu la réécrivant à chaque image —, l'ambiance donnait 4,6 : l'alpha
+entier. Le reste venait du feu et des lampes, huit, sur des feuilles qui lui
+tournent le dos.
+
+Les deux shaders de la végétation (`DoubleSidedCutoutDiffuse`,
+`DoubleSidedCutoutBumpedDiffuse`) sont en `Cull Off`, et **aucun shader du
+build ne lit `VFACE`** : la face arrière est éclairée avec la normale de la
+face avant. Babylon, avec `twoSidedLighting`, retourne la normale et éclaire
+les deux faces. Coupée, la nuit tombe à 7 contre 5.
+
+Midi, alors, montait à 77 contre 43. La même famille de shaders couvre aussi
+l'ascenseur, les passerelles, les colonnes — la tour — ; et la végétation
+n'était pas ombrée. `m_ReceiveShadows` est faux sur ses renderers, et le
+portage l'honorait depuis peu. Or la caméra du jeu est en **Deferred
+Lighting**, où Unity 4 ne lit pas ce drapeau : tout ce qui passe par le
+tampon de lumière reçoit l'ombre. Les pins ombrés, midi tombe à 44 contre 43.
+L'écran-titre, dont la caméra est aussi en différé, suit la même règle.
+
+| instant | terminal | tour | sol | sol à droite | arbres |
+|---|---|---|---|---|---|
+| 20 s | 45 / 49 | 36 / 39 | 9 / 11 | 4 / 6 | 5 / 7 |
+| 60 s | 79 / 79 | 59 / 59 | 50 / 47 | 46 / 44 | 45 / 44 |
+| 81 s | 98 / 89 | 63 / 65 | 88 / 89 | 42 / 45 | 45 / 48 |
+| 93 s | 103 / 89 | 68 / 66 | 89 / 90 | 87 / 89 | 43 / 44 |
+| 103 s | 87 / 86 | 68 / 66 | 56 / 55 | 59 / 67 | 51 / 53 |
+| 120 s | 70 / 70 | 50 / 51 | 40 / 42 | 34 / 38 | 33 / 36 |
+
+## La réparation se fait dehors
+
+`RepairVolume`, relu dans l'IL, contredit le portage de bout en bout. Le
+portage réparait **depuis le poste de pilotage**, touche tenue, la pièce la
+plus abîmée d'abord. Dans le build :
+
+- chaque volume est l'**enfant** de la pièce qu'il répare
+  (`ShipComponent.Awake`, `GetRequiredComponentInChildren`) — dix réacteurs
+  et cinq pièces de coque, quinze volumes, chacun sphère d'un mètre ;
+- il ne s'allume que quand **sa** pièce prend un coup (`Activate`,
+  `ResetVolume` : l'avancement repart de zéro à chaque nouveau coup) ;
+- il s'**éteint quand on entre dans le vaisseau** (`OnEnterShip` :
+  `_interactReceiver.Disable()`) : on répare en faisant le tour de la coque ;
+- on le **vise**, à trois unités (`InteractReceiver.Init("Repair", …,
+  _repairDistance)`), touche tenue trois secondes ; « NN% » s'affiche au
+  style des invites, cinquante pixels au-dessus du centre ;
+- l'achever répare **sa** pièce, et elle seule (`OnCompleteRepair`).
+
+Le portage suit désormais ces règles. Il garde sa simplification des dégâts
+par position (avant, arrière, haut, gauche, droite) : un volume y répare la
+position de sa pièce. L'extraction rattache chaque volume à sa pièce ; la
+position du volume suit la pose du vaisseau. Mesuré dans Chromium : un coup à
+l'avant et à gauche allume six volumes — celui de l'avant, les cinq réacteurs
+de gauche —, le joueur posé devant le nez vise l'avant, « 40% », « 57% »,
+« 97% », et l'avant revient à neuf, la gauche restant abîmée.

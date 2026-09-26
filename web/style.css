@@ -165,6 +165,14 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   font-size: 20px; line-height: 25px; color: #f00; white-space: pre;
 }
 .ow-prompts { position: absolute; display: flex; flex-direction: column; }
+/* RepairVolume.OnGUI : « NN% » au style des invites, centré, 50 px au-dessus
+   du centre de l'écran, tant qu'on vise la pièce. */
+.ow-reparation {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, calc(-50% - 50px));
+  color: #E6D8B8; white-space: nowrap;
+}
+.ow-reparation[hidden] { display: none; }
 /* PromptManager.Update : centre de l'ecran + 50 px vers le bas, aligne au centre */
 .ow-prompts-center {
   left: 50%; top: 50%; margin-top: 50px; transform: translateX(-50%);

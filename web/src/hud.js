@@ -424,3 +424,55 @@ export function crosshairPixels(w = 13, h = 13, t = 1) {
   }
   return out;
 }
+
+/**
+ * `LaunchCodePromptController` : l'invite du bas, et combien de temps elle
+ * reste. Cinq secondes, jamais plus.
+ *
+ *   OnLearnLaunchCodes           « Launch Codes Aquired », cinq secondes
+ *   Awake, si GetLoopCount() == 2  « Launch Codes Remembered », cinq secondes
+ *                                  apres le reveil, puis cinq secondes
+ *
+ * La DEUXIEME boucle seulement, et pas les suivantes. Le portage la montrait
+ * EN PERMANENCE des qu'on connaissait les codes : au clavier, sur le meme
+ * parcours, l'alpha n'affiche rien et le portage portait le bandeau tout le
+ * long (docs/132).
+ */
+export const DUREE_INVITE_CODES = 5;
+
+export class InviteCodes {
+  constructor() {
+    this.texte = null;          // 0 « Aquired », 1 « Remembered », ou null
+    this.depuis = -Infinity;
+    this.attendre = false;
+    this.reveil = 0;
+  }
+
+  /** `Awake`, a chaque boucle. `boucle` compte comme le build : 1 d'abord. */
+  debutBoucle(boucle, now) {
+    this.texte = null;
+    this.attendre = boucle === 2;
+    this.reveil = now;
+  }
+
+  /** `OnLearnLaunchCodes`. */
+  apprend(now) {
+    this.texte = 0;
+    this.depuis = now;
+  }
+
+  /** @returns l'indice du texte a montrer, ou null */
+  update(now) {
+    if (this.attendre) {
+      if (now > this.reveil + DUREE_INVITE_CODES) {
+        this.texte = 1;
+        this.depuis = now;
+        this.attendre = false;
+      }
+    } else if (this.texte !== null && now > this.depuis + DUREE_INVITE_CODES) {
+      this.texte = null;
+    }
+    return this.texte;
+  }
+}
+

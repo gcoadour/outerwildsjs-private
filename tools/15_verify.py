@@ -572,6 +572,16 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         rep.eq("spots : plus d'exposant de Babylon", lum["exposant"], False)
         rep.eq("attenuation : le fondu de fin de portee d'Unity", lum["fondu"], True)
+        # `Cull Off` sans `VFACE` : la face arriere garde la normale avant. Et
+        # en Deferred Lighting, tout recoit l'ombre (docs/132).
+        faces = page.evaluate("""() => {
+          const s = BABYLON.EngineStore.LastCreatedScene;
+          const m = s.materials.filter((x) => { const e = x.metadata && x.metadata.gltf && x.metadata.gltf.extras;
+            return e && /DoubleSidedCutout/.test(e.unityShader || ''); });
+          return { n: m.length, deux: m.filter((x) => x.twoSidedLighting).length };
+        }""")
+        rep.at_least("materiaux double face lus", faces["n"], 5)
+        rep.eq("aucun n'eclaire sa face arriere a l'envers", faces["deux"], 0)
 
         # --- animations ------------------------------------------------------
         anim = page.evaluate("""() => {
@@ -693,6 +703,13 @@ def _run(url, heavy, profil=None, zip_path=None):
                    '.ow-prompts-left .ow-prompt')]
                  .filter(n => !n.querySelector('.ow-prompt-btn'))
                  .map(n => n.textContent.trim())"""),
+               [])
+        # `LaunchCodePromptController` : l'invite du bas vit cinq secondes, et
+        # le portage la gardait tant qu'on savait les codes (docs/132). Bien
+        # apres le reveil et sans rien apprendre, le bas est vide.
+        rep.eq("pas d'invite des codes en permanence",
+               page.evaluate("""() => [...document.querySelectorAll(
+                   '.ow-prompts-bottom .ow-prompt')].map(n => n.textContent.trim())"""),
                [])
         page.evaluate("() => window.__map.pan(-0.5, -0.5, 1)")
         rep.check("le deplacement de la carte suit la distance de zoom",
@@ -1547,6 +1564,9 @@ def _run(url, heavy, profil=None, zip_path=None):
           const r = window.__resources, m = window.__consoles.marshmallow;
           const avant = r.health;
           r.health = 20;
+          // Une guimauve PRESENTE : laissee au feu plus tot dans la visite,
+          // elle a pu bruler et disparaitre — un etat du moment, pas du soin.
+          m.gone = false; m.goneFor = 0;
           m.held = true; m.toast = 1;                 // assez grillee
           const mange = m.eat();
           const apres = r.health;
@@ -1680,6 +1700,18 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         if vol:
             rep.eq("il a une position et une vitesse", vol["bouge"], True)
+        # Et il reste SUR SON SOCLE tant qu'on ne le pousse pas : sa position
+        # derivait a la vitesse orbitale de Timber Hearth, et il quittait
+        # l'observatoire avant qu'on ait touche a la console (docs/132).
+        socle = page.evaluate("""() => {
+          const m = window.__modele;
+          if (!m || !m.vaisseau) return null;
+          const v = m.vaisseau;
+          return { pose: v.pose, vitesse: Math.hypot(...v.vel) };
+        }""")
+        if socle:
+            rep.eq("le modele reste sur son socle", socle["pose"], True)
+            rep.eq("... immobile", socle["vitesse"], 0)
         # L'enfant compte, et les crashs passent avant les reussites.
         kid = page.evaluate("""() => {
           const k = window.__modele.enfant;
@@ -2129,6 +2161,23 @@ def _run(url, heavy, profil=None, zip_path=None):
             # l'image d'avant est nul. Un ecart durable dirait que le haut voulu
             # fuit — le signe qu'on interpole vers une cible qui bouge seule.
             rep.eq("et il est aligne, au repos", redresse["ecartCourant"] < 1, True)
+
+        # --- la reparation, dehors (docs/132) ----------------------------------
+        #
+        # `RepairVolume` s'allume avec SA piece : un coup a l'avant et a gauche
+        # allume le volume de l'avant et les cinq reacteurs de gauche, et rien
+        # d'autre. Le portage reparait au poste de pilotage.
+        page.evaluate("""() => { const d = window.__shipRef && window.__shipRef.damage; if (!d) return;
+          window.__shipRef.boarded = false;
+          d._blesse(d.parts.avant, 'avant', 40); d._blesse(d.parts.gauche, 'gauche', 60); }""")
+        page.wait_for_timeout(1500)
+        rep_actifs = page.evaluate("""() => { const r = window.__reparations; if (!r) return null;
+          const c = {}; for (const v of r.actifs) c[v.repair.volume.location] = (c[v.repair.volume.location] || 0) + 1;
+          return c; }""")
+        if rep_actifs is not None:
+            rep.eq("reparation : six volumes allumes, ceux des pieces touchees",
+                   rep_actifs, {"avant": 1, "gauche": 5})
+        page.evaluate("() => { const d = window.__shipRef && window.__shipRef.damage; if (d) d.reset(); }")
 
         # --- l'allumage du vaisseau (docs/66-allumage.md) -----------------------
         #

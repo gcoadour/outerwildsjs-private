@@ -1,4 +1,5 @@
 // @lit ModelShipCrashBehavior, ModelShipLandingSpot, RocketKidConvoController
+// @lit ModelShipController, RemoteFlightConsole
 //
 // Le vaisseau miniature de l'observatoire, et l'enfant qui le regarde.
 //
@@ -51,6 +52,97 @@ export const MODELE = {
   landHold: 0.2,
   kidCrashLimit: 5,
 };
+
+import { qMul, qRot } from "./map.js";
+
+/**
+ * Les propulseurs du modele : son PROPRE `ThrusterModel`, la seule instance
+ * simple de la classe dans le build (le vaisseau et le sac ont les leurs).
+ * Le portage prenait 0,4 fois la poussee du vrai vaisseau, « faute d'un modele
+ * a lui » — il etait la, extrait, et personne ne le lisait. Les replis sont
+ * les valeurs par defaut de la classe.
+ */
+export function poussesModele(gameplay) {
+  const f = (((gameplay || {}).singletons || {}).ThrusterModel || {}).fields || {};
+  return {
+    translation: f._maxTranslationalThrust ?? 10,
+    rotation: f._maxRotationalThrust ?? 5,
+    amortissement: f._angularDrag ?? 0.96,
+  };
+}
+
+/**
+ * Ce qui fait tomber le modele : `SingleFieldDetector`, sur son enfant
+ * `Detector`. Il ne voit qu'UN champ, `_onlyDetectableField` — `CraterField` —
+ * et l'applique a 0,8 (`_fieldMultiplier`), qu'on soit ou non dans son volume :
+ * `CalculateFieldAcceleration` ne teste pas de contenance. D'ou 9,6 u/s² sous
+ * douze de poussee : le modele decolle. Le portage lui donnait le champ
+ * dominant a pleine force, et la poussee l'equilibrait exactement.
+ */
+export function detecteurModele(gameplay) {
+  const liste = (((gameplay || {}).placed || {}).SingleFieldDetector) || [];
+  const d = liste.find((e) => e.body === "ModelShip_Body") || null;
+  if (!d) return null;
+  const f = d.fields || {};
+  const cible = (d.targets || {})._onlyDetectableField || null;
+  return { champ: cible ? cible.name : null, facteur: f._fieldMultiplier ?? 1 };
+}
+
+/** L'acceleration du detecteur : la direction du champ, sa force, le facteur. */
+export function graviteModele(champ, facteur) {
+  if (!champ || !champ.direction) return [0, 0, 0];
+  const a = (champ.magnitude || 0) * facteur;
+  return [champ.direction[0] * a, champ.direction[1] * a, champ.direction[2] * a];
+}
+
+const borne = (v, m) => Math.max(-m, Math.min(m, v));
+
+/**
+ * Une image de vol du modele : `ModelShipController` lit, `ThrusterModel`
+ * pousse.
+ *
+ *   translation locale = (thrustX, thrustUp - thrustDown, thrustZ)
+ *   rotation locale    = (-pitch, 0, -roll)       // le lacet n'est pas lu
+ *   acceleration       = entree x max, bornee axe par axe a +/- max,
+ *                        dans le repere du modele (`AddLocalAcceleration`)
+ *
+ * La rotation passe par la physique (`_usePhysicsToRotate`) : acceleration
+ * angulaire locale, puis l'amortissement du `Rigidbody` que `Awake` pose a
+ * `_angularDrag` — 0,96, soit `omega /= 1 + 0,96 dt` a chaque pas, la
+ * decroissance de PhysX.
+ *
+ * @param etat   { quat, omega } du modele, dans le repere de travail
+ * @param entree { translation: [x, y, z], rotation: [x, y, z] }, entrees locales
+ * @returns l'acceleration de poussee dans le repere de travail ; `etat.quat`
+ *          et `etat.omega` avancent en place
+ */
+export function voleModele(etat, entree, dt, cfg) {
+  const t = entree.translation || [0, 0, 0], r = entree.rotation || [0, 0, 0];
+  const accLocale = t.map((v) => borne(v * cfg.translation, cfg.translation));
+  const acc = qRot(etat.quat, accLocale);
+  const angLocale = r.map((v) => borne(v * cfg.rotation, cfg.rotation));
+  const ang = qRot(etat.quat, angLocale);
+  const amorti = 1 / (1 + cfg.amortissement * dt);
+  etat.omega = etat.omega.map((w, i) => (w + ang[i] * dt) * amorti);
+  // dq = 1/2 (omega, 0) q dt, omega dans le monde.
+  const [wx, wy, wz] = etat.omega;
+  const dq = qMul([wx, wy, wz, 0], etat.quat).map((v) => v * 0.5 * dt);
+  const q = etat.quat.map((v, i) => v + dq[i]);
+  const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  etat.quat = q.map((v) => v / n);
+  return acc;
+}
+
+/**
+ * `RemoteFlightConsole.Update` : ce que les invites disent, selon que le
+ * modele est a sa place (a moins d'une unite de `_respawnPoint`) ou non.
+ * La poussee rotationnelle a son invite, jamais rendue visible.
+ */
+export function invitesConsoleModele(distance) {
+  return distance > 1
+    ? ["_resetPrompt"]
+    : ["_exitPrompt", "_upThrustPrompt", "_downThrustPrompt", "_horizontalThrustPrompt"];
+}
 
 /** Les pistes d'atterrissage posees : TROIS, toutes a Timber Hearth. */
 export function modelLandingSpots(gameplay) {
