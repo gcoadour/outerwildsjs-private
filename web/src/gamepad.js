@@ -15,14 +15,13 @@
 // normalise (`mapping === "standard"`) : c'est la meme que celle qu'`XboxInput`
 // nomme, aux noms pres.
 
-/** Zone morte des manches. Un manche pose ne tient pas immobile. */
-export const PAD_DEAD_ZONE = 0.18;
+/**
+ * Zone morte des manches : le `dead` des axes `_PC` de l'InputManager, 0,25
+ * sur les deux manches. Le portage avait ecrit 0,18.
+ */
+export const PAD_DEAD_ZONE = 0.25;
 /** Deflexion a partir de laquelle une gachette compte comme appuyee. */
 export const TRIGGER_AT = 0.5;
-/** Vitesse de rotation a fond de manche, en pixels de souris par seconde. */
-export const PAD_LOOK_RATE = 900;
-/** Part lineaire de la courbe de regard ; le reste est cubique, comme au doigt. */
-export const PAD_LOOK_LINEAR = 0.25;
 
 /**
  * Les numeros d'`InputManager` vers ceux de la Gamepad API.
@@ -144,11 +143,6 @@ export function deadZone(v, dead = PAD_DEAD_ZONE) {
   return Math.sign(v) * ((a - dead) / (1 - dead));
 }
 
-/** Courbe de regard : lineaire pres du centre, cubique au bord. */
-export function padLookCurve(mag) {
-  return mag * (PAD_LOOK_LINEAR + (1 - PAD_LOOK_LINEAR) * mag * mag);
-}
-
 const value = (b) => (typeof b === "number" ? b : (b && b.value) || 0);
 const pressed = (b) => (typeof b === "number" ? b > TRIGGER_AT : !!(b && b.pressed));
 
@@ -162,9 +156,10 @@ export function padState(gp, dead = PAD_DEAD_ZONE) {
   if (!gp || !gp.axes) return zero;
   const ax = gp.axes, btn = gp.buttons || [];
   const lx = deadZone(ax[0] || 0, dead), ly = deadZone(ax[1] || 0, dead);
+  // Le regard est un axe comme les autres : zone morte par axe, et AUCUNE
+  // courbe — `Input.GetAxis` rend la deflexion telle quelle. Le portage y
+  // mettait une courbe cubique, comme au doigt (regard.js).
   const rx = deadZone(ax[2] || 0, dead), ry = deadZone(ax[3] || 0, dead);
-  const rmag = Math.min(1, Math.hypot(rx, ry));
-  const k = rmag > 0 ? padLookCurve(rmag) / rmag : 0;
   return {
     forward: -ly,          // manche pousse vers l'avant : on avance
     right: lx,
@@ -179,8 +174,8 @@ export function padState(gp, dead = PAD_DEAD_ZONE) {
     // dans `main.js`. Le cinquieme axe, quand la manette en a un, sert quand
     // meme : c'est une torsion, et elle ne coute rien.
     roll: deadZone(ax[4] || 0, dead),
-    lookX: rx * k,
-    lookY: ry * k,
+    lookX: rx,
+    lookY: ry,
   };
 }
 
@@ -214,7 +209,9 @@ export function padAvailable() {
 
 export class GamepadControls {
   /**
-   * @param opts { onKey(code), onLook(dx, dy), onHold(codes) }
+   * @param opts { onKey(code), onLookAxes(x, y), onHold(codes) } — le manche
+   *   de regard est rendu tel quel a chaque lecture, zero compris : c'est la
+   *   boucle qui le convertit en degres (regard.js)
    *
    * `onHold` est neuf, et indispensable depuis que les commandes du build sont
    * lues : trois canaux sont des boutons de SOURIS et deux sont des modificateurs
@@ -222,7 +219,7 @@ export class GamepadControls {
    */
   constructor(opts = {}) {
     this.onKey = opts.onKey || (() => {});
-    this.onLook = opts.onLook || (() => {});
+    this.onLookAxes = opts.onLookAxes || (() => {});
     this.onHold = opts.onHold || (() => {});
     this.axes = { forward: 0, right: 0, up: false, down: false, jump: false,
                   boost: false, roll: 0 };
@@ -256,6 +253,7 @@ export class GamepadControls {
       this.axes.boost = false; this.axes.roll = 0;
       this.held = null;
       this.onHold(new Set());
+      this.onLookAxes(0, 0);
       return this.axes;
     }
     const s = padState(gp);
@@ -270,10 +268,7 @@ export class GamepadControls {
     this.held = state;
     this.onHold(state);
     for (const c of codes) this.onKey(c);
-    if (s.lookX || s.lookY) {
-      const step = PAD_LOOK_RATE * Math.min(dt, 0.05);
-      this.onLook(s.lookX * step, s.lookY * step);
-    }
+    this.onLookAxes(s.lookX, s.lookY);
     return this.axes;
   }
 }

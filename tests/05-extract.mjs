@@ -44,6 +44,7 @@ import { extractInput } from "../web/src/pipeline/extract/input.js";
 import { clipLoops, HELD_ROOTS, exportSubtree, findRoots } from "../web/src/pipeline/extract/gltf.js";
 import { STICK_LIGHTS, THERM_HEAT_SPAN } from "../web/src/held.js";
 import { Commandes, COMMANDES } from "../web/src/input.js";
+import { regardDuBuild, REGARD } from "../web/src/regard.js";
 import { BUILD, DATA_FILES, haveBuild, load, loadEnv, check, report } from "./run.mjs";
 
 if (!haveBuild()) { console.log(`build absent (${BUILD}) — test ignore`); process.exit(0); }
@@ -525,6 +526,22 @@ console.log("     champs avec volume mesure:", volumes,
   const coup = nez.impact(40, null, [avant.position[0], avant.position[1], avant.position[2] + 1]);
   check("un choc devant touche la piece de l'avant", coup.location, "avant");
   check("qui n'est pas un reacteur", coup.piece.moteur, false);
+
+  // LE VAISSEAU PART AU SOMMET DE LA TOUR. `SpawnPlayer` ne deplace que le
+  // joueur, et la pose de repos de `Ship_Body` est celle du depart : a 172
+  // unites du centre de Timber Hearth, la ou l'ascenseur monte (docs/132). Le
+  // `SpawnPoint_Ship` de la planete, que le portage prenait, est 160 unites
+  // plus haut — un point de teleportation, pas une place de parking.
+  {
+    const th = solar.bodies.find((b) => /TimberHearth/.test(b.bodyName));
+    const c = th.bodyPosition || th.position;
+    const dist = (p) => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]);
+    const asc = (gp.placed.Elevator || [])[0];
+    const envol = (gp.placed.SpawnPoint || []).find((p) => p.name === "SpawnPoint_Ship" && p.body === "TimberHearth_Body");
+    check("le vaisseau repose a 172 unites du centre", Math.round(dist(sb.position)), 172);
+    check("a moins de quarante de l'ascenseur", Math.hypot(...sb.position.map((v, i) => v - asc.position[i])) < 40, true);
+    check("le point d'apparition du vaisseau est 160 plus haut", Math.round(dist(envol.position) - dist(sb.position)) > 150, true);
+  }
 
   // LES FISSURES. Chaque piece porte un `DS_Decals` que `Awake` eteint et que
   // le premier coup rallume ; le moteur doit trouver la piece dans le glTF, et
@@ -1607,6 +1624,20 @@ check("le pas de physique du jeu", inp.fixedTimestep, 0.016);
 check("le pas maximal d'une image", inp.maxTimestep, 1);
 check("le repli le connait", new Commandes(null).maxTimestep, inp.maxTimestep);
 
+// LE REGARD (regard.js) : la souris compte 0,1 par pixel, le manche a une zone
+// morte de 0,25, et le tangage court a 120 degres par seconde, borne a 80.
+{
+  const r3 = (v) => Math.round(v * 1000) / 1000;
+  const cmdsBuild = new Commandes(inp);
+  const r = regardDuBuild(gp, cmdsBuild);
+  const lu = (o) => [o.souris, o.zoneMorte, o.turnRate, o.sensitivityY, o.maxDegreesY,
+                     o.minDegreesY, o.telescopeTurn, o.telescopeSens].map(r3).join(",");
+  check("regard : souris, zone morte, lacet, tangage, bornes, lunette",
+        lu(r), "0.1,0.25,160,120,80,-80,0.5,0.5");
+  check("le tangage a la meme souris que le lacet", r3(cmdsBuild.get("Pitch").souris), 0.1);
+  check("et le repli dit la meme chose que le build", lu(REGARD), lu(r));
+}
+
 // A12 : L'ECRAN-TITRE, dans la scene de `mainData` (docs/131-ecran-titre.md).
 // `GUIText` et `GUITexture` n'avaient pas de structure : l'oracle d'abord.
 {
@@ -1788,6 +1819,7 @@ check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
     const v = lampes.get(d.name);
     check(`${d.name} est ponctuelle`, v.m_Type, 2);
     check(`${d.name} part eteinte`, !!v.m_Enabled, false);
+    check(`et le portage le sait pour ${d.name}`, d.enabled, !!v.m_Enabled);
     check(`portee de ${d.name}`, Number(v.m_Range.toFixed(3)), d.range);
     check(`intensite de ${d.name}`, Number(v.m_Intensity.toFixed(3)), d.intensity);
   }

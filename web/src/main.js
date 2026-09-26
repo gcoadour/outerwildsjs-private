@@ -91,6 +91,7 @@ import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
 import { loadCommandes, decoupeImage } from "./input.js";
+import { regardDuBuild, pasDeRegard, borneTangage } from "./regard.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
@@ -1427,7 +1428,16 @@ async function boot() {
         if (fissure) { fissure.setEnabled(false); fissuresPieces.push({ id: e.piece, noeud: fissure }); }
       }
     }
-    const spawnWorld = shipSpawn(gameplay, home.position0);
+    // LE VAISSEAU PART LA OU LA SCENE LE POSE : au sommet de la tour de
+    // lancement. `PlayerSpawner.SpawnPlayer` ne deplace que le JOUEUR ; les
+    // `SpawnPoint_Ship` ne servent qu'aux touches de teleportation de
+    // debogage, et seulement vaisseau occupe (`IsShipSpawn() ==
+    // _isPlayerInShip`). Le portage posait le vaisseau sur celui de Timber
+    // Hearth, a 332 unites du centre : 170 au-dessus de la tour, dans le ciel
+    // (docs/132). La pose de repos n'est pas « sous la surface », comme
+    // docs/07 le concluait : le sol du village est a 130 unites du centre, le
+    // haut de la tour a 166.
+    const spawnWorld = shipRest || shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
       const local = [spawnWorld[0] - home.position0[0],
                      spawnWorld[1] - home.position0[1],
@@ -1449,7 +1459,10 @@ async function boot() {
       // Le vaisseau porte desormais son orientation : sans la poser une
       // premiere fois, son « haut » serait celui du repere de travail et non
       // la verticale locale, et sa poussee verticale partirait de travers.
-      {
+      // Et dans l'orientation de la scene, celle dont les capteurs de pad et
+      // les volumes de reparation sont deja exprimes.
+      if (shipRest && shipRestRot) ship.quat = shipRestRot.slice();
+      else {
         const l = Math.hypot(...local) || 1;
         ship.orientTo([local[0] / l, local[1] / l, local[2] / l], null);
       }
@@ -1712,7 +1725,10 @@ async function boot() {
     (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
   // L'etat du baton : sorti ou range, ce qui se joue, ou en est l'aiguille.
-  const baton = new BatonGuimauve();
+  // `_isOut` et les lumieres : ce que la scene pose, le baton RANGE.
+  const baton = new BatonGuimauve({
+    isOut: !!((((gameplay.placed || {}).MarshmallowStick || [])[0] || {}).fields || {})._isOut,
+    lightsOn: STICK_LIGHTS.some((d) => d.enabled) });
   // Les deux objets tenus, une fois charges : { racine, groupes, lumieres }.
   const enMain = new Map();
 
@@ -1807,10 +1823,16 @@ async function boot() {
         }
       }
     }
+    // Un clip se lance QUAND il devient le clip voulu, une fois : les quatre
+    // sont en `Once`, et le baton garde la derniere pose. Le relancer des
+    // qu'il s'arrete le faisait sortir en boucle ; boucler `idle` apres
+    // `PullOut` le rangeait sitot sorti.
     const voulu = etat.clip;
+    const neuf = objet.clipLance !== voulu;
+    objet.clipLance = voulu;
     for (const [nom, g] of objet.parNom) {
       if (nom === "Therm") continue;
-      if (nom === voulu) { if (!g.isPlaying) g.play(nom === "idle"); }
+      if (nom === voulu) { if (neuf) g.play(false); }
       else if (g.isPlaying) g.stop();
     }
     const therm = objet.parNom.get("Therm");
@@ -2363,6 +2385,9 @@ async function boot() {
       // depart, coque comprise
       ship.damage.reset();
       ship.pos.x = shipStart[0]; ship.pos.y = shipStart[1]; ship.pos.z = shipStart[2];
+      // Et son orientation de depart : la scene rechargee le repose tel quel.
+      if (shipRest && shipRestRot) ship.quat = shipRestRot.slice();
+      if (ship.omega) ship.omega = [0, 0, 0];
       ship.parked = true;
       ship.landed = true;
       ship.groundBody = "TimberHearth";
@@ -3245,6 +3270,40 @@ async function boot() {
    * lunette — le portage n'avait pas ce ralenti (docs/36-audit.md §1.1).
    */
   const TURN = (player.c.turnRate ?? 160) * Math.PI / 180;
+  // A PIED, LE REGARD SUIT LE BUILD (regard.js) : les pixels de souris et le
+  // manche s'accumulent sur l'image, et la boucle les convertit une fois,
+  // avec la duree de l'image. Le chemin en pixels ci-dessous ne sert plus
+  // qu'aux commandes du vaisseau, du roulis et du modele reduit.
+  const cfgRegard = regardDuBuild(gameplay, cmds);
+  const fovInitial = camera.fov;
+  const regardAttente = { dx: 0, dy: 0, padX: 0, padY: 0 };
+  // Le manche, rendu en pixels pour ce chemin-la seulement : il n'a pas ete
+  // relu, et garde l'equivalence qu'il avait (900 pixels par seconde).
+  const PAD_EN_PIXELS = 900;
+  const regardAPied = () =>
+    !(consoles.active && consoles.active.flight && modele)
+    && !(ship && ship.boarded)
+    && !rollMode(!!(cmds && cmds.held("Swap Roll/Yaw", { keys })), false);
+  function appliquerRegard(dtImage) {
+    const r = regardAttente;
+    const dx = r.dx, dy = r.dy;
+    r.dx = 0; r.dy = 0;
+    if (!(dx || dy || r.padX || r.padY)) return;
+    if (alignement.locked || snapRegard !== null) return;
+    if (!regardAPied()) {
+      const pas = PAD_EN_PIXELS * Math.min(dtImage, 0.05);
+      if (r.padX || r.padY) look(r.padX * pas, r.padY * pas, 1);
+      return;
+    }
+    const d = pasDeRegard({
+      sourisDx: dx, sourisDy: dy, padX: r.padX, padY: r.padY, dt: dtImage,
+      sensibilite: settings.lookFactor(), fovRatio: camera.fov / fovInitial,
+      lunette: !!(telescope && telescope.active), combinaison: !!equipment.suit,
+    }, cfgRegard);
+    yaw += d.dYaw;
+    pitch = borneTangage(pitch + d.dPitch, cfgRegard);
+  }
+  window.__regardBuild = { cfg: cfgRegard, attente: regardAttente };
   function look(dx, dy, gain = 1) {
     // §T `_isInputLocked` : pendant que le jeu vous retourne, il vous prend les
     // commandes du regard. C'est le seul moment ou elles ne repondent plus, et
@@ -3284,6 +3343,11 @@ async function boot() {
       rollInput += dx * k * gain * Math.abs(f) * atterrissage.flipRollFactor;
       return;
     }
+    if (!(ship && ship.boarded)) {
+      regardAttente.dx += dx * gain;
+      regardAttente.dy += dy * gain;
+      return;
+    }
     yaw += dx * k * gain * Math.abs(f);
     pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * k * gain * f));
   }
@@ -3313,7 +3377,7 @@ async function boot() {
   const padHeld = new Set();
   const pad = new GamepadControls({
     onKey: command,
-    onLook: (dx, dy) => look(dx, dy, 1),
+    onLookAxes: (x, y) => { regardAttente.padX = x; regardAttente.padY = y; },
     onHold: (codes) => { padHeld.clear(); for (const c of codes) padHeld.add(c); },
   });
   window.__pad = pad;
@@ -3421,6 +3485,8 @@ async function boot() {
       (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
       cmds.maxTimestep);
     const now = performance.now() / 1000;
+    // Le regard de l'image, avant les pas : `UpdateInput` est dans `Update`.
+    appliquerRegard(n * h);
     // `Time.time` : l'horloge de l'image, avancee une fois pour toutes AVANT
     // les sous-pas. Les minuteries des scripts `Update` s'y lisent.
     horlogeImage += n * h;
@@ -5722,8 +5788,8 @@ async function boot() {
         }
       } else grillageRompu = false;
     }
-    // Le baton a guimauve, tel que le build le joue : deux clips a la queue au
-    // reveil, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
+    // Le baton a guimauve, tel que le build le joue : range au reveil (`idle`),
+    // `PullOut` au feu, `PutBack` quand on a mange, et le thermometre SCRUBBE sur la
     // chaleur — vitesse zero, pose choisie a la main (docs/64-mains.md).
     {
       const objet = enMain.get("marshmallowstick");

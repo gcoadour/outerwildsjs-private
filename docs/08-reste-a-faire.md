@@ -166,6 +166,7 @@ portage.
 | vérification avec le build | **267/267** ([`81`](81-invulnerable.md)) |
 | la sonde | charge, orbite à la pichenette, ancrage, lanterne, photo, rappel ([`60`](60-sonde.md)) |
 | **les commandes** | les 22 canaux de l'`InputManager` : souris, saut et sac dorsal séparés, manette refaite ([`61`](61-commandes.md)) |
+| **vitesse du regard** | à pied, celle du build : 160 °/s de lacet et 120 de tangage à fond de manche, zone morte 0,25, souris à 0,1 d'axe par pixel, tangage borné à 80° ; l'alpha se pilote aux flèches (`scripts/alpha-clavier.mjs`, [`132`](132-comparaison-native.md)) |
 | viser un référentiel | on vise ce qu'on **regarde** : crochets, accord de vitesse, pilote qui refuse ([`62`](62-visee.md)) |
 | boucles d'animation | 13 clips bouclent, 4 s'arrêtent — la règle d'Unity en deux étages ([`63`](63-boucles.md)) |
 | objets tenus en main | le bâton à guimauve et la lunette, exportés et animés ([`64`](64-mains.md)) |

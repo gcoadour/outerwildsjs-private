@@ -68,9 +68,12 @@ constantes décrivent.
 ### Les positions enregistrées ne sont pas les positions de départ
 
 La position enregistrée du vaisseau le place à 172 unités du centre de Timber
-Hearth, sous la surface. Ce n'est pas une erreur d'extraction : le jeu place
-vaisseau et joueur **à l'exécution**, via des composants `SpawnPoint`
-(16 instances, un jeu par planète). C'est `SpawnPoint_Ship` qui fait foi.
+Hearth. Cette page concluait « sous la surface », et que `SpawnPoint_Ship`
+faisait foi : **c'était faux** ([`132`](132-comparaison-native.md)). Le sol
+du village est à 130 unités du centre, le haut de la tour de lancement à 166 :
+172, c'est le vaisseau posé au sommet de la tour. `PlayerSpawner.SpawnPlayer`
+ne déplace que le **joueur** ; les `SpawnPoint_Ship` ne servent qu'aux touches
+de téléportation de débogage, vaisseau occupé.
 
 Le prototype faisait apparaître le joueur à 9 unités du vaisseau, alors que le
 jeu démarre au village : les deux points d'apparition sont distants de 471 u.

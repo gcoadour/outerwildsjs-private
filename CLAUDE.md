@@ -62,6 +62,8 @@ python3 tools/15_verify.py --repli
 # Les deux versions cote a cote (docs/132) : l'alpha native sous Xvfb (ELF
 # 32 bits, bibliotheques i386 requises), le portage dans Chromium.
 scripts/alpha.sh start | shot <png> | key <touche> | stop
+ALPHA_CLAVIER=1 scripts/alpha.sh start   # regard aux fleches, lunette t, verrou g
+                                         # (copie locale de l'InputManager)
 node scripts/playwright-scenarios.mjs        # 20 scenarios, titre traverse
 node scripts/pw-titre.mjs work/t.png 1280 720 20000 4   # titre, horloge calee a 4 s
 ```

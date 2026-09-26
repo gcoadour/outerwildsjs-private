@@ -3,6 +3,9 @@
 
 const SINGLETONS = ["PlayerResources", "JetpackThrusterModel", "ShipThrusterModel",
                     "ThrusterModel", "ShipDamageController", "PlayerCharacterController",
+                    // Le tangage du regard : `_sensitivityY`, ses bornes, et le
+                    // ralenti a la lunette (regard.js).
+                    "PlayerCameraController",
                     // `_loopDurationInMinutes` vaut 18 dans la scene, et le
                     // portage avait ecrit 20 de memoire (docs/88-boucle.md).
                     "Autopilot", "ShipBody", "PlayerBody", "TimeLoop",

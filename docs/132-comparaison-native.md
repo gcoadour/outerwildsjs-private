@@ -1146,3 +1146,88 @@ L'exportateur marque désormais le nœud de chaque pièce de son identifiant
 (`extras.piece`, le même que `gameplay.json`), et le moteur y trouve la
 fissure. Mesuré dans Chromium : aucune sur la coque intacte, deux après un
 choc sur le nez et un sur le réacteur `Left`, aucune après la boucle.
+
+## Le regard aux flèches, et la vitesse du build
+
+Toute la chaîne tour, terminal, vaisseau, carte restait hors d'atteinte de
+l'alpha au clavier : son regard n'a que la souris, et la souris l'envoie en
+NaN sous Xvfb. Or ce qui lie la souris au regard est une **donnée** : les axes
+`Yaw_Key` et `Pitch_Key` de l'`InputManager`, de genre `mouseMove`.
+`scripts/alpha-clavier.mjs` en fait une copie **locale** où ces deux axes sont
+des axes à boutons — flèches gauche/droite et bas/haut —, et où la lunette et
+le verrou, qui n'étaient que des clics, reçoivent `t` et `g`.
+`ALPHA_CLAVIER=1 scripts/alpha.sh start` pose la copie le temps du chargement,
+puis remet l'original. L'`InputManager` modifié est ajouté en fin de fichier ;
+seule son entrée de table change.
+
+Un axe à boutons vaut −1, 0 ou 1 : tenu, il vaut un manche à fond. Et c'est
+une mesure. Tenir la flèche droite **2,25 s fait un tour complet** dans
+l'alpha, 1,125 s un demi-tour : 160 degrés par seconde, le `_turnRate` de
+`PlayerCharacterController`.
+
+Le portage, lui, ne suivait pas le build sur ce point, ni au manche ni à la
+souris :
+
+- **au manche**, « 900 pixels de souris par seconde », une zone morte de
+  0,18 et une courbe cubique. Le build n'a ni courbe ni pixels :
+  `Input.GetAxis` rend la déflexion, zone morte de **0,25** passée, et
+  `PlayerCharacterController.FixedUpdate` tourne de
+  `axe × _turnRate × fixedDeltaTime` — 160 degrés par seconde à fond, 80 à
+  mi-course. Le tangage court à `_sensitivityY`, **120** degrés par seconde,
+  dans `PlayerCameraController.UpdateInput` ;
+- **à la souris**, `_turnRate` degrés pour une largeur d'écran. Dans le build,
+  un pixel vaut 0,1 d'axe (la `sensitivity` de l'axe `mouseMove`), puis la même
+  vitesse × la durée de l'image : 0,27 degré de lacet et 0,2 de tangage par
+  pixel à 60 images par seconde, et davantage quand l'image ralentit — le
+  build est ainsi, le portage aussi désormais ;
+- **la borne** du tangage était 86 degrés ; `_maxDegreesY` vaut **80** ;
+- le zoom ralentit les deux par le rapport des champs, et la lunette de
+  moitié (`_telescopeTurnScalar`, `_telescopeSensitivityScalar`).
+
+`regard.js` porte ces règles, à pied. Le chemin en pixels reste celui des
+commandes du vaisseau, du roulis et du modèle réduit, qui n'ont pas été
+relues. Mesuré dans Chromium, manette simulée : 160 degrés par seconde à
+fond, 80 à mi-course, 60 de tangage à mi-course.
+
+### Le bâton part rangé
+
+Premier parcours refait aux flèches, dans les deux versions : trois secondes
+de marche tout droit depuis le réveil mènent contre la roche, à droite de la
+tour. L'alpha y montre une paroi brune uniforme ; le portage, **une tache
+orange à cœur clair**, à 0,2 unité de l'œil. C'étaient les deux lumières du
+bâton à guimauve, `MallowLight` (portée 1,21) et `ThermLight` (0,16),
+accrochées au regard et **allumées depuis le réveil**.
+
+La lecture de `MarshmallowStick.Awake` était fausse : « deux clips à la
+queue, `PullOut` puis `idle`, donc le bâton est dehors ». L'IL écrit une
+alternative — `PullOut` si `_isOut`, `idle` sinon — et la scène pose `_isOut`
+à **faux**. Les lumières, qu'`Awake` ne touche pas, gardent leur `m_Enabled`
+sérialisé : éteint. Le test de `tests/05` le vérifiait déjà (« part
+éteinte »), pendant que le moteur les allumait : l'invariant gardait la
+scène, pas le portage. Il garde maintenant les deux.
+
+Deux conséquences de plus : `ToggleStick(true)` ne joue que `PullOut` —
+rien ne suit, le bâton garde la dernière pose —, et les quatre clips sont en
+`Once`. Le portage enchaînait `idle` en boucle après `PullOut`, et relançait
+un clip dès qu'il s'arrêtait.
+
+### Le vaisseau attend au sommet de la tour
+
+Le parcours vers la tour a fait lever les yeux : dans le portage, le
+vaisseau n'y était pas. Il flottait à 332 unités du centre de Timber Hearth,
+sur le `SpawnPoint_Ship` de la planète — 170 unités au-dessus de la tour, dans
+le ciel. `docs/07` avait lu la pose de repos de `Ship_Body` (172 unités du
+centre) comme « sous la surface », et pris le point d'apparition à la place.
+
+`PlayerSpawner` dit autre chose : `SpawnPlayer` pose le **joueur**, et
+`GetSpawnPoint` ne rend un point de vaisseau que si l'on est **dedans**
+(`IsShipSpawn() == _isPlayerInShip`) — pour les touches de téléportation de
+débogage. Rien ne déplace le vaisseau au réveil : il part de sa pose de
+scène, sur la plateforme au sommet de la tour, à 166 unités du centre pour le
+haut de la tour, que l'ascenseur dessert. C'est là que la chaîne tour,
+terminal, ascenseur mène.
+
+Le portage l'y pose désormais, dans l'orientation de la scène — celle dont
+les capteurs de pad et les volumes de réparation sont exprimés —, et l'y
+remet à chaque boucle. Mesuré dans Chromium : posé sur ses pads, immobile, de
+la 38ᵉ à la 60ᵉ seconde.

@@ -169,7 +169,8 @@ import { envelope } from "../web/src/pipeline/extract/particles.js";
 import { stickVector, lookCurve, sprinting, isTap, STICK_RADIUS, DEAD_ZONE,
          LOOK_DEAD_ZONE, SPRINT_AT, TAP_MS, TAP_PX, TAP_PATH }
   from "../web/src/touch.js";
-import { padState, padEdges, deadZone, padLookCurve, PAD_BUTTONS,
+import { regardDuBuild, pasDeRegard, borneTangage, REGARD } from "../web/src/regard.js";
+import { padState, padEdges, deadZone, PAD_BUTTONS,
          padDisagreements, UNITY_VERS_NAVIGATEUR,
          PAD_DEAD_ZONE } from "../web/src/gamepad.js";
 import { bodySpin, spinPeriod, rotateAbout, SpinField,
@@ -2500,13 +2501,46 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         round(deadZone(PAD_DEAD_ZONE + 1e-6), 3), 0);
   check("a fond", deadZone(1), 1);
   check("le signe est conserve", deadZone(-1), -1);
-  check("courbe de regard : lineaire pres du centre, cubique au bord",
-        round(padLookCurve(0.5), 3), 0.219);
+  // La zone morte du build : le `dead` des axes `_PC`, et non 0,18.
+  check("la zone morte est celle de l'InputManager", PAD_DEAD_ZONE, 0.25);
+  // Et pas de courbe : `Input.GetAxis` rend la deflexion. A mi-course (hors
+  // zone morte), le regard va a mi-vitesse — la courbe cubique en donnait 0,22.
+  check("le regard n'a pas de courbe",
+        round(padState({ axes: [0, 0, 0.625, 0], buttons: [] }).lookX, 3), 0.5);
 
   const pad = { axes: [0, -1, 1, 0], buttons: [] };
   const st = padState(pad);
   check("manche gauche pousse : on avance", st.forward, 1);
   check("manche droit a droite : on tourne", round(st.lookX, 3), 1);
+
+  // LE REGARD DU BUILD (regard.js). Un manche a fond pendant une seconde
+  // tourne de `_turnRate` (160 degres) et leve de `_sensitivityY` (120).
+  const deg = (r) => round(r * 180 / Math.PI, 3);
+  const plein = pasDeRegard({ padX: 1, padY: -1, dt: 1 });
+  check("manche a fond, une seconde : 160 degres de lacet", deg(plein.dYaw), 160);
+  check("et 120 de tangage, vers le haut", deg(plein.dPitch), -120);
+  // La souris : 0,1 par pixel, puis la meme vitesse, sur la duree de l'image.
+  const souris = pasDeRegard({ sourisDx: 100, dt: 1 / 60 });
+  check("cent pixels a 60 images/s : 26,7 degres", deg(souris.dYaw), 26.667);
+  check("et deux fois plus a 30 images/s, comme dans le build",
+        deg(pasDeRegard({ sourisDx: 100, dt: 1 / 30 }).dYaw), 53.333);
+  check("la lunette ralentit de moitie",
+        deg(pasDeRegard({ padX: 1, dt: 1, lunette: true }).dYaw), 80);
+  check("le zoom aussi, par le rapport des champs",
+        deg(pasDeRegard({ padX: 1, dt: 1, fovRatio: 0.5 }).dYaw), 80);
+  check("l'inversion ne touche que le tangage",
+        [deg(pasDeRegard({ padX: 1, padY: 1, dt: 1, sensibilite: -1 }).dYaw),
+         deg(pasDeRegard({ padX: 1, padY: 1, dt: 1, sensibilite: -1 }).dPitch)].join(","), "160,-120");
+  check("le tangage s'arrete a 80 degres", deg(borneTangage(Math.PI / 2)), 80);
+  // Les valeurs viennent du build quand on les a.
+  const cfg = regardDuBuild({ singletons: {
+    PlayerCameraController: { fields: { _sensitivityY: 60, _maxDegreesY: 70, _minDegreesY: -70 } },
+    PlayerCharacterController: { fields: { _turnRate: 100 } } } },
+    { get: (n) => (n === "Yaw" ? { souris: 0.2, zoneMorte: 0.3 } : null) });
+  check("le regard lit le build",
+        [cfg.sensitivityY, cfg.turnRate, cfg.maxDegreesY, cfg.souris, cfg.zoneMorte].join(","),
+        "60,100,70,0.2,0.3");
+  check("et retombe sur ses replis sans lui", regardDuBuild().turnRate, REGARD.turnRate);
 
   const press = (i) => {
     const b = [];
@@ -6098,11 +6132,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("brulant, elle bute", thermTime(400), 1);
   check("et un froid negatif ne la renverse pas", thermTime(-5), 0);
   // Le baton est DEHORS au premier instant : `Awake` met deux clips a la queue.
-  const baton = new Baton();
-  check("le baton commence dehors", baton.out, true);
-  check("et sort avant d'attendre", baton.clip, "PullOut");
+  // `_isOut` vaut FAUX dans la scene : `Awake` joue `idle`, le baton est
+  // range, et ses lumieres restent eteintes (docs/132).
+  const range = new Baton();
+  check("le baton commence range", range.out, false);
+  check("sur la pose idle", range.clip, "idle");
+  check("lumieres eteintes", range.lights, false);
+  check("et pas de thermometre", range.canTherm, false);
+  range.toggle();
+  check("le feu le sort", range.out, true);
+  check("par PullOut, et rien a la suite", range.queue.join(","), "PullOut");
+  check("et les lumieres s'allument", range.lights, true);
+  // Une instance ou `_isOut` serait vrai sortirait au reveil.
+  const baton = new Baton({ isOut: true, lightsOn: true });
+  check("_isOut vrai : dehors", baton.out, true);
+  check("et sort d'abord", baton.clip, "PullOut");
   baton.update(0.016, { playing: false });
-  check("le clip fini, il attend", baton.clip, "idle");
+  check("le clip fini, il garde sa pose", baton.clip, "PullOut");
   baton.toggle();
   check("le ranger le range", baton.out, false);
   check("et joue PutBack", baton.clip, "PutBack");
@@ -6114,12 +6160,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le ressortir le ressort", baton.out, true);
   check("les lumieres reviennent", baton.lights, true);
   // Manger range le baton TOUT SEUL.
-  const mange = new Baton();
+  const mange = new Baton({ isOut: true });
   mange.update(0.016, { eaten: true });
   check("manger range le baton", mange.out, false);
   check("il s'en souvient", mange.putAwayOnce, true);
   // La flamme ne se voit que baton dehors et animation finie.
-  const flamme = new Baton();
+  const flamme = new Baton({ isOut: true });
   flamme.update(0.016, { playing: true });
   check("pas de flamme pendant la sortie", flamme.flame, false);
   flamme.update(0.016, { playing: false });

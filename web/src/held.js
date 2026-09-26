@@ -70,9 +70,9 @@ export const THERM_HEAT_SPAN = 40;
  */
 export const STICK_LIGHTS = [
   { name: "MallowLight", position: [-0.035279, 0.100099, 0.565471],
-    range: 1.21, intensity: 0.4 },
+    range: 1.21, intensity: 0.4, enabled: false },
   { name: "ThermLight", position: [-0.090081, 0.075408, 0.199992],
-    range: 0.16, intensity: 2 },
+    range: 0.16, intensity: 2, enabled: false },
 ];
 
 /** Les quatre clips du baton, dans l'ordre ou ils se jouent. */
@@ -92,17 +92,33 @@ export function thermTime(heat, length = 1) {
 /**
  * Le baton a guimauve : sorti ou range, et ce qui se joue.
  *
- * `Awake` met deux clips a la queue — `PullOut` puis `idle` — donc le baton est
- * DEHORS au premier instant du jeu. `ToggleStick` fait le reste, et `Update`
- * le range tout seul une fois la guimauve mangee.
+ * UNE LECTURE A CORRIGER. Ce commentaire disait : « `Awake` met deux clips a la
+ * queue — `PullOut` puis `idle` — donc le baton est DEHORS au premier instant
+ * du jeu ». L'IL dit une alternative, pas une suite :
+ *
+ *     if (_isOut) animation.PlayQueued("PullOut");
+ *     else        animation.PlayQueued("idle");
+ *
+ * et la scene pose `_isOut` a FAUX. Le baton part range, et ses deux lumieres
+ * — que `Awake` ne touche pas — gardent leur `m_Enabled` serialise, eteint. Le
+ * portage les allumait des le reveil : collees au regard, elles faisaient une
+ * tache orange sur toute paroi approchee a moins d'un metre, que l'alpha n'a
+ * pas (docs/132).
+ *
+ * `ToggleStick(true)` ne joue que `PullOut` : rien ne suit, et le baton reste
+ * sur la derniere pose du clip. Les quatre clips sont en `Once`.
  */
 export class MarshmallowStick {
-  constructor() {
-    // `Awake` : `PlayQueued("PullOut")`, puis `PlayQueued("idle")`.
-    this.out = true;
-    this.queue = ["PullOut", "idle"];
-    this.canTherm = true;
-    this.lights = true;
+  /**
+   * @param isOut    `_isOut`, serialise sur l'instance (faux dans ce build)
+   * @param lightsOn les `m_Enabled` des deux lumieres (eteintes)
+   */
+  constructor({ isOut = false, lightsOn = false } = {}) {
+    this.out = !!isOut;
+    this.queue = [isOut ? "PullOut" : "idle"];
+    // `_canTherm` n'est pose que par `ToggleStick` : faux au reveil.
+    this.canTherm = false;
+    this.lights = !!lightsOn;
     this.flame = false;
     // `_hasBeenPutAwayOnce` : le build le tient pour son tutoriel.
     this.putAwayOnce = false;
@@ -122,7 +138,7 @@ export class MarshmallowStick {
     this.events = [];
     if (!this.out) {
       this.flame = false;
-      this.queue = ["PullOut", "idle"];
+      this.queue = ["PullOut"];
       this.out = true;
       this.canTherm = true;
       this.lights = true;
