@@ -205,16 +205,24 @@ export function interactZones(gameplay) {
 }
 
 /**
- * La zone est-elle regardee d'assez pres et d'assez face ?
+ * La zone est-elle regardee dans sa fenetre ? `InteractZone.UpdateFocus` :
  *
- * @param toward  direction du regard du joueur, normalisee
- * @param facing  direction de l'avant de la zone, normalisee
+ *     num = Vector3.Angle(_playerCam.transform.forward, transform.forward);
+ *     if (num > _viewingWindow) _hasFocus = false;
+ *
+ * L'angle est celui du REGARD contre l'avant de la zone, et il se compare a la
+ * fenetre ENTIERE. Ce commentaire disait « un demi-angle une fois compare », et
+ * le portage mesurait la direction zone -> joueur : deux lectures a cote de
+ * trois lignes d'IL (docs/132).
+ *
+ * @param regard  avant de la camera, normalise
+ * @param facing  avant de la zone, normalise
  */
-export function zoneFaced(zone, toward, facing) {
+export function zoneFaced(zone, regard, facing) {
   if ((zone.viewingWindow ?? 360) >= 360) return true;
-  const d = toward[0] * facing[0] + toward[1] * facing[1] + toward[2] * facing[2];
+  const d = regard[0] * facing[0] + regard[1] * facing[1] + regard[2] * facing[2];
   const angle = Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
-  return angle <= zone.viewingWindow / 2;
+  return angle <= zone.viewingWindow;
 }
 
 /**

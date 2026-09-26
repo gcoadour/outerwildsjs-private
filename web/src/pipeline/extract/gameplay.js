@@ -356,6 +356,25 @@ export function extractGameplay(ctx) {
       }
     }
 
+    // LA TRAPPE EST UN COLLIDER. `_hatchObject` designe `Hatch_Collider`, un
+    // GameObject sans maillage dont le seul role est de barrer l'entree :
+    // `OpenHatch` le desactive. Le glTF n'emporte que de la geometrie, donc
+    // pas lui ; on en donne ici la forme et la pose (docs/132).
+    if (cls === "HatchController" && fields._hatchObject && fields._hatchObject.pathId) {
+      const hgid = fields._hatchObject.pathId;
+      if (ctx.transformOf.has(hgid)) {
+        const vol = ctx.volumeOf(hgid);
+        const [hpos, hrot] = ctx.world(hgid);
+        if (vol) {
+          entry.hatchCollider = {
+            name: ctx.name(hgid), volume: vol,
+            position: hpos.map((v) => Math.round(v * 1e4) / 1e4),
+            rotation: hrot.map((v) => Math.round(v * 1e6) / 1e6),
+          };
+        }
+      }
+    }
+
     // A QUI ce seuil appartient. `OWEffectVolume.Awake` prend ses
     // `EntrywayTrigger` par `GetComponentsInChildren` : le lien est dans la
     // HIERARCHIE, pas dans un champ, et le nom du corps porteur ne suffit pas

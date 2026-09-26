@@ -79,7 +79,7 @@ import { FOOTSTEP, footstepInterval, Footsteps, TURBULENCE, turbulenceTarget,
 import { gearPickups, Equipment, suitVolumes, suitVolumeStep, interactZones,
          zoneFaced, ZeroGTraining, CameraLock, lockFOV, lockYawError,
          suitBarrierPush } from "../web/src/gear.js";
-import { Interactables, rayonVolume, RAYON_VISEE } from "../web/src/interact.js";
+import { Interactables, rayonVolume, RAYON_VISEE, joueurDansVolume } from "../web/src/interact.js";
 import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          FieldAlignment, FIELD_ALIGN, discreteRotationDuration,
          ALIGN, slerpRate, steadyPitch, steadyLook, UpAligner,
@@ -4386,8 +4386,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
       fields: { _prompt: "Activate Lift", _viewingWindow: 360 } },
   ] } });
   check("l'invite vient du build", zones[0].prompt, "Open Hatch");
-  check("de face, la trappe s'annonce",
+  // `Vector3.Angle(camera.forward, zone.forward) > _viewingWindow` : le
+  // regard contre l'avant de la zone, et la fenetre ENTIERE (docs/132).
+  check("regard dans l'axe de la trappe : elle s'annonce",
         zoneFaced(zones[0], [0, 0, 1], [0, 0, 1]), true);
+  check("a 50 degres, encore : la fenetre de 60 n'est pas un demi-angle",
+        zoneFaced(zones[0], [Math.sin(50 * Math.PI / 180), 0, Math.cos(50 * Math.PI / 180)], [0, 0, 1]), true);
   check("de biais, non", zoneFaced(zones[0], [1, 0, 0], [0, 0, 1]), false);
   check("une zone a 360 degres s'annonce de partout",
         zoneFaced(zones[1], [1, 0, 0], [0, 0, 1]), true);
@@ -4401,18 +4405,35 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         rotation: [0, 0, 0, 1], volume: { shape: "sphere", radius: 1 },
         fields: { _prompt: "Gear Up", _viewingWindow: 90 } },
     ] } });
-    // La zone regarde vers +Z : on l'aborde donc par devant, en venant de +Z.
-    const versLaZone = { x: 0, y: 0, z: -1 };
-    check("la zone porte l'invite du build",
-          cat.focus({ x: 0, y: 0, z: 2 }, [0, 0, 0], versLaZone).prompt, "Gear Up");
-    check("prise a revers, elle ne s'annonce pas : la fenetre est celle de la ZONE",
-          cat.focus({ x: 0, y: 0, z: -2 }, [0, 0, 0], { x: 0, y: 0, z: 1 }), null);
+    // `InteractZone` : on y ENTRE (la capsule du `PlayerDetector`, rayon 0,5,
+    // touche la sphere de rayon 1), puis on regarde dans les 90 degres de son
+    // avant (+Z). La distance ne suffit pas, la visee non plus.
+    const haut = [0, 1, 0];
+    const versPlusZ = { x: 0, y: 0, z: 1 };
+    check("dedans, regard dans sa fenetre : la zone porte l'invite du build",
+          cat.focus({ x: 0, y: 0, z: 1.2 }, [0, 0, 0], versPlusZ, null, null, haut).prompt, "Gear Up");
+    check("dedans mais le regard a revers : rien",
+          cat.focus({ x: 0, y: 0, z: 1.2 }, [0, 0, 0], { x: 0, y: 0, z: -1 }, null, null, haut), null);
+    check("a deux unites, dehors : rien, meme en la regardant",
+          cat.focus({ x: 0, y: 0, z: 2 }, [0, 0, 0], { x: 0, y: 0, z: -1 }, null, null, haut), null);
     check("restee au sol quand le vaisseau est parti, elle ne s'annonce plus",
-          cat.focus({ x: 0, y: 0, z: 2 }, [0, 0, 0], versLaZone,
-                    () => [500, 0, 0]), null);
+          cat.focus({ x: 0, y: 0, z: 1.2 }, [0, 0, 0], versPlusZ,
+                    () => [500, 0, 0], null, haut), null);
     check("mais elle suit le vaisseau",
-          cat.focus({ x: 500, y: 0, z: 2 }, [0, 0, 0], versLaZone,
-                    () => [500, 0, 0]).prompt, "Gear Up");
+          cat.focus({ x: 500, y: 0, z: 1.2 }, [0, 0, 0], versPlusZ,
+                    () => [500, 0, 0], null, haut).prompt, "Gear Up");
+  }
+  // Le volume d'une zone, contre la capsule du joueur.
+  {
+    const capsule = { shape: "capsule", radius: 0.5, height: 2, axis: 1, center: [0, 0, 0] };
+    check("capsule contre capsule, cote a cote a 0,9 : dedans",
+          joueurDansVolume([0, 0, 0], null, capsule, [0.9, 0, 0], [0, 1, 0]), true);
+    check("a 1,1 : dehors", joueurDansVolume([0, 0, 0], null, capsule, [1.1, 0, 0], [0, 1, 0]), false);
+    check("a la verticale, 1,9 plus haut : dedans (deux demi-segments et deux rayons)",
+          joueurDansVolume([0, 0, 0], null, capsule, [0, 1.9, 0], [0, 1, 0]), true);
+    const boite = { shape: "box", size: [2, 2, 2], center: [0, 0, 0] };
+    check("une boite se touche par sa face", joueurDansVolume([0, 0, 0], null, boite, [1.4, 0, 0], [0, 1, 0]), true);
+    check("et pas au-dela du rayon du detecteur", joueurDansVolume([0, 0, 0], null, boite, [1.6, 0, 0], [0, 1, 0]), false);
   }
 
   // L'entrainement : trois noeuds du satellite casse, et eux seuls.

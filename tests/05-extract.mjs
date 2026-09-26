@@ -543,6 +543,18 @@ console.log("     champs avec volume mesure:", volumes,
     check("le point d'apparition du vaisseau est 160 plus haut", Math.round(dist(envol.position) - dist(sb.position)) > 150, true);
   }
 
+  // LA TRAPPE EST UN COLLIDER sans maillage : l'extraction en donne la forme,
+  // que le glTF n'emporte pas (docs/132).
+  {
+    const tr = (gp.placed.HatchController || [])[0];
+    const hc = tr && tr.hatchCollider;
+    console.log("  trappe :", JSON.stringify(hc));
+    check("la trappe barre l'entree : un collider nomme Hatch_Collider", hc && hc.name, "Hatch_Collider");
+    check("de forme connue", !!(hc && hc.volume && ["box", "sphere", "capsule", "mesh"].includes(hc.volume.shape)), true);
+    check("a moins de trois unites des commandes de la trappe",
+          Math.hypot(...hc.position.map((v, i) => v - tr.position[i])) < 3, true);
+  }
+
   // LES FISSURES. Chaque piece porte un `DS_Decals` que `Awake` eteint et que
   // le premier coup rallume ; le moteur doit trouver la piece dans le glTF, et
   // c'est l'identifiant pose par l'exportateur qui la lui designe.
@@ -557,6 +569,11 @@ console.log("     champs avec volume mesure:", volumes,
     return c.name === "Decals" || fissureSous(c);
   });
   check("et une fissure sous chacun", noeudsPiece.every(fissureSous), true);
+  // Et la trappe, collider sans maillage a voir : emise, cachee, solide.
+  const trappeNoeud = vg.gltf.nodes.find((n) => n.name === "Hatch_Collider");
+  check("le glTF du vaisseau porte Hatch_Collider, un maillage cache mais solide",
+        !!trappeNoeud && trappeNoeud.mesh !== undefined && !!(trappeNoeud.extras && trappeNoeud.extras.hidden)
+          && !(trappeNoeud.extras && trappeNoeud.extras.noCollide), true);
 }
 
 // --- ce que l'audit a mesure, garde en invariant ---

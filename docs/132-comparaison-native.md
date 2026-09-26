@@ -1231,3 +1231,49 @@ Le portage l'y pose désormais, dans l'orientation de la scène — celle dont
 les capteurs de pad et les volumes de réparation sont exprimés —, et l'y
 remet à chaque boucle. Mesuré dans Chromium : posé sur ses pads, immobile, de
 la 38ᵉ à la 60ᵉ seconde.
+
+### La borne, puis le vaisseau, à pied
+
+Le regard aux flèches a mené l'alpha jusqu'à la borne de lancement. Ce qu'on y
+voit, puis ce que le portage faisait à la place :
+
+- **la borne se vise.** Son `InteractReceiver` est une sphère de 0,42, de
+  portée 2 : il faut la regarder, à deux pas. L'invite est « ⓧ Enter Launch
+  Codes » (avec Skip Intro, qui donne les codes), l'icône de la manette même
+  au clavier. Appuyer éteint l'invite — `_interactVolume.Disable()` — et la
+  tour passe au **vert** : `OnActivateLaunchTower` allume `ElevatorLight`,
+  éteinte dans la scène. Le portage avait deux voies de plus, prises à la
+  seule proximité (un objet « borne » à 2,5 unités, et une boucle à 3), sans
+  regarder la borne ; il n'allumait pas la lumière verte, et sans les codes
+  n'affichait rien là où le build dit « Requires Launch Codes » ;
+- **la touche de la borne asseyait aux commandes.** Le portage embarquait à
+  quarante unités de la coque, codes de lancement en poche : depuis que le
+  vaisseau attend au sommet de la tour, la même touche vous posait dans le
+  siège. Dans le build, on embarque par `FlightConsole`, une `InteractZone`
+  (capsule autour du siège) : « Suit Required » au réveil, « Buckle Up » une
+  fois la combinaison enfilée — et c'est la combinaison qu'il faut, pas les
+  codes ;
+- **le vaisseau n'avait pas de colliders.** Il était exclu de la physique —
+  « il se déplace » — et le joueur le traversait. Ses dix-sept colliders sont
+  désormais des corps **animés**, que Havok recale sur le nœud avant chaque
+  pas : on se tient dans la cabine ;
+- **une zone ne se vise pas, on y entre.** `InteractZone.UpdateFocus` :
+  pas de focus hors du volume (`_isPlayerInsideVolume`, la capsule du
+  `PlayerDetector`), puis l'angle entre l'avant de la **caméra** et l'avant
+  de la **zone**, comparé à `_viewingWindow` tel quel. Le portage prenait la
+  zone à portée, mesurait la direction zone → joueur, contre une
+  demi-fenêtre ;
+- **le paquetage se prend par sa zone**, « Gear Up » — et la combinaison de
+  la grotte par son récepteur « Suit Up » —, non plus à trois unités sans
+  regarder.
+
+La trappe, elle, est un `MeshCollider` **sans maillage à voir** :
+`Hatch_Collider` n'a pas de `MeshFilter`, et l'exportateur glTF n'émettait
+que ceux-là. Six objets de `level0` sont dans ce cas — la trappe, une grille
+des jumelles, quatre `ProxyCollider` de Giant's Deep —, et aucun n'était
+solide dans le portage. Leur maillage de collision est désormais émis, caché :
+la trappe fermée barre l'entrée, et l'ouvrir la retire.
+
+Mesuré dans Chromium : au poste sans combinaison, « Suit Required » et l'on
+ne s'assoit pas ; au paquetage, « Gear Up » et la combinaison ; au poste,
+« Buckle Up », et l'on s'assoit.

@@ -530,6 +530,7 @@ async function boot() {
   // Position du vaisseau dans la scene AU REPOS, pour ramener ce qu'il porte.
   const shipRest = ((gameplay.singletons || {}).ShipBody || {}).position || null;
   const shipRestRot = ((gameplay.singletons || {}).ShipBody || {}).rotation || null;
+  window.__shipRest = shipRest; window.__shipRestRot = shipRestRot;
 
   // Depart : au point d'apparition du joueur, celui que le build pose.
   //
@@ -1395,6 +1396,9 @@ async function boot() {
   // --- vaisseau ---
   let ship = null;
   let shipStart = [0, 0, 0];
+  // Les colliders du vaisseau, et celui de la trappe parmi eux.
+  let collidersVaisseau = null, colliderTrappe = [];
+  const MASQUE_VAISSEAU = 2;
   const fissuresPieces = [];
   {
     const entry = entryForBody(geo, home.name);
@@ -1437,6 +1441,32 @@ async function boot() {
     // (docs/132). La pose de repos n'est pas « sous la surface », comme
     // docs/07 le concluait : le sol du village est a 130 unites du centre, le
     // haut de la tour a 166.
+    // ON ENTRE DANS LE VAISSEAU. Ses colliders etaient exclus de la physique
+    // — « il se deplace » — et le joueur le traversait : on ne pouvait ni
+    // passer la trappe ni se tenir dans la cabine, et l'on embarquait de loin.
+    // Ils sont desormais ANIMES : Havok lit la pose du noeud avant chaque pas,
+    // le vaisseau pousse le joueur sans que le decor le retienne. La trappe est
+    // un collider parmi eux (`_hatchObject`, `Hatch_Collider`) : l'ouvrir le
+    // desactive, comme `SetActive(false)` (docs/132).
+    if (plugin && node && node.getChildMeshes) {
+      collidersVaisseau = buildColliders(BABYLON, scene,
+        node.getChildMeshes(false).filter((m) => m.getTotalVertices() > 0), {});
+      const nomTrappe = (trappeData[0] || {}).hatchObject || "Hatch_Collider";
+      for (const a of collidersVaisseau.aggregates) {
+        a.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
+        a.body.disablePreStep = false;
+        // Un bit a lui : les sondes du vaisseau cherchent le SOL, et sans ce
+        // filtre elles trouvaient sa propre coque (docs/132).
+        try { a.shape.filterMembershipMask = MASQUE_VAISSEAU; } catch (e) { /* sans filtre */ }
+        for (let n = a.transformNode; n; n = n.parent) {
+          if (n.name === nomTrappe) { colliderTrappe.push(a); break; }
+        }
+      }
+      window.__collidersVaisseau = { poses: collidersVaisseau.aggregates.length,
+                                     trappe: colliderTrappe.length };
+      console.log(`vaisseau : ${collidersVaisseau.aggregates.length} colliders anime(s), `
+        + `trappe ${colliderTrappe.length}`);
+    }
     const spawnWorld = shipRest || shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
       const local = [spawnWorld[0] - home.position0[0],
@@ -1481,7 +1511,7 @@ async function boot() {
                                          pos.y - up[1] * reach,
                                          pos.z - up[2] * reach);
           try {
-            const hit = eng.raycast(from, to);
+            const hit = eng.raycast(from, to, { collideWith: ~MASQUE_VAISSEAU });
             if (!hit || !hit.hasHit) return null;
             const q = hit.hitPointWorld || hit.hitPoint;
             if (!q) return null;
@@ -2466,7 +2496,17 @@ async function boot() {
   // s'etend sur une dizaine d'unites. Le sas n'a pas d'interactif extrait : ce
   // rayon large est un repli assume, pas une valeur du build. Il ne raccourcit
   // plus le depart, qui se fait desormais au village, 471 u plus loin.
-  const SHIP_REACH = 40;
+  // LE POSTE DE PILOTAGE, ET LUI SEUL. `FlightConsole` est une `InteractZone`
+  // (capsule autour du siege) : on y entre, on regarde devant soi, et l'on
+  // s'attache — combinaison sur le dos. `Awake` l'annonce « Suit Required »,
+  // `OnSuitUp` « Buckle Up ». Le portage embarquait a quarante unites de la
+  // coque, codes de lancement en poche : depuis que le vaisseau attend au
+  // sommet de la tour, la touche de la borne, en bas, vous asseyait aux
+  // commandes (docs/132).
+  const estPoste = (f) => !!f && f.kind === "zone" && f.name === "FlightConsole"
+    && f.body === "Ship_Body";
+  const invitePoste = () => (equipment.suit ? "Buckle Up" : "Suit Required");
+  let focusPrecedent = null;
 
   // §O LES PHARES DU VAISSEAU. Le portage n'en avait aucun : `shiplightRange`
   // etait ecrite, eprouvee, et appelee par personne.
@@ -2486,7 +2526,6 @@ async function boot() {
   // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
   // enfants de la zone. Trois unites est donc la hauteur de cette capsule, pas
   // un nombre choisi.
-  const GEAR_REACH = 3;
 
   // §J S'ASSEOIR (docs/69-assise.md).
   //
@@ -2512,7 +2551,7 @@ async function boot() {
                       cibles: ciblesVerrou };
   const zoneAscenseur = interactables.items.find((it) => it.prompt === "Activate Lift"
     || (it.kind === "zone" && it.name === "AttachPoint" && it.body === "TimberHearth_Body")) || null;
-  const terminalItem = interactables.items.find((it) => it.kind === "terminal" || it.name === "LaunchTerminal") || null;
+  const terminalItem = interactables.items.find((it) => it.terminal || it.kind === "terminal") || null;
   const elAttach = pointsAttache.points.find((p) => p.name === "AttachPoint" && p.body === "TimberHearth_Body") || null;
   const zoneAscRestPos = zoneAscenseur ? [...zoneAscenseur.world] : [1.6731, -38.8395, -8720.9674];
   const elAttachRestPos = elAttach ? [...elAttach.position] : [1.6731, -38.8395, -8720.9674];
@@ -4228,8 +4267,7 @@ async function boot() {
           const a = ship.axes;
           player.pos.x += a.up[0] * 4; player.pos.y += a.up[1] * 4;
           player.pos.z += a.up[2] * 4;
-        } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
-                   pdata.knowsLaunchCodes) {
+        } else if (estPoste(focusPrecedent) && equipment.suit) {
           ship.boarded = true;
           const sonBoucle = sonsUI.buckleUp();
           if (sonBoucle) audio.playOneShot(sonBoucle.file, { volume: sonBoucle.volume });
@@ -4354,8 +4392,10 @@ async function boot() {
       // avec le vaisseau, et une zone du village tourne avec sa planete.
       focus = interactables.focus(player.pos, anchorPos, fwd,
                                   (it) => decalageDuCorps(it.body, anchorPos),
-                                  visesParRayon ? camera.position : null);
+                                  visesParRayon ? camera.position : null,
+                                  [up.x, up.y, up.z]);
     }
+    focusPrecedent = focus;
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
     // comportement d'avant.
@@ -4454,11 +4494,19 @@ async function boot() {
         }
       } else if (interactPressed && !dialogue.active && focus
                  && (focus.kind === "zone" || focus.kind === "interact" || focus.kind === "terminal" || focus.kind === "observatoryMap")) {
+        // Le poste de pilotage sans combinaison : `ResetInteraction`, et rien
+        // d'autre — ni siege ni accroche. Avec, l'embarquement l'a deja pris.
+        if (estPoste(focus)) {
+          interactPressed = false;
+        } else
         // La borne de lancement : actionne la tour ou refuse selon les codes
-        if (focus.kind === "terminal") {
+        if (focus.kind === "terminal" || focus.terminal) {
           const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
           if (r === "activate") {
             for (const a of ascenseurs) a.activateControls();
+            // `GetComponentInChildren<Light>().enabled = true` : la lumiere
+            // verte de la tour, eteinte dans la scene, s'allume.
+            placedLights.allumeScript("ElevatorLight", true);
             bipUI("PlayAffirmativeUISound");
             console.log("tour de lancement actionnee");
             interactPressed = false;
@@ -4500,7 +4548,7 @@ async function boot() {
           }
           interactPressed = false;
         }
-        const point = pointsAttache.at(focus.world, 2);
+        const point = estPoste(focus) ? null : pointsAttache.at(focus.world, 2);
         if (point && point !== siegePilotage) {
           lacetSiege = yaw;
           const demande = pointsAttache.attach(point, {
@@ -4658,12 +4706,18 @@ async function boot() {
     }
     // §7 L'EQUIPEMENT SE RAMASSE. Le paquetage du vaisseau donne les trois,
     // la combinaison de la grotte ne donne qu'elle. On appuie dessus, une fois.
-    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
+    //
+    // PAR SON VOLUME D'INTERACTION, et non a trois unites : `GearPickup` prend
+    // l'`InteractVolume` de ses enfants — la zone « Gear Up » du paquetage, ou
+    // l'on entre regard dans sa fenetre ; le recepteur « Suit Up » de la
+    // combinaison, qu'on vise a deux unites. Tous deux sont poses au point
+    // meme du ramassage (docs/132).
+    if (interactPressed && !dialogue.active && !(ship && ship.boarded) && focus) {
       for (const p of pickups) {
-        const q = restingPoint(playerW, decalageDuCorps(p.body, anchorPos));
-        const d = Math.hypot(q[0] - p.position[0], q[1] - p.position[1],
-                             q[2] - p.position[2]);
-        if (d > GEAR_REACH) continue;
+        if (focus.body !== p.body) continue;
+        const d = Math.hypot(focus.world[0] - p.position[0], focus.world[1] - p.position[1],
+                             focus.world[2] - p.position[2]);
+        if (d > 0.05) continue;
         const gagne = equipment.pickUp(p);
         if (gagne.length) {
           console.log(`equipement : ${gagne.join(", ")}`);
@@ -4854,7 +4908,7 @@ async function boot() {
         // `InteractReceiver.Init("Repair", ...)` : l'invite du volume vise.
         : reparationVisee_ ? P("InteractVolume._screenPrompt", "Repair")
         : focus ? P("InteractVolume._screenPrompt",
-                    focus.prompt || focus.name)
+                    estPoste(focus) ? invitePoste() : (focus.prompt || focus.name))
         : (convo && !dialogue.active)
           ? P("InteractVolume._screenPrompt",
               `Parler a ${convo.character || convo.name}`)
@@ -4974,12 +5028,11 @@ async function boot() {
       if (autopilot && autopilot.engaged) bits.push(`pilote auto : ${autopilot.phase}`);
       if (ship) bits.push(ship.boarded
         ? `vaisseau : ${ship.speed.toFixed(0)} u/s — E pour sortir`
-        : (ship.distanceTo(player.pos) < SHIP_REACH ? "E pour embarquer"
+        : (estPoste(focus) && equipment.suit ? "E pour embarquer"
            : `vaisseau a ${ship.distanceTo(player.pos).toFixed(0)} u`));
       bits.push(`memoire ${dialogue.known}/${dialogue.total} · ${pdata.summary}`);
-      if (ship && !ship.boarded && !pdata.knowsLaunchCodes &&
-          ship.distanceTo(player.pos) < SHIP_REACH) {
-        bits.push("vaisseau verrouillé — parler au conservateur");
+      if (ship && !ship.boarded && estPoste(focus) && !equipment.suit) {
+        bits.push("combinaison requise pour s'asseoir aux commandes");
       }
       // La reparation : ce qui est en cours, et l'invite quand il y a a faire.
       if (ship && ship.boarded && ship.damage &&
@@ -6494,6 +6547,10 @@ async function boot() {
             ? ship.node.getChildren((m) => m.name === trappe.data.hatchObject, false)[0]
             : null;
           if (n && n.setEnabled) n.setEnabled(trappe.collider);
+          // Et le collider anime qu'il porte : plus de collision, trappe ouverte.
+          for (const c of colliderTrappe) {
+            try { c.shape.filterCollideMask = trappe.collider ? 0xffffffff : 0; } catch (e) { /* sans filtre */ }
+          }
           noeudTrappeOn = trappe.collider;
           if (!n && !trappeSansNoeud) {
             trappeSansNoeud = true;
@@ -6663,7 +6720,8 @@ async function boot() {
         terminalItem.prompt = " Enter Launch Codes";
         terminalItem.disabled = false;
       } else {
-        terminalItem.prompt = null;
+        // `LaunchTerminal.Start` : `Init(" Requires Launch Codes")`.
+        terminalItem.prompt = " Requires Launch Codes";
         terminalItem.disabled = false;
       }
     }
@@ -6671,31 +6729,9 @@ async function boot() {
       zoneGearUp.disabled = equipment.suit;
     }
 
-    // `LaunchTerminal.OnPressInteract` : avec les codes, un son affirmatif et
-    // `ActivateLaunchTower` ; sans, un son negatif et la borne se remet a
-    // disposition. Elle ne sert qu'UNE fois — le build desactive son volume
-    // d'interaction.
-    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
-      for (const b of bornesTour) {
-        const q = restingPoint(playerW, decalageDuCorps(b.body, anchorPos));
-        const d = Math.hypot(q[0] - b.position[0], q[1] - b.position[1],
-                             q[2] - b.position[2]);
-        if (d > GEAR_REACH) continue;
-        const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
-        if (r === "activate") {
-          // `LaunchElevatorController.OnActivateLaunchTower`.
-          for (const a of ascenseurs) a.activateControls();
-          bipUI("PlayAffirmativeUISound");
-          console.log("tour de lancement actionnee");
-          interactPressed = false;
-        } else if (r === "refuse") {
-          bipUI("PlayNegativeUISound");
-          console.log("tour de lancement : codes inconnus");
-          interactPressed = false;
-        }
-        break;
-      }
-    }
+    // `LaunchTerminal.OnPressInteract` se traite avec l'objet VISE, plus haut.
+    // Une seconde voie l'actionnait ici a la seule proximite, sans regarder la
+    // borne : dans l'alpha, il faut la viser a deux unites (docs/132).
     // `LaunchElevatorController.OnTriggerEnter` : entrer dans la sphere de dix
     // unites alors que la cabine est en haut la renvoie en bas. Le seuil de 0,9
     // est ce qui empeche qu'elle reparte des qu'on approche du pied de la tour.

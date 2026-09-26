@@ -320,6 +320,12 @@ export function exportSubtree(ctx, rootGid, label, {
   // d'oxygene. Les compter comme solides, c'etait rendre une atmosphere
   // infranchissable.
   const colliderGids = new Set();
+  // LES COLLIDERS SANS MAILLAGE A VOIR. Six `MeshCollider` de `level0` sont
+  // seuls sur leur GameObject, sans `MeshFilter` : la trappe du vaisseau
+  // (`Hatch_Collider`), une grille des jumelles, quatre `ProxyCollider` de
+  // Giant's Deep. Leur maillage n'etait donc jamais exporte, et ils n'etaient
+  // solides nulle part. On l'emet, cache — rien ne le dessine (docs/132).
+  const colliderSeulOf = new Map();
   for (const type of ["MeshCollider", "SphereCollider", "BoxCollider",
                       "CapsuleCollider", "WheelCollider"]) {
     for (const o of env.objects({ type, file: ctx.sceneFile })) {
@@ -327,6 +333,10 @@ export function exportSubtree(ctx, rootGid, label, {
       if (!v || !v.m_GameObject) continue;
       if (v.m_IsTrigger === 1 || v.m_IsTrigger === true) continue;
       colliderGids.add(v.m_GameObject.pathId);
+      if (type === "MeshCollider" && v.m_Mesh && v.m_Mesh.pathId
+          && !meshOf.has(v.m_GameObject.pathId)) {
+        colliderSeulOf.set(v.m_GameObject.pathId, v.m_Mesh);
+      }
     }
   }
   // CE QUI SE VOIT. Un `MeshFilter` ne dessine rien : c'est le RENDERER qui
@@ -669,9 +679,12 @@ export function exportSubtree(ctx, rootGid, label, {
       rotation: [-lr.x, -lr.y, lr.z, lr.w],
       scale: [ls.x, ls.y, ls.z],
     };
-    if (meshOf.has(gid)) {
-      const materialIndices = matOf.has(gid) ? matOf.get(gid).map((m) => putMaterial(m)) : [];
-      const mi = emitMesh(meshOf.get(gid), materialIndices, skinOf.has(gid));
+    if (meshOf.has(gid) || colliderSeulOf.has(gid)) {
+      const seul = !meshOf.has(gid);
+      const materialIndices = !seul && matOf.has(gid) ? matOf.get(gid).map((m) => putMaterial(m)) : [];
+      const mi = emitMesh(seul ? colliderSeulOf.get(gid) : meshOf.get(gid), materialIndices,
+                          !seul && skinOf.has(gid));
+      if (seul && mi !== null) stats.collidersSeuls = (stats.collidersSeuls || 0) + 1;
       if (mi !== null) {
         node.mesh = mi;
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);

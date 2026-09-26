@@ -509,8 +509,24 @@ def _run(url, heavy, profil=None, zip_path=None):
               options: window.__titre.lignes.map((l) => l.textContent),
               verrous: window.__titre.menu.locked })""")
             rep.eq("cinq lignes au menu-titre", len(titre["options"]), 5)
-            page.keyboard.press("KeyE")
-        page.wait_for_function("window.__ready===true", timeout=300000)
+            # Une IMAGE peut durer plus d'une seconde en rendu logiciel : un
+            # appui instantane tombe entre deux, et le menu reste a attendre
+            # jusqu'au bout des cinq minutes. On TIENT la touche, et l'on
+            # recommence tant que le menu n'est pas passe a « Loading... » (`menu.loading`).
+            for _ in range(20):
+                page.keyboard.down("KeyE"); page.wait_for_timeout(600); page.keyboard.up("KeyE")
+                page.wait_for_timeout(4000)
+                if page.evaluate("() => window.__ready === true || !window.__titre || window.__titre.menu.loading"):
+                    break
+        try:
+            page.wait_for_function("window.__ready===true", timeout=300000)
+        except Exception:
+            # Dire POURQUOI le moteur n'a pas demarre, plutot qu'une trace
+            # d'appel sur une attente : l'erreur de la page est la cause.
+            print("  !!   le moteur n'a pas demarre ; erreurs de la page :")
+            for e in errors[:10]:
+                print("       " + e[:300])
+            raise
         page.wait_for_timeout(3000)
 
         rep.eq("erreurs console au demarrage", errors[:3], [])
@@ -907,6 +923,113 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("le vaisseau attend au sommet de la tour, sur ses pads, immobile",
                    [depart_vaisseau["r"], depart_vaisseau["pads"], depart_vaisseau["immobile"]],
                    [172, True, True])
+
+        # --- on embarque a pied (docs/132) ---------------------------------------
+        #
+        # Le vaisseau a des colliders : on se tient dans sa cabine. Le paquetage
+        # se prend par sa zone « Gear Up » (on y entre, regard dans sa
+        # fenetre), le poste par la sienne, « Suit Required » puis « Buckle
+        # Up ». Le portage embarquait a quarante unites, codes en poche, et
+        # ramassait a trois unites sans regarder.
+        embarque = page.evaluate("""() => {
+          const s = window.__shipRef, L = window.__lots;
+          if (!s || !window.__shipRest || !window.__collidersVaisseau) return null;
+          const agg = window.__player.body;
+          const e = L.equipment;
+          const avant = { p: agg.transformNode.position.clone(), regard: window.__regardCam(),
+                          eq: { suit: e.suit, probe: e.probe, minimap: e.minimap },
+                          pris: new Set(e.taken), posVaisseau: { ...s.pos }, vitVaisseau: { ...s.vel },
+                          etatVaisseau: { landed: s.landed, parked: s.parked, onPad: s.onPad,
+                                          quat: s.quat.slice(), groundBody: s.groundBody } };
+          window.__retourEmbarque = avant;
+          const rest = window.__shipRest, q = window.__shipRestRot, sc = BABYLON.EngineStore.LastCreatedScene;
+          const rot = (q, v) => { const [x, y, zz, w] = q; const tx = 2 * (y * v[2] - zz * v[1]), ty = 2 * (zz * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+            return [v[0] + w * tx + (y * tz - zz * ty), v[1] + w * ty + (zz * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]; };
+          window.__placerZone = (nom) => {
+            const z = window.__interactables.items.find((i) => i.kind === "zone" && i.name === nom && i.body === "Ship_Body");
+            const inv = [-q[0], -q[1], -q[2], q[3]], a = s.axes;
+            const cadre = (v) => [0, 1, 2].map((i) => v[0] * a.right[i] + v[1] * a.up[i] + v[2] * a.fwd[i]);
+            const C = cadre(rot(inv, [z.world[0] - rest[0], z.world[1] - rest[1], z.world[2] - rest[2]])).map((v, i) => v + s.pos[["x", "y", "z"][i]]);
+            const de = new BABYLON.Vector3(C[0] + a.up[0] * 0.5, C[1] + a.up[1] * 0.5, C[2] + a.up[2] * 0.5);
+            const r = sc.getPhysicsEngine().raycast(de, de.add(new BABYLON.Vector3(...a.up).scale(-4)));
+            const P = r.hasHit ? [0, 1, 2].map((i) => [r.hitPointWorld.x, r.hitPointWorld.y, r.hitPointWorld.z][i] + a.up[i] * 0.65) : C;
+            agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false; agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+            window.__regarder = cadre(rot(inv, rot(z.rotation, [0, 0, 1])));
+            return r.hasHit;
+          };
+          if (!window.__regardeur) {
+            window.__regardeur = sc.onAfterRenderObservable.add(() => {
+              if (!window.__regarder || s.boarded) return;
+              const cam = sc.activeCamera, f = cam.getDirection(BABYLON.Axis.Z), U = cam.upVector.clone().normalize(); const { yaw, pitch } = window.__regardCam();
+              const cp = Math.cos(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw); const h = f.add(U.scale(Math.sin(pitch))).scale(1 / cp);
+              const N = h.scale(cy).subtract(BABYLON.Vector3.Cross(U, h).scale(sy)); const E = BABYLON.Vector3.Cross(U, N);
+              const F = new BABYLON.Vector3(...window.__regarder); const Fh = F.subtract(U.scale(BABYLON.Vector3.Dot(F, U))).normalize();
+              window.__look(Math.atan2(BABYLON.Vector3.Dot(Fh, E), BABYLON.Vector3.Dot(Fh, N)), 0);
+            });
+          }
+          s.boarded = false; L.equipment.suit = false; L.equipment.probe = false; L.equipment.minimap = false;
+          return { colliders: window.__collidersVaisseau.poses, trappe: window.__collidersVaisseau.trappe,
+                   sol: window.__placerZone("FlightConsole") };
+        }""")
+        if embarque:
+            invites = lambda: page.evaluate("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].filter((n) => n.offsetParent).map((n) => n.textContent.trim())")
+            def appui():
+                page.keyboard.down("KeyE"); page.wait_for_timeout(700); page.keyboard.up("KeyE"); page.wait_for_timeout(2000)
+            def attendre_invite():
+                # Une image dure plus d'une seconde sans GPU : on attend que
+                # l'invite paraisse, sans compter sur une duree fixe.
+                try:
+                    page.wait_for_function("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].some((n) => n.offsetParent)", timeout=10000)
+                except Exception:
+                    pass
+            # Sans trop attendre : le joueur, pose contre le siege, finit par
+            # glisser hors de la capsule du poste.
+            attendre_invite()
+            sans = invites()
+            appui()
+            assis_sans = page.evaluate("() => window.__shipRef.boarded")
+            page.evaluate("() => window.__placerZone('InteractVolume')")
+            attendre_invite()
+            paquetage = invites()
+            appui()
+            combi = page.evaluate("() => window.__lots.equipment.suit")
+            page.evaluate("() => window.__placerZone('FlightConsole')")
+            attendre_invite()
+            avec = invites()
+            # Le casque descend encore apres « Gear Up » : sans GPU, une image
+            # dure plus d'une seconde, et le premier appui peut tomber pendant.
+            # On retente, comme le controle de l'assise plus bas.
+            assis = False
+            for _ in range(4):
+                appui()
+                assis = page.evaluate("() => window.__shipRef.boarded")
+                if assis:
+                    break
+            # On se LEVE par la touche, comme un joueur : ecrire `boarded` a
+            # faux laissait les commandes du vaisseau en place, et la marche
+            # qu'on mesure plus loin se faisait a la poussee.
+            if assis:
+                appui()
+            page.evaluate("""() => { window.__regarder = null; const s = window.__shipRef, r = window.__retourEmbarque;
+              s.boarded = false; Object.assign(window.__lots.equipment, r.eq);
+              window.__lots.equipment.taken = new Set(r.pris);
+              Object.assign(s.pos, r.posVaisseau); Object.assign(s.vel, r.vitVaisseau);
+              Object.assign(s, r.etatVaisseau);
+              window.__assise.points.detach([0, 0, 0]);
+              const siege = window.__assise.points.points.find((p) => p.name === "FlightConsole");
+              if (siege && siege.follow) siege.follow(null);
+              const agg = window.__player.body; agg.transformNode.position.copyFrom(r.p); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+              window.__look(r.regard.yaw, r.regard.pitch); }""")
+            page.wait_for_timeout(1500)
+            rep.at_least("le vaisseau a des colliders, on tient dans sa cabine", embarque["colliders"], 10)
+            # `Hatch_Collider` n'a pas de maillage a voir : l'exportateur emet
+            # celui de son `MeshCollider`, et la trappe fermee barre l'entree.
+            rep.eq("et la trappe en est un", embarque["trappe"], 1)
+            rep.eq("au poste sans combinaison : « Suit Required », et l'on ne s'assoit pas",
+                   [sans, assis_sans], [["Suit Required"], False])
+            rep.eq("au paquetage : « Gear Up », et la combinaison", [paquetage, combi], [["Gear Up"], True])
+            rep.eq("au poste avec : « Buckle Up », et l'on s'assoit", [avec, assis], [["Buckle Up"], True])
 
         # --- degats du vaisseau -------------------------------------------------
         # Les valeurs de l'alpha eteignent les degats localises : on verifie que
@@ -2979,6 +3102,13 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         if tour:
             rep.eq("une borne de lancement montee", tour["bornes"], 1)
+            # Elle se VISE : son recepteur (portee 2), et plus d'objet pris a la
+            # proximite (docs/132).
+            visee_borne = page.evaluate("""() => { const it = window.__interactables.items;
+              const b = it.find((i) => i.terminal);
+              return [it.filter((i) => i.kind === "terminal").length, b ? b.kind : null, b ? b.range : null]; }""")
+            rep.eq("la borne se vise : un recepteur de portee 2, rien a la proximite",
+                   visee_borne, [0, "interact", 2])
             rep.eq("un declencheur d'en haut", tour["declencheurs"], 1)
             rep.eq("une cabine", tour["cabines"], 1)
             # `LaunchElevatorController.Start` ferme les commandes : tant que la
@@ -3167,6 +3297,9 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (window.__dialogue && window.__dialogue.active) window.__dialogue.active = null;
           s.boarded = false;
           window.__assise.points.detach([0, 0, 0]);
+          // On embarque par le POSTE, une zone ou l'on entre (docs/132) : a
+          // deux unites de la coque, le portage asseyait ; le build, non.
+          if (window.__placerZone) { window.__placerZone("FlightConsole"); return true; }
           const agg = p.body;
           agg.transformNode.position.set(s.pos.x + 2, s.pos.y + 2, s.pos.z + 2);
           agg.body.disablePreStep = false;
@@ -3227,6 +3360,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         # controle ne doit pas effacer ce qu'un autre a mesure.
         page.evaluate("""(codes) => {
           const s = window.__shipRef;
+          window.__regarder = null;
           s.boarded = false;
           window.__assise.points.detach([0, 0, 0]);
           window.__assise.points.drain();
