@@ -21,7 +21,7 @@
 // inverse. Surtout pas par une mise a l'echelle negative : celle-ci inverserait
 // l'orientation des faces.
 
-import { hideUnrendered, hideDisabledRenderers, disableInactive } from "./physics.js";
+import { hideUnrendered, hideDisabledRenderers, disableInactive, propagerExtras } from "./physics.js";
 import { falloffUnity, applyLayers } from "./lights.js";
 import { toLegacyMaterials } from "./shaders/index.js";
 
@@ -64,6 +64,7 @@ export const BODY_FILES = [
 async function loadFile(BABYLON, scene, file) {
   const res = await BABYLON.SceneLoader.ImportMeshAsync("", "data/gltf/", file, scene);
   // Ce que le build ne dessine pas — un MeshFilter sans renderer allume.
+  propagerExtras(res.meshes);
   hideUnrendered(res.meshes);
   // ... ni ce dont le renderer est eteint au depart.
   hideDisabledRenderers(res.meshes);

@@ -360,7 +360,10 @@ export function exportSubtree(ctx, rootGid, label, {
       // receveur. Au titre, le sol sortait trois fois trop sombre (docs/132).
       if (!v.m_CastShadows) sansOmbrePortee.add(gid);
       if (!v.m_ReceiveShadows) sansOmbreRecue.add(gid);
-      if (v.m_Materials && v.m_Materials.length) matOf.set(gid, v.m_Materials[0]);
+      // TOUS les materiaux, un par sous-maillage : le premier seul faisait du
+      // cratere de Timber Hearth un bloc de roche, la ou l'alpha montre
+      // l'herbe du fond (173 renderers en portent plusieurs, docs/132).
+      if (v.m_Materials && v.m_Materials.length) matOf.set(gid, v.m_Materials);
       if (type === "SkinnedMeshRenderer") {
         skinOf.set(gid, v);
         if (v.m_Mesh) meshOf.set(gid, v.m_Mesh);
@@ -535,11 +538,13 @@ export function exportSubtree(ctx, rootGid, label, {
 
   // --- maillages ---
   const meshCache = new Map();
-  const emitMesh = (ptr, materialIndex, wantSkin) => {
+  const emitMesh = (ptr, materialIndices, wantSkin) => {
     if (!ptr || !ptr.pathId) return null;
     // Un meme maillage peut etre instancie avec des materiaux differents : la
-    // cle de cache doit donc inclure le materiau.
-    const key = `${ptr.pathId}:${materialIndex}:${wantSkin ? 1 : 0}`;
+    // cle de cache doit donc inclure les materiaux.
+    // Les POSITIONS comptent : un materiau manquant ne decale pas les autres.
+    const mats = materialIndices || [];
+    const key = `${ptr.pathId}:${mats.join(",")}:${wantSkin ? 1 : 0}`;
     if (meshCache.has(key)) return meshCache.get(key);
     if (stats.meshes >= maxMeshes) return null;
     meshCache.set(key, null);
@@ -597,17 +602,39 @@ export function exportSubtree(ctx, rootGid, label, {
     }
 
     // Inversion de l'ordre des triangles : l'inversion de Z change l'orientation.
-    const tri = Math.floor(d.indices.length / 3);
-    const idx = new Uint32Array(tri * 3);
-    for (let i = 0; i < tri; i++) {
-      idx[i * 3] = d.indices[i * 3 + 2];
-      idx[i * 3 + 1] = d.indices[i * 3 + 1];
-      idx[i * 3 + 2] = d.indices[i * 3];
+    const tranche = (debut, compte) => {
+      const tri = Math.floor(compte / 3);
+      const idx = new Uint32Array(tri * 3);
+      for (let i = 0; i < tri; i++) {
+        const b = debut + i * 3;
+        idx[i * 3] = d.indices[b + 2];
+        idx[i * 3 + 1] = d.indices[b + 1];
+        idx[i * 3 + 2] = d.indices[b];
+      }
+      return idx;
+    };
+    // UN PRIMITIVE PAR SOUS-MAILLAGE, avec son materiau. Unity dessine le
+    // sous-maillage i avec le materiau i ; un sous-maillage sans materiau ne se
+    // dessine pas ; un materiau de trop redessine le DERNIER sous-maillage. Seuls
+    // les triangles (`topology` 0) se decoupent ; le reste garde un bloc.
+    const subs = (d.subMeshes || []).filter((sm) => (sm.topology || 0) === 0 && sm.indexCount > 0
+      && sm.firstIndex + sm.indexCount <= d.indices.length);
+    const primitives = [];
+    if (subs.length > 1 && mats.length > 0) {
+      for (let i = 0; i < Math.max(subs.length, mats.length); i++) {
+        const sm = subs[Math.min(i, subs.length - 1)];
+        if (i >= mats.length) break;
+        const prim = { attributes, indices: g.addIndices(tranche(sm.firstIndex, sm.indexCount)) };
+        if (mats[i] !== null && mats[i] !== undefined) prim.material = mats[i];
+        primitives.push(prim);
+      }
+      stats.subMeshes = (stats.subMeshes || 0) + primitives.length;
+    } else {
+      const prim = { attributes, indices: g.addIndices(tranche(0, d.indices.length)) };
+      if (mats.length && mats[0] !== null && mats[0] !== undefined) prim.material = mats[0];
+      primitives.push(prim);
     }
-
-    const prim = { attributes, indices: g.addIndices(idx) };
-    if (materialIndex !== null && materialIndex !== undefined) prim.material = materialIndex;
-    g.meshes.push({ name: raw.m_Name || "mesh", primitives: [prim] });
+    g.meshes.push({ name: raw.m_Name || "mesh", primitives });
     meshCache.set(key, g.meshes.length - 1);
     stats.meshes++;
     return g.meshes.length - 1;
@@ -630,8 +657,8 @@ export function exportSubtree(ctx, rootGid, label, {
       scale: [ls.x, ls.y, ls.z],
     };
     if (meshOf.has(gid)) {
-      const materialIndex = matOf.has(gid) ? putMaterial(matOf.get(gid)) : null;
-      const mi = emitMesh(meshOf.get(gid), materialIndex, skinOf.has(gid));
+      const materialIndices = matOf.has(gid) ? matOf.get(gid).map((m) => putMaterial(m)) : [];
+      const mi = emitMesh(meshOf.get(gid), materialIndices, skinOf.has(gid));
       if (mi !== null) {
         node.mesh = mi;
         if (skinOf.has(gid)) skinnedNodes.push([g.nodes.length, gid]);

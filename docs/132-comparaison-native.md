@@ -796,7 +796,7 @@ les spots de `SunImposterPivot`, que `LookAtSun` tourne vers l'étoile à
 chaque image — `SunImposter_Center` à 491,3 unités du centre, intensité 8,
 cône de 45 degrés, **avec des ombres** : c'est la planète qui éteint sa face
 nuit. `imposteur.js` refait l'échange de calques et la pose des spots ; le
-relief du corps porte l'ombre (carte de 1 024, rafraîchie toutes les six
+relief du corps porte l'ombre (carte de 2 048, plans serrés sur le corps, rafraîchie toutes les six
 images, l'étoile ne tournant que de deux degrés par seconde).
 
 Mesure au réveil, alpha / portage :
@@ -814,3 +814,24 @@ propre shader (`DoubleSidedCutoutBumpedDiffuse`) — mais la lumière du
 village, elle, est celle de l'alpha. Le soleil suit aussi le même horaire des
 deux côtés : nuit au réveil, plein jour vers quatre-vingt-dix secondes,
 nuit de nouveau vers cent trente-cinq.
+
+### Un renderer, plusieurs matériaux
+
+Le sol du cratère sortait couleur roche. Dans le build, 173 renderers portent
+**plusieurs** matériaux, un par sous-maillage — `craterGeo` en a deux, la roche
+et l'herbe — et l'export glTF n'en gardait que le premier, appliqué à tout le
+maillage. `gltf.js` émet désormais une primitive par sous-maillage, chacune
+avec son matériau ; Babylon en fait des enfants `<nom>_primitive<i>`, auxquels
+`propagerExtras` recopie les drapeaux du parent (ombres portées et reçues,
+rendu ou non) avant que `hideUnrendered` ne les lise.
+
+### Le spot de l'imposteur, vivant et bien classé
+
+Deux raisons faisaient que le spot `SunImposter_Center` n'éclairait pas, alors
+que l'échange de calques était fait. Il passait par le budget de `LightField`,
+qui garde les lumières proches du joueur, et il n'y survivait pas : il est
+désormais créé à part, comme l'imposteur de Brittle Hollow. Et Babylon ne trie
+les lumières d'un maillage que si `scene.requireLightSorting` est posé : le
+spot, rallumé en entrant dans le secteur, était ajouté en fin de liste, onzième
+pour sept emplacements. Le tri est posé, et la liste de chaque maillage est
+refaite à chaque bascule.

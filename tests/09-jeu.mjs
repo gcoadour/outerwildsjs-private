@@ -145,7 +145,7 @@ import { gltfEnGamma } from "../web/src/shaders/index.js";
 import { paginate, dispositionDialogue, GEOMETRIE } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer } from "../web/src/physics.js";
+import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer, propagerExtras } from "../web/src/physics.js";
 import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE } from "../web/src/lights.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
@@ -702,6 +702,19 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   vus[0](loader);
   check("le chargeur glTF n'utilise plus de tampon sRGB", loader.useSRGBBuffers, false);
   gltfEnGamma.pose = false;
+}
+
+// Un noeud a plusieurs primitives rend ses `extras` a ses primitives, et a
+// elles seules (docs/132).
+{
+  const ex = { layer: 12, noCollide: true };
+  const parent = { name: "craterGeo", metadata: { gltf: { extras: ex } } };
+  const p0 = { name: "craterGeo_primitive0", parent };
+  const p1 = { name: "craterGeo_primitive1", parent };
+  const autre = { name: "Grass", parent };
+  check("deux primitives recoivent les extras", propagerExtras([p0, p1, autre]), 2);
+  check("avec le calque du noeud", p0.metadata.gltf.extras.layer, 12);
+  check("un enfant qui est un autre noeud garde les siens", autre.metadata, undefined);
 }
 
 // Le halo du `GlowEffect` recoit la teinte BRUTE : (255, 100, 100) a la mort

@@ -84,7 +84,7 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
          probeReadout, selfDestructed } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
-         createPlayerBody, teleportBody, hideUnrendered, hiddenMesh,
+         createPlayerBody, teleportBody, hideUnrendered, propagerExtras, hiddenMesh,
          disableInactive, underInactive } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
@@ -297,6 +297,11 @@ async function boot() {
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
   const scene = new BABYLON.Scene(canvas ? engine : engine);
+  // `renderPriority` ne trie les lumieres d'un maillage que si la scene le
+  // demande. Sans cela, l'ordre est celui de CREATION : les lumieres tenues
+  // passaient devant par chance, et le soleil de substitution, cree apres les
+  // lampes du village, tombait hors des sept que prend un materiau (docs/132).
+  scene.requireLightSorting = true;
   // L'attenuation des lumieres ponctuelles d'Unity 4, avant tout shader.
   patchAttenuationUnity(BABYLON);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
@@ -1024,8 +1029,27 @@ async function boot() {
     if (typeof soleilDuBuild.intensity === "number") sun.intensity = soleilDuBuild.intensity;
     if (soleilDuBuild.color) sun.diffuse = new BABYLON.Color3(...soleilDuBuild.color.slice(0, 3));
   }
+  // Les spots de l'imposteur ne passent pas par le budget de `LightField`,
+  // qui ne garde que les lumieres proches du joueur : ils sont a cinq cents
+  // unites, et ils eclairent toute la planete (imposteur.js).
+  const nomsImposteurs = new Set(IMPOSTEURS.map((i) => i.lumiere));
   const placedLights = new LightField(BABYLON, scene,
-    (lighting.lights || []).filter((l) => l !== soleilDuBuild));
+    (lighting.lights || []).filter((l) => l !== soleilDuBuild && !nomsImposteurs.has(l.name)));
+  const spotsImposteurs = new Map();
+  for (const imp of IMPOSTEURS) {
+    const l = (lighting.lights || []).find((x) => x.name === imp.lumiere);
+    if (!l) continue;
+    const node = placedLights.createNode(l);
+    if (!node) continue;
+    node.includeOnlyWithLayerMask = layerMaskFor(l.cullingMask);
+    // Le Deferred Lighting d'Unity rend TOUTES les lumieres ; un materiau de
+    // Babylon n'en prend que sept, les premieres par `renderPriority`. Le
+    // soleil de substitution passait onzieme sur le terminal de lancement, et
+    // midi restait la nuit (docs/132) : il passe devant.
+    node.renderPriority = 3;
+    node.setEnabled(false);
+    spotsImposteurs.set(imp.lumiere, { imp, l, node });
+  }
   // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
   // .Enable` que sous trente pour cent de coque, et une lumiere que rien n'a
   // allumee ne bat pas (docs/116-trappe.md).
@@ -1624,6 +1648,7 @@ async function boot() {
     try {
       const res = await BABYLON.SceneLoader.ImportMeshAsync(
         "", "data/gltf/", fichier, scene);
+      propagerExtras(res.meshes);
       hideUnrendered(res.meshes);
       disableInactive(res);
       toLegacyMaterials(BABYLON, scene, res.meshes);
@@ -6790,36 +6815,53 @@ async function boot() {
     placedLights.update(player.pos, anchorPos, (x) => decalageDuCorps(x.body, anchorPos));
     // `LookAtSun` : les spots de l'imposteur suivent l'etoile, a leur distance
     // du centre, tournes vers lui ; et ils portent des ombres (`m_Shadows`
-    // doux, force 1) — c'est la planete qui eteint sa face nuit.
+    // doux, force 1) — c'est la planete qui eteint sa face nuit. Ils ne
+    // servent que dans le secteur de leur corps : ailleurs, rien n'est au
+    // calque `UseSunImposter`.
     {
       const etoile = bodies.find((b) => (b.gravity.surfaceAcceleration || 0) >= 50);
-      for (const imp of IMPOSTEURS) {
-        let node = null, lum = null;
-        for (const [l, n] of placedLights.live) if (l.name === imp.lumiere) { lum = l; node = n; break; }
+      for (const { imp, l, node } of spotsImposteurs.values()) {
+        const ech = echanges.get(imp.corps);
+        const actif = !!(ech && ech.dedans);
+        if (node.isEnabled() !== actif) {
+          node.setEnabled(actif);
+          // Rallumee, une lumiere se range en QUEUE de la liste de chaque
+          // maillage (`_resyncLightSource`), quelle que soit sa priorite : on
+          // refait les listes dans l'ordre trie de la scene.
+          for (const m of scene.meshes) if (m._resyncLightSources) m._resyncLightSources();
+        }
         const corps = bodies.find((b) => b.bodyName === imp.corps);
-        if (!node || !corps || !etoile) continue;
+        if (!actif || !corps || !etoile) continue;
         const pose = poseImposteur(corps.position, etoile.position, imp.distance);
         if (!pose) continue;
         node.position.set(...pose.position);
         if (node.direction) node.direction.set(...pose.direction);
-        const ech = echanges.get(imp.corps);
         const ombres = window.__imposteur.ombres;
-        if (ech && ech.meshes.length && BABYLON.ShadowGenerator && ombres.get(imp.lumiere) !== node) {
+        if (ech.meshes.length && BABYLON.ShadowGenerator && !ombres.has(imp.lumiere)) {
           try {
-            const g = new BABYLON.ShadowGenerator(1024, node);
-            g.bias = 0.0008;
-            g.setDarkness(1 - ((lum.ombre && lum.ombre.force) ?? 1));
-            const carte = g.getShadowMap();
-            // L'etoile tourne de deux degres par seconde : une carte tous les
+            // La profondeur de la carte ne couvre que le CORPS : de la face
+            // eclairee a la face nuit, soit la distance du spot au centre plus
+            // ou moins le rayon. Etalee de 1 a 600, elle rendait le relief en
+            // marches d'escalier noires.
+            const R = ((corps.gravity && corps.gravity.upperSurfaceRadius) || 200) * 1.3;
+            node.shadowMinZ = Math.max(1, imp.distance - R);
+            node.shadowMaxZ = imp.distance + R;
+            // `m_Resolution` 3 : « tres haute », 2 048 pour un spot dans Unity 4.
+            const g = new BABYLON.ShadowGenerator(2048, node);
+            g.bias = 0.002;
+            g.normalBias = 0.01;
+            if ("usePercentageCloserFiltering" in g) g.usePercentageCloserFiltering = true;
+            g.setDarkness(1 - ((l.ombre && l.ombre.force) ?? 1));
+            // L'etoile tourne de deux degres par seconde : une carte toutes les
             // six images suffit, et le relief du corps ne bouge pas.
-            carte.refreshRate = 6;
+            g.getShadowMap().refreshRate = 6;
             for (const { mesh } of ech.meshes) {
               if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) continue;
               g.addShadowCaster(mesh, false);
               mesh.receiveShadows = true;
             }
-            ombres.set(imp.lumiere, node);
-          } catch (e) { ombres.set(imp.lumiere, node); }
+            ombres.set(imp.lumiere, g);
+          } catch (e) { ombres.set(imp.lumiere, null); }
         }
       }
     }
