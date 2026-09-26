@@ -342,7 +342,8 @@ que le « rayon », et le portage émettait dans un cube de deux unités. Ses
 soixante particules par seconde s'éparpillaient en taches rouges au lieu de
 s'empiler, en additif, en une langue orange.
 
-Ce qui reste ouvert : l'alpha voit les bûches de plus près que le portage,
+**Fermé depuis** (« Le cratère de Timber Hearth », plus bas). Ce qu'on en
+disait alors : l'alpha voit les bûches de plus près que le portage,
 alors que les positions du build (point d'apparition, caméra à 0,9 au-dessus
 du centre du corps et 0,15 devant, feu) placent l'œil à 4,5 m de la flamme, et
 le portage à 4,7 m. L'écart vient sans doute de ce que la physique fait du
@@ -354,7 +355,9 @@ glissade à l'arrêt : la capsule porte `Character`, sans frottement, mais
 en course ou en l'air. `PhysicMaterial` (classe 134) se lit maintenant au bit
 près. L'éblouissement
 blanc, lui, n'est ni le tonemapping (éteint par `TonemappingManager`) ni le
-flashback ; il n'est pas encore attribué.
+flashback : c'est le `StartOfTimeLoop` de `PlayerCameraEffectController`,
+glow blanc à 3 en teinte 0-255, que le portage normalisait et lançait à
+l'instant zéro — attribué et corrigé dans « La fin des temps, côte à côte ».
 
 Et le cercle en haut à gauche de l'écran, absent de l'alpha : le marqueur de
 la sonde, créé `hidden` mais dont la classe pose `display: flex` — une règle
@@ -503,11 +506,11 @@ de cliquer — viser le vide ne vise plus rien.
 Sous Xvfb, **la souris de l'alpha est inutilisable** : dès que la fenêtre a
 le focus — au chargement ou en pleine partie —, le premier mouvement de souris
 envoie la caméra en NaN. On ne tourne donc pas la tête de l'alpha ; on vise en
-se déplaçant, par pas chassés et pas en avant tenus au clavier. Cela suffit
-pour la marche, le saut et la mise en place, pas pour viser une capsule de
-cinquante centimètres à deux pas : la conversation n'a pas pu être ouverte
-côté alpha, et la règle du rayon (dix unités, `_interactRange`) repose sur
-l'IL, pas sur une capture.
+se déplaçant, par pas chassés et pas en avant tenus au clavier. C'est lent,
+mais cela suffit, y compris pour viser une capsule de cinquante centimètres :
+une fois le cadrage du réveil connu (section « Le cratère »), Slate se vise
+en contournant le feu par la droite. Voir « Parler, côte à côte, pour de
+bon » plus bas.
 
 ## Le menu de pause, côte à côte
 
@@ -558,3 +561,425 @@ fixe et par axe**, pas une fraction de l'écart — quatorze pas, 0,28 s, pour
 atteindre 7 — ; et debout, le matériau frotte, ce qui arrête en 0,59 m sur
 Timber Hearth (`pasAuSol`). La glissade après une touche lâchée, que
 l'alpha montrait et que le portage n'avait pas, en vient.
+
+## La fin des temps, côte à côte
+
+Une nouvelle expédition n'explose jamais : `TimeLoop.Start` suspend la
+supernova tant qu'on ignore les codes de lancement, et seul « Skip Intro »
+les donne d'emblée (`PlayerData.CreateNewPlayerSave(true)`). Les deux
+versions passent donc le titre par « Skip Intro » — `CHOIX=s` pour
+`scripts/alpha-reveil.sh`, `demarrer(page, { avant: 2 })` pour le
+portage — et la boucle de l'alpha dure **dix-huit** minutes, pas vingt.
+
+### L'effondrement, lu dans l'IL
+
+Le portage faisait partir `TriggerSupernova` et `SunExploded` ensemble,
+« faute de connaître la durée de l'effondrement », et contractait l'étoile
+pendant les **douze dernières secondes** de la boucle, avant même l'annonce,
+vers 62 % de sa taille — des valeurs déclarées « les miennes ». Il la faisait
+aussi enfler de 35 % au fil de la boucle. L'IL dit autre chose :
+
+- `SunSurfaceProgressionBehavior` et `SunCoronaProgressBehavior` ne touchent
+  qu'à la **couleur** (`SunColorCurve`) : l'étoile ne grossit pas.
+- `SunExplosionBehavior.Start` vise `localScale × 0,03` ; à partir de
+  `TriggerSupernova`, `Update` fait `Lerp(localScale, fin, 3 × deltaTime)`
+  et, sous 150 en x, met l'échelle à zéro, fait exploser le `Detonator` et
+  annonce `SunExploded`. La surface est à 4 000 dans `level0` : l'explosion
+  vient **1,58 s** après l'annonce à soixante images par seconde (1,4 s à
+  dix — la cadence compte, comme dans le build).
+- `ShrinkSunBehavior` fait de même pour la couronne (362,2), à `deltaTime`
+  seul, et l'éteint sous 50 : 2,18 s.
+- `SunSphereOfDeathBehavior.OnSunExploded` prend l'heure : l'onde part de
+  l'explosion, pas de l'annonce, et son rayon vaut `D × (t / T)³`
+  (30 000 u, 15 s), ce que le portage faisait déjà.
+
+`Effondrement` (`timeloop.js`) rejoue cette loi image par image ; l'échelle
+de départ est lue dans la scène (`localScale`, extrait pour ces deux
+classes), les constantes sont celles de l'IL. `SunStage` suit
+l'effondrement au lieu de sa courbe en cosinus, et, l'explosion passée, ne
+montre plus que la sphère de mort au rayon de l'onde.
+
+### Mesuré côte à côte
+
+`CHOIX=s scripts/alpha-reveil.sh 25 130 0.5 1075 work/alpha-fin` puis
+`node scripts/pw-fin.mjs work/web-fin/ 1080 36 0.5` (la boucle du portage est
+avancée à 1 080 s plutôt qu'attendue). Luminance moyenne de l'image :
+
+| étape | alpha | portage |
+|---|---|---|
+| de l'annonce à la mort (onde à Timber Hearth) | ≈ 11,5 s (1,6 + 9,9) | 11,4 s |
+| effet de mort : l'écran monte au blanc | 39 → 255, ≈ 1,5 s | 15 → 123 → 249 |
+| noir, puis photos à rebours sur fond noir | ≈ 3 s de noir | `attente` 3 s, noir |
+| blanc final, puis réveil ébloui | 255 → 175 → 23 → 11 | 255 → 210 → 27 → 11 |
+
+Cinq écarts corrigés en chemin, tous visibles sur la planche :
+
+- **L'éclair de mort ne blanchissait pas.** `FlashScreen(3, (255, 100, 100))`
+  : le build écrit des composantes de 0 à 255 là où Unity attend 0 à 1, et le
+  `GlowEffect` multiplie son halo par elles — le moindre pixel non noir
+  sature. Le rendu du portage divisait par 255 et bornait l'intensité à 2
+  (`multiplicateurGlow`, `cameraeffects.js`).
+- **Le réveil n'éblouissait pas**, pour deux raisons : la même
+  normalisation, et `startOfTimeLoop()` qui lançait son éclair à l'instant
+  zéro, de sorte qu'il se croyait fini à la première image. C'est
+  l'« éblouissement blanc non attribué » du réveil horodaté : c'est le
+  `StartOfTimeLoop` du build, glow blanc à 3 qui retombe en trois secondes.
+  Il part désormais aussi au premier chargement.
+- **Le flashback partait à la mort.** `PlayerCameraEffectController.Update`
+  n'annonce `TriggerFlashback` qu'à la fin de l'effet de mort (0,3, 3 ou
+  5 s selon la cause). Le portage calculait cet instant (`flashbackDemande`)
+  et ne le lisait nulle part ; `PlayerDeathHandler.attendreEffet` le fait
+  attendre, en phase `effet`.
+- **La scène restait visible autour des photos.** La caméra du flashback
+  efface en noir (`clearFlags` 2) ; le calque du portage a maintenant son
+  fond noir.
+- **Les photos étaient noires.** La `RenderTargetTexture` de 256 × 256
+  rendait du noir ; la photo est maintenant copiée de l'image affichée, dans
+  le `onAfterRender`, en carré central — ce que donne une caméra d'Unity
+  rendue dans une cible carrée, qui garde son champ vertical.
+
+La durée du défilement, elle, ne se compare pas sur cette capture : elle
+dépend du nombre de photos, deux cent seize après dix-huit minutes dans
+l'alpha (≈ 17 s), cinq dans le portage avancé à la fin de la boucle. La loi
+est celle de `OnTriggerFlashback` depuis [`98`](98-flashback.md).
+
+## Le cratère de Timber Hearth
+
+L'écart de cadrage au réveil — l'alpha voit le feu et Slate une fois et demie
+plus grands — n'était ni une distance ni un champ de vision. Le terminal de
+lancement, à dix mètres, a la même taille dans les deux images, et l'écart
+angulaire entre lui et le feu est le même (18,5° contre 16,5°) : tout est
+décalé d'environ quatorze degrés, le portage regarde vers le sol.
+
+Le « haut » du point d'apparition vaut exactement (0, 0, −1), à 11,7° de la
+verticale du lieu. C'est celui de **`CraterField`**, un
+`DirectionalForceField` sphérique de 111 unités posé sur Timber Hearth
+(12 u/s², bas (0, 0, 1) une fois la rotation de la planète appliquée) : le
+village est dans un cratère dont la gravité est **droite**, pas radiale.
+Le portage lisait ce champ, mais le testait à sa place **de départ** alors
+que la planète orbite à une cinquantaine d'unités par seconde : le joueur en
+sortait avant la fin du réveil, le champ radial (7,8 u/s²) reprenait la
+main, le corps se redressait de 11,7° de trop — et glissait d'un mètre en
+vingt secondes sur une pente qui n'en était pas une.
+
+Les champs directionnels et polaires se testent maintenant au repos de leur
+corps (`shiftOf`, le même décalage que les zones). Le joueur ne dérive plus,
+et le cadrage du réveil est celui de l'alpha : le feu, Slate, la tour et le
+terminal tombent aux mêmes endroits de l'image. Le vaisseau posé et le
+modèle réduit, dans le même cratère, suivent le même champ. Invariant :
+`tests/09-jeu.mjs` (un champ sur une planète qui a avancé de 600 unités
+contient toujours son village, et donne le bas).
+
+Le vérificateur y a gagné une correction de mesure : sous 12 u/s², le saut
+ne tient que 0,5 s en l'air, et une image rendue sous SwiftShader peut
+couvrir plusieurs sous-pas — le saut monte et retombe entre deux images.
+Le contrôle lit donc la vitesse que `tryJump` donne au corps : 6 u/s, celle
+du build.
+
+### La lumière qui reste, remesurée sur un cadrage commun
+
+Le cadrage du réveil étant maintenant le même, l'écart de lumière se mesure
+objet par objet (alpha / portage, moyenne RVB) :
+
+| zone | alpha | portage |
+|---|---|---|
+| terminal de lancement (9 m du feu) | 61 / 49 / 31 | 26 / 19 / 12 |
+| Slate (3,7 m du feu) | 104 / 49 / 16 | 44 / 22 / 9 |
+| tour | 50 / 34 / 17 | 38 / 22 / 9 |
+| sol près du feu | 9 / 7 / 3 | 10 / 5 / 3 |
+
+Ce que la mesure écarte, une piste après l'autre :
+
+- **ni cuisson ni sondes** : les 2 261 renderers de `level0` ont tous
+  `m_LightmapIndex` 255, et aucun n'utilise de sonde de lumière ;
+- **ni facteur caché dans le shader** : la passe finale de `Bumped Diffuse`
+  en Deferred Lighting vaut `albedo × _Color × (tampon de lumière + terme de
+  sommet)`, et la passe de lumière ponctuelle `N·L × atténuation ×
+  _LightColor` (lues en assembleur ARB dans `unity default resources`) ;
+- **ni gamma ni traitement d'image** : basculer `gammaSpace` sur les 249
+  textures, ou couper le traitement d'image de Babylon, ne bouge rien ;
+- **ni cartes de normales ni normales du personnage** : les retirer ne change
+  rien, et une lumière posée sur la caméra éclaire bien Slate de face ;
+- **ni le vacillement** : `LightFlicker` est la même loi des deux côtés.
+
+Ce qui reste : le feu seul, figé à 2 au lieu de 0,93, porte le terminal de
+7 à 40 ; il en faudrait près de quatre fois plus pour rejoindre l'alpha,
+alors que le sol près du feu est, lui, déjà aussi clair. L'écart n'est donc
+pas un facteur global sur la lumière. Une anomalie à creuser : la boîte
+englobante du villageois reste dans la pose de liaison, à plusieurs
+centaines d'unités de son corps.
+
+## Parler, côte à côte, pour de bon
+
+Au clavier seul, l'alpha finit par montrer Slate sous le réticule : l'invite
+**« ⓧ Talk »** apparaît au centre, E ouvre la conversation. La même séquence
+dans le portage (`node scripts/pw-dialogue.mjs <dossier> 1280 720`) a sorti
+quatre écarts, et le premier était grave.
+
+- **Slate récitait le texte d'un autre.** `convo.name === enfant.name` : les
+  quatorze zones s'appellent toutes `ConversationZone`, et chaque
+  conversation passait pour celle de l'enfant aux fusées. Slate disait
+  `Hobbyist_Intro` (« tu voulais t'entraîner à atterrir ? ») au lieu de
+  `BigDay`. L'enfant se reconnaît maintenant à son contrôleur
+  (`estEnfant`).
+- **Les réponses étaient vides, les enchaînements coupés.**
+  `Conversation.ProcessXMLDialogues`, lu dans ILSpy : un nœud affiche son
+  PREMIER enfant (`FirstChild.InnerText`) ; une réplique peut porter un
+  `goto` — quinze le font — qui mène au nœud suivant après « Next » ; le
+  texte d'une option est son `<talk>` imbriqué, et les trente-six options du
+  build en ont un ; `selectOption` choisit par `id` ; une conversation
+  commence toujours au nœud 1. Le portage lisait le texte propre des
+  options (vide, affiché « … ») et fermait la conversation au bout d'une
+  réplique qui enchaînait.
+- **L'interface n'était pas celle du jeu.** `DialogueGUI` est un IMGUI : des
+  textures posées à des ancres calculées sur l'écran, en pixels, corps 30 —
+  `Short_Dialog_BG` sans réponses, `Dialog_Choice_BG` avec, le nom aligné à
+  droite sur `NPC_Name_BG`, le texte d'un personnage aligné à droite, le
+  curseur `NPC_Name_BG` + `White_Dialog_Btn` qui descend de 35 pixels par
+  option, le bouton `Short_Dialog_Btn` « Next » ou « Close ».
+  `dispositionDialogue` (`dialogueui.js`) refait ces ancres ; sur la capture
+  de l'alpha à 640 × 360, le nom finit à x = 572, les options commencent à
+  440 et l'icône du curseur à 402, et ce sont les invariants de
+  `tests/09-jeu.mjs`. Seul écart assumé : sous 1 280 pixels de large la
+  scène se réduit, là où l'alpha sort de l'écran par la gauche.
+- **Les commandes.** `chooseResponse` est l'axe `moveZ` (W/S) et
+  `advanceText` la touche d'interaction : E choisit l'option sous le
+  curseur, qui ne boucle pas et repart de la première à chaque boîte. Le
+  portage ne lisait que les flèches et Entrée, et E restait sans effet
+  devant des réponses. L'invite « Talk » manquait aussi : son texte est un
+  champ (`InteractVolume._prompt`), pas un littéral, et le catalogue des
+  invites ne lit que des littéraux ; elle disparaît maintenant pendant la
+  conversation (`_hasInteracted`), comme dans l'alpha.
+
+La séquence est désormais la même des deux côtés : « Hey, you ready to get
+this thing off the ground? » (Next), « So how are you feeling? » et ses trois
+réponses, « All systems go! » choisi à E, « I'm glad you're excited… »
+(Next), « Anyway, you just need those launch codes… » (Close), et l'invite
+revient.
+
+## La lumière du réveil, expliquée
+
+Deux causes, trouvées une fois le cadrage commun, et qui se compensaient en
+partie — c'est ce qui les rendait si difficiles à isoler.
+
+### Les textures des glTF étaient décodées en linéaire
+
+Le chargeur glTF de Babylon crée ses textures de couleur en **tampon sRGB**
+(`useSRGBBuffers`) : le processeur graphique les convertit en linéaire à
+chaque lecture. C'est juste pour du PBR ; c'est faux pour les
+`StandardMaterial` de `toLegacyMaterials`, qui calculent en gamma comme les
+shaders d'Unity 4. Une demi-teinte à 0,5 arrivait à 0,21. Basculer
+`gammaSpace` ne changeait rien — le format interne était déjà choisi — et
+c'est pour cela que les essais précédents (« ni gamma ni traitement
+d'image ») concluaient à tort. `gltfEnGamma` coupe l'option sur le
+chargeur avant tout import, titre compris.
+
+L'écran-titre, qui n'avait que cette cause, tombe juste : image entière
+9,8 / 12,6 / 5,8 contre 9,4 / 12,5 / 5,9 dans l'alpha, à la même seconde de
+rotation.
+
+### Le soleil de Timber Hearth est un imposteur
+
+Corriger les textures rendait la tour, le sol et les arbres **trop** clairs.
+Isolée lumière par lumière, la tour du portage recevait 43 du feu, 11 de
+l'ambiance et **32 du soleil** — alors que le soleil est à trente-cinq degrés
+sous l'horizon. `SunLight` est une ponctuelle sans ombre : elle éclaire tout
+ce qui se tourne vers elle, face nuit comprise. Dans l'alpha, la tour vaut
+50, soit le feu et l'ambiance seuls.
+
+Le build a un composant pour cela, que le portage ne lisait pas :
+`SunlightSwapper`, posé sur `TimberHearth_Body` et `BrittleHollow_Body`.
+Quand le joueur entre dans le secteur majeur, tout ce qui est au calque
+`Default` sous le corps passe à `UseSunImposter` (12), que le masque de
+`SunLight` exclut ; en sortant, l'inverse. La planète est alors éclairée par
+les spots de `SunImposterPivot`, que `LookAtSun` tourne vers l'étoile à
+chaque image — `SunImposter_Center` à 491,3 unités du centre, intensité 8,
+cône de 45 degrés, **avec des ombres** : c'est la planète qui éteint sa face
+nuit. `imposteur.js` refait l'échange de calques et la pose des spots ; le
+relief du corps porte l'ombre (carte de 2 048, plans serrés sur le corps, rafraîchie toutes les six
+images, l'étoile ne tournant que de deux degrés par seconde).
+
+Mesure au réveil, alpha / portage :
+
+| zone | alpha | portage |
+|---|---|---|
+| terminal de lancement | 61 / 49 / 31 | 61 / 49 / 36 |
+| Slate | 113 / 55 / 18 | 99 / 49 / 17 |
+| tour | 50 / 34 / 17 | 50 / 36 / 21 |
+| sol, arbres | 9 / 7 / 3 ; 10 / 7 / 5 | 18 / 11 / 6 ; 17 / 14 / 7 |
+
+Il reste le sol et les feuillages lointains, un peu plus clairs dans le
+portage — le terrain répète sa texture cinquante fois, et le feuillage a son
+propre shader (`DoubleSidedCutoutBumpedDiffuse`) — mais la lumière du
+village, elle, est celle de l'alpha. Le soleil suit aussi le même horaire des
+deux côtés : nuit au réveil, plein jour vers quatre-vingt-dix secondes,
+nuit de nouveau vers cent trente-cinq.
+
+### Un renderer, plusieurs matériaux
+
+Le sol du cratère sortait couleur roche. Dans le build, 173 renderers portent
+**plusieurs** matériaux, un par sous-maillage — `craterGeo` en a deux, la roche
+et l'herbe — et l'export glTF n'en gardait que le premier, appliqué à tout le
+maillage. `gltf.js` émet désormais une primitive par sous-maillage, chacune
+avec son matériau ; Babylon en fait des enfants `<nom>_primitive<i>`, auxquels
+`propagerExtras` recopie les drapeaux du parent (ombres portées et reçues,
+rendu ou non) avant que `hideUnrendered` ne les lise.
+
+### Le spot de l'imposteur, vivant et bien classé
+
+Deux raisons faisaient que le spot `SunImposter_Center` n'éclairait pas, alors
+que l'échange de calques était fait. Il passait par le budget de `LightField`,
+qui garde les lumières proches du joueur, et il n'y survivait pas : il est
+désormais créé à part, comme l'imposteur de Brittle Hollow. Et Babylon ne trie
+les lumières d'un maillage que si `scene.requireLightSorting` est posé : le
+spot, rallumé en entrant dans le secteur, était ajouté en fin de liste, onzième
+pour sept emplacements. Le tri est posé, et la liste de chaque maillage est
+refaite à chaque bascule.
+
+### Le plein jour : la couronne du pivot, le cookie, la fin de portée
+
+Au réveil, la lumière était juste ; à midi, le village restait deux fois trop
+sombre (sol 53 contre 86). Quatre causes, trouvées l'une après l'autre en
+isolant chaque lumière sur la même image.
+
+**La couronne.** Mesuré au point près, le spot central frappait le terminal et
+la tour par la tranche (N·L de 0,1 : le soleil est au zénith), là où l'alpha
+les éclaire de face. Le spot central n'est pas seul : `SunImposterPivot` porte
+**huit autres spots**, en couronne — TopLight, LeftLight … BottomRightLight, à
+391 unités de l'axe et 371 en avant, inclinés de trente degrés vers lui,
+intensité 5,25, cône de 85 degrés, sans ombre. L'extraction les exportait à
+leur pose monde du fichier, et le portage n'en faisait rien. Elle garde
+désormais, pour toute lumière enfant d'un `LookAtSun`, sa pose **locale**
+(`pivot`) ; `imposteur.js` la recompose dans le repère de `LookAt(soleil)`,
+haut du monde conservé comme le fait Unity. Neuf spots de plus ne tiennent pas
+dans le budget d'un matériau Babylon (dix lumières sous SwiftShader, huit sous
+ANGLE) : la couronne est rangée dans un `ClusteredLightContainer`, qui compte
+pour une seule lumière et passe par le même `computeSpotLighting`.
+
+**La carte d'ombre en retard.** La couronne branchée, le spot central
+n'apportait plus rien au sol : zone d'ombre et zone éclairée valaient
+pareil. Sa carte d'ombre était refaite toutes les six images — assez à
+soixante images par seconde, mais le Chromium de mesure en fait deux : six
+images, trois secondes, cinq degrés de course de l'étoile, et le sol
+s'ombrait lui-même en entier. Le spot ne bouge plus que **par pas** : quand
+il s'est déplacé d'une demi-unité, dans le monde ou par rapport au relief,
+on le repose et la carte se refait avec lui. Carte et lumière ont toujours la
+même pose, à toute cadence.
+
+**Le cookie.** Un spot d'Unity 4 n'a pas d'exposant : il multiplie son
+atténuation par la texture `Soft` de `unity default resources` (128 × 128,
+Alpha8), projetée sur le cône — plate jusqu'aux six dixièmes du rayon, nulle
+au bord. Babylon prend cos² de l'angle. L'extraction relève le profil radial
+de `Soft` (33 échantillons) et `patchCookieUnity` le met à la place, lu en
+`tan(angle) / tan(demi-cône)`, la projection d'Unity.
+
+**La fin de portée.** Restait la couronne deux fois trop forte, et le spot
+central une fois et demie trop faible — l'alpha le dit dans ses propres
+ombres : au sol, à 81 s, 88 au soleil et 42 à l'ombre du spot central. Le
+village est à 73 % de la portée du spot central et à 92 % de celle de la
+couronne. La table d'atténuation d'Unity n'est pas `1 / (1 + 25 x²)` jusqu'au
+bout : de 0,8 à 1, elle est multipliée par une rampe linéaire en carré de la
+distance, `(1 − x²) / 0,36`, jusqu'à zéro. Le portage ne l'avait pas, et
+c'était aussi ce qui éclairait trop, la nuit, les arbres à la limite des
+lampes du village.
+
+Même cadrage, même instant de boucle, alpha / portage (terminal, tour, sol
+éclairé, sol à droite — où tombe l'ombre de 81 s —, arbres) :
+
+| instant | terminal | tour | sol | sol à droite | arbres |
+|---|---|---|---|---|---|
+| 20 s | 45 / 55 | 36 / 44 | 9 / 12 | 4 / 6 | 5 / 16 |
+| 60 s | 79 / 85 | 59 / 63 | 50 / 49 | 46 / 46 | 45 / 43 |
+| 81 s | 98 / 89 | 63 / 67 | 88 / 90 | 42 / 46 | 45 / 52 |
+| 93 s | 103 / 88 | 68 / 65 | 89 / 90 | 87 / 88 | 43 / 51 |
+| 103 s | 87 / 92 | 68 / 70 | 56 / 56 | 59 / 67 | 51 / 49 |
+| 120 s | 70 / 83 | 50 / 58 | 40 / 44 | 34 / 38 | 33 / 28 |
+
+À 20 s, le terminal de l'alpha oscille de 45 à 58 avec le vacillement du feu
+(moyenne 51). L'écran-titre, qui ne vit que de ponctuelles, n'en sort que plus
+juste : image entière 9,4 / 12,4 / 5,8 contre 9,4 / 12,5 / 5,9.
+
+### La flamme du feu, et le piège des deux images par seconde
+
+Capturée par le Chromium de mesure, la flamme du feu de camp sortait rose
+(bleu 70 à 110 sur les pixels les plus clairs, contre 20 à 40 dans l'alpha).
+La texture (`fire3`, DXT1 orange) et le dégradé de vie (bleu, orange, rouge
+sombre) étaient pourtant ceux du build. C'est la cadence : à deux images par
+seconde, trente particules naissent à la fois, toutes au même âge, et la
+flamme n'est plus qu'un échantillon de trois âges. En forçant un pas de
+1/60 s (`scene.getAnimationRatio = () => 1`, une minute et demie pour
+atteindre le régime), la flamme est orange-jaune à la base et rouge au-dessus,
+comme dans l'alpha (bleu 56 contre 19 à 32) ; il reste un cœur un peu plus
+jaune. Toute comparaison de particules se fait à ce pas-là.
+
+## La tour et la carte, au clavier seul
+
+L'alpha, sous Xvfb, ne se pilote qu'au clavier : toute entrée de souris
+envoie sa caméra en NaN (écran noir), y compris un déplacement relatif de
+trois pixels. On ne peut donc ni lever ni baisser le regard.
+
+**Le terminal de lancement est hors d'atteinte ainsi, dans les deux
+versions.** Son volume d'interaction est une sphère de 0,42 posée à 1,44 au
+centre du pupitre ; l'œil est à 2,2 au-dessus des pieds. Centré sur le pupitre
+à moins d'un mètre, le rayon du regard passe au-dessus. C'est la géométrie du
+build, que le portage reprend : il faut baisser les yeux. La chaîne tour,
+ascenseur, vaisseau ne se compare donc pas au clavier.
+
+**La carte, si — et l'alpha refuse de l'ouvrir.** Au feu de camp, Entrée ne
+fait rien. `MapController` est **éteint** dans la scène (`m_Enabled` 0),
+`Awake` le laisse éteint, et c'est son `LateUpdate` qui lit la touche :
+seuls `OnSuitUp` et `OnTriggerObservatoryMap` l'allument ; `OnRemoveSuit`, la
+mort, et la sortie d'une carte d'observatoire sans combinaison l'éteignent.
+Le portage ouvrait la carte partout. `AccesCarte` (map.js) refait la règle ;
+le contrôle navigateur vérifie qu'Entrée n'ouvre rien sans combinaison, et
+que l'ôter l'éteint.
+
+Au passage, la maquette de l'observatoire appelait `solarMap.ouvre()`, une
+méthode que `SolarMap` n'a jamais eue : l'interaction levait une erreur. Elle
+ouvre désormais la carte comme `OnTriggerObservatoryMap`, sans cadrer de
+cible — le système entier.
+
+### La carte est une caméra
+
+Dans le build, la carte n'est pas un dessin : c'est `MapCamera` (champ de 60,
+plan lointain à 100 000) qui s'élève de l'œil du joueur jusqu'à la vue
+plongeante, en `SmoothStep` sur deux secondes (dix depuis l'observatoire, 0,6
+avec une cible), plan proche de 0,1 à 5,1. Le portage ouvrait d'un coup un
+calque opaque, dessiné à plat par-dessus la scène. Relu dans l'IL
+(`MapController.LateUpdate`, `MapOpenGL.OnPostRender`, `MapMarker`), il
+manquait bien plus que l'animation :
+
+- **le centre** : `_focalOffset` est un décalage depuis le **Soleil**. Le
+  portage tenait un point absolu de son repère flottant, ancré sur le corps
+  du joueur : sans cible, la carte se centrait sur Timber Hearth ;
+- **le cadrage d'une cible** se calcule avec le champ de `MapCamera` (60) et
+  non celui du joueur (70) : 48 497 unités de hauteur à 40 000 de distance,
+  pas 39 988 ;
+- **la durée** à la touche est de deux secondes (`EnterMapView(2f, …)`) ; le
+  portage écrivait 1, sans la jouer ;
+- **les orbites** sont des cercles d'écran : centrés sur le Soleil **projeté**,
+  de rayon la distance **à l'écran** du corps au Soleil. Pendant la montée,
+  ils ne suivent pas encore le plan du système — c'est l'alpha ;
+- **l'ellipse de la comète** se dessine dix degrés par image, à chaque
+  ouverture ;
+- **les marqueurs** se testent sur la **profondeur caméra** (`_screenPos.z`),
+  pas sur la distance au joueur, et portent les noms du build — « You Are
+  Here », « Ship » — là où le portage écrivait « vous » et « vaisseau » ;
+- **le casque s'éteint** : `HUDCameraScript.OnSwitchActiveCamera` coupe la
+  caméra du casque dès que la caméra active n'est plus `MainCamera`. Jauges,
+  silhouette de la combinaison et minicarte disparaissent ; les invites et
+  les marqueurs, dessinés par `OnGUI`, restent ;
+- **les invites** « Close Map », « Zoom In/Out », « Pan View » n'arrivent
+  qu'en fin de montée, et le déplacement n'est permis qu'à mi-course.
+
+La carte du portage est désormais la caméra du joueur, pilotée par
+`VueCarte` (map.js) le temps de la carte, puis rendue à ses réglages. Un
+piège : le repère de travail **tourne** avec le corps ancré (spin.js). Le bas
+de la carte est `Vector3.down` du monde, et le décalage du point visé vit
+dans les axes du monde ; l'inverse de `toFrame`, retiré faute d'appelant, est
+revenu pour cela.
+
+L'alpha ne s'est pas laissée photographier carte ouverte : il lui faut la
+combinaison, qui est dans le vaisseau, derrière le terminal que le clavier
+seul n'atteint pas. La carte du portage est donc refaite sur l'IL, sans
+image de l'alpha pour la juger.

@@ -30,6 +30,8 @@
 // @lit BloomAndLensFlares, NoiseEffect, NoiseAndGrain
 // Le rendu de ces effets — refait, pas transpose (docs/47).
 
+import { multiplicateurGlow } from "./cameraeffects.js";
+
 const SHADERS = {
   // --- glow : un halo additif tire des zones claires ------------------------
   //
@@ -294,10 +296,10 @@ export class PostFX {
     if (fx.glow.enabled) {
       this.allumer("glow");
       this.passes.glow.onApply = (e) => {
-        // Normaliser les teintes si elles sont exprimees en 0-255
-        const normTint = fx.glow.tint.map((c) => (c > 1 ? c / 255 : Math.max(0, c)));
-        e.setFloat3("tint", ...normTint);
-        e.setFloat("intensity", Math.min(Math.max(0, fx.glow.intensity), 2.0));
+        // La teinte telle que le build l'ecrit, 0-255 compris : c'est le
+        // debordement qui blanchit l'ecran (`multiplicateurGlow`).
+        e.setFloat3("tint", ...multiplicateurGlow(fx.glow));
+        e.setFloat("intensity", 1);
         e.setFloat("radius", (fx.glow.blurSpread || 0.5) * Math.max(1, fx.glow.iterations) * 4);
         e.setFloat2("texelSize", ...t);
       };

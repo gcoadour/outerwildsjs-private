@@ -545,6 +545,34 @@ def _run(url, heavy, profil=None, zip_path=None):
                                    "b => window.__sectors.fileFor(b)).length +"
                                    " window.__sectors.extras.length"), 10)
 
+        # --- le soleil de substitution ---------------------------------------
+        # Au reveil, le joueur est dans le secteur de Timber Hearth : le spot
+        # central de `SunImposterPivot` est allume, et sa couronne de huit
+        # spots aussi — rangee dans UNE lumiere clusterisee quand le moteur le
+        # permet (docs/132). Sans la couronne, midi sortait deux fois trop
+        # sombre.
+        imp = page.evaluate("""() => {
+          const s = window.__scene || BABYLON.Engine.LastCreatedScene;
+          const c = s.lights.find(l => l.name === 'couronne_TimberHearth_Body');
+          const seuls = s.lights.filter(l => /^ow_(Top|Bottom|Left|Right)\\w*Light$/.test(l.name));
+          const centre = s.lights.find(l => l.name === 'ow_SunImposter_Center');
+          return {centre: !!(centre && centre.isEnabled()),
+                  couronne: c ? (c.lights || c._lights).length : seuls.length,
+                  allumee: c ? c.isEnabled() : seuls.every(l => l.isEnabled())};
+        }""")
+        rep.eq("spot central de l'imposteur allume au reveil", imp["centre"], True)
+        rep.eq("couronne de l'imposteur : huit spots", imp["couronne"], 8)
+        rep.eq("... allumee au reveil", imp["allumee"], True)
+        # Les spots lisent le cookie `Soft` d'Unity, pas l'exposant de Babylon,
+        # et l'attenuation s'eteint en fin de portee (docs/132).
+        lum = page.evaluate("""() => {
+          const k = BABYLON.Effect.IncludesShadersStore.lightsFragmentFunctions || '';
+          return {exposant: k.includes('attenuation*=getAttenuation(cosAngle'),
+                  fondu: k.includes('/0.36)')};
+        }""")
+        rep.eq("spots : plus d'exposant de Babylon", lum["exposant"], False)
+        rep.eq("attenuation : le fondu de fin de portee d'Unity", lum["fondu"], True)
+
         # --- animations ------------------------------------------------------
         anim = page.evaluate("""() => {
           const s = window.__scene || BABYLON.Engine.LastCreatedScene;
@@ -604,11 +632,47 @@ def _run(url, heavy, profil=None, zip_path=None):
                }"""),
                ["OW Dialogue", "OW Helmet", "OW Menu", "OW Name"])
 
+        # La carte ne repond qu'une fois `MapController` allume : combinaison
+        # sur le dos (`OnSuitUp`). Au feu de camp, dans l'alpha, Entree n'ouvre
+        # rien (docs/132).
+        combi_avant = page.evaluate("() => !!window.__lots.equipment.suit")
+        if not combi_avant:
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(600)
+            rep.eq("sans combinaison, Entree n'ouvre pas la carte",
+                   page.evaluate("() => !!window.__map.open"), False)
+            page.evaluate("() => { window.__lots.equipment.suit = true; }")
+            page.wait_for_timeout(1500)
         # les invites de la carte, de priorite 2, doivent evincer les autres.
         # La carte est sur ENTREE dans le build (canal `Map`), pas sur M
         # (docs/61-commandes.md).
         page.keyboard.press("Enter")
-        page.wait_for_timeout(1200)
+        # `MapCamera` monte de l'oeil a la vue plongeante en deux secondes
+        # (`SmoothStep`), et les invites n'arrivent qu'a la fin de la montee.
+        page.wait_for_timeout(300)
+        rep.eq("pendant la montee, pas encore d'invite de carte",
+               page.evaluate("() => window.__vueCarte.t < 1 ? "
+                             "[...document.querySelectorAll('.ow-prompts-left .ow-prompt')]"
+                             ".map(n=>n.textContent.trim()).filter(t => /Map|Zoom|Pan/.test(t)) : []"),
+               [])
+        page.wait_for_timeout(2500)
+        vue = page.evaluate("""() => {
+          const c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
+          const s = window.__map.bodies.find((b) => /sun/i.test(b.bodyName || b.name || ''));
+          const avant = c.getDirection(BABYLON.Axis.Z);
+          return { t: window.__vueCarte.t, fov: Math.round(c.fov * 180 / Math.PI),
+                   hauteur: s ? Math.round(Math.hypot(c.position.x - s.position[0],
+                     c.position.y - s.position[1], c.position.z - s.position[2])) : null,
+                   plonge: s ? Math.round(BABYLON.Vector3.Dot(avant.normalize(),
+                     c.position.subtract(new BABYLON.Vector3(...s.position)).normalize()) * 100) / 100 : null,
+                   casque: [...document.querySelectorAll('#ui .ow-res')]
+                     .some((e) => !e.hidden && getComputedStyle(e).display !== 'none') };
+        }""")
+        rep.eq("la camera de la carte est montee", vue["t"], 1)
+        rep.eq("au champ de `MapCamera`", vue["fov"], 60)
+        rep.eq("a quarante mille du Soleil, sans cible", vue["hauteur"], 40000)
+        rep.eq("et le regarde droit dessous", vue["plonge"], -1.0)
+        rep.eq("la camera du casque s'eteint avec la carte", vue["casque"], False)
         rep.eq("la carte, elle, en pose trois",
                page.evaluate("() => [...document.querySelectorAll("
                              "'.ow-prompts-left .ow-prompt')].map(n=>n.textContent.trim())"),
@@ -656,6 +720,15 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.evaluate("() => window.__map.recenter()")
         page.keyboard.press("Enter")
         page.wait_for_timeout(600)
+        rep.eq("la carte fermee, la camera du joueur retrouve son champ",
+               page.evaluate("() => Math.round(BABYLON.EngineStore.LastCreatedScene"
+                             ".activeCamera.fov * 180 / Math.PI)"), 70)
+        if not combi_avant:
+            # La combinaison ote : `OnRemoveSuit` eteint la carte de nouveau.
+            page.evaluate("() => { window.__lots.equipment.suit = false; }")
+            page.wait_for_timeout(1500)
+            rep.eq("combinaison otee, la carte s'eteint",
+                   page.evaluate("() => window.__accesCarte.actif"), False)
 
         # --- reglages ----------------------------------------------------------
         wrap = page.evaluate("""() => {
@@ -671,7 +744,10 @@ def _run(url, heavy, profil=None, zip_path=None):
         # --- consoles et objets de bord ---------------------------------------
         cons = page.evaluate("""() => {
           const c = window.__consoles.computer, m = window.__consoles.marshmallow;
-          m.held = true; m.toast = 0;
+          // Une guimauve ENTIERE : pres du feu, la partie a pu en bruler une,
+          // et les premieres secondes compteraient alors son retour
+          // (`gone`, `respawn`) au lieu de la griller.
+          m.held = true; m.toast = 0; m.gone = false; m.goneFor = 0;
           for (let i = 0; i < 3; i++) m.update(1, 100);
           return {notices: c.records.length,
                   avecTexte: c.records.filter(r => r.text && r.text.length > 20).length,
@@ -765,13 +841,19 @@ def _run(url, heavy, profil=None, zip_path=None):
           fb.start(garde.count); fb.running = garde.running; fb.t = garde.t;
           return {vingtDeux, trois,
                   progression: at(0.5, 600, false, 0).phase,
-                  contraction: +at(1, 0, false, 0).scale.toFixed(2),
+                  avantAnnonce: +at(1, 0, false, 0).scale.toFixed(2),
+                  effondrement: [window.__loop.surface && window.__loop.surface.echelle,
+                                 window.__loop.corona && window.__loop.corona.echelle],
                   explosion: at(1, 0, true, 5000).phase,
                   causes: Object.keys(window.__death.byCause).length};
         }""")
         rep.eq("vingt-deux photos : dix secondes deux", fin["vingtDeux"], 10.209)
         rep.eq("trois photos : six secondes quatre", fin["trois"], 6.426)
-        rep.eq("l'etoile se contracte avant d'exploser", fin["contraction"], 0.62)
+        # `SunExplosionBehavior` : l'etoile ne se contracte qu'apres
+        # `TriggerSupernova`, vers 3 % de l'echelle que la scene lui donne.
+        rep.eq("l'etoile ne se contracte pas avant l'annonce", fin["avantAnnonce"], 1)
+        rep.eq("l'effondrement part des echelles de la scene", fin["effondrement"],
+               [4000, 362.2121])
         rep.eq("phase d'explosion", fin["explosion"], "explosion")
         rep.eq("aucune mort au demarrage", fin["causes"], 0)
 
@@ -1055,10 +1137,40 @@ def _run(url, heavy, profil=None, zip_path=None):
             # Saut : l'espace saute (`Jump`), la majuscule pousse (`Move Up`).
             # Ce sont DEUX canaux du build, et le portage les avait sur une
             # seule touche (docs/61-commandes.md).
-            page.keyboard.press("Space")
-            page.wait_for_timeout(120)
-            rep.eq("le saut quitte le sol",
-                   page.evaluate("() => window.__player.grounded"), False)
+            # Sous SwiftShader une image dure ~200 ms, et dans le cratere
+            # (`CraterField`, 12 u/s2) le saut ne tient que 0,6 s en l'air :
+            # un echantillon fixe a 120 ms tombait avant la premiere image.
+            # On attend le decollage, une seconde au plus.
+            # Et une image rendue peut couvrir plusieurs sous-pas : le saut du
+            # cratere (0,5 s en l'air sous 12 u/s2) monte et retombe entre deux
+            # images, et ni `grounded` ni la vitesse ne s'y lisent. On le
+            # mesure donc la ou il nait : la vitesse le long du haut local que
+            # `tryJump` laisse au corps.
+            page.evaluate("""() => {
+              const p = window.__player;
+              window.__saut = null;
+              const orig = p.tryJump.bind(p);
+              p.tryJump = (i, u) => {
+                const r = orig(i, u);
+                if (r && !window.__saut) {
+                  window.__saut = p.vel.x * u.x + p.vel.y * u.y + p.vel.z * u.z;
+                }
+                return r;
+              };
+            }""")
+            page.keyboard.down("Space")
+            page.wait_for_timeout(300)
+            page.keyboard.up("Space")
+            try:
+                page.wait_for_function("() => window.__saut !== null", timeout=4000)
+            except Exception:
+                pass
+            saut = page.evaluate("() => window.__saut")
+            decolle = saut is not None and saut > 1
+            rep.eq("le saut quitte le sol", decolle, True)
+            if saut is not None:
+                rep.near("vers le haut, a la vitesse de saut du build", round(saut, 2),
+                         (pc or {}).get("jumpSpeed", 4), 1.5)
 
         # --- inertie de rotation du vaisseau ------------------------------------
         #
@@ -2293,18 +2405,21 @@ def _run(url, heavy, profil=None, zip_path=None):
             while (dial.view && !dial.view.atEnd) dial.advance();
             if (!dial.view) continue;              // branche close sans reponse
             dlgUI.render(dial.view, false);
-            const boite = document.querySelector('.dlg-box').getBoundingClientRect();
+            const boite = document.querySelector('.dlg-fond').getBoundingClientRect();
             const face = document.querySelector('.tc-face').getBoundingClientRect();
             const cible = (el) => {
               if (!el || el.hidden) return null;
               const r = el.getBoundingClientRect();
               const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+              // Le bouton porte une icone et un texte : ce qu'on touche peut
+              // etre l'un des deux, et c'est toujours le bouton.
+              const b = e && e.closest && e.closest('.dlg-choix');
               return { h: Math.round(r.height),
-                       sous: e ? String(e.className || e.tagName) : 'rien' };
+                       sous: b ? 'dlg-choix' : e ? String(e.className || e.tagName) : 'rien' };
             };
             dlg = { chevauche: boite.right > face.left && boite.bottom > face.top,
-                    option: cible(document.querySelector('.dlg-option')),
-                    next: cible(document.querySelector('.dlg-next')) };
+                    option: cible(document.querySelector('.dlg-opt')),
+                    next: cible(document.querySelector('.dlg-choix')) };
             if (dlg.option) break;     // une conversation a reponses suffit
           }
 
@@ -2320,7 +2435,7 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (plusLong && dial.read(plusLong)) {
             const v = dial.view;
             dlgUI.render(v, !!v.sign);
-            const boite = document.querySelector('.dlg-box');
+            const boite = document.querySelector('.dlg-imgui');
             let appuis = 0;
             while (dial.active && appuis < 40) { dial.advance(); appuis += 1; }
             lecture = {
@@ -2333,7 +2448,7 @@ def _run(url, heavy, profil=None, zip_path=None):
               panneau: v.sign === true,
               style: boite.classList.contains('dlg-sign'),
               options: v.options.length,
-              texteAffiche: document.querySelector('.dlg-text').textContent.length,
+              texteAffiche: document.querySelector('.dlg-texte').textContent.length,
               appuis,
               ferme: dial.active === null,
               // Rien n'est perdu : la somme des mots des pages est celle du
@@ -2412,12 +2527,12 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("la boite de dialogue ne passe plus sous le losange d'action",
                    dlg["chevauche"], False)
             rep.eq("ce que le doigt touche sur une option, c'est l'option",
-                   dlg["option"]["sous"], "dlg-option dlg-sel")
+                   dlg["option"]["sous"], "dlg-opt dlg-sel")
             rep.eq("une option fait la taille d'un doigt",
                    dlg["option"]["h"] >= 36, True)
             if dlg["next"]:
                 rep.eq("et « Next » est bien « Next », pas le bouton derriere",
-                       dlg["next"]["sous"], "dlg-next")
+                       dlg["next"]["sous"], "dlg-choix")
                 rep.eq("« Next » fait la taille d'un doigt",
                        dlg["next"]["h"] >= 40, True)
 

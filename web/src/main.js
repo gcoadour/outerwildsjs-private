@@ -44,7 +44,7 @@ import { loadAudioMap, AudioField, AudioMixer, signalStrength,
          audioShells, AudioShells } from "./audio.js";
 import { loadParticleMap, ParticleField } from "./particles.js";
 import { makeAtmosphere, makeSun, updateMaterials } from "./materials.js";
-import { TimeLoop, ResetTrigger } from "./timeloop.js";
+import { TimeLoop, ResetTrigger, effondrementsDuBuild } from "./timeloop.js";
 import { SunStage, SupernovaView } from "./supernova.js";
 import { PlayerDeathHandler, FlashbackOverlay, deathCamera, SnapshotTimer,
          FLASHBACK, DEATH_SOUNDS } from "./death.js";
@@ -61,7 +61,7 @@ import { Anglerfish, Thorns, NoiseField, Corruption, shipOnlyMusicState } from "
 import { Sectors, sectorMap, ambientIntensity, ambientLight, majorSectors,
          activeMajorSector, sectorThrustLimit } from "./sectors.js";
 import { Autopilot, relativeDelta, matchVelocityStep } from "./autopilot.js";
-import { SolarMap, mapMarkers } from "./map.js";
+import { SolarMap, mapMarkers, AccesCarte, VueCarte, MAP as REGLES_CARTE, qRot } from "./map.js";
 import { engineComponents, ALERT_ORDER } from "./shipdamage.js";
 import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
@@ -73,7 +73,8 @@ import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
          PlayerState, PLAYER_FALLBACK } from "./player.js";
-import { applyGameShaders, updateGameShaders, toLegacyMaterials } from "./shaders/index.js";
+import { applyGameShaders, updateGameShaders, toLegacyMaterials, gltfEnGamma } from "./shaders/index.js";
+import { EchangeSoleil, imposteursDuBuild, poseImposteur } from "./imposteur.js";
 import { SECTORS, PlayerData, selectTree, convoControllers } from "./playerdata.js";
 import { Telescope, ProbeCamera, SoundWave, WAVE, TELESCOPE_MIX,
          telescopeScale, zoomArrowFraction } from "./tools.js";
@@ -83,8 +84,8 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
          probeReadout, selfDestructed } from "./probe.js";
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
-         createPlayerBody, teleportBody, hideUnrendered, hiddenMesh,
-         disableInactive, underInactive } from "./physics.js";
+         createPlayerBody, teleportBody, hideUnrendered, propagerExtras, hiddenMesh,
+         disableInactive, underInactive, ombresDuRenderer } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
@@ -92,7 +93,7 @@ import { loadCommandes, decoupeImage } from "./input.js";
 import { Modes, annonceDe } from "./modes.js";
 import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
-         modelLandingSpots, modelShipBody, rocketKids } from "./modelship.js";
+         modelLandingSpots, modelShipBody, rocketKids, estEnfant } from "./modelship.js";
 import { SpinField, sunElevation, spinPeriod, bodySpin } from "./spin.js";
 import { directionalFields, polarFields, insideVolume,
          dominantField } from "./gravity.js";
@@ -134,7 +135,7 @@ import { relativeMotion, trackerReadout, motionDust,
          shipNozzles, modelShipNozzles } from "./tracker.js";
 import { loadLighting, LightField, ambientTarget, ambientStep, FadeLight,
          SATELLITE_FADE, shiplightRange, SHIPLIGHT_RANGE, lightCap,
-         patchAttenuationUnity, falloffUnity, layerMaskFor, applyLayers,
+         patchAttenuationUnity, patchCookieUnity, falloffUnity, layerMaskFor, applyLayers,
          masqueCamera, CALQUE_SONDE } from "./lights.js";
 import { loadSky, Sky, StarField } from "./sky.js";
 import { champEtoiles, creerVoute } from "./etoiles.js";
@@ -265,6 +266,8 @@ async function boot() {
   const engine = new BABYLON.Engine(canvas, true,
     { stencil: true, audioEngine: true }, true);
   addEventListener("resize", () => engine.resize());
+  // Avant tout chargement de glTF, titre compris : les textures en gamma.
+  gltfEnGamma(BABYLON);
   // Les liaisons de touches du jeu. Absentes, la table mesuree de `input.js`
   // prend le relais — et elle se sait repli, comme `config.js`.
   const cmds = await loadCommandes();
@@ -294,6 +297,11 @@ async function boot() {
   if (!bodies.length) { setStatus("Aucun corps a afficher."); return; }
 
   const scene = new BABYLON.Scene(canvas ? engine : engine);
+  // `renderPriority` ne trie les lumieres d'un maillage que si la scene le
+  // demande. Sans cela, l'ordre est celui de CREATION : les lumieres tenues
+  // passaient devant par chance, et le soleil de substitution, cree apres les
+  // lampes du village, tombait hors des sept que prend un materiau (docs/132).
+  scene.requireLightSorting = true;
   // L'attenuation des lumieres ponctuelles d'Unity 4, avant tout shader.
   patchAttenuationUnity(BABYLON);
   scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
@@ -649,6 +657,8 @@ async function boot() {
   // lumieres posees, les reglages de rendu, les champs de force directionnels,
   // les volumes de fluide et les zones d'oxygene. Voir docs/34-actions.md.
   const lighting = await loadLighting();
+  // Le cookie des spots d'Unity, avant que le premier spot ne compile.
+  patchCookieUnity(BABYLON, lighting.cookieSpot);
   // Le ciel du build : la voute tourne vers l'etoile, et c'est elle qui
   // fait le jour et la nuit (docs/41-ciel.md).
   const skyData = await loadSky();
@@ -1021,8 +1031,61 @@ async function boot() {
     if (typeof soleilDuBuild.intensity === "number") sun.intensity = soleilDuBuild.intensity;
     if (soleilDuBuild.color) sun.diffuse = new BABYLON.Color3(...soleilDuBuild.color.slice(0, 3));
   }
+  // Les spots de l'imposteur ne passent pas par le budget de `LightField`,
+  // qui ne garde que les lumieres proches du joueur : ils sont a cinq cents
+  // unites, et ils eclairent toute la planete (imposteur.js).
+  const imposteurs = imposteursDuBuild(lighting.lights);
   const placedLights = new LightField(BABYLON, scene,
-    (lighting.lights || []).filter((l) => l !== soleilDuBuild));
+    (lighting.lights || []).filter((l) => l !== soleilDuBuild && !imposteurs.includes(l)));
+  // Le pas du spot ombre de l'imposteur, en unites : 0,06 degre vu du centre,
+  // soit un trentieme de seconde de la course de l'etoile.
+  const PAS_OMBRE_IMPOSTEUR = 0.5;
+  const spotsImposteurs = new Map();
+  for (const l of imposteurs) {
+    const node = placedLights.createNode(l);
+    if (!node) continue;
+    node.includeOnlyWithLayerMask = layerMaskFor(l.cullingMask);
+    // Le Deferred Lighting d'Unity rend TOUTES les lumieres ; un materiau de
+    // Babylon n'en prend que sept, les premieres par `renderPriority`. Le
+    // soleil de substitution passait onzieme sur le terminal de lancement, et
+    // midi restait la nuit (docs/132) : il passe devant.
+    node.renderPriority = 3;
+    node.setEnabled(false);
+    spotsImposteurs.set(`${l.body}/${l.name}`, { l, node, groupe: null });
+  }
+  // La couronne de Timber Hearth : huit spots sans ombre, qui ne tiennent pas
+  // dans le budget d'un materiau (`lightCap` : dix sous SwiftShader, huit sous
+  // ANGLE) a cote du spot central, du feu et de l'ambiance. L'eclairage
+  // « clusterise » de Babylon les range dans UNE lumiere, et passe par le meme
+  // `computeSpotLighting` — donc par l'attenuation d'Unity. Sans son support
+  // (flottants de rendu absents), les spots restent separes et le budget
+  // garde les plus prioritaires.
+  if (BABYLON.ClusteredLightContainer) {
+    const parCorps = new Map();
+    for (const e of spotsImposteurs.values()) {
+      if (e.l.shadows > 0) continue;
+      if (!parCorps.has(e.l.body)) parCorps.set(e.l.body, []);
+      parCorps.get(e.l.body).push(e);
+    }
+    for (const [corps, liste] of parCorps) {
+      if (liste.length < 2) continue;
+      try {
+        for (const e of liste) e.node.setEnabled(true);
+        if (!liste.every((e) => BABYLON.ClusteredLightContainer.IsLightSupported(e.node))) {
+          for (const e of liste) e.node.setEnabled(false);
+          continue;
+        }
+        const c = new BABYLON.ClusteredLightContainer(`couronne_${corps}`,
+          liste.map((e) => e.node), scene);
+        c.includeOnlyWithLayerMask = layerMaskFor(liste[0].l.cullingMask);
+        c.renderPriority = 3;
+        c.setEnabled(false);
+        for (const e of liste) e.groupe = c;
+      } catch (err) {
+        console.warn("couronne de l'imposteur :", err && err.message);
+      }
+    }
+  }
   // L'alarme generale nait ETEINTE : `MasterAlarm` n'appelle `PulsingLight
   // .Enable` que sous trente pour cent de coque, et une lumiere que rien n'a
   // allumee ne bat pas (docs/116-trappe.md).
@@ -1119,7 +1182,23 @@ async function boot() {
   // approche (voir sectors.js). Un corps pas encore la montre sa sphere de
   // substitution, exactement comme un corps sans geometrie exportee.
   let shaderCounts = {};
+  // `SunlightSwapper` : l'echange de calques de Timber Hearth et de Brittle
+  // Hollow, et les spots de leur soleil de substitution (imposteur.js).
+  const echanges = new Map([...new Set(imposteurs.map((l) => l.body))]
+    .map((c) => [c, new EchangeSoleil(c)]));
+  window.__imposteur = { echanges, ombres: new Map() };
   const store = new GeometryStore(BABYLON, scene, (entry) => {
+    // `GetComponentsInChildren<Transform>` : ce qui est SOUS le corps, et pas
+    // son voisin de lot (Attlerock partage le fichier de Timber Hearth).
+    for (const [corps, ech] of echanges) {
+      const racine = (entry.meshes || []).map((m) => m.parent).concat(entry.root ? [entry.root] : [])
+        .flatMap((n) => { const out = []; for (let x = n; x; x = x.parent) out.push(x); return out; })
+        .find((n) => n && n.name === corps);
+      const noeud = racine || scene.getTransformNodeByName(corps) || scene.getMeshByName(corps);
+      if (!noeud) continue;
+      const sous = (entry.meshes || []).filter((m) => m !== noeud && m.isDescendantOf && m.isDescendantOf(noeud));
+      if (sous.length) ech.ajouter(sous);
+    }
     // tout ce qui, avant, se faisait une fois pour toutes au demarrage
     const counts = applyGameShaders(BABYLON, scene, entry.meshes);
     for (const [k, v] of Object.entries(counts)) {
@@ -1606,6 +1685,7 @@ async function boot() {
     try {
       const res = await BABYLON.SceneLoader.ImportMeshAsync(
         "", "data/gltf/", fichier, scene);
+      propagerExtras(res.meshes);
       hideUnrendered(res.meshes);
       disableInactive(res);
       toLegacyMaterials(BABYLON, scene, res.meshes);
@@ -1766,8 +1846,17 @@ async function boot() {
 
   // Invite du catalogue du jeu, par « Classe.champ ». Les textes ne sont pas
   // reecrits ici : ils viennent tels quels de data/interface/interface.json.
+  // Les invites dont le texte est un CHAMP et non un litteral echappent au
+  // catalogue, qui ne lit que des `ldstr`. La premiere d'entre elles est celle
+  // de tout interactif : `InteractVolume.Awake` fait `new ScreenPrompt(
+  // XboxButton.X, _prompt)`, et `_prompt` vaut « Talk » sur les quatorze
+  // zones de conversation. Sans elle, viser Slate n'affichait RIEN, la ou
+  // l'alpha montre « (X) Talk » sous le reticule (docs/132).
+  const HORS_CATALOGUE = {
+    "InteractVolume._screenPrompt": { priority: 0, button: "X" },
+  };
   const P = (key, text) => {
-    const p = prompts && prompts.get(key);
+    const p = (prompts && prompts.get(key)) || HORS_CATALOGUE[key] || null;
     if (!p) return null;
     return { text: text || p.text, priority: p.priority, button: p.button };
   };
@@ -2028,6 +2117,9 @@ async function boot() {
   const loop = new TimeLoop(
     ((gameplay.singletons || {}).TimeLoop || {}).fields
       ?._loopDurationInMinutes ?? undefined);
+  // L'effondrement de l'etoile a l'echelle de la scene : c'est elle qui fixe
+  // le temps entre `TriggerSupernova` et `SunExploded` (docs/132).
+  Object.assign(loop, effondrementsDuBuild(gameplay));
   // `TimeLoop.Start` : la statique `_startTimeLoopOnReload` nait a VRAI, donc
   // le tout premier chargement annonce deja `StartOfTimeLoop` et calcule la
   // prevention. Sur une partie neuve, l'etoile n'explose donc pas tant qu'on
@@ -2097,9 +2189,14 @@ async function boot() {
     return d;
   })() : null;
   let fxMort = false, fxEau = false;
+  // `StartOfTimeLoop` part aussi au PREMIER chargement : le reveil de la
+  // partie eblouit comme celui qui suit une mort.
+  let fxReveil = false;
 
   // Mort et flashback : une seule porte d'entree pour toutes les causes.
   const death = new PlayerDeathHandler();
+  // Le flashback attend `TriggerFlashback`, que la fin de l'effet de mort annonce.
+  death.attendreEffet = true;
   const flashOverlay = uiRoot ? new FlashbackOverlay(uiRoot) : null;
 
   // §R LA MEMOIRE DU FLASHBACK (docs/98-flashback.md).
@@ -2110,11 +2207,10 @@ async function boot() {
   // build ne porte pas de memoire a rejouer » — et c'est la plus visible des
   // choses que le portage ne faisait pas.
   //
-  // Une cible de rendu de 256 par 256 coute 256 Ko de lecture toutes les cinq
-  // secondes : a l'echelle de la boucle, deux cent seize photos et cinquante
-  // megaoctets. Le build en garde autant, et sans plafond : mourir tard donne
+  // Une photo de 256 par 256 coute 256 Ko toutes les cinq secondes : a
+  // l'echelle de la boucle, deux cent seize photos et cinquante megaoctets. Le build en garde autant, et sans plafond : mourir tard donne
   // un long flashback, c'est le principe.
-  const pellicule = { timer: new SnapshotTimer(), cible: null, photos: [],
+  const pellicule = { timer: new SnapshotTimer(), photos: [],
                       enCours: false, t0: performance.now() / 1000 };
   // `_finalImage` — `FinalFlashbackImage` —, posee sur le plan pendant que le
   // blanc monte. Sans le build, elle manque et le fondu reste nu : c'est un
@@ -2128,58 +2224,39 @@ async function boot() {
   window.__death = death;
   window.__pellicule = pellicule;
 
-  /** La cible de rendu, creee a la premiere photo et jamais avant. */
-  function cibleFlashback() {
-    if (pellicule.cible) return pellicule.cible;
-    try {
-      const n = FLASHBACK.snapshotSize;
-      const rtt = new BABYLON.RenderTargetTexture("flashback", n, scene, false);
-      // `refreshRate = 0` : Babylon ne la dessine jamais tout seul, on appelle
-      // `render()` a la main — une fois toutes les cinq secondes, et pas une
-      // image de plus.
-      rtt.refreshRate = 0;
-      rtt.renderList = null;           // toute la scene, comme la camera
-      rtt.clearColor = new BABYLON.Color4(0, 0, 0, 1);
-      pellicule.cible = rtt;
-    } catch (e) {
-      console.warn("flashback : pas de cible de rendu —", e.message);
-      pellicule.cible = null;
-      pellicule.timer.due = () => false;   // on n'essaiera plus
-    }
-    return pellicule.cible;
-  }
-
   /**
-   * Une photo. La lecture des pixels est asynchrone : on ne bloque pas l'image
-   * pour elle, et une photo qui n'arrive pas est une photo de moins, rien de
-   * plus.
+   * Une photo : l'image que le joueur vient de VOIR, prise juste apres son
+   * rendu.
    *
-   * WebGL rend ses lignes de bas en haut ; `ImageData` les attend de haut en
-   * bas. D'ou le retournement, sans quoi tout le flashback serait a l'envers.
+   * Le portage rendait une seconde fois la scene dans une `RenderTargetTexture`
+   * de 256 par 256 : sous SwiftShader comme ailleurs, elle sortait NOIRE — le
+   * flashback de l'alpha montre le feu, la tour, le ciel, celui du portage
+   * montrait des rectangles noirs (docs/132). Le build rend la camera du
+   * joueur, effets d'image compris, dans une `RenderTexture` carree ; une
+   * camera Unity rendue dans une cible carree garde son champ VERTICAL, et
+   * c'est donc le carre central de l'image affichee. On le copie dans le
+   * `onAfterRender` : a ce moment le tampon de dessin est encore lisible,
+   * sans `preserveDrawingBuffer`.
    */
-  async function photographier() {
-    const rtt = cibleFlashback();
-    if (!rtt || pellicule.enCours) return;
+  function photographier() {
+    if (pellicule.enCours) return;
     pellicule.enCours = true;
-    try {
-      rtt.activeCamera = scene.activeCamera;
-      rtt.render();
-      const n = FLASHBACK.snapshotSize;
-      const brut = await rtt.readPixels();
-      if (!brut) return;
-      const px = new Uint8ClampedArray(n * n * 4);
-      for (let y = 0; y < n; y++) {
-        const src = (n - 1 - y) * n * 4;
-        px.set(brut.subarray(src, src + n * 4), y * n * 4);
+    const obs = scene.onAfterRenderObservable.addOnce(() => {
+      try {
+        const src = engine.getRenderingCanvas();
+        const n = FLASHBACK.snapshotSize;
+        const w = src.width, h = src.height, cote = Math.min(w, h);
+        const toile = new OffscreenCanvas(n, n);
+        toile.getContext("2d").drawImage(src, (w - cote) / 2, (h - cote) / 2,
+                                         cote, cote, 0, 0, n, n);
+        pellicule.photos.push(toile.transferToImageBitmap());
+      } catch (e) {
+        // Un contexte perdu, une copie refusee : la partie continue.
+      } finally {
+        pellicule.enCours = false;
       }
-      const toile = new OffscreenCanvas(n, n);
-      toile.getContext("2d").putImageData(new ImageData(px, n, n), 0, 0);
-      pellicule.photos.push(toile.transferToImageBitmap());
-    } catch (e) {
-      // Un contexte perdu, un `readPixels` refuse : la partie continue.
-    } finally {
-      pellicule.enCours = false;
-    }
+    });
+    if (!obs) pellicule.enCours = false;
   }
 
   function respawn() {
@@ -2561,6 +2638,67 @@ async function boot() {
   const autopilot = ship ? new Autopilot(ship, declared.frames) : null;
   // Les treize marqueurs que le build pose, avec leurs vrais noms de jeu.
   const marqueurs = mapMarkers(gameplay);
+  const accesCarte = new AccesCarte();
+  // `MapCamera` : la carte est une CAMERA qui s'eleve de l'oeil du joueur
+  // (map.js, `VueCarte`). Le portage la tient avec la camera du joueur, dont
+  // il retient les reglages le temps de la carte — c'est aussi ce que fait le
+  // build pour le son, en passant l'ecoute a la camera de la carte.
+  const vueCarte = new VueCarte();
+  const camCarteBuild = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => (c.roles || []).includes("carte")) || null;
+  const reglagesCarte = {
+    fov: ((camCarteBuild && camCarteBuild.fov) || REGLES_CARTE.fov) * Math.PI / 180,
+    far: (camCarteBuild && camCarteBuild.far) || REGLES_CARTE.far,
+    masque: masqueCamera(camCarteBuild ? camCarteBuild.cullingMask : null),
+  };
+  let cameraAvantCarte = null;
+  // Le monde vu du repere de travail, qui tourne avec le corps ancre : le bas
+  // de la carte est `Vector3.down` du MONDE (spin.js).
+  const versRepereCarte = (v) => (anchorBody ? spins.toFrame(anchorBody, v) : v);
+  const depuisRepereCarte = (v) => (anchorBody ? spins.fromFrame(anchorBody, v) : v);
+  const etoileCarte = () => bodies.find((b) => ((b.gravity || {}).surfaceAcceleration || 0) >= 50) || null;
+  /**
+   * `EnterMapView`. Le cadrage joueur-cible se mesure dans le repere, puis se
+   * ramene aux axes du monde : `_focalOffset` y vit, le deplacement aussi.
+   */
+  function ouvrirCarte({ observatoire = false } = {}) {
+    const now = performance.now() / 1000;
+    const etoile = etoileCarte();
+    const sp = etoile ? etoile.position : [0, 0, 0];
+    const rel = (p) => depuisRepereCarte([p[0] - sp[0], p[1] - sp[1], p[2] - sp[2]]);
+    const cible = observatoire ? null : solarMap.selected;
+    const r = solarMap.enterMapView(rel([player.pos.x, player.pos.y, player.pos.z]),
+                                    cible ? rel(cible.position) : null, now,
+                                    REGLES_CARTE.fov, [0, 0, 0],
+                                    observatoire ? REGLES_CARTE.observatoryZoomDuration
+                                                 : REGLES_CARTE.zoomDuration);
+    const regard = new BABYLON.Quaternion();
+    camera.getWorldMatrix().decompose(undefined, regard);
+    vueCarte.entrer({ now, zoomDuration: r.zoomDuration,
+                      rotationRate: observatoire ? REGLES_CARTE.observatoryRotationRate
+                                                 : REGLES_CARTE.rotationRate,
+                      doRotation: observatoire,
+                      regard: [regard.x, regard.y, regard.z, regard.w],
+                      versRepere: versRepereCarte });
+    if (!cameraAvantCarte) {
+      cameraAvantCarte = { fov: camera.fov, minZ: camera.minZ, maxZ: camera.maxZ,
+                           layerMask: camera.layerMask };
+    }
+    return r;
+  }
+  /** `ExitMapView` : la camera du joueur retrouve ses reglages. */
+  function fermerCarte() {
+    if (solarMap.open) solarMap.exitMapView();
+    accesCarte.sortie();
+    vueCarte.sortir();
+    solarMap.panLocked = false;
+    if (cameraAvantCarte) {
+      camera.rotationQuaternion = null;
+      Object.assign(camera, cameraAvantCarte);
+      cameraAvantCarte = null;
+    }
+  }
+  window.__vueCarte = vueCarte;
   const solarMap = new SolarMap(document.getElementById("map"), bodies,
                                 pdata, SECTOR_OF, marqueurs);
   // §V LES ORBITES ONT UNE COULEUR CHACUNE (docs/100-carte.md). `MapOpenGL`
@@ -2590,6 +2728,7 @@ async function boot() {
   if (marqueurs.length) console.log(`carte : ${marqueurs.length} marqueurs declares`);
   window.__dlgUI = dlgUI;   // sonde de verification : le dialogue au doigt
   window.__map = solarMap;
+  window.__accesCarte = accesCarte;
   window.__autopilot = autopilot;
   window.__ship = !!ship;
   window.__shipRef = ship;   // sonde de verification
@@ -2805,14 +2944,12 @@ async function boot() {
     // `EnterMapView` / `ExitMapView` : ouvrir avec une cible visee vous CADRE
     // tous les deux, et le son d'ouverture a dix secondes de garde
     // (docs/117-carte.md).
-    if (est("Map") || code === "KeyM") {
-      if (solarMap.open) solarMap.exitMapView();
+    // La touche ne repond que si `MapController` est allume : combinaison sur
+    // le dos, ou carte ouverte depuis l'observatoire (map.js, `AccesCarte`).
+    if ((est("Map") || code === "KeyM") && accesCarte.actif) {
+      if (solarMap.open) fermerCarte();
       else {
-        const cible = solarMap.selected;
-        const moi = [player.pos.x + framePos[0], player.pos.y + framePos[1],
-                     player.pos.z + framePos[2]];
-        const r = solarMap.enterMapView(moi, cible ? cible.position : null,
-                                        performance.now() / 1000);
+        const r = ouvrirCarte();
         // Le son d'ouverture est celui de la source du `MapController`, pas un
         // clip d'interface : s'il n'est pas extrait, la garde de dix secondes
         // reste vraie et rien ne joue.
@@ -3010,9 +3147,17 @@ async function boot() {
       settingsUI.render();
     }
     if (dialogue.active) {
+      // `ConversationInput.chooseResponse` est l'axe `moveZ` : W monte d'une
+      // option, S descend, un cran par appui (`_cursorLocationChanged`). Le
+      // portage ne lisait que les fleches ; elles restent, pour la croix de
+      // la manette. Le choix, lui, passe par `advanceText`, la touche
+      // d'interaction (plus bas) ; Entree reste un raccourci.
       const n = (dialogue.view && dialogue.view.options.length) || 0;
-      if (code === "ArrowUp") dlgUI.moveCursor(-1, n);
-      if (code === "ArrowDown") dlgUI.moveCursor(1, n);
+      const cz = cmds.get("Move Z");
+      const z = code === "ArrowUp" ? 1 : code === "ArrowDown" ? -1
+        : !cz ? 0 : cz.pos.codes.includes(code) ? 1 : cz.neg.codes.includes(code) ? -1 : 0;
+      if (z > 0) dlgUI.moveCursor(-1, n);
+      if (z < 0) dlgUI.moveCursor(1, n);
       if (code === "Enter" && n) optionPressed = dlgUI.cursor + 1;
     }
   }
@@ -3447,7 +3592,12 @@ async function boot() {
         console.log(modeAtt === "enter"
           ? `mode atterrissage : ${cibleAtt.name}` : "mode atterrissage quitte");
       }
-      if (death.dead && !modes.mort) modes.annonce("PlayerDeath");
+      if (death.dead && !modes.mort) {
+        modes.annonce("PlayerDeath");
+        // `MapController.OnPlayerDeath` : la carte se ferme et s'eteint.
+        fermerCarte();
+        accesCarte.mort();
+      }
       else if (!death.dead && modes.mort) { modes.init(); modes.dedans.clear(); }
     }
 
@@ -3536,6 +3686,9 @@ async function boot() {
     }
     const world = { directional: dirFields, polar: polFields,
                     framePos: anchorPos, fluids, zeroG,
+                    // Les champs sont au repos de leur corps : on y ramene le
+                    // point, comme pour les zones (docs/132).
+                    shiftOf: decale,
                     // Le referentiel du mode atterrissage, s'il y en a un :
                     // c'est lui qui donne l'axe radial de l'ecretage.
                     landing: atterrissageCorps
@@ -3663,11 +3816,32 @@ async function boot() {
     // LOCALE : le decalage etait applique sur Y du repere de travail, ce qui
     // ne vaut qu'au pole nord du corps ancre. Ailleurs il portait la camera
     // de cote, et sous l'equateur sud, sous les pieds du joueur.
-    camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
-                        player.pos.y + up.y * EYE_HEIGHT,
-                        player.pos.z + up.z * EYE_HEIGHT);
-    camera.upVector = up;
-    camera.setTarget(camera.position.add(fwd));
+    if (vueCarte.open) {
+      // `MapController.LateUpdate` : la camera monte de l'oeil vers la vue
+      // plongeante. Le haut de la camera est pose a chaque image : Babylon ne
+      // le retourne avec la rotation que quand sa composante z change.
+      const etoile = etoileCarte();
+      const e = vueCarte.etape(performance.now() / 1000,
+                               [player.pos.x, player.pos.y, player.pos.z],
+                               etoile ? etoile.position : [0, 0, 0],
+                               solarMap.zoom, solarMap.focal, versRepereCarte);
+      solarMap.panLocked = e.t < 0.5;
+      camera.position.set(e.position[0], e.position[1], e.position[2]);
+      if (!camera.rotationQuaternion) camera.rotationQuaternion = new BABYLON.Quaternion();
+      camera.rotationQuaternion.set(e.rotation[0], e.rotation[1], e.rotation[2], e.rotation[3]);
+      const h = qRot(e.rotation, [0, 1, 0]);
+      camera.upVector = new BABYLON.Vector3(h[0], h[1], h[2]);
+      camera.minZ = e.near;
+      camera.maxZ = reglagesCarte.far;
+      camera.fov = reglagesCarte.fov;
+      camera.layerMask = reglagesCarte.masque;
+    } else {
+      camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
+                          player.pos.y + up.y * EYE_HEIGHT,
+                          player.pos.z + up.z * EYE_HEIGHT);
+      camera.upVector = up;
+      camera.setTarget(camera.position.add(fwd));
+    }
 
     // le soleil eclaire depuis sa position monde, geometrie visible ou non
     const star = entries.find((e) => e.isStar);
@@ -3934,7 +4108,15 @@ async function boot() {
       }
     }
     if (interactPressed) {
-      if (dialogue.active) {
+      if (dialogue.active && dialogue.view && dialogue.view.options.length) {
+        // `DialogueGUI.Update` : devant des options, `advanceText` CHOISIT
+        // celle du curseur (`OnDialogueInput(_optionNo + 1)`). Le portage
+        // appelait `advance()`, qui ne fait rien devant des options : la
+        // conversation restait bloquee sur la touche du jeu (docs/132).
+        optionPressed = dlgUI.cursor + 1;
+        bipUI("AdvanceText");
+        interactPressed = false;
+      } else if (dialogue.active) {
         const avant = dialogue.active;
         dialogue.advance();
         // Deux clips differents : avancer CLIQUE, finir a son propre son.
@@ -3952,7 +4134,7 @@ async function boot() {
         // les crashs passent avant, donc se planter cinq fois puis reussir une
         // fois vous vaut le reproche (docs/78-modele.md).
         let arbre = null;
-        if (enfant && convo.name === enfant.name) {
+        if (estEnfant(convo, enfant)) {
           const choix = compteurEnfant.tree();
           if (choix && enfant.trees[choix]) {
             arbre = enfant.trees[choix];
@@ -3994,6 +4176,8 @@ async function boot() {
       : null);
     const secMaj = secteurDe(playerW);
     secteurMajeur = secMaj;
+    // `OnOccupantEnterSector(Player)` / `OnOccupantExitSector(Player)`.
+    for (const [corps, ech] of echanges) ech.poser(!!(secMaj && secMaj.body === corps));
     // LES SEUILS : on n'y est pas « dedans », on les a franchis dans un sens.
     //
     // Les deux comptes se tiennent ici parce que l'invite de lampe, plus haut
@@ -4089,7 +4273,11 @@ async function boot() {
         } else if (focus.kind === "observatoryMap") {
           // La maquette du systeme solaire a l'observatoire ouvre la carte
           events.fire(OBSERVATORY_EVENTS.triggerMap);
-          solarMap.ouvre();
+          // `OnTriggerObservatoryMap` : allume la carte, et `EnterMapView`
+          // SANS cadrer de cible — l'observatoire montre le systeme entier.
+          // (L'appel visait une methode `ouvre` que `SolarMap` n'a jamais eue.)
+          accesCarte.depuisObservatoire();
+          if (!solarMap.open) ouvrirCarte({ observatoire: true });
           interactPressed = false;
         } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
           // La console de projection du satellite
@@ -4396,7 +4584,7 @@ async function boot() {
       }
       // `Minimap` dit si la carte existe, `MinimapHUD` si on la voit : deux
       // composants dans le build, deux appels ici.
-      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden,
+      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden && !vueCarte.open,
                                                 hasMinimap: equipment.minimap }));
       if (minimap.on && secMaj) {
         // Tout se compare AU REPOS du secteur : c'est le seul repere ou sa
@@ -4454,8 +4642,12 @@ async function boot() {
       // L'invite empruntee est celle de l'interaction, avec son icone et sa
       // priorite ; le MOT, lui, est du portage — `Conversation` ne construit
       // pas de `ScreenPrompt` dans l'alpha, et on ne pretend pas le contraire.
-      const centre = focus ? P("InteractVolume._screenPrompt",
-                               focus.prompt || focus.name)
+      // `UpdatePromptDisplay` : l'invite ne s'affiche que tant qu'on n'a PAS
+      // interagi (`!_hasInteracted`). Une conversation ouverte la retire ; le
+      // portage la laissait sous le reticule pendant tout le dialogue.
+      const centre = (focus && dialogue.active) ? null
+        : focus ? P("InteractVolume._screenPrompt",
+                    focus.prompt || focus.name)
         : (convo && !dialogue.active)
           ? P("InteractVolume._screenPrompt",
               `Parler a ${convo.character || convo.name}`)
@@ -4468,8 +4660,11 @@ async function boot() {
       // et seule la plus haute reste affichee.
       const left = [];
       if (solarMap && solarMap.open) {
-        left.push(P("MapController._closePrompt"), P("MapController._zoomPrompt"),
-                  P("MapController._panPrompt"));
+        // `AddScreenPrompt` quand t atteint 1 : pas pendant la montee.
+        if (vueCarte.promptsShown || !vueCarte.open) {
+          left.push(P("MapController._closePrompt"), P("MapController._zoomPrompt"),
+                    P("MapController._panPrompt"));
+        }
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
       } else if (ship && ship.boarded) {
@@ -4619,13 +4814,27 @@ async function boot() {
       if (focus) bits.push(focus.kind === "readable"
         ? `E pour lire ${focus.name}` : (focus.prompt || focus.name));
       hud2.textContent = bits.join("   ·   ");
-      solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
+      if (vueCarte.open) {
+        // `WorldToScreenPoint` de la camera de la carte, sa pose de l'image.
+        const tm = camera.getViewMatrix(true).multiply(camera.getProjectionMatrix(true));
+        const vp = new BABYLON.Viewport(0, 0, solarMap.canvas.clientWidth,
+                                        solarMap.canvas.clientHeight);
+        const avant = camera.getDirection(BABYLON.Axis.Z);
+        const projeter = (p) => {
+          const v = new BABYLON.Vector3(p[0], p[1], p[2]);
+          const e = BABYLON.Vector3.Project(v, BABYLON.Matrix.IdentityReadOnly, tm, vp);
+          return [e.x, e.y, BABYLON.Vector3.Dot(v.subtract(camera.position), avant)];
+        };
+        solarMap.drawProjete(projeter, player.pos, ship ? ship.pos : null, dansEpave);
+      } else {
+        solarMap.draw(player.pos, ship ? ship.pos : null, dansEpave);
+      }
     }
     {
       // `_isMuseumSign` vient maintenant de la vue : un objet lisible le porte
       // toujours (`DialogueBox(..., true)`), une conversation selon sa zone.
       const v = dialogue.view;
-      dlgUI.render(v, !!(v && v.sign));
+      dlgUI.render(v);
     }
 
     // --- secteurs ---
@@ -5006,18 +5215,20 @@ async function boot() {
     const zoomAxe = telescope.active
       ? ((cmds.held("Zoom In", etatCmd) ? 1 : 0)
          - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
-    camera.fov = telescope.update(dt, zoomAxe);
+    // Carte ouverte, c'est `MapCamera` qui fixe champ et plan proche.
+    const fovLunette = telescope.update(dt, zoomAxe);
+    if (!vueCarte.open) camera.fov = fovLunette;
     // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
     // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
     // image que l'assise, et la meme dependance a la cadence.
-    if (verrouFOV !== null && !telescope.active) {
+    if (verrouFOV !== null && !telescope.active && !vueCarte.open) {
       const vise = verrouFOV * Math.PI / 180;
       camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
     }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
-    camera.minZ = telescope.nearClip;
+    if (!vueCarte.open) camera.minZ = telescope.nearClip;
     // La lunette a un corps et un verre dans le build : on les montre quand
     // elle sert, et le portage ne montrait rien. `TelescopeGUI.LateUpdate` la
     // fait GROSSIR avec le champ — quatre fois plus grande a soixante degres
@@ -5514,6 +5725,10 @@ async function boot() {
     // `death.kill()` est appele sept fois dans cette boucle et ne retient que
     // la premiere cause, et un volume mortel qu'on ne quitte pas le rappelle a
     // chaque image. Guetter le passage de vivant a mort ne se trompe pas.
+    if (!fxReveil) {
+      fxReveil = true;
+      fx.startOfTimeLoop(now);
+    }
     if (death.dead && !fxMort) {
       fxMort = true;
       fx.playerDeath(deathTypeOf(death.cause), now);
@@ -5531,7 +5746,7 @@ async function boot() {
     } else if (!death.dead && fxMort) {
       fxMort = false;
       // Le reveil : le glow blanc a 3 qui retombe au noir en trois secondes.
-      fx.startOfTimeLoop();
+      fx.startOfTimeLoop(now);
       etatJoueur.dead = false;
     }
     // L'immersion : `OnEnterWaterZone` / `OnExitWaterZone`. Le portage sait
@@ -5643,6 +5858,11 @@ async function boot() {
         if (n) console.log(`son de mort demande (${death.cause}) : ${n} source(s)`);
       }
       // la sequence de flashback tient l'ecran, puis la boucle repart
+      // `TriggerFlashback` : la fin de l'effet de mort, pas la mort.
+      if (fx.flashbackDemande) {
+        fx.flashbackDemande = false;
+        death.declencherFlashback();
+      }
       const phaseAvant = death.state.phase;
       if (death.update(dt)) respawn();
       if (phaseAvant === "attente" && death.state.phase !== "attente") {
@@ -5984,6 +6204,7 @@ async function boot() {
     // [70, 280] est celle qu'on ne peut pas atteindre, et le suivi vertical y
     // est bride.
     player.setSuit(equipment.suit);
+    accesCarte.porte(!!equipment.suit);
     if (equipment.suit && !casque.worn && casque.state !== 0) casque.suitUp();
     if (!equipment.suit && casque.worn) casque.removeSuit();
     // §U LES JAUGES SONT SUR LA VISIERE. `HUDCameraScript` les eteint a
@@ -5992,7 +6213,10 @@ async function boot() {
     // portage affichait l'oxygene et le carburant en permanence, casque ote,
     // au village, ou il n'y a rien a afficher. Et le mode d'affichage les
     // efface sans effacer l'etat : en sortir les rend a ce qu'elles etaient.
-    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden);
+    // `HUDCameraScript.OnSwitchActiveCamera` : si la camera active n'est pas
+    // `MainCamera` — la carte —, la camera du casque s'eteint, et avec elle
+    // jauges, silhouette de la combinaison et minicarte.
+    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden && !vueCarte.open);
     {
       const euler = ((-pitch * 180 / Math.PI) % 360 + 360) % 360;
       casque.update(dt, input.right || 0, 0, euler);
@@ -6333,9 +6557,13 @@ async function boot() {
           (a.right[2] * ax + a.fwd[2] * az + a.up[2] * mu) * p,
         ];
       }
+      // Le modele vole dans le cratere : `CraterField` le tient comme il tient
+      // le joueur, au repos de Timber Hearth (docs/132).
       const g = dominantField(bodies, {
         x: modele.pos[0] - anchorPos[0], y: modele.pos[1] - anchorPos[1],
-        z: modele.pos[2] - anchorPos[2] });
+        z: modele.pos[2] - anchorPos[2] },
+        { directional: dirFields, polar: polFields, framePos: anchorPos,
+          shiftOf: (v) => decalageDuCorps(v.body, anchorPos) });
       const avant = modele.vel.slice();
       for (let i = 0; i < 3; i++) {
         const gi = g ? [g.dir.x, g.dir.y, g.dir.z][i] * g.magnitude : 0;
@@ -6735,6 +6963,81 @@ async function boot() {
       fadeCible.intensity = fadeLight.update(performance.now() / 1000);
     }
     placedLights.update(player.pos, anchorPos, (x) => decalageDuCorps(x.body, anchorPos));
+    // `LookAtSun` : les spots de l'imposteur suivent l'etoile, a leur distance
+    // du centre, tournes vers lui ; et ils portent des ombres (`m_Shadows`
+    // doux, force 1) — c'est la planete qui eteint sa face nuit. Ils ne
+    // servent que dans le secteur de leur corps : ailleurs, rien n'est au
+    // calque `UseSunImposter`.
+    {
+      const etoile = bodies.find((b) => (b.gravity.surfaceAcceleration || 0) >= 50);
+      let bascule = false;
+      for (const { l, node, groupe } of spotsImposteurs.values()) {
+        const ech = echanges.get(l.body);
+        const actif = !!(ech && ech.dedans);
+        const interrupteur = groupe || node;
+        if (interrupteur.isEnabled() !== actif) { interrupteur.setEnabled(actif); bascule = true; }
+        const corps = bodies.find((b) => b.bodyName === l.body);
+        if (!actif || !corps || !etoile) continue;
+        const pose = poseImposteur(corps.position, etoile.position, l.pivot);
+        if (!pose) continue;
+        const ombres = window.__imposteur.ombres;
+        // La carte d'ombre et la lumiere qui la lit doivent avoir la MEME pose.
+        // Une carte refaite toutes les six images suffisait a soixante images
+        // par seconde ; a deux (SwiftShader), six images font trois secondes,
+        // le spot avait tourne de cinq degres et le sol s'ombrait lui-meme en
+        // entier (docs/132). Le spot ne bouge donc que par pas : quand il s'est
+        // deplace de plus d'une demi-unite, dans le monde OU par rapport au
+        // relief qui tourne, on le repose et la carte se refait avec lui.
+        const gen = ombres.get(l.name);
+        if (gen) {
+          const P = new BABYLON.Vector3(...pose.position);
+          const ref = ech.meshes.length ? ech.meshes[0].mesh : null;
+          const loc = ref ? BABYLON.Vector3.TransformCoordinates(P, ref.getWorldMatrix().clone().invert()) : P;
+          const avant = gen.__pose;
+          if (avant && BABYLON.Vector3.Distance(avant.monde, P) < PAS_OMBRE_IMPOSTEUR &&
+              BABYLON.Vector3.Distance(avant.local, loc) < PAS_OMBRE_IMPOSTEUR) continue;
+          gen.__pose = { monde: P, local: loc };
+          gen.getShadowMap().resetRefreshCounter();
+        }
+        node.position.set(...pose.position);
+        if (node.direction) node.direction.set(...pose.direction);
+        // Seul le spot central porte des ombres ; la couronne n'en a pas.
+        if (l.shadows > 0 && ech.meshes.length && BABYLON.ShadowGenerator && !ombres.has(l.name)) {
+          try {
+            // La profondeur de la carte ne couvre que le CORPS : de la face
+            // eclairee a la face nuit, soit la distance du spot au centre plus
+            // ou moins le rayon. Etalee de 1 a 600, elle rendait le relief en
+            // marches d'escalier noires.
+            const R = ((corps.gravity && corps.gravity.upperSurfaceRadius) || 200) * 1.3;
+            const distance = Math.hypot(...l.pivot.position);
+            node.shadowMinZ = Math.max(1, distance - R);
+            node.shadowMaxZ = distance + R;
+            // `m_Resolution` 3 : « tres haute », 2 048 pour un spot dans Unity 4.
+            const g = new BABYLON.ShadowGenerator(2048, node);
+            g.bias = 0.002;
+            g.normalBias = 0.01;
+            if ("usePercentageCloserFiltering" in g) g.usePercentageCloserFiltering = true;
+            g.setDarkness(1 - ((l.ombre && l.ombre.force) ?? 1));
+            // Rendue une fois, puis refaite a chaque pas du spot (ci-dessus).
+            g.getShadowMap().refreshRate = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+            // Porter et recevoir, renderer par renderer (`m_CastShadows`,
+            // `m_ReceiveShadows`), comme au titre : les branches des pins ne
+            // recoivent pas l'ombre, et les recevoir les noircissait.
+            for (const { mesh } of ech.meshes) {
+              if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) continue;
+              const o = ombresDuRenderer(mesh);
+              if (o.porte) g.addShadowCaster(mesh, false);
+              mesh.receiveShadows = o.recoit;
+            }
+            ombres.set(l.name, g);
+          } catch (e) { ombres.set(l.name, null); }
+        }
+      }
+      // Rallumee, une lumiere se range en QUEUE de la liste de chaque maillage
+      // (`_resyncLightSource`), quelle que soit sa priorite : on refait les
+      // listes dans l'ordre trie de la scene, une fois pour toute la couronne.
+      if (bascule) for (const m of scene.meshes) if (m._resyncLightSources) m._resyncLightSources();
+    }
     // Ce qui fait VIVRE ces lumieres : 15 `NightLight`, 15 `PulsingLight` et
     // 9 `LightFlicker` que le portage ne lisait pas. Un feu de camp qui ne
     // vacille pas se remarque (docs/42-lumieres.md).

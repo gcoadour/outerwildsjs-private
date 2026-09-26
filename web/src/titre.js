@@ -16,7 +16,7 @@
 
 import { MENU } from "./settings.js";
 import { flicker, patchAttenuationUnity, patchOmbresUnity, ombreUnity, falloffUnity } from "./lights.js";
-import { hideUnrendered, disableInactive, ombresDuRenderer } from "./physics.js";
+import { hideUnrendered, disableInactive, ombresDuRenderer, propagerExtras } from "./physics.js";
 import { creerVoute } from "./etoiles.js";
 
 /**
@@ -306,6 +306,7 @@ export class TitleScreen {
     if (d.gltf && B.SceneLoader) {
       try {
         const res = await B.SceneLoader.ImportMeshAsync("", "data/titre/", d.gltf, this.scene);
+        propagerExtras(res.meshes);
         hideUnrendered(res.meshes);
         disableInactive(res);
         if (toLegacyMaterials) toLegacyMaterials(B, this.scene, res.meshes);

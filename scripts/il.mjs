@@ -37,6 +37,8 @@ const NOM = {
   0x5f: "and", 0x60: "or", 0x61: "xor", 0x62: "shl", 0x63: "shr", 0x65: "neg", 0x66: "not",
   0x8c: "box", 0x74: "castclass", 0x75: "isinst", 0x71: "ldobj", 0x79: "unbox",
   0x8e: "ldlen", 0x9a: "ldelem.ref", 0xa2: "stelem.ref",
+  0x6b: "conv.r4", 0x6c: "conv.r8", 0x69: "conv.i4", 0x76: "conv.r.un", 0xa0: "stelem.r4",
+  0x98: "ldelem.r4", 0x8d: "newarr", 0xdd: "leave", 0xde: "leave.s", 0xdc: "endfinally",
   0xfe01: "ceq", 0xfe02: "cgt", 0xfe04: "clt", 0xfe06: "ldftn", 0xfe09: "ldarg", 0xfe0c: "ldloc",
 };
 
@@ -165,8 +167,11 @@ export function disassemble(asm, methodIndex) {
       const t = methodTarget(asm, operand);
       const quoi = op === 0x73 ? "newobj " : op === 0x28 ? "call   " : "callvrt";
       txt = `${quoi} ${t ? `${t.declaring}::${t.name}` : `#${operand}`}`;
-    } else if (op === 0x7b || op === 0x7d || op === 0x7e || op === 0x80) {
-      const quoi = { 0x7b: "ldfld  ", 0x7d: "stfld  ", 0x7e: "ldsfld ", 0x80: "stsfld " }[op];
+    } else if (op === 0x7b || op === 0x7d || op === 0x7e || op === 0x80 || op === 0x7c || op === 0x7f) {
+      // `ldflda` (adresse d'un champ) : c'est ainsi que le C# lit `v.x` d'un
+      // Vector2 range en champ — l'IMGUI de `DialogueGUI` n'est fait que de ca.
+      const quoi = { 0x7b: "ldfld  ", 0x7d: "stfld  ", 0x7e: "ldsfld ", 0x80: "stsfld ",
+                     0x7c: "ldflda ", 0x7f: "ldsflda" }[op];
       txt = `${quoi} ${fieldName(asm, operand) || `#${operand}`}`;
     } else if (op === 0x22) txt = `ldc.r4  ${new DataView(code.buffer, code.byteOffset).getFloat32(offset + 1, true)}`;
     else if (op === 0x23) txt = `ldc.r8  ${new DataView(code.buffer, code.byteOffset).getFloat64(offset + 1, true)}`;

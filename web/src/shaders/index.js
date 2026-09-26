@@ -261,6 +261,32 @@ function applyParticleAdditive(BABYLON, mat) {
 }
 
 /**
+ * Les textures des glTF, lues telles qu'elles sont stockees.
+ *
+ * Le chargeur glTF de Babylon cree ses textures de couleur en TAMPON sRGB
+ * (`useSRGBBuffers`) : le processeur graphique les decode alors en lineaire a
+ * chaque lecture. C'est juste pour le PBR, qui calcule en lineaire ; c'est
+ * faux pour les `StandardMaterial` de `toLegacyMaterials`, qui calculent en
+ * gamma comme les shaders d'Unity 4. Une demi-teinte a 0,5 y arrivait a 0,21 :
+ * Slate et le terminal de lancement sortaient deux fois plus sombres que
+ * dans l'alpha, a lumiere egale, et doubler les lumieres n'y changeait
+ * presque rien (docs/132). Le basculement de `gammaSpace` ne touche pas au
+ * format interne : il faut le dire au chargeur, avant qu'il ne cree la
+ * texture.
+ *
+ * @returns vrai si l'observateur a ete pose
+ */
+export function gltfEnGamma(BABYLON) {
+  const obs = BABYLON && BABYLON.SceneLoader && BABYLON.SceneLoader.OnPluginActivatedObservable;
+  if (!obs || gltfEnGamma.pose) return !!gltfEnGamma.pose;
+  obs.add((loader) => {
+    if (loader && loader.name === "gltf" && "useSRGBBuffers" in loader) loader.useSRGBBuffers = false;
+  });
+  gltfEnGamma.pose = true;
+  return true;
+}
+
+/**
  * LES SHADERS « LEGACY » D'UNITY 4 ECLAIRENT EN ESPACE GAMMA.
  *
  * `Diffuse`, `Bumped Diffuse`, `Specular`… : la couleur de la texture, telle

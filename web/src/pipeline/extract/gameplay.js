@@ -11,7 +11,12 @@ const SINGLETONS = ["PlayerResources", "JetpackThrusterModel", "ShipThrusterMode
                     // comete. Le portage tracait tout d'un meme gris invente
                     // (docs/100-carte.md).
                     "MapOpenGL"];
-const PLACED = ["InteractReceiver", "ReadableObject", "PlanetoidSector",
+const PLACED = [
+                // L'effondrement de l'etoile : ces deux-la lisent leur ECHELLE
+                // LOCALE au depart (`Start`), et c'est elle qui fixe la duree
+                // entre `TriggerSupernova` et `SunExploded` (docs/132).
+                "SunExplosionBehavior", "ShrinkSunBehavior",
+                "InteractReceiver", "ReadableObject", "PlanetoidSector",
                 "OWAudioSource", "Conversation", "AudioTransmitter", "SpawnPoint",
                 "QuantumMoon", "QuantumOrbit", "QuantumFogBoundary", "FogVolume",
                 "FogLight", "MakeChildrenBreakable", "SectorData",
@@ -215,6 +220,13 @@ const WANT_VOLUME = new RegExp([
 const WANT_ROTATION =
   /^(spawnpoint|shipbody|whiteholevolume|ancientteleportreceiver)$/i;
 
+/**
+ * Composants dont l'ECHELLE LOCALE est une donnee : `SunExplosionBehavior` et
+ * `ShrinkSunBehavior` visent 3 % de celle qu'ils trouvent au `Start`, et
+ * s'arretent sous un seuil absolu (150, 50) — c'est elle qui fait la duree.
+ */
+const WANT_SCALE = /^(SunExplosionBehavior|ShrinkSunBehavior)$/;
+
 /** Composants dont le PARENT designe ce qu'ils commandent. */
 const WANT_PARENTS = /^EntrywayTrigger$/i;
 
@@ -277,6 +289,11 @@ export function extractGameplay(ctx) {
     if (WANT_ROTATION.test(cls)) {
       const [, rot] = ctx.world(gid);
       entry.rotation = rot.map((v) => Math.round(v * 1e6) / 1e6);
+    }
+
+    if (WANT_SCALE.test(cls)) {
+      const t = ctx.transformOf.get(gid);
+      if (t && t.m_LocalScale) entry.localScale = Math.round(t.m_LocalScale.x * 1e4) / 1e4;
     }
 
     if (SINGLETONS.includes(cls) && !singletons[cls]) singletons[cls] = entry;

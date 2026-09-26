@@ -13,12 +13,12 @@
 import { check, report } from "./run.mjs";
 import { CameraEffects, DEATH_TYPE, WAKE_DURATION, TWIRL_START_ANGLE,
          TWIRL_DURATION, REGLAGES_JOUEUR, reglagesDuJoueur,
-         reglagesDe } from "../web/src/cameraeffects.js";
+         reglagesDe, multiplicateurGlow } from "../web/src/cameraeffects.js";
 import { Telescope, TELESCOPE, SoundWave, WAVE, telescopeScale,
          zoomArrowFraction, TELESCOPE_GUI } from "../web/src/tools.js";
 import { mapMarkers, markerVisible, ORBIT_COLORS, ORBIT_ALPHA, COMET_COLOR,
          COMET_ELLIPSE, fociDistance, orbitStyle, SolarMap,
-         MAP } from "../web/src/map.js";
+         MAP, AccesCarte, VueCarte, smoothStep01, qRot, qLookRotation } from "../web/src/map.js";
 import { gazeSwitches, energyGates, GazeSwitch as Regard, EnergyGate as Porte,
          webSpeeds, webAlpha, webAnimators, GAZE, WEB } from "../web/src/gaze.js";
 import { Helmet, SUIT, MasterAlarm as Alarme, DamageDisplay, Notifications,
@@ -104,7 +104,7 @@ import { ATTERRISSAGE, rollMode, orbitSpeed, project,
          limitOrbitThrust, allowLandingMode, LandingView } from "../web/src/landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes, stillEnough,
          modelLandingSpots, modelShipBody,
-         rocketKids } from "../web/src/modelship.js";
+         rocketKids, estEnfant } from "../web/src/modelship.js";
 import { QUANTIQUE, QuantumObject as ObjetQuantique, planarQuantumObjects,
          quantumStatues, locksOnSnapshot, collapsesOnFlashlightOff,
          statueParts, planarCandidate, slopeOK } from "../web/src/quantumobj.js";
@@ -118,7 +118,8 @@ import { Flashback, PlayerDeathHandler, FLASHBACK, SnapshotTimer,
          frameLengths, displayTimes } from "../web/src/death.js";
 import { Settings, MenuInput } from "../web/src/settings.js";
 import { TimeLoop, ResetTrigger, LOOP_MINUTES, SHOCKWAVE_SECONDS,
-         SHOCKWAVE_RADIUS, shockwaveRadius } from "../web/src/timeloop.js";
+         SHOCKWAVE_RADIUS, shockwaveRadius, Effondrement, EFFONDREMENT_SURFACE,
+         EFFONDREMENT_COURONNE, effondrementsDuBuild } from "../web/src/timeloop.js";
 import { SunStage } from "../web/src/supernova.js";
 import { ShipDamage, locationOf, LOCATIONS, ALL_LOCATIONS, ALERT_ORDER,
          engineComponents, THRUSTERS, awakeThreshold } from "../web/src/shipdamage.js";
@@ -139,11 +140,13 @@ import { AUTOPILOT_MESSAGES, maxPriority } from "../web/src/hud.js";
 import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          brakingDistance, flyStep, autopilotRotation,
          autopilotMessageKey } from "../web/src/autopilot.js";
-import { paginate } from "../web/src/dialogueui.js";
+import { coucheApresEchange, poseImposteur, repereRegard, imposteursDuBuild, EchangeSoleil, CALQUE_IMPOSTEUR } from "../web/src/imposteur.js";
+import { gltfEnGamma } from "../web/src/shaders/index.js";
+import { paginate, dispositionDialogue, GEOMETRIE } from "../web/src/dialogueui.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
-import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer } from "../web/src/physics.js";
-import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE } from "../web/src/lights.js";
+import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer, propagerExtras } from "../web/src/physics.js";
+import { patchOmbresUnity, ombreUnity, BIAIS_OMBRE_PONCTUELLE, cookieGLSL, patchCookieUnity } from "../web/src/lights.js";
 import { skyAlpha, curveAt as skyCurveAt, SKY_RADIUS, Sky, alignAxis,
          DISC_FALLBACK, CLOUD_NAME, StarField } from "../web/src/sky.js";
 import { scrollOffset, TextureScrollers } from "../web/src/texanim.js";
@@ -519,30 +522,355 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("elle s'est desarmee", sphere.armed, false);
 }
 
-// --- mise en scene de la supernova --------------------------------------
+// --- mise en scene de la supernova ---
 {
   const stage = new SunStage(2000);
-  const at = (f, left, nova, r) => stage.update(
-    { fraction: f, secondsRemaining: left, supernova: nova, shockwaveRadius: r });
+  const at = (f, left, nova, r, extra = {}) => stage.update(
+    { fraction: f, secondsRemaining: left, supernova: nova, shockwaveRadius: r, ...extra });
 
-  const debut = at(0, 1200, false, 0);
-  const tard = at(0.9, 120, false, 0);
-  check("l'etoile enfle au fil de la boucle", tard.scale > debut.scale, true);
+  const debut = at(0, 1080, false, 0);
+  const tard = at(0.9, 108, false, 0);
+  // `SunSurfaceProgressionBehavior` ne touche qu'a la couleur.
+  check("l'etoile ne grossit pas au fil de la boucle", tard.scale, debut.scale);
   check("phase au fil de la boucle", tard.phase, "progression");
+  check("pas de contraction avant l'annonce", at(1, 0.5, false, 0).scale, 1);
 
-  const creux = at(1, 0, false, 0);
-  check("ShrinkSunBehavior : elle se contracte avant d'exploser",
-        round(creux.scale), 0.62);
+  const eff = new Effondrement();
+  eff.update(0.5);
+  const creux = at(1, 0, false, 0, { collapsing: true, effondrement: eff });
   check("phase de contraction", creux.phase, "contraction");
-  check("la contraction passe sous la taille de depart", creux.scale < 1, true);
+  check("l'echelle est celle de l'effondrement", creux.scale, eff.fraction);
 
   const boum = at(1, 0, true, 20000);
-  check("l'explosion suit l'onde", round(boum.scale), 10.62);
+  check("l'explosion : la sphere de mort, au rayon de l'onde", round(boum.scale), 10);
   check("phase d'explosion", boum.phase, "explosion");
   check("l'onde palit en s'etendant", at(1, 0, true, 29000).shock.alpha < boum.shock.alpha, true);
   check("l'eclair ne dure pas", at(1, 0, true, 20000).flash, 0);
   check("... mais il est plein au declenchement", at(1, 0, true, 0).flash, 1);
   check("echelle bornee", at(1, 0, true, 1e9).scale, 40);
+}
+
+// `TriggerFlashback` part a la FIN de l'effet de mort, pas a la mort
+// (`PlayerCameraEffectController.Update`, docs/132).
+{
+  const d = new PlayerDeathHandler();
+  d.attendreEffet = true;
+  d.kill("supernova", 5);
+  d.update(1);
+  check("pendant l'effet, pas de flashback", d.state.phase, "effet");
+  check("... et rien ne finit", d.update(10), false);
+  check("TriggerFlashback lance la sequence", d.declencherFlashback(), true);
+  check("avec les photos retenues a la mort", d.flashback.count, 5);
+  d.update(0.1);
+  check("puis l'attente du build", d.state.phase, "attente");
+  check("on ne declenche qu'une fois", d.declencherFlashback(), false);
+  const fx = new CameraEffects();
+  fx.playerDeath(DEATH_TYPE.Supernova, 10);
+  fx.update(12.9);
+  check("la supernova : pas avant trois secondes", fx.flashbackDemande, false);
+  fx.update(13.1);
+  check("... et apres, oui", fx.flashbackDemande, true);
+}
+
+// Un champ directionnel se teste au REPOS de son corps : `CraterField` sur
+// une planete qui a bouge de 600 unites contient toujours le village (docs/132).
+{
+  const cratere = { name: "CraterField", position: [0, 0, -8693], rotation: null,
+                    direction: [0, 0, 1], magnitude: 12, priority: 0,
+                    volume: { shape: "sphere", radius: 111, center: [0, 0, 0] },
+                    body: "TimberHearth_Body" };
+  const village = [-1.4, -25.7 + 600, -8720];      // la planete a avance de 600 en y
+  check("sans decalage, le village est hors du champ",
+        strongestDirectional([cratere], village), null);
+  const decale = (f) => (f.body === "TimberHearth_Body" ? [0, 600, 0] : null);
+  check("ramene au repos, il y est", strongestDirectional([cratere], village, decale), cratere);
+  const g = dominantField([{ position: [0, 600, 100], gravity: { surfaceAcceleration: 12,
+      falloff: "linear", upperSurfaceRadius: 130, cutoffRadius: 0 } }],
+    { x: village[0], y: village[1], z: village[2] },
+    { directional: [cratere], shiftOf: decale });
+  check("et c'est lui qui donne le bas", g && [g.dir.x, g.dir.y, g.dir.z].join(","), "0,0,1");
+}
+
+// Slate n'est pas l'enfant aux fusees : les zones portent toutes le meme nom
+// (docs/132).
+{
+  const enfant = { name: "ConversationZone", position: [12, 25.8, -8720] };
+  const slate = { name: "ConversationZone", position: [4.37, -31.8, -8720.98],
+                  controller: { kind: "RocketScientistConvoController" } };
+  const kid = { name: "ConversationZone", position: [12, 25.8, -8720],
+                controller: { kind: "RocketKidConvoController" } };
+  check("le meme nom ne fait pas l'enfant", estEnfant(slate, enfant), false);
+  check("le controleur, si", estEnfant(kid, enfant), true);
+  check("sans controleur, la position",
+        estEnfant({ name: "ConversationZone", position: [12, 25.8, -8720] }, enfant), true);
+}
+
+// La mise en page de `DialogueGUI`, en pixels, contre la capture de l'alpha a
+// 640 x 360 (docs/132) : fond court a x = -130, nom qui finit a 572, options
+// a 440 et icone du curseur a 402 quand il y a des reponses.
+{
+  const r = (x) => Math.round(x);
+  const sans = dispositionDialogue(640, 360, { character: "Rocket Scientist", lines: ["Hey"],
+    options: [], atEnd: false }, () => 200);
+  check("a 640 px, l'echelle du jeu", sans.echelle, 0.5);
+  const plein = dispositionDialogue(1280, 720, { character: "Rocket Scientist", lines: ["Hey"],
+    options: [], atEnd: false }, () => 200);
+  check("a 1 280 px, les pixels du jeu", plein.echelle, 1);
+  check("fond court a x = W/2 - 450", r(plein.fond.x), 190);
+  check("... et a y = H - 310,4", Math.round(plein.fond.y * 10) / 10, 409.6);
+  check("le fond court est Short_Dialog_BG", plein.fond.tex, "Short_Dialog_BG");
+  check("le nom finit a 61,3 + 641 du fond", r(plein.nom.x + plein.nom.w - plein.fond.x), 702);
+  check("son bandeau est a sa taille, cale a droite",
+        r(plein.bandeau.x + plein.bandeau.w), r(plein.nom.x + plein.nom.w));
+  check("le texte d'un personnage est aligne a droite", plein.texte.align, "right");
+  check("« Next » tant qu'il reste a dire", plein.choix.texte, "Next");
+  // En pixels d'alpha (echelle 1 sur un ecran de 640) : on recalcule a 640 de
+  // large en logique, ce que fait l'alpha sans reduire.
+  const alpha = (v) => dispositionDialogue(1280, 720, v, () => 180);
+  const a1 = alpha({ character: "Rocket Scientist", lines: ["x"], options: [], atEnd: true });
+  check("fond de l'alpha a -130 sur 640 (decale de 320)", r(a1.fond.x - 320), -130);
+  check("nom de l'alpha qui finit a 572 sur 640", r(a1.nom.x + a1.nom.w - 320), 572);
+  check("« Close » a la fin", a1.choix.texte, "Close");
+  const a2 = alpha({ character: "Rocket Scientist", lines: ["So how are you feeling?"],
+    options: [{ text: "All systems go!" }, { text: "You sound excited" }], atEnd: true, curseur: 1 });
+  check("avec des reponses, Dialog_Choice_BG", a2.fond.tex, "Dialog_Choice_BG");
+  check("options a 440 sur 640", r(a2.options.x - 320), 440);
+  check("icone du curseur a 402 sur 640", r(a2.icone.x - 320), 402);
+  check("un cran de 35 par option", r(a2.curseur.y - (a2.fond.y + 94.487)), 35);
+  check("le curseur couvre l'option la plus longue, plus l'ecart des ancres",
+        Math.round((a2.curseur.w - 180) * 100) / 100, 38.45);
+  check("pas de bouton quand on choisit", a2.choix, undefined);
+  const pan = alpha({ character: "", lines: ["texte"], options: [], atEnd: false, sign: true });
+  check("un panneau a son propre fond", pan.fond.tex, "LocationText_BG");
+  check("et son texte aligne a gauche", pan.texte.align, "left");
+  const doigt = dispositionDialogue(900, 400, { character: "R", lines: ["x"],
+    options: [{ text: "a" }], atEnd: true }, () => 50, { reserve: 150, cible: 44 });
+  check("au doigt, le fond s'arrete avant le losange",
+        doigt.echelle * (doigt.fond.x + doigt.fond.w) <= 900 - 150, true);
+  check("et une option fait un doigt", doigt.ligne * doigt.echelle >= 44, true);
+}
+
+// `Conversation` : une replique enchaine (`goto`), une option se choisit par
+// son id (docs/132).
+{
+  const tree = { start: "1", branches: {
+    "1": { id: "1", talk: ["So how are you feeling?"], goto: null,
+           options: [{ id: "1", text: "All systems go!", goto: "4" },
+                     { id: "2", text: "You sound excited", goto: "2" }] },
+    "2": { id: "2", talk: ["Are you kidding?"], goto: "5", options: [] },
+    "4": { id: "4", talk: ["I'm glad you're excited"], goto: "5", options: [] },
+    "5": { id: "5", talk: ["Anyway, the launch codes"], goto: null, options: [] } } };
+  const d = new DialogueSystem({ trees: { t: tree }, conversations: [] });
+  d.open({ name: "ConversationZone", character: "Rocket Scientist", tree: "t" });
+  check("la reponse porte son texte", d.view.options[0].text, "All systems go!");
+  d.choose(0);
+  check("le bouton 1 suit l'option d'id 1", d.view.lines.join(" "), "I'm glad you're excited");
+  check("une replique qui enchaine dit « Next »", d.view.atEnd, false);
+  d.advance();
+  check("... et enchaine sur le noeud 5", d.view.lines.join(" "), "Anyway, the launch codes");
+  check("le noeud 5 finit", d.view.atEnd, true);
+  d.advance();
+  check("puis la conversation se ferme", d.active, null);
+}
+
+// `MapController.enabled` : la carte ne repond qu'a la combinaison, ou depuis
+// l'observatoire (docs/132).
+{
+  const a = new AccesCarte();
+  check("carte : eteinte au reveil, sans combinaison", a.actif, false);
+  a.porte(true);
+  check("carte : SuitUp l'allume", a.actif, true);
+  a.porte(false);
+  check("carte : RemoveSuit l'eteint", a.actif, false);
+  a.depuisObservatoire();
+  check("carte : l'observatoire l'allume sans combinaison", a.actif, true);
+  a.sortie();
+  check("carte : en sortir sans combinaison l'eteint", a.actif, false);
+  a.porte(true); a.depuisObservatoire(); a.sortie();
+  check("carte : en sortir combinaison sur le dos la garde", a.actif, true);
+  a.mort();
+  check("carte : la mort l'eteint, meme combinaison sur le dos", a.actif, false);
+  a.porte(true);
+  check("carte : le meme etat de combinaison ne la rallume pas", a.actif, false);
+  a.porte(false); a.porte(true);
+  check("carte : un nouveau SuitUp, si", a.actif, true);
+}
+
+// `MapCamera` : la camera qui monte de l'oeil a la vue plongeante
+// (`MapController.LateUpdate`, docs/132).
+{
+  check("SmoothStep : 0, puis 0,5 a mi-course, puis 1", [smoothStep01(0), smoothStep01(0.5), smoothStep01(2)].join(","), "0,0.5,1");
+  check("LookRotation(+Z, +Y) est l'identite", qLookRotation([0, 0, 1], [0, 1, 0]).map((x) => Math.round(x)).join(","), "0,0,0,1");
+  const v = new VueCarte();
+  v.entrer({ now: 10 });
+  const r = (a) => a.map((x) => Math.round(x) + 0).join(",");
+  let e = v.etape(10, [100, 0, 50], [0, 0, 0], 40000, [0, 0]);
+  check("carte : au depart, la camera est au joueur", r(e.position), "100,0,50");
+  check("... et regarde deja vers le bas", r(qRot(e.rotation, [0, 0, 1])), "0,-1,0");
+  check("... le haut de l'ecran vers +Z", r(qRot(e.rotation, [0, 1, 0])), "0,0,1");
+  check("... plan proche a 0,1", Math.round(e.near * 100) / 100, 0.1);
+  e = v.etape(11, [100, 0, 50], [0, 0, 0], 40000, [0, 0]);
+  check("carte : a mi-duree, a mi-hauteur (SmoothStep)", r(e.position), "50,20000,25");
+  check("... sans invite encore", e.montrer, false);
+  e = v.etape(12, [100, 0, 50], [0, 0, 0], 40000, [0, 0]);
+  check("carte : a deux secondes, au-dessus du Soleil", r(e.position), "0,40000,0");
+  check("... plan proche a 5,1", Math.round(e.near * 100) / 100, 5.1);
+  check("... et les invites arrivent", e.montrer, true);
+  check("... une seule fois", v.etape(13, [0, 0, 0], [0, 0, 0], 40000, [0, 0]).montrer, false);
+  // Le repere de travail tourne avec le corps ancre : le bas du MONDE n'y est
+  // plus forcement le bas. Un quart de tour autour de Y.
+  const tourne = (w) => [w[2], w[1], -w[0]];
+  const v2 = new VueCarte();
+  v2.entrer({ now: 0, versRepere: tourne });
+  e = v2.etape(5, [0, 0, 0], [0, 0, 0], 40000, [1000, 0], tourne);
+  check("carte : le decalage du point vise suit les axes du monde", r(e.position), "0,40000,-1000");
+  check("... et le haut de l'ecran, le +Z du monde", r(qRot(e.rotation, [0, 1, 0])), "1,0,0");
+  // Depuis l'observatoire : on part du regard, qui se tourne vers le bas.
+  const v3 = new VueCarte();
+  v3.entrer({ now: 0, doRotation: true, regard: [0, 0, 0, 1] });
+  check("carte d'observatoire : le regard horizontal bascule vers le bas",
+        r(qRot(v3.rotation, [0, 0, 1])), "0,-1,0");
+  // Le point vise est un decalage depuis le Soleil.
+  const m = new SolarMap({ hidden: true }, []);
+  m.enterMapView([5000, 0, 0], [7000, 0, 0], 0, 60, [1000, 0, 0]);
+  check("carte : le milieu joueur-cible, compte depuis le Soleil", m.focal.join(","), "5000,0");
+  m.panLocked = true; m.pan(1, 0, 1);
+  check("carte : pas de deplacement pendant la premiere moitie de la montee", m.focal.join(","), "5000,0");
+}
+
+// Le cookie des spots d'Unity 4 (`Soft`), en GLSL : l'expression s'evalue
+// aussi en JavaScript (docs/132).
+{
+  // Un profil a la forme de `Soft` : plat, puis une pente, puis zero.
+  const profil = Array.from({ length: 33 }, (_, i) => (i <= 20 ? 1 : Math.max(0, 1 - (i - 20) / 12)));
+  const expr = cookieGLSL(profil);
+  const mix = (a, b, t) => a + (b - a) * t;
+  const cookie = (r) => Function("mix", "r", `return ${expr};`)(mix, r);
+  check("cookie : plein au centre", cookie(0), 1);
+  check("cookie : plein jusqu'a la fin du plat", cookie(0.6), 1);
+  check("cookie : interpole entre deux echantillons",
+        Math.round(cookie((20.5) / 32) * 1000) / 1000, Math.round((1 - 0.5 / 12) * 1000) / 1000);
+  check("cookie : nul au bord du cone", cookie(1), 0);
+  check("cookie : nul au-dela", cookie(1.5), 0);
+  check("cookie : sans profil, pas d'expression", cookieGLSL(null), null);
+  const store = { lightsFragmentFunctions:
+    "x;attenuation*=getAttenuation(cosAngle,lightData.w);return y;" };
+  check("patch : la decroissance de Babylon est remplacee",
+        patchCookieUnity({ Effect: { IncludesShadersStore: store } }, profil), true);
+  check("patch : plus d'exposant", store.lightsFragmentFunctions.includes("getAttenuation"), false);
+  check("patch : r = tan(angle) / tan(demi-cone)",
+        store.lightsFragmentFunctions.includes("(sqrt(max(0.,1.-c_*c_))/c_)/(sqrt(1.-w_*w_)/w_)"), true);
+}
+
+// Le soleil de substitution de Timber Hearth (`SunlightSwapper`, `LookAtSun`,
+// docs/132).
+{
+  check("dans le secteur, le calque 0 passe au 12", coucheApresEchange(0, true), CALQUE_IMPOSTEUR);
+  check("un autre calque ne bouge pas", coucheApresEchange(15, true), 15);
+  check("en sortant, le 12 revient au 0", coucheApresEchange(12, false), 0);
+  const centre = { position: [0, 0, 491.313], direction: [0, 0, -1] };
+  const p = poseImposteur([0, 0, -8593], [0, 0, 0], centre);
+  check("le spot est sur l'axe du soleil, a 491 du centre", Math.round(p.position[2]), -8102);
+  check("et regarde le centre", p.direction.map((x) => Math.round(x)).join(","), "0,0,-1");
+  // `LookAt` garde le haut du monde : etoile a l'est (+x), l'avant est +x, la
+  // droite -z (haut x avant), le haut reste +y.
+  const b = repereRegard([0, 0, 0], [10, 0, 0]);
+  check("LookAt : l'avant vers l'etoile", b.avant.join(","), "1,0,0");
+  check("LookAt : la droite, haut x avant", b.droite.map((x) => Math.round(x) + 0).join(","), "0,0,-1");
+  check("LookAt : le haut du monde conserve", b.haut.map((x) => Math.round(x) + 0).join(","), "0,1,0");
+  check("LookAt : etoile au zenith, repere quand meme", !!repereRegard([0, 0, 0], [0, 5, 0]), true);
+  // TopLight : (-391,2 ; 0 ; 371,2) dans le pivot, tourne vers l'axe.
+  const top = poseImposteur([0, 0, 0], [0, 0, 100],
+    { position: [-391.204, 0, 371.199], direction: [0.5, 0, -0.86603] });
+  check("la couronne tourne avec le pivot", top.position.map((x) => Math.round(x)).join(","), "-391,0,371");
+  const top2 = poseImposteur([0, 0, 0], [100, 0, 0],
+    { position: [-391.204, 0, 371.199], direction: [0.5, 0, -0.86603] });
+  check("... et suit l'etoile", top2.position.map((x) => Math.round(x) + 0).join(","), "371,0,391");
+  check("seules les lumieres d'un pivot sont des imposteurs",
+        imposteursDuBuild([{ name: "a", body: "X", pivot: centre }, { name: "b", body: "X" },
+                           { name: "c", body: "X", pivot: centre, enabled: false }]).length, 1);
+  const m1 = { layerMask: 1 }, m2 = { layerMask: 1 << 15 };
+  const e = new EchangeSoleil("TimberHearth_Body");
+  e.ajouter([m1, m2]);
+  e.poser(true);
+  check("entrer : le Default passe a UseSunImposter", m1.layerMask, 1 << 12);
+  check("IgnoreSun reste IgnoreSun", m2.layerMask, 1 << 15);
+  check("entrer deux fois ne change rien", e.poser(true), false);
+  e.poser(false);
+  check("sortir : retour au Default", m1.layerMask, 1);
+  // Les textures glTF en gamma : le chargeur ne doit pas les decoder en lineaire.
+  const vus = [];
+  const B = { SceneLoader: { OnPluginActivatedObservable: { add: (f) => vus.push(f) } } };
+  gltfEnGamma.pose = false;
+  check("l'observateur se pose", gltfEnGamma(B), true);
+  const loader = { name: "gltf", useSRGBBuffers: true };
+  vus[0](loader);
+  check("le chargeur glTF n'utilise plus de tampon sRGB", loader.useSRGBBuffers, false);
+  gltfEnGamma.pose = false;
+}
+
+// Un noeud a plusieurs primitives rend ses `extras` a ses primitives, et a
+// elles seules (docs/132).
+{
+  const ex = { layer: 12, noCollide: true };
+  const parent = { name: "craterGeo", metadata: { gltf: { extras: ex } } };
+  const p0 = { name: "craterGeo_primitive0", parent };
+  const p1 = { name: "craterGeo_primitive1", parent };
+  const autre = { name: "Grass", parent };
+  check("deux primitives recoivent les extras", propagerExtras([p0, p1, autre]), 2);
+  check("avec le calque du noeud", p0.metadata.gltf.extras.layer, 12);
+  check("un enfant qui est un autre noeud garde les siens", autre.metadata, undefined);
+}
+
+// Le halo du `GlowEffect` recoit la teinte BRUTE : (255, 100, 100) a la mort
+// par supernova sature l'ecran, comme dans l'alpha (docs/132).
+{
+  check("l'eclair de mort n'est pas normalise",
+        multiplicateurGlow({ tint: [255, 100, 100], intensity: 3 }).join(","), "765,300,300");
+  check("le reveil non plus", multiplicateurGlow({ tint: [255, 255, 255], intensity: 3 })[0], 765);
+  check("une teinte d'eau reste une fraction",
+        multiplicateurGlow({ tint: [0.3216, 0.6588, 1], intensity: 1 })[2], 1);
+  check("une intensite negative ne retire rien",
+        multiplicateurGlow({ tint: [1, 1, 1], intensity: -2 }).join(","), "0,0,0");
+}
+
+// L'effondrement du build : `SunExplosionBehavior` et `ShrinkSunBehavior`.
+{
+  const duree = (p, dt) => {
+    const e = new Effondrement(p);
+    let n = 1;
+    while (!e.update(dt) && n < 10000) n++;
+    return round(n * dt, 2);
+  };
+  check("la surface explose en 1,6 s a 60 images", duree(EFFONDREMENT_SURFACE, 1 / 60), 1.58);
+  check("... en 1,4 s a 10 images : la cadence compte, comme dans le build",
+        duree(EFFONDREMENT_SURFACE, 0.1), 1.4);
+  check("la couronne disparait en 2,2 s", duree(EFFONDREMENT_COURONNE, 1 / 60), 2.18);
+  check("vers 3 % de l'echelle", EFFONDREMENT_SURFACE.taux, 0.03);
+  const e = new Effondrement();
+  e.update(1 / 60);
+  check("apres une image, 3 dt du chemin", round(e.echelle, 1),
+        round(4000 + (120 - 4000) * 0.05, 1));
+  const lent = new Effondrement();
+  lent.update(10);
+  check("Lerp borne son facteur a 1 : une image de 10 s va au bout", lent.fini, true);
+  check("l'echelle de la scene prime",
+        effondrementsDuBuild({ placed: { SunExplosionBehavior: [{ localScale: 2000 }] } })
+          .surface.echelle, 2000);
+  check("repli explicite sans la scene", effondrementsDuBuild(null).corona.echelle, 362.2121);
+
+  // La boucle : `TriggerSupernova` d'abord, `SunExploded` a la fin de
+  // l'effondrement, et l'onde part de LA.
+  const l = new TimeLoop(18);
+  l.elapsed = l.duration - 0.01;
+  l.update(1 / 60, 1e9);
+  check("TriggerSupernova seul", l.events.slice(-1)[0], "TriggerSupernova");
+  check("l'etoile s'effondre", l.collapsing && !l.supernova, true);
+  check("l'onde ne part pas encore", l.shockwaveRadius, 0);
+  let n = 0;
+  while (!l.supernova && n < 1000) { l.update(1 / 60, 1e9); n++; }
+  check("SunExploded suit, 1,6 s plus tard", round(l.supernovaAt - l.triggerAt, 1), 1.6);
+  check("dans l'ordre", l.events.slice(-2).join(","), "TriggerSupernova,SunExploded");
 }
 
 // --- degats du vaisseau -------------------------------------------------
@@ -1345,6 +1673,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   field.advance(1);
   check("... et le sens : un demi-tour retourne l'axe",
         round(field.toFrame(anchor, [1000, 0, 0])[0], 3), -1000);
+  // L'inverse, pour la carte : du repere vers le monde, puis retour.
+  const aller = field.toFrame(anchor, [3, 4, 5]);
+  check("fromFrame defait toFrame", field.fromFrame(anchor, aller).map((x) => round(x, 6)).join(","), "3,4,5");
   field.advance(2);   // on revient ou l'on etait
 
   // Cycle jour/nuit : le soleil passe sous l'horizon local a mi-tour.
@@ -4151,12 +4482,18 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
         fx.sousLEau.intensity, REGLAGES_JOUEUR.glow.intensity);
 
   // Le reveil : blanc a 3, puis retour au noir en trois secondes.
-  fx.startOfTimeLoop();
+  fx.startOfTimeLoop(100);
   check("le reveil dure trois secondes", WAKE_DURATION, 3);
   check("il part du blanc", fx.glow.tint.join(","), "255,255,255");
-  fx.update(0);
+  fx.update(100);
   check("et le glow est allume", fx.glow.enabled, true);
-  fx.update(WAKE_DURATION);
+  // L'eclair part de l'heure donnee : une seconde apres, il eblouit encore.
+  fx.update(101);
+  // teinte 255 x 0,2, intensite 1,4 : le halo pese encore soixante-dix
+  // fois l'image — un pixel a 1,4 % de blanc sature.
+  check("une seconde apres, le halo pese encore 70 fois l'image",
+        Math.round(multiplicateurGlow(fx.glow)[0]), 70);
+  fx.update(100 + WAKE_DURATION);
   check("au bout, il s'eteint", fx.glow.enabled, false);
 
   // L'adoucissement n'est pas symetrique, et c'est LUI qui donne sa brutalite a
@@ -4456,8 +4793,10 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
           MAP.targetZoomDuration);
     // Assez loin pour que le cadrage l'emporte sur le minimum.
     m.enterMapView([0, 0, 0], [0, 0, 40000], 200);
+    // `base.camera.fieldOfView` : celui de `MapCamera`, 60 degres — et non
+    // les 70 du joueur que le portage prenait.
     check("a quarante mille, le cadrage l'emporte",
-          Math.round(m.zoom), Math.round(40000 / Math.tan(35 * Math.PI / 180) * 0.7));
+          Math.round(m.zoom), Math.round(40000 / Math.tan(30 * Math.PI / 180) * 0.7));
     check("et le milieu suit en z", m.focal.join(","), "0,20000");
   }
   // ET LE SOLEIL EST BIEN A UN FOYER. La verification tient en une addition :
@@ -7953,6 +8292,11 @@ check("jamais sous quatre", lightCap(6), 4);
 check("au pied de la lumiere, deux fois sa couleur", attenuationUnity(0, 10), 2);
 check("a la moitie de la portee, 2/7,25", attenuationUnity(5, 10).toFixed(4), "0.2759");
 check("au-dela de la portee, rien", attenuationUnity(11, 10), 0);
+// La fin de portee : pleine jusqu'a 0,8, puis une rampe en carre de la distance.
+check("a 0,8 de la portee, pas encore de fondu", attenuationUnity(8, 10).toFixed(4), (2 / 17).toFixed(4));
+check("a 0,9, le fondu : (1 - 0,81) / 0,36 de 2/21,25",
+      attenuationUnity(9, 10).toFixed(4), (2 / 21.25 * 0.19 / 0.36).toFixed(4));
+check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
 
 // `SpacesuitAudioController` : FadeIn(5) hors de l'oxygene, FadeOut(5) dedans.
 {

@@ -57,7 +57,7 @@ export async function navigateur({ largeur = 1280, hauteur = 720 } = {}) {
 }
 
 /** Ouvre la page, fournit le build s'il le faut, et attend le moteur. */
-export async function demarrer(page) {
+export async function demarrer(page, { avant = null } = {}) {
   await page.goto(`http://127.0.0.1:${PORT}/`);
   await page.waitForFunction(() => {
     const done = document.getElementById("gate-step-done");
@@ -73,8 +73,8 @@ export async function demarrer(page) {
     await page.waitForSelector("#gate-summary table", { timeout: 300000 });
   }
   await page.click("#gate-play");
-  await traverserTitre(page);
-  await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+  await traverserTitre(page, "KeyE", avant);
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
 }
 
 /**
@@ -110,10 +110,29 @@ export async function prechauffer(page, { seuilMs = 1000, suite = 5, maxMs = 240
  * choisie a l'ouverture, et `Interact` (E) la valide. Sans titre extrait, le
  * moteur part droit dans la partie et il n'y a rien a faire.
  */
-export async function traverserTitre(page, touche = "KeyE") {
-  await page.waitForFunction(() => window.__titre || window.__ready === true,
+export async function traverserTitre(page, touche = "KeyE", avant = null) {
+  await page.waitForFunction(() => window.__titre || window.__ready === true, null,
                              { timeout: 120000 });
   if (await page.evaluate(() => window.__ready === true)) return false;
+  // Les touches a passer avant de valider (`KeyS` : « Skip Intro »), espacees
+  // de plus que la cadence du menu (0,2 s).
+  // Le menu lit l'AXE tenu, image par image : un appui instantane tombe entre
+  // deux images sous SwiftShader, et un appui tenu peut sauter deux lignes. On
+  // vise donc une LIGNE (`avant` : son numero), en tenant S ou W jusqu'a ce
+  // que le curseur bouge, et on corrige si l'on a depasse.
+  if (typeof avant === "number") {
+    for (let essai = 0; essai < 12; essai++) {
+      const i0 = await page.evaluate(() => window.__titre.menu.index);
+      if (i0 === avant) break;
+      const k = i0 < avant ? "KeyS" : "KeyW";
+      await page.keyboard.down(k);
+      await page.waitForFunction((i) => window.__titre.menu.index !== i, i0,
+                                 { timeout: 20000, polling: 16 }).catch(() => {});
+      await page.keyboard.up(k);
+      await page.waitForTimeout(400);
+    }
+    console.log("titre : ligne", await page.evaluate(() => window.__titre.menu.index));
+  }
   await page.keyboard.press(touche);
   return true;
 }

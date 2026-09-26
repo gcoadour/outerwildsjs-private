@@ -105,7 +105,7 @@ try {
 
   await page.click("#gate-play");
   await traverserTitre(page);
-  await page.waitForFunction(() => window.__ready === true, { timeout: 120000 });
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
   // Le reveil se mesure A LA PREMIERE IMAGE : il se deroule en sept secondes,
   // et le prechauffage des shaders en dure bien plus sans GPU.
   const reveilInfo = await page.evaluate(() => {
@@ -173,7 +173,7 @@ try {
   // Saut : la plus forte vitesse le long de la verticale LOCALE (l'oppose du
   // champ), relevee a CHAQUE pas du joueur — une image dure ici pres d'une
   // seconde, et l'arc du saut tient dans deux ou trois.
-  await page.waitForFunction(() => window.__player.grounded, { timeout: 15000 }).catch(() => {});
+  await page.waitForFunction(() => window.__player.grounded, null, { timeout: 15000 }).catch(() => {});
   await page.evaluate(() => {
     const p = window.__player;
     window.__vMax = -Infinity;
@@ -346,7 +346,7 @@ try {
   // L'un OU l'autre : si l'image a dure plus que la seconde d'allumage, c'est
   // `CompleteShipIgnition` qui vient, et le jeu a raison — on le dit.
   await page.waitForFunction(() => window.__shipEvents.includes("CancelShipIgnition")
-    || window.__shipEvents.includes("CompleteShipIgnition"), { timeout: 15000 });
+    || window.__shipEvents.includes("CompleteShipIgnition"), null, { timeout: 15000 });
   const cancelIgnite = await page.evaluate(() => ({
     events: [...window.__shipEvents],
     landed: window.__shipRef.landed,
@@ -355,7 +355,7 @@ try {
 
   // Test full ignition (hold ShiftLeft until 1.0s ignition duration completes) -> should complete and liftoff
   await page.keyboard.down("ShiftLeft");
-  await page.waitForFunction(() => window.__shipEvents.includes("CompleteShipIgnition"), { timeout: 10000 });
+  await page.waitForFunction(() => window.__shipEvents.includes("CompleteShipIgnition"), null, { timeout: 10000 });
   await page.keyboard.up("ShiftLeft");
   await page.waitForTimeout(200);
 
@@ -536,8 +536,16 @@ try {
   const dead = await page.evaluate(() => window.__death?.dead === true);
   assert("Mort du joueur déclenchée (PlayerDeath)", dead === true);
 
-  // Advance flashback sequence in simulation
+  // L'effet de mort tient l'ecran d'abord : `TriggerFlashback` n'est annonce
+  // qu'a sa fin (`PlayerCameraEffectController.Update`, docs/132). On le joue
+  // ici a la main, comme le reste de la sequence.
+  const effet = await page.evaluate(() => {
+    window.__death.update(0.1);
+    return window.__death.state.phase;
+  });
+  assert("L'effet de mort passe avant le flashback", effet === "effet", effet);
   await page.evaluate(() => {
+    window.__death.declencherFlashback();
     for (let i = 0; i < 20; i++) window.__death.update(0.1);
   });
   const phaseFlashback = await page.evaluate(() => window.__death?.state?.phase === "flashback" || window.__death?.state?.phase === "images" || window.__death?.state?.phase === "attente");

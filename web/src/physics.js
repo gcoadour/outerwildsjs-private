@@ -94,6 +94,31 @@ export function disableInactive(res) {
   return n;
 }
 
+/**
+ * Les `extras` d'un noeud a plusieurs primitives, rendus a ses primitives.
+ *
+ * L'exporteur ecrit un primitive par sous-maillage (173 renderers en ont
+ * plusieurs). Babylon fait alors du noeud un parent et de chaque primitive un
+ * maillage enfant, `<nom>_primitive<i>` — et laisse les `extras` au parent :
+ * calque, renderer eteint, collision, ombres se perdaient. On ne les recopie
+ * que du parent DIRECT et que sur ses propres primitives : un enfant qui est
+ * un autre noeud garde les siens.
+ */
+export function propagerExtras(meshes) {
+  let n = 0;
+  for (const m of meshes || []) {
+    if (!m || (m.metadata && m.metadata.gltf && m.metadata.gltf.extras)) continue;
+    const p = m.parent;
+    const ex = p && p.metadata && p.metadata.gltf && p.metadata.gltf.extras;
+    const suffixe = ex && typeof m.name === "string" && m.name.startsWith(`${p.name}_primitive`)
+      ? m.name.slice(p.name.length + "_primitive".length) : null;
+    if (!suffixe || !/^\d+$/.test(suffixe)) continue;
+    m.metadata = { ...(m.metadata || {}), gltf: { ...((m.metadata && m.metadata.gltf) || {}), extras: ex } };
+    n++;
+  }
+  return n;
+}
+
 /** Masque, dans un lot importe, ce que le build ne dessine pas. */
 export function hideUnrendered(meshes) {
   let n = 0;

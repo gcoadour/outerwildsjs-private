@@ -42,14 +42,15 @@ portage.
 | géométrie des 7 corps | complète, 69 Mo en glTF |
 | matériaux et textures | 251 matériaux, 200 textures, normales désentrelacées |
 | collision | Havok, colliders trimesh du corps ancré |
-| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
+| déplacement du joueur | **marche, course d'élan, saut et sac dorsal, aux constantes du build** ; gravité droite du cratère de Timber Hearth (`CraterField`, testé au repos de la planète) ; mise en vitesse bornée par pas et par axe, recul à la vitesse de côté, frottement debout (`UpdateMovement`, [`132`](132-comparaison-native.md)) |
 | ressources | oxygène, carburant, santé, intégrité |
 | vaisseau | embarquement, vol, **inertie de rotation et roulis**, appui sur le terrain réel |
-| détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ([`132`](132-comparaison-native.md)) |
+| détection d'interaction | 39 interactifs, 34 lisibles ; **on vise le collider** à dix unités, puis `_interactRange` — on parle en regardant, à deux pas ; invite « ⓧ Talk » du build ([`132`](132-comparaison-native.md)) |
+| dialogue | arbres lus comme `ProcessXMLDialogues` (premier enfant, `goto`, réponses imbriquées, choix par `id`) ; mise en page IMGUI de `DialogueGUI` ; W/S et E comme `ConversationInput` — comparé à l'alpha réplique par réplique ([`132`](132-comparaison-native.md)) |
 | audio spatial | 92 sources, 31 clips, instanciation à la volée |
 | particules | 135 systèmes, 15 textures, budget de 14 simultanés |
 | atmosphères et soleil | shaders maison, 122 shaders classés |
-| boucle temporelle | 20 min, supernova, onde de choc, mort, redémarrage |
+| boucle temporelle | 18 min, effondrement de l'étoile lu dans l'IL (1,6 s), onde cubique, mort, effet de mort puis flashback, réveil ébloui — mesurés côte à côte avec l'alpha ([`132`](132-comparaison-native.md)) |
 | dialogues et mémoire | 26 arbres, 72 branches, connaissance persistante |
 | contrôleurs de conversation | 5 règles lues dans l'IL, **14 conversations sur 14 joignables** |
 | codes de lancement | accordés **à la fin** de la conversation du Conservateur |
@@ -60,7 +61,7 @@ portage.
 | secteurs | **tout le système chargé derrière le titre** et visible de loin, comme `level0` ; « à portée » par secteur ; **10 secteurs majeurs, actif par déclencheur** ([`82`](82-secteur-majeur.md), [`132`](132-comparaison-native.md)) |
 | poids au démarrage | 47 Mo de tampons pour les huit lots, chargés pendant que le titre tourne |
 | pilote auto et dégâts | 4 phases, seuils d'impact 15/30/300 |
-| carte du système | orbites, marqueurs, sélection de cible |
+| carte du système | **`MapCamera`** : la caméra monte de l'œil à la vue plongeante sur le Soleil (`SmoothStep`, 2 s), orbites et comète en cercles d'écran, marqueurs du build à la profondeur caméra, casque éteint ; ouverte seulement combinaison sur le dos ([`132`](132-comparaison-native.md)) |
 | shaders du jeu | **203 affectations**, tous les shaders utilisés couverts |
 | skinning | 55 squelettes, 33 maillages skinnés, décodage direct |
 | animations | 34 animations, 8 148 canaux, Mecanim compris (mesure) |
@@ -74,13 +75,13 @@ portage.
 | réglages | 7 options comme l'alpha, pilotées par `Move Z`/`Move X` (W/S, A/D), sauvegarde distincte de la partie ; « Exit to Main Menu » ramène au titre |
 | écran-titre | la scène de `mainData` : planète, feu, fumées, voyageurs, cinq lignes lues dans l'IL ; ombres ponctuelles au test du build (biais × 0,97, porter et recevoir par renderer) ([`131`](131-ecran-titre.md), [`132`](132-comparaison-native.md)) |
 | temps | l'image découpée comme Unity : pas maximal de 1 s, Havok au même pas ([`132`](132-comparaison-native.md)) |
-| ciel et lumière | voûte `Skybox` du build, étoiles à leur taille, `SunLight` ponctuelle de portée 20 000 sans ombres, liseré de Giant's Deep d'après son programme, renderers éteints respectés ([`132`](132-comparaison-native.md)) |
+| ciel et lumière | voûte `Skybox` du build, étoiles à leur taille, `SunLight` ponctuelle de portée 20 000 sans ombres, soleil de substitution de Timber Hearth et Brittle Hollow (`SunlightSwapper`, `LookAtSun` : spot central ombré et couronne de huit spots en lumière clusterisée), spots au cookie `Soft` d'Unity, atténuation éteinte en fin de portée comme la table d'Unity — le plein jour mesuré à celui de l'alpha, ombres comprises, un matériau par sous-maillage, textures glTF lues en gamma, liseré de Giant's Deep d'après son programme, renderers éteints respectés ([`132`](132-comparaison-native.md)) |
 | particules | `playOnAwake` respecté (53 sur 135 attendent un script), `_TintColor` appliquée, cinq déclencheurs du build portés ([`132`](132-comparaison-native.md)) |
 | polices | les 4 polices du jeu, réparties par rôle |
 | ordinateur de bord | 7 notices de lieu, ouvertes par l'exploration |
 | lampe et guimauve | portée 80, grillage en 5 s |
 | mort et flashback | 5 causes, commandes coupées, et les **photos de la partie** rejouées à rebours — autant qu'on a survécu de fois cinq secondes ([`98`](98-flashback.md)) |
-| supernova | progression, contraction, explosion, onde de choc |
+| supernova | progression (couleur seule), effondrement `SunExplosionBehavior` / `ShrinkSunBehavior`, explosion, onde de choc ([`132`](132-comparaison-native.md)) |
 | dégâts du vaisseau | pièces, propulseurs coupés, destruction |
 | LOD par maillage | hauteur relative à l'écran, parcours tournant |
 | éviction | un corps quitté depuis 45 s est libéré |

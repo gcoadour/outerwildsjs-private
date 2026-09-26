@@ -262,7 +262,8 @@ export class DialogueSystem {
       // Les options ne s'offrent qu'a la DERNIERE page de la derniere
       // replique : tant qu'il reste du texte, il n'y a rien a choisir.
       options: derniere && finReplique ? (b.options || []) : [],
-      atEnd: derniere && finReplique,
+      // Une replique qui enchaine n'est pas une fin : « Next », pas « Close ».
+      atEnd: derniere && finReplique && !b.goto,
     };
   }
 
@@ -281,6 +282,12 @@ export class DialogueSystem {
     const b = this.branch;
     if (!b) return;
     if (a.line < (b.talk || []).length - 1) { a.line += 1; return; }
+    // `_noOfOptions < -90` : la replique enchaine sur un autre noeud.
+    if (b.goto && a.tree.branches[b.goto]) {
+      a.branchId = b.goto; a.line = 0; a.page = 0;
+      this.learn(a.treeId, b.goto);
+      return;
+    }
     if (!(b.options || []).length) this.close();
   }
 
@@ -288,7 +295,9 @@ export class DialogueSystem {
   choose(i) {
     const a = this.active, b = this.branch;
     if (!a || !b) return;
-    const opt = (b.options || [])[i];
+    // `selectOption(bouton)` : l'option dont l'`id` est le numero du bouton.
+    const opts = b.options || [];
+    const opt = opts.find((o) => o.id != null && String(o.id) === String(i + 1)) || opts[i];
     if (!opt) return;
     const next = opt.goto && a.tree.branches[opt.goto];
     if (!next) { this.close(); return; }

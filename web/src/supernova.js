@@ -7,25 +7,23 @@
 //   ShrinkSunBehavior               l'etoile se CONTRACTE juste avant d'exploser
 //   SunExplosionBehavior            puis l'explosion et son onde
 //
-// Ce qui vient du build : ces quatre etapes, leur ordre, et la seule valeur
-// numerique que l'alpha donne pour la fin des temps — l'onde de choc parcourt
-// 30 000 unites en 15 secondes, soit 2 000 u/s (`SunSphereOfDeathBehavior`).
+// Ce qui vient du build : ces quatre etapes, leur ordre, et leurs lois. Les
+// deux premieres ne touchent qu'a la COULEUR (`SunColorCurve`) : l'etoile ne
+// grossit pas au fil de la boucle, et le gonflement de 35 % que le portage lui
+// donnait etait de lui. Les deux dernieres sont des effondrements lus dans
+// l'IL (`Effondrement`, timeloop.js) : la surface tombe vers 3 % de son
+// echelle et explose sous 150, en 1,6 s ; la couronne la suit et disparait
+// sous 50. L'onde de choc part a l'explosion, pas au declenchement
+// (docs/132).
 //
-// Ce qui n'en vient PAS : les durees et les echelles de la mise en scene. Les
-// comportements portent leurs courbes dans des composants d'animation que ce
-// portage ne lit pas. Les valeurs de `SUN_SHOW` sont donc les miennes, choisies
-// pour que l'enchainement se lise a l'ecran ; elles sont ici en clair pour
-// qu'on ne les prenne pas pour des mesures.
+// Ce qui n'en vient PAS : l'eclair et la coque d'onde, la mise en scene
+// Babylon de ce que fait le `Detonator` d'Unity 4.
 
 // @lit Detonator
 // @autrement Detonator : le composant Detonator d'Unity 4 est remplace par la mise en scene Babylon de SunStage
 export const SUN_SHOW = {
-  shrinkSeconds: 12,     // duree de la contraction avant l'explosion
-  shrinkTo: 0.62,        // echelle atteinte au creux de la contraction
-  growth: 0.35,          // gonflement de la surface sur toute la boucle
-  flashSeconds: 0.8,     // eclair blanc au declenchement
-  coronaBase: 1.18,      // echelle de la couronne au repos
-  coronaGrowth: 0.45,    // ce qu'elle gagne sur la boucle
+  flashSeconds: 0.8,     // eclair blanc a l'explosion
+  coronaBase: 1.18,      // echelle de la couronne autour de la surface
   maxScale: 40,          // borne : au-dela, l'etoile deborde la scene utile
 };
 
@@ -57,29 +55,27 @@ export class SunStage {
     const c = this.cfg;
     const frac = Math.min(1, Math.max(0, loop.fraction || 0));
 
-    // 1. progression de surface : l'etoile enfle et s'agite tout au long
-    let scale = 1 + frac * c.growth;
+    // 1. progression : la couleur seule, que le shader du soleil suit
+    let scale = 1;
+    let corona = 1;
     let phase = "progression";
 
-    // 2. contraction : ShrinkSunBehavior reprend la main sur la fin
-    const left = loop.secondsRemaining;
-    if (!loop.supernova && left != null && left < c.shrinkSeconds) {
-      const k = 1 - Math.max(0, left) / c.shrinkSeconds;   // 0 -> 1
-      const peak = 1 + c.growth;
-      // courbe en cosinus : la contraction part doucement et s'acheve net,
-      // ce qui donne l'aspiration qui precede l'explosion
-      const e = (1 - Math.cos(k * Math.PI)) / 2;
-      scale = peak + (c.shrinkTo - peak) * e;
+    // 2. contraction : de `TriggerSupernova` a `SunExploded`, l'echelle est
+    // celle de l'effondrement du build, image par image
+    if (loop.collapsing) {
       phase = "contraction";
+      scale = loop.effondrement ? loop.effondrement.fraction : 1;
     }
+    if (loop.couronne) corona = loop.couronne.fraction;
 
-    // 3. explosion : l'etoile suit son onde de choc
+    // 3. explosion : la surface a disparu (`localScale` nul, `Destroy`) ; ce
+    // qu'on voit grandir est la sphere de mort, au rayon de l'onde
     let flash = 0;
     const shock = { radius: 0, alpha: 0 };
     if (loop.supernova) {
       phase = "explosion";
       const r = loop.shockwaveRadius || 0;
-      scale = Math.min(c.maxScale, c.shrinkTo + r / this.radius);
+      scale = Math.min(c.maxScale, r / this.radius);
       // Temps ecoule depuis l'explosion : le temps reel de boucle donne l'eclair
       // bref de 0,8 s ; repli sur la distance si seul le rayon est fourni.
       const since = (loop.elapsed != null && loop.supernovaAt != null)
@@ -96,7 +92,7 @@ export class SunStage {
       phase,
       scale,
       corona: {
-        scale: (c.coronaBase + frac * c.coronaGrowth) * scale,
+        scale: c.coronaBase * corona,
         alpha: 0.12 + frac * 0.45 + flash * 0.4,
       },
       flash,
@@ -170,7 +166,7 @@ export class SupernovaView {
     if (!visible && !this.corona) return;
     if (!this.corona) this._build();
 
-    this.corona.setEnabled(state.corona.alpha > 0.02);
+    this.corona.setEnabled(state.corona.alpha > 0.02 && state.corona.scale > 0);
     this.corona.position.set(center[0], center[1], center[2]);
     this.corona.scaling.setAll(state.corona.scale);
     this.corona.material.alpha = Math.min(1, state.corona.alpha);

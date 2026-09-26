@@ -45,11 +45,18 @@ export function lightCap(maxUniformBlocks) {
  * dore toute la planete du titre, la ou une decroissance lineaire le laissait
  * brun sombre, et la lune qui l'eclaire moins qu'on ne croirait.
  */
+//
+// Et la table s'ETEINT en fin de portee : de 0,8 a 1 (en distance), le terme
+// est multiplie par une rampe lineaire EN CARRE de la distance, de 1 a 0 —
+// `(1 - x^2) / 0,36`. Sans elle, les lampes du village eclairaient les arbres
+// qui etaient a la limite de leur portee, la nuit, et la couronne de
+// l'imposteur, dont le village est a 92 % de la portee, donnait deux fois ce
+// qu'elle donne dans l'alpha (docs/132).
 // @mesure
 export function attenuationUnity(distance, range) {
   if (!(range > 0)) return 0;
   const x2 = (distance * distance) / (range * range);
-  return x2 < 1 ? 2 / (1 + 25 * x2) : 0;
+  return x2 < 1 ? 2 / (1 + 25 * x2) * Math.min(1, (1 - x2) / 0.36) : 0;
 }
 
 /**
@@ -66,7 +73,7 @@ export function patchAttenuationUnity(BABYLON) {
   if (typeof store[k] === "string") {
     const avant = "{return max(0.,1.0-length(lightOffset)/range);}";
     const apres = "{float x2=dot(lightOffset,lightOffset)/(range*range);" +
-                  "return x2<1.0?2.0/(1.0+25.0*x2):0.0;}";
+                  "return x2<1.0?2.0/(1.0+25.0*x2)*min(1.0,(1.0-x2)/0.36):0.0;}";
     if (store[k].includes(avant)) store[k] = store[k].replace(avant, apres);
     ok = store[k].includes(apres);
   }
@@ -78,11 +85,63 @@ export function patchAttenuationUnity(BABYLON) {
     // qu'un bloc en accolades casserait.
     const avant = "attenuation=max(0.,1.0-length(direction)/range);";
     const expr = "(dot(direction,direction)<range*range?" +
-                 "2.0/(1.0+25.0*dot(direction,direction)/(range*range)):0.0);";
+                 "2.0/(1.0+25.0*dot(direction,direction)/(range*range))*" +
+                 "min(1.0,(1.0-dot(direction,direction)/(range*range))/0.36):0.0);";
     store[k2] = store[k2].split(avant).join("attenuation=" + expr);
     ok = store[k2].includes(expr) && ok;
   }
   return ok;
+}
+
+/**
+ * Le cookie par defaut des spots d'Unity 4, en expression GLSL de `r`.
+ *
+ * `r` est la distance au centre du disque projete, rapportee a son rayon :
+ * `tan(angle) / tan(demi-cone)`, la projection que fait `_LightMatrix0` avant
+ * de lire le cookie — et non l'angle lui-meme. `profil` est la coupe radiale de
+ * la texture `Soft` (33 echantillons, r de 0 a 1, voir l'extraction) ; entre
+ * deux echantillons on interpole, comme le filtre bilineaire. La partie plate
+ * du profil tient en un seul test.
+ *
+ * Une chaine de ternaires plutot qu'un tableau : elle compile aussi en GLSL
+ * ES 1.0, et elle s'evalue telle quelle en JavaScript pour les tests.
+ */
+export function cookieGLSL(profil) {
+  if (!Array.isArray(profil) || profil.length < 2) return null;
+  const n = profil.length - 1;
+  const f = (x) => {
+    const t = Math.max(0, Math.min(1, +x || 0)).toFixed(4);
+    return t.includes(".") ? t : `${t}.0`;
+  };
+  let debut = 0;
+  while (debut < n && profil[debut + 1] >= profil[0]) debut++;
+  let expr = "0.0";
+  for (let i = n - 1; i >= debut; i--) {
+    const r0 = f(i / n), r1 = f((i + 1) / n);
+    expr = `(r<${r1}?mix(${f(profil[i])},${f(profil[i + 1])},(r-${r0})*${n}.0):${expr})`;
+  }
+  return `(r<=${f(debut / n)}?${f(profil[0])}:${expr})`;
+}
+
+/**
+ * Remplace, dans le materiau STANDARD, la decroissance angulaire des spots de
+ * Babylon (`pow(cos, exposant)`) par le cookie d'Unity.
+ *
+ * Le spot central de l'imposteur, dont le terminal est a cinq degres de
+ * l'axe, n'y voit presque rien ; la couronne, qui eclaire le village a trente
+ * degres et plus de son axe, y perd l'essentiel de ce qu'elle donnait en trop.
+ */
+export function patchCookieUnity(BABYLON, profil) {
+  const store = BABYLON && BABYLON.Effect && BABYLON.Effect.IncludesShadersStore;
+  const expr = cookieGLSL(profil);
+  if (!store || !expr) return false;
+  const k = "lightsFragmentFunctions";
+  if (typeof store[k] !== "string") return false;
+  const avant = "attenuation*=getAttenuation(cosAngle,lightData.w);";
+  const apres = "{float c_=max(cosAngle,1e-4);float w_=clamp(lightDirection.w,1e-4,0.9999);" +
+    "float r=(sqrt(max(0.,1.-c_*c_))/c_)/(sqrt(1.-w_*w_)/w_);attenuation*=" + expr + ";}";
+  store[k] = store[k].split(avant).join(apres);
+  return store[k].includes(apres);
 }
 
 /**

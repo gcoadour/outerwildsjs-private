@@ -68,10 +68,80 @@ function lightBehaviours(ctx) {
   return byOwner;
 }
 
+function pivotLocal(ctx, pivots, gid) {
+  if (!pivots.has(parentDe(ctx, gid))) return null;
+  const t = ctx.transformOf.get(gid);
+  const p = t.m_LocalPosition, q = t.m_LocalRotation;
+  return {
+    position: [p.x, p.y, p.z].map((x) => round(x, 3)),
+    direction: forward([q.x, q.y, q.z, q.w]),
+  };
+}
+
+/**
+ * Le profil RADIAL du cookie par defaut des spots d'Unity 4 : la texture
+ * `Soft` (128 x 128, Alpha8) de `unity default resources`.
+ *
+ * Un spot d'Unity 4 n'a pas d'exposant : sans cookie a lui, il multiplie son
+ * attenuation par `Soft`, projetee sur le cone — le bord du disque est le bord
+ * du cone. Le profil est plat jusqu'aux six dixiemes du rayon, puis tombe a
+ * zero. Babylon, lui, prend cos^2 de l'angle, encore 0,54 au bord d'un cone de
+ * 85 degres : la couronne de l'imposteur eclairait trop tout ce qu'elle ne
+ * visait pas (docs/132). On garde 33 echantillons, du centre (r = 0) au bord
+ * (r = 1), sur la ligne mediane ; la texture est de revolution.
+ */
+function profilCookie(ctx) {
+  let objets;
+  try { objets = [...ctx.env.objects({ type: "Texture2D", file: "unity default resources" })]; }
+  catch { return null; }
+  for (const o of objets) {
+    const v = ctx.readEngine(o);
+    if (!v || v.m_Name !== "Soft" || v.m_TextureFormat !== 1) continue;
+    const W = v.m_Width | 0, H = v.m_Height | 0, d = v["image data"];
+    if (!W || !H || !d || d.length < W * H) return null;
+    const cy = H >> 1, cx = W >> 1, out = [];
+    for (let i = 0; i <= 32; i++) {
+      const x = Math.min(W - 1, cx + Math.round((i * cx) / 32));
+      out.push(round(d[cy * W + x] / 255, 4));
+    }
+    return out;
+  }
+  return null;
+}
+
+/**
+ * Les GameObject qui portent un `LookAtSun` : leurs enfants tournent avec eux.
+ *
+ * `SunImposterPivot` ne porte pas que `SunImposter_Center`. Huit autres spots
+ * y sont accroches en couronne — TopLight, LeftLight, ... BottomRightLight,
+ * a 391 unites de l'axe et 371 en avant, inclines de trente degres vers lui,
+ * intensite 5,25 et cone de 85 degres. Exportes a leur pose MONDE du fichier,
+ * ils restaient la ou `LookAtSun` les avait laisses a l'enregistrement, et le
+ * portage n'en faisait rien : le plein jour du village sortait deux fois trop
+ * sombre (docs/132). On garde donc, pour ces lumieres-la, leur pose LOCALE.
+ */
+function pivotsDuSoleil(ctx) {
+  const ids = new Set();
+  for (const { obj } of ctx.behaviours((c) => c === "LookAtSun")) {
+    const gid = ctx.ownerId(obj);
+    if (gid) ids.add(gid);
+  }
+  return ids;
+}
+
+/** Le GameObject parent d'un GameObject, ou 0. */
+function parentDe(ctx, gid) {
+  const t = ctx.transformOf.get(gid);
+  const par = t && t.m_Father ? ctx.env.deref(t.m_Father, ctx.env.get(ctx.sceneFile)) : null;
+  const pt = par ? ctx.env.read(par) : null;
+  return pt && pt.m_GameObject ? pt.m_GameObject.pathId : 0;
+}
+
 export function extractLighting(ctx) {
   const lights = [];
   const stats = { lues: 0, "sans GameObject": 0, illisibles: 0 };
   const behaviours = lightBehaviours(ctx);
+  const pivots = pivotsDuSoleil(ctx);
 
   for (const o of ctx.env.objects({ type: "Light", file: ctx.sceneFile })) {
     const v = ctx.readEngine(o);
@@ -110,6 +180,9 @@ export function extractLighting(ctx) {
         : null,
       // Ce qui l'anime, s'il y a lieu : pulsation, vacillement, jour et nuit.
       behaviours: behaviours.get(gid) || null,
+      // Sous un pivot `LookAtSun` : la pose dans le repere du pivot, que le
+      // moteur recompose a chaque image (imposteur.js).
+      pivot: pivotLocal(ctx, pivots, gid),
     });
     stats.lues += 1;
   }
@@ -144,5 +217,5 @@ export function extractLighting(ctx) {
   }
   stats.comportements = byBehaviour;
 
-  return { unity: ctx.env.get(ctx.sceneFile).unityVersion, settings, lights, stats };
+  return { cookieSpot: profilCookie(ctx), unity: ctx.env.get(ctx.sceneFile).unityVersion, settings, lights, stats };
 }

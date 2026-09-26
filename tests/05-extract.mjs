@@ -134,6 +134,12 @@ check("chaque recepteur porte son collider",
     && Math.abs(x.position[0] - 4.37) < 0.1 && Math.abs(x.position[2] + 8720.98) < 0.1);
   check("le Rocket Scientist se vise sur une capsule", savant && savant.volume.shape, "capsule");
 }
+// L'effondrement de l'etoile : ses deux comportements visent 3 % de leur
+// echelle locale, et c'est elle qui fait la duree (docs/132).
+check("la surface de l'etoile a l'echelle 4000",
+      (gp.placed.SunExplosionBehavior || [])[0]?.localScale, 4000);
+check("la couronne a 362,2121",
+      (gp.placed.ShrinkSunBehavior || [])[0]?.localScale, 362.2121);
 check("onze spheres de visee de referentiel", n("ReferenceFrameSphere"), 11);
 check("celle de Giant's Deep fait mille",
       (gp.placed.ReferenceFrameSphere.find((x) => x.body === "GiantsDeep_Body") || {}).volume.radius, 1000);
@@ -345,6 +351,38 @@ check("CoreLight : une ombre a 0,7",
       (lighting.lights.find((l) => l.name === "CoreLight") || {}).ombre?.force, 0.7);
 check("quatre lumieres du monde portent une ombre",
       lighting.lights.filter((l) => l.ombre).length, 4);
+// Le cookie par defaut des spots, lu dans `unity default resources` : plat
+// jusqu'aux six dixiemes du rayon, puis nul au bord (docs/132).
+{
+  const c = lighting.cookieSpot || [];
+  check("cookie des spots : 33 echantillons", c.length, 33);
+  check("plein au centre", c[0], 1);
+  check("plat jusqu'a r = 0,59", c.slice(0, 20).every((x) => x === 1), true);
+  check("a r = 0,8125, la moitie", c[26], 0.5176);
+  check("presque nul au bord", c[32] < 0.02, true);
+}
+// Sous les pivots `LookAtSun` : le spot central et sa couronne de huit sur
+// Timber Hearth, un seul spot sur Brittle Hollow (docs/132).
+{
+  // Plus une directionnelle de test, eteinte, qui reste eteinte.
+  check("une lumiere du pivot est eteinte : la directionnelle de test",
+        lighting.lights.filter((l) => l.pivot && !l.enabled).map((l) => `${l.name}/${l.type}`).join(","),
+        "Directional light/directional");
+  const piv = lighting.lights.filter((l) => l.pivot && l.enabled);
+  check("neuf lumieres allumees sous le pivot de Timber Hearth",
+        piv.filter((l) => l.body === "TimberHearth_Body").length, 9);
+  check("une sous celui de Brittle Hollow",
+        piv.filter((l) => l.body === "BrittleHollow_Body").map((l) => l.name).join(","), "SunImposterLight");
+  const c = piv.find((l) => l.name === "SunImposter_Center");
+  check("le spot central, a 491,3 sur l'avant du pivot", c && c.pivot.position.join(","), "0,0,491.313");
+  check("... tourne vers le centre", c && c.pivot.direction.map((x) => Math.round(x) + 0).join(","), "0,0,-1");
+  const top = piv.find((l) => l.name === "TopLight");
+  check("TopLight : 391,2 de l'axe, 371,2 en avant", top && top.pivot.position.join(","), "-391.204,0,371.199");
+  check("... incline de trente degres vers l'axe", top && top.pivot.direction.map((x) => Math.round(x * 1000) / 1000).join(","), "0.5,0,-0.866");
+  check("la couronne est sans ombre, a 5,25",
+        piv.filter((l) => l.body === "TimberHearth_Body" && l.name !== "SunImposter_Center")
+          .every((l) => l.shadows === 0 && l.intensity === 5.25 && l.spotAngle === 85), true);
+}
 check("les RenderSettings de la scene sont lus", !!lighting.settings, true);
 // Ce qui fait VIVRE ces lumieres : trois comportements que le portage ne lisait
 // pas (docs/42-lumieres.md). Une lumiere sans eux garde l'intensite serialisee.
@@ -974,6 +1012,20 @@ console.log("     sources avec courbe echantillonnee:", courbes,
         dlg.stats["conversations a controleur"], 4);
   check("et toutes les conversations sont jouables",
         dlg.stats["conversations jouables"], 14);
+  // `ProcessXMLDialogues`, lu cote a cote avec l'alpha (docs/132) : les
+  // reponses sont le `<talk>` imbrique de chaque option, et une replique peut
+  // enchainer sur un autre noeud.
+  const bigDay = Object.values(dlg.trees).find((t) => t.name === "BigDay");
+  check("BigDay : trois reponses, avec leur texte",
+        bigDay.branches["1"].options.map((o) => o.text).join(" | "),
+        "All systems go! | You sound excited enough for both of us. | You're SURE you fixed the retro rockets?");
+  check("... numerotees par leur id", bigDay.branches["1"].options.map((o) => o.id).join(","), "1,2,3");
+  check("la reponse 4 enchaine sur le noeud 5", bigDay.branches["4"].goto, "5");
+  check("on commence au noeud 1", bigDay.start, "1");
+  const toutes = Object.values(dlg.trees).flatMap((t) => Object.values(t.branches));
+  check("toutes les options ont un texte", toutes.flatMap((b) => b.options).filter((o) => !o.text).length, 0);
+  check("quinze repliques enchainent", toutes.filter((b) => b.goto).length, 15);
+  check("une replique par noeud", toutes.filter((b) => b.talk.length !== 1).length, 0);
 
   const curator = dlg.conversations.find((c) => c.character === "Curator");
   check("le Conservateur est bien la", !!curator, true);

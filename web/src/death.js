@@ -360,6 +360,12 @@ export class PlayerDeathHandler {
     this.state = { phase: "fini", frame: -1, alpha: 0, fini: true, t: 0 };
     this.deaths = 0;
     this.byCause = {};
+    // `TriggerFlashback` ne part pas a la mort : `PlayerCameraEffectController`
+    // l'annonce a la FIN de l'effet de mort (0,3, 3 ou 5 s selon la cause).
+    // Avec `attendreEffet`, `kill()` retient le compte de photos et le
+    // flashback attend `declencherFlashback()` ; sans, il part tout de suite.
+    this.attendreEffet = false;
+    this.enAttente = null;
   }
 
   get dead() { return this.cause !== null; }
@@ -376,18 +382,34 @@ export class PlayerDeathHandler {
     this.cause = DEATHS[cause] ? cause : "impact";
     this.deaths += 1;
     this.byCause[this.cause] = (this.byCause[this.cause] || 0) + 1;
-    this.flashback.start(snapshots);
+    if (this.attendreEffet) this.enAttente = snapshots;
+    else this.flashback.start(snapshots);
+    return true;
+  }
+
+  /** `TriggerFlashback` : la fin de l'effet de mort lance la sequence. */
+  declencherFlashback() {
+    if (!this.dead || this.enAttente === null) return false;
+    this.flashback.start(this.enAttente);
+    this.enAttente = null;
     return true;
   }
 
   /** @returns true a l'image ou la sequence s'acheve : c'est le moment de rejouer */
   update(dt) {
     if (!this.dead) return false;
+    if (this.enAttente !== null) {
+      // L'effet de mort tient l'ecran ; le flashback n'a pas commence.
+      this.state = { phase: "effet", index: -1, frame: -1, alpha: 0, white: 0,
+                     fini: false, t: 0 };
+      return false;
+    }
     this.state = this.flashback.update(dt);
     return this.state.fini;
   }
 
   revive() {
+    this.enAttente = null;
     this.cause = null;
     this.flashback.reset();
     this.state = this.flashback.update(0);
@@ -417,6 +439,13 @@ export class FlashbackOverlay {
     this.el = document.createElement("div");
     this.el.className = "ow-flashback";
     this.el.hidden = true;
+    // Le fond : la camera du flashback efface en NOIR (`clearFlags` 2) et ne
+    // voit que le plan porte-image. Sans lui, la scene restait visible autour
+    // de la photo, la ou l'alpha ne montre que du noir (docs/132).
+    this.fond = document.createElement("div");
+    this.fond.className = "ow-flashback-fond";
+    this.fond.hidden = true;
+    root.appendChild(this.fond);
     // Le canevas porte la photo ; le `div` porte le blanc par-dessus.
     this.canvas = document.createElement("canvas");
     this.canvas.className = "ow-flashback-img";
@@ -438,7 +467,8 @@ export class FlashbackOverlay {
    * @param shots les photos en memoire, la plus ancienne en tete
    */
   update(state, shots = null) {
-    const vivant = !!state && !state.fini;
+    const vivant = !!state && !state.fini && state.phase !== "effet";
+    this.fond.hidden = !vivant;
     const voile = vivant && state.alpha > 0.001;
     this.el.hidden = !voile;
     if (voile) this.el.style.opacity = String(Math.min(1, state.alpha));

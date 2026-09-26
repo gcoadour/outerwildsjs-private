@@ -89,6 +89,24 @@ export function rocketKids(gameplay) {
   }));
 }
 
+/**
+ * Cette conversation est-elle celle de l'enfant aux fusees ?
+ *
+ * PAS PAR LE NOM : les quatorze zones du build s'appellent toutes
+ * `ConversationZone`, et la comparaison des noms faisait de CHAQUE
+ * conversation celle de l'enfant. Slate recitait `Hobbyist_Intro` — « tu
+ * voulais t'entrainer a atterrir ? » — la ou l'alpha lui fait dire `BigDay`
+ * (docs/132). Le controleur dit qui parle ; sa position, a defaut.
+ */
+export function estEnfant(convo, enfant) {
+  if (!convo || !enfant) return false;
+  if (convo.controller && convo.controller.kind) {
+    return convo.controller.kind === "RocketKidConvoController";
+  }
+  const a = convo.position, b = enfant.position;
+  return !!(a && b && Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 0.05);
+}
+
 /** Un contact doux n'est pas un crash. */
 export function crashes(impactSpeed, cfg = MODELE) {
   return impactSpeed > cfg.crashSpeed;
