@@ -894,6 +894,20 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("elles font 256 pixels de cote",
                    [pellicule["largeur"], pellicule["hauteur"]], [256, 256])
 
+        # --- le vaisseau part au sommet de la tour (docs/132) -------------------
+        #
+        # `SpawnPlayer` ne deplace que le joueur : le vaisseau part de sa pose
+        # de scene, a 172 unites du centre de Timber Hearth, pose sur ses pads.
+        # Le portage le mettait sur `SpawnPoint_Ship`, 160 unites plus haut.
+        depart_vaisseau = page.evaluate("""() => { const s = window.__shipRef;
+          if (!s) return null;
+          return { r: Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)),
+                   pads: s.onPad, immobile: Math.hypot(s.vel.x, s.vel.y, s.vel.z) < 0.01 }; }""")
+        if depart_vaisseau:
+            rep.eq("le vaisseau attend au sommet de la tour, sur ses pads, immobile",
+                   [depart_vaisseau["r"], depart_vaisseau["pads"], depart_vaisseau["immobile"]],
+                   [172, True, True])
+
         # --- degats du vaisseau -------------------------------------------------
         # Les valeurs de l'alpha eteignent les degats localises : on verifie que
         # c'est bien CE qu'on lit dans le build, pas une hypothese du portage.

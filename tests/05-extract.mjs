@@ -527,6 +527,22 @@ console.log("     champs avec volume mesure:", volumes,
   check("un choc devant touche la piece de l'avant", coup.location, "avant");
   check("qui n'est pas un reacteur", coup.piece.moteur, false);
 
+  // LE VAISSEAU PART AU SOMMET DE LA TOUR. `SpawnPlayer` ne deplace que le
+  // joueur, et la pose de repos de `Ship_Body` est celle du depart : a 172
+  // unites du centre de Timber Hearth, la ou l'ascenseur monte (docs/132). Le
+  // `SpawnPoint_Ship` de la planete, que le portage prenait, est 160 unites
+  // plus haut — un point de teleportation, pas une place de parking.
+  {
+    const th = solar.bodies.find((b) => /TimberHearth/.test(b.bodyName));
+    const c = th.bodyPosition || th.position;
+    const dist = (p) => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]);
+    const asc = (gp.placed.Elevator || [])[0];
+    const envol = (gp.placed.SpawnPoint || []).find((p) => p.name === "SpawnPoint_Ship" && p.body === "TimberHearth_Body");
+    check("le vaisseau repose a 172 unites du centre", Math.round(dist(sb.position)), 172);
+    check("a moins de quarante de l'ascenseur", Math.hypot(...sb.position.map((v, i) => v - asc.position[i])) < 40, true);
+    check("le point d'apparition du vaisseau est 160 plus haut", Math.round(dist(envol.position) - dist(sb.position)) > 150, true);
+  }
+
   // LES FISSURES. Chaque piece porte un `DS_Decals` que `Awake` eteint et que
   // le premier coup rallume ; le moteur doit trouver la piece dans le glTF, et
   // c'est l'identifiant pose par l'exportateur qui la lui designe.

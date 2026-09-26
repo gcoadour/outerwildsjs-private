@@ -1210,3 +1210,24 @@ Deux conséquences de plus : `ToggleStick(true)` ne joue que `PullOut` —
 rien ne suit, le bâton garde la dernière pose —, et les quatre clips sont en
 `Once`. Le portage enchaînait `idle` en boucle après `PullOut`, et relançait
 un clip dès qu'il s'arrêtait.
+
+### Le vaisseau attend au sommet de la tour
+
+Le parcours vers la tour a fait lever les yeux : dans le portage, le
+vaisseau n'y était pas. Il flottait à 332 unités du centre de Timber Hearth,
+sur le `SpawnPoint_Ship` de la planète — 170 unités au-dessus de la tour, dans
+le ciel. `docs/07` avait lu la pose de repos de `Ship_Body` (172 unités du
+centre) comme « sous la surface », et pris le point d'apparition à la place.
+
+`PlayerSpawner` dit autre chose : `SpawnPlayer` pose le **joueur**, et
+`GetSpawnPoint` ne rend un point de vaisseau que si l'on est **dedans**
+(`IsShipSpawn() == _isPlayerInShip`) — pour les touches de téléportation de
+débogage. Rien ne déplace le vaisseau au réveil : il part de sa pose de
+scène, sur la plateforme au sommet de la tour, à 166 unités du centre pour le
+haut de la tour, que l'ascenseur dessert. C'est là que la chaîne tour,
+terminal, ascenseur mène.
+
+Le portage l'y pose désormais, dans l'orientation de la scène — celle dont
+les capteurs de pad et les volumes de réparation sont exprimés —, et l'y
+remet à chaque boucle. Mesuré dans Chromium : posé sur ses pads, immobile, de
+la 38ᵉ à la 60ᵉ seconde.

@@ -1428,7 +1428,16 @@ async function boot() {
         if (fissure) { fissure.setEnabled(false); fissuresPieces.push({ id: e.piece, noeud: fissure }); }
       }
     }
-    const spawnWorld = shipSpawn(gameplay, home.position0);
+    // LE VAISSEAU PART LA OU LA SCENE LE POSE : au sommet de la tour de
+    // lancement. `PlayerSpawner.SpawnPlayer` ne deplace que le JOUEUR ; les
+    // `SpawnPoint_Ship` ne servent qu'aux touches de teleportation de
+    // debogage, et seulement vaisseau occupe (`IsShipSpawn() ==
+    // _isPlayerInShip`). Le portage posait le vaisseau sur celui de Timber
+    // Hearth, a 332 unites du centre : 170 au-dessus de la tour, dans le ciel
+    // (docs/132). La pose de repos n'est pas « sous la surface », comme
+    // docs/07 le concluait : le sol du village est a 130 unites du centre, le
+    // haut de la tour a 166.
+    const spawnWorld = shipRest || shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
       const local = [spawnWorld[0] - home.position0[0],
                      spawnWorld[1] - home.position0[1],
@@ -1450,7 +1459,10 @@ async function boot() {
       // Le vaisseau porte desormais son orientation : sans la poser une
       // premiere fois, son « haut » serait celui du repere de travail et non
       // la verticale locale, et sa poussee verticale partirait de travers.
-      {
+      // Et dans l'orientation de la scene, celle dont les capteurs de pad et
+      // les volumes de reparation sont deja exprimes.
+      if (shipRest && shipRestRot) ship.quat = shipRestRot.slice();
+      else {
         const l = Math.hypot(...local) || 1;
         ship.orientTo([local[0] / l, local[1] / l, local[2] / l], null);
       }
@@ -2373,6 +2385,9 @@ async function boot() {
       // depart, coque comprise
       ship.damage.reset();
       ship.pos.x = shipStart[0]; ship.pos.y = shipStart[1]; ship.pos.z = shipStart[2];
+      // Et son orientation de depart : la scene rechargee le repose tel quel.
+      if (shipRest && shipRestRot) ship.quat = shipRestRot.slice();
+      if (ship.omega) ship.omega = [0, 0, 0];
       ship.parked = true;
       ship.landed = true;
       ship.groundBody = "TimberHearth";
