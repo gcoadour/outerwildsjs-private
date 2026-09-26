@@ -1329,8 +1329,10 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         if depart:
             rep.eq("le regard de depart vient du build", depart["oriente"], True)
-            rep.near("les yeux sont a 1,2 u au-dessus du joueur",
-                     round(depart["haut"], 3), 1.2, 0.05)
+            # `PlayerCamera` a 0,9 du centre d'une capsule de 2 : 1,9 du sol,
+            # soit 1,3 du centre de la sphere de 0,6 du portage (docs/132).
+            rep.near("les yeux sont a 1,3 u au-dessus du centre du joueur",
+                     round(depart["haut"], 3), 1.3, 0.05)
             rep.at_most("... et exactement au-dessus, pas de cote",
                         round(depart["cote"], 3), 0.01)
             # On tombe d'une garde d'un demi-metre, pas de quarante unites.
@@ -3174,6 +3176,13 @@ def _run(url, heavy, profil=None, zip_path=None):
             # en moins d'un dixieme de seconde : le vaisseau decolle des
             # capteurs, glisse, et se repose — et sans GPU les trois tiennent
             # dans une seule image. Lire `onPad` ensuite mesurait le repos.
+            # Pose d'abord : les controles d'embarquement qui precedent
+            # peuvent le laisser se reposer, et un toucher en retard passait
+            # alors devant le decollage mesure.
+            try:
+                page.wait_for_function("() => window.__shipRef.onPad", timeout=15000)
+            except Exception:
+                pass
             n0 = page.evaluate("""() => {
               const s = window.__shipRef;
               const n = s.pads.events.length;
