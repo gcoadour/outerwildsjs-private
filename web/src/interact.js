@@ -12,6 +12,7 @@
 // de ce lot-la.
 
 import { zoneFaced, interactZones } from "./gear.js";
+import { pointVivant, rotationVivante } from "./frames.js";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
@@ -306,9 +307,9 @@ export class Interactables {
       for (const it of this.items) {
         if (it.disabled || it.kind !== "interact" || !it.volume) continue;
         const shift = shiftOf ? shiftOf(it) : null;
-        const w = shift ? [it.world[0] + shift[0], it.world[1] + shift[1],
-                           it.world[2] + shift[2]] : it.world;
-        const h = rayonVolume(o, dir, sub(w, frameOffset), it.rotation, it.volume);
+        const w = pointVivant(it.world, shift);
+        const h = rayonVolume(o, dir, sub(w, frameOffset), rotationVivante(it.rotation, shift),
+                              it.volume);
         if (h != null && h <= viseD) { vise = it; viseD = h; }
       }
       if (vise && viseD <= vise.range) return vise;
@@ -321,8 +322,10 @@ export class Interactables {
       // rend le deplacement du corps porteur depuis. Sans lui, une zone posee
       // dans le vaisseau reste sur l'aire de lancement quand le vaisseau part.
       const shift = shiftOf ? shiftOf(it) : null;
-      const w = shift ? [it.world[0] + shift[0], it.world[1] + shift[1],
-                         it.world[2] + shift[2]] : it.world;
+      const w = pointVivant(it.world, shift);
+      // Et l'orientation du porteur : une zone du vaisseau pose de travers
+      // regarde de travers (`frames.js`, `poseMobile`).
+      const rot = rotationVivante(it.rotation, shift);
       const p = sub(w, frameOffset);
       const d = [p[0] - origin.x, p[1] - origin.y, p[2] - origin.z];
       const dist = Math.hypot(...d);
@@ -333,13 +336,13 @@ export class Interactables {
       // soi, et mesurait la direction zone -> joueur contre une demi-fenetre.
       if (it.kind === "zone") {
         const dedans = it.volume
-          ? joueurDansVolume(p, it.rotation, it.volume, [origin.x, origin.y, origin.z], haut)
+          ? joueurDansVolume(p, rot, it.volume, [origin.x, origin.y, origin.z], haut)
           : dist <= it.range;
         if (!dedans || dist > bestD) continue;
-        if (it.viewingWindow != null && it.rotation) {
+        if (it.viewingWindow != null && rot) {
           const n = Math.hypot(fwd.x, fwd.y, fwd.z) || 1;
           if (!zoneFaced(it, [fwd.x / n, fwd.y / n, fwd.z / n],
-                         qrot(it.rotation, [0, 0, 1]))) continue;
+                         qrot(rot, [0, 0, 1]))) continue;
         }
         best = it; bestD = dist;
         continue;

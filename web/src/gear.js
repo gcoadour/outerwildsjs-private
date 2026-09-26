@@ -26,6 +26,7 @@
 
 import { insideVolume } from "./gravity.js";
 import { restingPoint } from "./frames.js";
+import { DECALAGE_ASSISE } from "./start.js";
 
 export const GEAR_EVENTS = {
   suitUp: "SuitUp",
@@ -178,6 +179,7 @@ export function attachPoints(gameplay) {
       matchRotation: !!f._matchRotation,
       centerCamera: !!f._centerCamera,
       rotationRate: f._rotationRate ?? 100,
+      attachOffset: DECALAGE_ASSISE,
     };
   });
 }

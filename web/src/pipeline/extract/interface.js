@@ -99,6 +99,50 @@ function crop(img, [x0, y0, x1, y1]) {
   return { width: w, height: h, rgba: out, format: img.format };
 }
 
+/**
+ * Les `TextMesh` de la scene : le texte ecrit DANS le monde.
+ *
+ * Neuf dans `level0`, et le portage n'en lisait aucun : l'ecran de
+ * l'ordinateur de bord (`NameText`, `DescriptionText`), son avis « database
+ * updated », les cinq notifications du casque — dont « Launch Window
+ * Obstructed », que le portage recrivait en capitales de son invention.
+ *
+ * La classe 102 n'est pas dans `unity41-types.json` ; sa structure d'Unity 4
+ * est courte et se lit a la main :
+ *
+ *   m_GameObject PPtr, m_Text string, m_OffsetZ, m_CharacterSize,
+ *   m_LineSpacing (float), m_Anchor, m_Alignment (int16), m_TabSize (float),
+ *   m_FontSize, m_FontStyle (int32), m_RichText (bool, aligne), m_Font PPtr
+ *
+ * L'oracle est le meme qu'ailleurs : la lecture doit consommer exactement
+ * `byteSize` octets, sinon l'objet est ecarte plutot que mal lu. La couleur
+ * n'est pas un champ de la classe en 4.1 — elle vient du materiau de police.
+ */
+export function textesDeScene(ctx) {
+  const out = [];
+  for (const o of ctx.env.objects({ file: ctx.sceneFile, type: "TextMesh" })) {
+    try {
+      const r = o.file.reader(o);
+      const debut = r.pos;
+      const go = { fileId: r.i32(), pathId: r.i32() };
+      const t = {
+        text: r.string(), offsetZ: r.f32(), characterSize: r.f32(), lineSpacing: r.f32(),
+        anchor: r.i16(), alignment: r.i16(), tabSize: r.f32(),
+        fontSize: r.i32(), fontStyle: r.i32(),
+      };
+      t.richText = r.i32() !== 0;
+      const police = { fileId: r.i32(), pathId: r.i32() };
+      if (r.pos - debut !== o.byteSize) continue;
+      const cible = ctx.env.deref(police, o.file);
+      const chaine = ctx.ancestors(go.pathId);
+      out.push({ name: ctx.name(go.pathId), parent: chaine[chaine.length - 1] || null,
+                 path: [...chaine, ctx.name(go.pathId)].join("/"),
+                 ...t, font: cible ? ctx.assetName(cible) : null });
+    } catch (e) { /* objet illisible : ecarte */ }
+  }
+  return out;
+}
+
 export function extractInterface(ctx, emitImage, emitFile, assembly) {
   // Textures et polices du build, par nom.
   const textureByName = new Map();
@@ -191,6 +235,8 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
       },
     },
     fonts,
+    // Le texte pose dans le monde (`TextMesh`).
+    textes: textesDeScene(ctx),
     // L'ecran de la console du satellite : carte postale au repos, schema une
     // fois la console prise.
     satellite: {

@@ -74,6 +74,9 @@ export function majorSectors(gameplay = {}) {
       out.push({
         name: c.name, body: c.body || null, position: c.position,
         rotation: c.rotation || null, volume: c.volume || null,
+        // `Sector._sectorName` : ce que `GetName` rend, et ce que
+        // l'ordinateur de bord enregistre a l'entree.
+        secteur: f._sectorName ?? null,
         useMinimap: useMinimap(f),
         // `MajorSector.GetHorizonRadius` rend 0 : seul un PlanetoidSector en a.
         horizon: f._horizonRadius || 0,

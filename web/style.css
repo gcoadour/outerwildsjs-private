@@ -233,21 +233,6 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 }
 .ow-settings-title { font-size: 42px; }
 
-/* Ordinateur de bord : deux zones de texte, comme les deux TextMesh du terminal */
-#computer {
-  position: fixed; left: 50%; top: 22%; transform: translateX(-50%);
-  z-index: 7; pointer-events: none; width: min(620px, 74vw);
-  padding: 22px 28px; box-sizing: border-box;
-  background: rgba(4, 12, 10, .93);
-  border: 1px solid rgba(120, 230, 190, .3);
-  font-family: "OW Dialogue", ui-monospace, monospace; color: #9fe8c8;
-}
-.ow-computer-name {
-  font-size: 26px; letter-spacing: .06em; text-align: center;
-  padding-bottom: 10px; margin-bottom: 12px;
-  border-bottom: 1px solid rgba(120, 230, 190, .22);
-}
-.ow-computer-desc { font-size: 17px; line-height: 1.6; white-space: pre-wrap; }
 
 /* --- Ecran d'accueil ------------------------------------------------------
    Il occupe la page tant que l'extraction n'a pas eu lieu ; le canvas du
@@ -581,11 +566,6 @@ body.touch .ow-prompts-left {
 /* Au doigt, la mise en page reste celle du jeu : `dispositionDialogue` borne
    l'échelle avant le losange d'action et grandit lignes et bouton jusqu'à la
    taille d'un doigt (docs/95-pnj-au-doigt.md). */
-body.touch #computer {
-  top: 12%; width: min(560px, 68vw); padding: 12px 16px;
-}
-body.touch .ow-computer-name { font-size: 18px; padding-bottom: 6px; margin-bottom: 8px; }
-body.touch .ow-computer-desc { font-size: 13px; line-height: 1.45; }
 
 /* Menu ou carte ouverte : les commandes de vol sont rangees par la couche
    elle-meme (voir setContext), et les lignes d'etat laissent la place a la

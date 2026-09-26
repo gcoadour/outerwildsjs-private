@@ -127,6 +127,28 @@ const gp = extractGameplay(ctx);
 console.timeEnd("gameplay");
 const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
+// L'ordinateur de bord range ses lieux du Soleil au Nomade (`_locationData`),
+// et c'est cet ordre que `_locationIndex` parcourt (docs/132).
+check("l'ordre des lieux de l'ordinateur de bord",
+      ((gp.placed.ShipComputer || [])[0] || {}).listes
+        ? gp.placed.ShipComputer[0].listes._locationData.join() : null,
+      "Sun_Data,HourglassTwins_Data,TimberHearth_Data,BrittleHollow_Data,"
+      + "GiantsDeep_Data,DarkBramble_Data,Nomad_Data");
+{
+  // Les `TextMesh` : neuf dans la scene, lus a la main et bornes par
+  // l'oracle de `byteSize`.
+  const { textesDeScene } = await import("../web/src/pipeline/extract/interface.js");
+  const textes = textesDeScene(ctx);
+  check("les TextMesh de la scene", textes.length, 9);
+  const t = (nom, parent) => textes.find((x) => x.name === nom && (!parent || x.parent === parent)) || {};
+  check("le nom de l'ecran : taille de caractere 1,92, ancre au centre",
+        [t("NameText").characterSize.toFixed(2), t("NameText").anchor, t("NameText").font].join(),
+        "1.92,4,Gill Sans MT");
+  check("la fiche : ancree en haut a gauche", [t("DescriptionText").anchor, t("DescriptionText").alignment].join(), "0,0");
+  check("l'avis de l'ecran eteint", t("UpdateText").text, "database updated");
+  check("la notification du tir refuse, en casse mixte",
+        t("Text", "ProbeLaunchWindowObstructed").text, "Launch Window Obstructed");
+}
 // Ce que vise le rayon de `FirstPersonManipulator` : le collider du recepteur,
 // et ce que vise `ReferenceFrameTracker` : les spheres du calque 19 (docs/132).
 check("chaque recepteur porte son collider",

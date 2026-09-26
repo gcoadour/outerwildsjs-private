@@ -403,6 +403,15 @@ export function extractGameplay(ctx) {
       const info = ctx.ownerInfo(v);
       if (info && info.name) (entry.targets ||= {})[k] = info;
     }
+    // Et un TABLEAU de composants : l'ordre y est une donnee. `_locationData`
+    // de l'ordinateur de bord range les sept lieux du Soleil au Nomade, et
+    // `_locationIndex` (2 au depart) se lit dans cet ordre-la — pas dans celui
+    // de l'enumeration des secteurs, que le portage suivait.
+    for (const [k, v] of Object.entries(fields)) {
+      if (!Array.isArray(v) || !v.length || !v.every((x) => x && typeof x === "object" && "pathId" in x)) continue;
+      const noms = v.map((x) => (x.pathId ? (ctx.ownerInfo(x) || {}).name || null : null));
+      if (noms.some(Boolean)) (entry.listes ||= {})[k] = noms;
+    }
     // Texte des objets lisibles, resolu depuis le TextAsset.
     if (cls === "ReadableObject") {
       const t = ctx.textFor(fields._displayTextAsset);

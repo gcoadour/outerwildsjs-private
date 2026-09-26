@@ -29,7 +29,7 @@ import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI, MenuInput } from "./settings.js";
 import { loadTitre, TitleScreen, SKIP_INTRO_FLAGS } from "./titre.js";
-import { shipRecords, ShipComputer, Flashlight, Marshmallow,
+import { shipRecords, ShipComputer, suivreEcran, Flashlight, Marshmallow,
          heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts } from "./consoles.js";
@@ -37,7 +37,7 @@ import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust, detachVelocity } from "./crust.js";
 import { Interactables, OBSERVATORY_EVENTS } from "./interact.js";
-import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
+import { Ship, shipSpawn } from "./ship.js";
 import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT,
          REVEIL, Reveil } from "./start.js";
 import { loadAudioMap, AudioField, AudioMixer, signalStrength,
@@ -68,7 +68,7 @@ import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
 import { elevators, Elevator, LaunchTerminal, launchTerminals,
          elevatorControllers, RETURN_ABOVE, landingPadSensors,
          museumEntryways } from "./tower.js";
-import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
+import { Helmet, MasterAlarm, DamageDisplay, Notifications, notificationsDuBuild, helmetSettings,
          roastPrompts, roastBroken, shipProximity,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
@@ -122,6 +122,7 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
+import { EcranOrdinateur } from "./ecranordinateur.js";
 import { LockOn, aimedFrame, canFlyTo,
          ancientProbeAcceleration } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
@@ -150,7 +151,7 @@ import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer, isDay } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
-import { referenceFrames, DeclaredFrames, restingPoint,
+import { referenceFrames, DeclaredFrames, restingPoint, poseMobile, pointVivant,
          autopilotDistances, attachTarget,
          matchInitialVelocity } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
@@ -364,9 +365,11 @@ async function boot() {
   const camera = new BABYLON.FreeCamera("cam", BABYLON.Vector3.Zero(), scene);
   // `PlayerCamera` : plan proche a 0,05, plan lointain a 50 000. On garde le
   // proche du build et NON son lointain : le build n'affiche au-dela que des
-  // impostures rafraichies par `LODCameraSnapshot`, que ce portage ne fait pas
-  // — couper a 50 000 effacerait donc les planetes lointaines au lieu de les
-  // remplacer. Le lointain est le seul des deux qui soit un choix.
+  // impostures rafraichies par `LODCameraSnapshot`. Le portage les refait
+  // (imposters.js), mais trois cameras sur cinq seulement sont cablees dans
+  // l'alpha (docs/56) — couper a 50 000 effacerait donc Giant's Deep et le
+  // Hourglass au lieu de les remplacer. Le lointain est le seul des deux qui
+  // soit un choix.
   camera.minZ = 0.05;
   camera.maxZ = 200000;
   // Le champ de vision du build, et non celui de Babylon. `PlayerCamera` voit a
@@ -492,11 +495,16 @@ async function boot() {
     // dans `bodies`, et il se deplace bien plus que les planetes. Ce qu'il
     // porte — le paquetage de la cabine, les commandes, la trappe — se ramene
     // donc a SA position du moment, lue sur le corps simule.
+    //
+    // Et il TOURNE : le decalage porte le passage complet de sa pose de repos
+    // a celle du moment (`poseMobile`). Sa translation seule laissait la
+    // cabine a l'orientation de la tour une fois le vaisseau pose ailleurs —
+    // la trappe, le paquetage et le poste de pilotage a cote de leur place.
     if (bodyName === "Ship_Body") {
       if (!ship || !shipRest) return null;
-      return [ship.pos.x + framePos[0] - shipRest[0],
-              ship.pos.y + framePos[1] - shipRest[1],
-              ship.pos.z + framePos[2] - shipRest[2]];
+      return poseMobile(shipRest, shipRestRot,
+                        [ship.pos.x + framePos[0], ship.pos.y + framePos[1],
+                         ship.pos.z + framePos[2]], ship.quat);
     }
     if (!corpsParNom.size) {
       for (const b of bodies) if (b.bodyName) corpsParNom.set(b.bodyName, b);
@@ -963,6 +971,9 @@ async function boot() {
                                        ["EnterDarkZone", "ExitDarkZone"]);
   // Le secteur majeur actif de l'image courante, pour les controles navigateur.
   let secteurMajeur = null;
+  // Les secteurs ou le detecteur du joueur se trouve, pour n'annoncer que les
+  // entrees (`OnTriggerEnter`).
+  let secteursJoueur = new Set();
   // §7 l'equipement se RAMASSE : le portage le donnait d'emblee.
   const pickups = gearPickups(gameplay);
   const suits = suitVolumes(gameplay);
@@ -1406,6 +1417,17 @@ async function boot() {
     if (node) {
       // Detacher le vaisseau de sa hierarchie parente pour eliminer les rotations heritees
       node.parent = null;
+      // ... mais PAS le retournement qui va avec. L'exportateur ecrit le glTF
+      // en z miroir (`[x, y, -z]`), et c'est la racine du chargeur, puis le
+      // conteneur tourne d'un demi-tour, qui le remettent a l'endroit : la
+      // scene statique retombe exactement sur les coordonnees d'Unity. Le
+      // vaisseau detache perdait les deux et gardait le miroir. Son
+      // orientation etait bien celle du build, mais sa CABINE etait retournee
+      // bout pour bout : le cockpit a l'arriere, l'ordinateur de bord (z -2,24
+      // dans `Ship_Body`) a l'avant, face au hublot, et le joueur qu'on y
+      // assied — a la position du build — regardait le mur du fond. Le miroir
+      // se rend ici, sur le noeud, et tout ce qui y pend le suit.
+      node.scaling.set(1, 1, -1);
       if (node.getChildMeshes) {
         for (const m of node.getChildMeshes(false)) {
           // Rallumer la coque, pas ce que le build tient eteint.
@@ -1697,6 +1719,8 @@ async function boot() {
 
   // --- interface de jeu : jauges et invites ---
   const iface = await loadInterface();
+  // Le texte des notifications, celui de leurs `TextMesh`.
+  notifications.table = notificationsDuBuild((iface && iface.textes) || []);
   const uiRoot = document.getElementById("ui");
   const resHUD = iface && uiRoot ? new ResourceHUD(uiRoot, iface) : null;
   const prompts = iface && uiRoot ? new Prompts(uiRoot, iface) : null;
@@ -1753,6 +1777,10 @@ async function boot() {
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
   // L'ecran que le regard vise, assis a l'ordinateur.
   const cibleOrdinateur = ((((gameplay.placed || {}).ShipComputer || [])[0] || {}).targets || {})._targetPoint || null;
+  // Et l'ecran lui-meme, dans la cabine (ecranordinateur.js).
+  const ecranOrdi = new EcranOrdinateur(BABYLON, scene,
+    { cameras: camerasDuBuild, textes: (iface && iface.textes) || [] });
+  window.__ecranOrdi = ecranOrdi;
   const flashlight = new Flashlight(BABYLON, scene,
     (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
@@ -1882,7 +1910,6 @@ async function boot() {
       }
     } else if (therm && therm.isPlaying) { therm.stop(); objet.thermFrame = undefined; }
   }
-  const computerEl = document.getElementById("computer");
   // --- mixage par piste et emetteurs de signal ---
   const mixer = new AudioMixer();
   const transmitters = ((gameplay.placed || {}).AudioTransmitter || []).map((t) => ({
@@ -2575,18 +2602,16 @@ async function boot() {
    * `boot()`, ou il n'existe pas — une faute qui ne se declenchait qu'en
    * MONTANT dans le vaisseau, ce qu'aucun controle ne fait (docs/71).
    */
+  // Le siege suit la coque par le meme passage que la cabine. Il appliquait
+  // l'orientation ABSOLUE du vaisseau a un decalage deja exprime dans la
+  // scene, donc deja tourne une fois : depuis que le vaisseau part de sa pose
+  // de repos (couche a -90 degres), le pilote s'asseyait cinq unites au-dessus
+  // du poste, dans le toit.
   function siegeVivant(anchorPos) {
     if (!ship || !shipRest || !siegePilotage) return null;
-    const d = [siegePilotage.position[0] - shipRest[0],
-               siegePilotage.position[1] - shipRest[1],
-               siegePilotage.position[2] - shipRest[2]];
-    const r = quatRotate(ship.quat, d);
-    return {
-      position: [ship.pos.x + anchorPos[0] + r[0],
-                 ship.pos.y + anchorPos[1] + r[1],
-                 ship.pos.z + anchorPos[2] + r[2]],
-      rotation: quatMul(ship.quat, siegePilotage.rotation),
-    };
+    const pose = decalageDuCorps("Ship_Body", anchorPos);
+    return { position: pose.point(siegePilotage.position),
+             rotation: pose.rot(siegePilotage.rotation) };
   }
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   // Le champ de repos du telescope n'est pas un champ du telescope : c'est
@@ -4489,9 +4514,8 @@ async function boot() {
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
     sondeInteraction.repere = (it) => {
-      const sh = decalageDuCorps(it.body, anchorPos) || [0, 0, 0];
-      return [it.world[0] + sh[0] - anchorPos[0], it.world[1] + sh[1] - anchorPos[1],
-              it.world[2] + sh[2] - anchorPos[2]];
+      const w = pointVivant(it.world, decalageDuCorps(it.body, anchorPos));
+      return [w[0] - anchorPos[0], w[1] - anchorPos[1], w[2] - anchorPos[2]];
     };
     // --- dialogue ---
     //
@@ -4714,7 +4738,7 @@ async function boot() {
           // `ShipComputer.OnPressInteract` -> `EnterShipComputer` : on s'assied
           // (le point d'accrochage ci-dessous), l'ecran s'allume.
           if (!computer.open) {
-            computer.open = true;
+            computer.enter();
             const sb = sonsUI.shipComputerBoot();
             if (sb) audio.playOneShot(sb.file, { volume: sb.volume });
             console.log("annonce : EnterShipComputer");
@@ -4858,6 +4882,10 @@ async function boot() {
       // image — un interlocuteur pose sur une planete tourne avec elle.
       const cle = lu ? `lu:${lu.name}:${lu.world.join()}`
         : parle ? `parle:${parle.index}`
+        // L'ordinateur de bord avait sa cible et son reglage, mais pas de
+        // cle : le verrou ne se posait jamais, et l'on restait assis face au
+        // hublot, l'ecran hors du champ.
+        : computer.open && cibleOrdinateur ? "ordinateur"
         : consoles.active ? `console:${consoles.active.name}` : null;
       if (cle && verrouCible !== cle) {
         verrouCamera.lockOn(surCible, reglage);
@@ -5913,14 +5941,28 @@ async function boot() {
     probeCam.update(guiMode.hidden ? null : probes.last,
                     cmds.held("Alt Probe", etatCmd) && !consoles.active);
 
-    // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
-    if (player.field) {
-      const sec = SECTOR_OF[player.field.body.name];
-      const near = player.field.distance <
-        (player.field.body.gravity.upperSurfaceRadius || 200) * 3;
-      if (sec && near && pdata.saveExploredPlanet(sec)) {
-        console.log("secteur explore :", sec);
+    // --- connaissances : l'exploration s'enregistre en ENTRANT dans un secteur ---
+    //
+    // `ShipComputer.OnEnterSector`, abonne au `SectorDetector` du joueur :
+    // c'est l'ordinateur de bord qui tient le registre, et il le tient a
+    // l'entree des declencheurs de secteur. Le portage enregistrait un corps a
+    // trois rayons de sa surface, par une regle a lui.
+    {
+      const dedans = new Set();
+      for (const sct of majSecteurs) {
+        if (sct.secteur == null || !sct.volume) continue;
+        const pt = restingPoint(playerW, decalageDuCorps(sct.body, anchorPos));
+        if (insideVolume(sct, pt)) dedans.add(sct);
       }
+      for (const sct of dedans) {
+        if (secteursJoueur.has(sct)) continue;
+        const r = computer.entreSecteur(sct.secteur);
+        if (r) {
+          events.fire(r);
+          console.log(`annonce : ${r} — ${SECTORS[sct.secteur]}`);
+        }
+      }
+      secteursJoueur = dedans;
     }
     if (loop.loopCount > pdata.loopCount) pdata.setLoopCount(loop.loopCount);
 
@@ -6077,21 +6119,8 @@ async function boot() {
     if (computer.open && !(pointsAttache.current && pointsAttache.current.name === "ShipComputer")) {
       computer.open = false;
     }
-    if (computerEl) {
-      computerEl.hidden = !computer.open || guiMode.hidden;
-      if (computer.open) {
-        const d = computer.display();
-        computerEl.textContent = "";
-        const nm = document.createElement("div");
-        nm.className = "ow-computer-name";
-        nm.textContent = d.name;
-        const ds = document.createElement("div");
-        ds.className = "ow-computer-desc";
-        ds.textContent = d.description;
-        computerEl.appendChild(nm);
-        computerEl.appendChild(ds);
-      }
-    }
+    // L'ecran de la cabine : la boite HTML qui le remplacait est partie.
+    ecranOrdi.update(dt, computer, suivreEcran);
 
     // Etat de l'interface tactile : un menu ouvert sort la croix et suspend le
     // pilotage, la carte laisse ses gestes au canvas, la combinaison affiche le jetpack.
@@ -6757,11 +6786,8 @@ async function boot() {
       // annonce `EnterShip` ; sortir n'annonce que `ExitShip`, et la laisse
       // ouverte (docs/116-trappe.md).
       if (trappe.data.volume) {
-        const dec = decalageDuCorps(trappe.data.body, anchorPos) || [0, 0, 0];
-        const d = Math.hypot(
-          playerWorld.x - trappe.data.position[0] - dec[0],
-          playerWorld.y - trappe.data.position[1] - dec[1],
-          playerWorld.z - trappe.data.position[2] - dec[2]);
+        const c = pointVivant(trappe.data.position, decalageDuCorps(trappe.data.body, anchorPos));
+        const d = Math.hypot(playerWorld.x - c[0], playerWorld.y - c[1], playerWorld.z - c[2]);
         const franchi = trappe.setInside(d <= trappe.data.volume.radius);
         // `_hatchObject.SetActive` : ouvrir RETIRE le collider, il n'y a pas
         // d'animation. On le cherche dans le modele du vaisseau sous le nom
@@ -7019,9 +7045,9 @@ async function boot() {
     // poussee, la montee, la descente, le tangage, le lacet — et rien d'autre,
     // ni sonde ni carte.
     //
-    // La poussee est celle du VRAI vaisseau, faute d'un modele a lui : le
-    // build n'en pose aucun sur `ModelShip_Body`, et c'est dit ici plutot que
-    // presente comme mesure.
+    // La poussee est celle de SON `ThrusterModel` (`poussesModele`) : ce
+    // commentaire disait « celle du vrai vaisseau, faute d'un modele a lui »,
+    // longtemps apres que le modele eut recu le sien.
     let pousseeModele = [0, 0, 0];
     if (modele) {
       const auxCommandes = !!(consoles.active && consoles.active.flight);

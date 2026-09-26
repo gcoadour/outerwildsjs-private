@@ -8714,6 +8714,71 @@ check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
         teinteParticules([1, 1, 1, 1], [0.1, 0.1, 0.1, 0.1], "multiply").join(), "1,1,1,1");
 }
 
+// --- l'ordinateur de bord, dans la cabine (docs/132) ------------------------
+{
+  const { shipRecords, ShipComputer, suivreEcran, NOMS_LIEUX, TAILLE_SURVOL } =
+    await import("../web/src/consoles.js");
+  const { SECTORS, PlayerData } = await import("../web/src/playerdata.js");
+  const { poseMobile, restingPoint, pointVivant } = await import("../web/src/frames.js");
+  const { EYE_HEIGHT, DECALAGE_ASSISE } = await import("../web/src/start.js");
+  const donnees = (n, s, o) => ({ name: n, fields: { _sectorName: s, _orthoSize: o }, text: n });
+  const gp = { placed: {
+    SectorData: [donnees("TimberHearth_Data", 3, 0.85), donnees("Sun_Data", 8, 4),
+                 donnees("GiantsDeep_Data", 5, 2), donnees("DarkBramble_Data", 6, 2),
+                 donnees("BrittleHollow_Data", 4, 0.85), donnees("Nomad_Data", 1, 1),
+                 donnees("HourglassTwins_Data", 2, 0.85)],
+    ShipComputer: [{ listes: { _locationData: ["Sun_Data", "HourglassTwins_Data",
+      "TimberHearth_Data", "BrittleHollow_Data", "GiantsDeep_Data", "DarkBramble_Data",
+      "Nomad_Data"] } }] } };
+  const lieux = shipRecords(gp);
+  check("l'ordre de `_locationData` : du Soleil au Nomade",
+        lieux.map((r) => r.sector).join(), "8,2,3,4,5,6,1");
+  delete gp.placed.ShipComputer;
+  check("sans l'ordre de la scene, celui de `NameToIndex`",
+        shipRecords(gp).map((r) => r.sector).join(), "8,2,3,4,5,6,1");
+  check("les noms de `SectorData.Awake`", NOMS_LIEUX[3] + "|" + NOMS_LIEUX[1], "Timber Hearth|The Nomad");
+  const pd = { vus: new Set(["TimberHearth"]), hasExplored(n) { return this.vus.has(n); },
+               saveExploredPlanet(n) { this.vus.add(n); return true; } };
+  const c = new ShipComputer(lieux, SECTORS, pd);
+  check("`_locationIndex` part a 2 : Timber Hearth", c.current.sector, 3);
+  check("l'ecran : le nom avec ses espaces, pas celui de l'enumeration",
+        c.display().name, "<   Timber Hearth   >");
+  c.move(-1); c.move(-1); c.move(-1);
+  check("a gauche, on bute sur le Soleil", c.current.sector, 8);
+  // `OnEnterSector` : ordinateur eteint, un lieu neuf allume l'avis.
+  const r = c.entreSecteur(4);
+  check("entrer dans Brittle Hollow l'enregistre et l'annonce",
+        [r, pd.hasExplored("BrittleHollow"), c.misAJour, c.current.sector].join(), "ComputerUpdated,true,true,4");
+  check("un lieu deja vu ne dit rien", c.entreSecteur(4), null);
+  check("la Lune (secteur 0) n'a pas d'indice", c.entreSecteur(0), null);
+  c.enter();
+  check("la mise en route eteint l'avis", c.misAJour, false);
+  check("au premier niveau, la camera vise a la taille 5",
+        c.cibleEcran().taille, TAILLE_SURVOL);
+  c.select();
+  check("dans la fiche, a la taille du lieu", c.cibleEcran().taille, 0.85);
+  // `ShipComputerCamera.Update` : cinq par seconde.
+  const e = suivreEcran({ x: 0, y: 0, taille: 11.38 }, { x: 1, y: 0, taille: 5 }, 0.1);
+  check("la camera parcourt la moitie du chemin en un dixieme de seconde",
+        [e.x.toFixed(2), e.taille.toFixed(3)].join(), "0.50,8.190");
+  // Le vaisseau tourne : la cabine le suit.
+  const qx = [Math.sin(-Math.PI / 4), 0, 0, Math.cos(-Math.PI / 4)];
+  const pose = poseMobile([10, 0, 0], qx, [20, 0, 0], [0, 0, 0, 1]);
+  const p = pointVivant([10, 1, 0], pose);
+  check("un point de la cabine suit la rotation du vaisseau",
+        p.map((v) => +v.toFixed(3) + 0).join(), "20,0,1");
+  check("et `restingPoint` le ramene au repos",
+        restingPoint(p, pose).map((v) => +v.toFixed(3) + 0).join(), "10,1,0");
+  check("a la pose de repos, le passage est une translation",
+        pointVivant([10, 1, 0], poseMobile([10, 0, 0], qx, [12, 0, 0], qx)).map((v) => +v.toFixed(3) + 0).join(),
+        "12,1,0");
+  check("les yeux a 1,9 du sol, comme `PlayerCamera`", +(0.6 + EYE_HEIGHT).toFixed(3), 1.9);
+  check("assis, a 0,9 au-dessus du point", +(EYE_HEIGHT + DECALAGE_ASSISE[1]).toFixed(3), 0.9);
+  const siege = new AttachPoint({ position: [10, 1, 0], rotation: [0, 0, 0, 1] });
+  check("un point d'accrochage du vaisseau suit sa rotation",
+        siege.frame(pose).position.map((v) => +v.toFixed(3) + 0).join(), "20,0,1");
+}
+
 check("Timber Hearth : un bleu de nuit a 0,12",
       ambientLight(1).map((x) => x.toFixed(3)).join(), "0.090,0.090,0.118");
 check("la comete : le noir", ambientLight(0).join(), "0,0,0");

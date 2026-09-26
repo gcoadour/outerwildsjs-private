@@ -240,15 +240,35 @@ export class DamageDisplay {
  * (docs/121-avis.md).
  */
 export const NOTIFICATIONS = {
-  ProbeLaunchAborted: { texte: "PROBE LAUNCH WINDOW OBSTRUCTED", duree: 1.5 },
+  ProbeLaunchAborted: { objet: "ProbeLaunchWindowObstructed", texte: "Launch Window Obstructed",
+                        duree: 1.5 },
 };
 
+/**
+ * Le texte de chaque notification, lu sur son `TextMesh` (interface.json).
+ *
+ * Le portage ecrivait « PROBE LAUNCH WINDOW OBSTRUCTED », en capitales et
+ * avec un mot de plus. L'objet que `NotificationManager` allume porte un
+ * enfant `Text` : « Launch Window Obstructed », en casse mixte — la police
+ * digital-7 ne convertit rien (`m_ConvertCase` -2).
+ */
+export function notificationsDuBuild(textes = []) {
+  const out = {};
+  for (const [k, n] of Object.entries(NOTIFICATIONS)) {
+    const t = (textes || []).find((x) => x.parent === n.objet);
+    out[k] = t && t.text ? { ...n, texte: t.text } : n;
+  }
+  return out;
+}
+
 export class Notifications {
-  constructor() { this.current = null; this.t0 = 0; this.duration = 0; }
+  constructor(table = NOTIFICATIONS) {
+    this.table = table; this.current = null; this.t0 = 0; this.duration = 0;
+  }
 
   /** L'annonce du build, telle qu'elle arrive — ou null si elle n'en pose pas. */
   annonce(evenement, t = 0) {
-    const n = NOTIFICATIONS[evenement];
+    const n = this.table[evenement];
     if (!n) return null;
     return this.display(n.texte, n.duree, t);
   }

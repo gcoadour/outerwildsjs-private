@@ -1347,3 +1347,81 @@ sous la coque.
 
 Le satellite reçoit de même son `NoiseEffect` monochrome — grain et rayures —
 par-dessus le gris.
+
+### La cabine était retournée bout pour bout
+
+Assis à l'ordinateur de bord, le portage regardait… par le hublot. La mesure
+dans le repère du vaisseau l'a dit tout de suite : le point d'accrochage de
+`ShipComputer` est à z = −2,24 dans `Ship_Body` — à l'**arrière** de la
+cabine, tourné vers la paroi du fond, où se trouve l'écran (z = −3,53) —, et
+le nœud glTF du même objet se dessinait à z = +2,24. Tout l'intérieur était en
+miroir : cockpit à l'arrière, ordinateur à l'avant.
+
+L'exportateur écrit le glTF en z miroir (`[x, y, −z]`) ; la racine du chargeur
+de Babylon puis le conteneur tourné d'un demi-tour le remettent à l'endroit,
+et la scène statique retombe exactement sur les coordonnées d'Unity. Le
+vaisseau, lui, est **détaché** de cette hiérarchie pour être mené par la
+simulation — et perdait le retournement avec. Il se rend désormais sur le
+nœud (`scaling (1, 1, −1)`), et tout ce qui pend au vaisseau suit : colliders
+animés, trappe, fissures.
+
+Deux défauts se cachaient derrière :
+
+- **le siège du pilote** appliquait l'orientation *absolue* du vaisseau à un
+  décalage déjà exprimé dans la scène, donc déjà tourné une fois. Depuis que
+  le vaisseau part de sa pose de repos (couché à −90 degrés), le pilote
+  s'asseyait cinq unités au-dessus du poste, dans le toit. Il est à
+  (0 ; 1,4 ; 3,7) dans le repère du vaisseau : le poste, plus 0,9 ;
+- **les zones de la cabine** ne suivaient que la *translation* du vaisseau.
+  Posé ailleurs qu'au sommet de la tour, dans une autre assiette, « Open
+  Hatch », « Gear Up », « Boot Up » et le poste restaient à l'orientation de
+  repos. Le décalage du vaisseau porte désormais le passage complet
+  (`frames.js`, `poseMobile`), que `restingPoint`, les zones et les points
+  d'accrochage savent lire.
+
+### La hauteur des yeux
+
+`PlayerCamera` est à (0 ; 0,9 ; 0,15) dans `Player_Body`, dont la capsule
+(rayon 0,5, hauteur 2) est centrée sur l'origine : les yeux sont à 1,9 du sol.
+Le portage a une sphère de 0,6 et posait les yeux à 1,2 de son centre — 1,8
+du sol debout, un dixième trop bas. Et un point d'accrochage pose le
+**centre** du corps : assis, les yeux étaient à 1,2 au-dessus du point au lieu
+de 0,9, et l'écran de l'ordinateur passait sous le regard. Les yeux sont
+désormais à 1,3 du centre de la sphère, et le point d'accrochage pose la
+sphère 0,4 plus bas (`start.js`, `DECALAGE_ASSISE`).
+
+### L'écran de l'ordinateur de bord
+
+Le portage affichait la consultation dans une boîte HTML au milieu de l'écran.
+Le build n'a pas de boîte : il a **un écran dans la cabine**, `ComputerScreen`,
+et une `RenderTexture` de 1024 × 1024 que remplissent deux caméras :
+
+- `MovingCamera`, orthographique, 4/3 forcé : elle voit les sept sprites de
+  lieu (`SectorData`, pleins si le lieu est exploré, en contour sinon) et s'en
+  approche à cinq par seconde (`ShipComputerCamera.Update`) — taille 5 au
+  premier niveau, celle du lieu dans sa fiche (0,85 pour Timber Hearth) ;
+- `StaticCamera`, taille 5, sans effacer : les deux `TextMesh`, le nom en haut
+  et la fiche en bas à gauche.
+
+C'est ce que rend désormais `ecranordinateur.js`. Les `TextMesh` — neuf dans la
+scène, classe absente de `unity41-types.json` — se lisent à la main, bornés
+par l'oracle de `byteSize`. Éteint, l'écran montre l'aplat bleu et le logo ;
+un lieu découvert entre-temps y met « database updated » et son icône qui
+clignote (`OnEnterSector`).
+
+Trois écarts de données tombaient au passage :
+
+- **l'ordre des lieux** est celui de `_locationData`, du Soleil au Nomade ; le
+  portage triait par numéro de secteur, ce qui permutait les deux bouts ;
+- **les noms** sont ceux de `SectorData.Awake` — « Timber Hearth », « The
+  Nomad » — et non ceux de l'énumération (« TimberHearth ») ;
+- **l'exploration** s'enregistre à l'**entrée d'un secteur**, par
+  l'ordinateur lui-même, et non à trois rayons d'une surface.
+
+Enfin, le verrou du regard sur l'écran (`LockOn(_targetPoint, 1, zoom, 8)`)
+avait sa cible et son réglage, mais pas de clé : il ne se posait jamais. Et la
+notification du tir refusé dit ce que dit son `TextMesh`, « Launch Window
+Obstructed », et non « PROBE LAUNCH WINDOW OBSTRUCTED ».
+
+Reste une différence assumée : le flou de mouvement de `MovingCamera` (0,6),
+un effet d'accumulation qui n'adoucit qu'un glissement d'une demi-seconde.

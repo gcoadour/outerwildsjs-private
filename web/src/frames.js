@@ -131,7 +131,64 @@ export function frameAt(frames, worldPoint, shiftOf = null) {
  */
 export function restingPoint(worldPoint, shift) {
   if (!shift) return worldPoint;
+  // Un porteur qui TOURNE — le vaisseau — donne avec son deplacement le
+  // passage complet (`poseMobile`) : sa translation seule laissait les volumes
+  // de la cabine a l'orientation de repos une fois le vaisseau pose ailleurs.
+  if (typeof shift.repos === "function") return shift.repos(worldPoint);
   return [worldPoint[0] - shift[0], worldPoint[1] - shift[1], worldPoint[2] - shift[2]];
+}
+
+/** Le point de repos porte a sa place du moment : `restingPoint` a l'envers. */
+export function pointVivant(restPoint, shift) {
+  if (!shift) return restPoint;
+  if (typeof shift.point === "function") return shift.point(restPoint);
+  return [restPoint[0] + shift[0], restPoint[1] + shift[1], restPoint[2] + shift[2]];
+}
+
+/** L'orientation de repos portee a celle du moment (identite sans rotation). */
+export function rotationVivante(restRotation, shift) {
+  if (!restRotation || !shift || typeof shift.rot !== "function") return restRotation;
+  return shift.rot(restRotation);
+}
+
+const qmulF = (a, b) => [
+  a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+  a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+  a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+  a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+const qrotF = (q, v) => {
+  const [x, y, z, w] = q;
+  const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz),
+          v[2] + w * tz + (x * ty - y * tx)];
+};
+
+/**
+ * Le deplacement d'un porteur qui tourne : de sa pose de repos (`repos`,
+ * `qRepos`) a sa pose du moment (`pos`, `q`).
+ *
+ * C'est un tableau — la translation de son origine, comme tout decalage —
+ * qui porte en plus les trois passages complets : `point` (repos -> moment),
+ * `repos` (moment -> repos) et `rot` (orientation). Les lecteurs qui ne
+ * connaissent que la translation restent justes a l'origine du porteur ; ceux
+ * qui passent par `restingPoint`, `pointVivant` et `rotationVivante` le sont
+ * partout.
+ */
+export function poseMobile(repos, qRepos, pos, q) {
+  const qr = qRepos || [0, 0, 0, 1];
+  const delta = qmulF(q || qr, [-qr[0], -qr[1], -qr[2], qr[3]]);
+  const inv = [-delta[0], -delta[1], -delta[2], delta[3]];
+  const out = [pos[0] - repos[0], pos[1] - repos[1], pos[2] - repos[2]];
+  out.point = (w) => {
+    const r = qrotF(delta, [w[0] - repos[0], w[1] - repos[1], w[2] - repos[2]]);
+    return [pos[0] + r[0], pos[1] + r[1], pos[2] + r[2]];
+  };
+  out.repos = (w) => {
+    const r = qrotF(inv, [w[0] - pos[0], w[1] - pos[1], w[2] - pos[2]]);
+    return [repos[0] + r[0], repos[1] + r[1], repos[2] + r[2]];
+  };
+  out.rot = (r) => (r ? qmulF(delta, r) : r);
+  return out;
 }
 
 /**

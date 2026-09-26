@@ -1007,11 +1007,29 @@ def _run(url, heavy, profil=None, zip_path=None):
               index: window.__consoles.computer.index,
               assis: window.__assise.points.current ? window.__assise.points.current.name : null,
               gauche: [...document.querySelectorAll('.ow-prompts-left .ow-prompt')].map((n) => n.textContent.trim()) })""")
+            # L'ecran de la cabine : la texture de rendu a la place de l'aplat,
+            # et devant les yeux — le verrou du regard converge lentement sans
+            # GPU, on attend donc que l'ecran entre dans le champ.
+            ecran_js = """() => { const e = window.__ecranOrdi, sc = BABYLON.EngineStore.LastCreatedScene;
+              if (!e || !e.pret) return null; const cam = sc.activeCamera, eng = sc.getEngine();
+              e.ecran.computeWorldMatrix(true);
+              const p = BABYLON.Vector3.Project(e.ecran.getAbsolutePosition(), BABYLON.Matrix.Identity(),
+                sc.getTransformMatrix(), cam.viewport.toGlobal(eng.getRenderWidth(), eng.getRenderHeight()));
+              const u = p.x / eng.getRenderWidth(), v = p.y / eng.getRenderHeight();
+              return { ecran: e.ecran.isVisible, splash: e.splash ? e.splash.isVisible : null,
+                       rendu: sc.customRenderTargets.includes(e.rtt),
+                       texte: e.dernierTexte, champ: p.z > 0 && p.z < 1 && u > 0.1 && u < 0.9 && v > 0.1 && v < 0.9 }; }"""
+            try:
+                page.wait_for_function(f"() => {{ const r = ({ecran_js})(); return r && r.champ; }}", timeout=30000)
+            except Exception:
+                pass
+            ecran = page.evaluate(ecran_js)
             page.keyboard.down("KeyD"); page.wait_for_timeout(600); page.keyboard.up("KeyD"); page.wait_for_timeout(1500)
             ordi_d = page.evaluate("() => window.__consoles.computer.index")
             page.keyboard.down("KeyQ"); page.wait_for_timeout(600); page.keyboard.up("KeyQ"); page.wait_for_timeout(2000)
             ordi_q = page.evaluate("""() => ({ open: window.__consoles.computer.open,
               assis: window.__assise.points.current ? window.__assise.points.current.name : null })""")
+            ecran_q = page.evaluate(ecran_js)
             page.evaluate("() => window.__placerZone('FlightConsole')")
             attendre_invite()
             avec = invites()
@@ -1024,6 +1042,13 @@ def _run(url, heavy, profil=None, zip_path=None):
                 assis = page.evaluate("() => window.__shipRef.boarded")
                 if assis:
                     break
+            # Le pilote au poste, les yeux a 0,9 au-dessus du point : dans le
+            # repere du vaisseau, (0 ; 1,4 ; 3,74). Le siege appliquait deux
+            # fois l'orientation de repos, et l'on s'asseyait dans le toit.
+            page.wait_for_timeout(3000)
+            oeil_pilote = page.evaluate("""() => { const s = window.__shipRef, a = s.axes, c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
+              const d = [c.position.x - s.pos.x, c.position.y - s.pos.y, c.position.z - s.pos.z];
+              return [a.right, a.up, a.fwd].map((ax) => +(d[0]*ax[0] + d[1]*ax[1] + d[2]*ax[2]).toFixed(1)); }""")
             # On se LEVE par la touche, comme un joueur : ecrire `boarded` a
             # faux laissait les commandes du vaisseau en place, et la marche
             # qu'on mesure plus loin se faisait a la poussee.
@@ -1054,6 +1079,17 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("D parcourt (Move X), Q fait se lever (Cancel)",
                    [ordi_d - ordi["index"], ordi_q["open"], ordi_q["assis"]], [1, False, None])
             rep.eq("au poste avec : « Buckle Up », et l'on s'assoit", [avec, assis], [["Buckle Up"], True])
+            if ecran:
+                rep.eq("l'ordinateur allume : l'ecran de la cabine rend sa camera, l'aplat s'eteint, "
+                       "l'ecran est dans le champ",
+                       [ecran["ecran"], ecran["splash"], ecran["rendu"], ecran["champ"]], [True, False, True, True])
+                rep.eq("son texte : le nom du build, avec ses espaces",
+                       (ecran["texte"] or "").split("\n")[0], "<   Timber Hearth   >")
+            if ecran_q:
+                rep.eq("et eteint, l'aplat revient", [ecran_q["ecran"], ecran_q["splash"], ecran_q["rendu"]],
+                       [False, True, False])
+            if assis:
+                rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.7])
 
         # --- la console du satellite : des instantanes (docs/132) ----------------
         #
