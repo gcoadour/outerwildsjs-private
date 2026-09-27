@@ -3197,41 +3197,6 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("la fin des temps est suspendue si et seulement si les codes"
                    " sont inconnus", boucle["prevenue"], not boucle["codes"])
 
-        # --- le vaisseau stationne survit a un changement de repere ------------
-        #
-        # Le joueur part pour Brittle Hollow — le repere passe au corps
-        # d'arrivee, puis au Soleil — et revient. Le vaisseau stationne ne
-        # doit pas bouger de ses pads : l'ecart de vitesse de chaque changement
-        # le decrochait, et le retour le lancait a six cents unites par seconde.
-        voyage = page.evaluate("""() => { const agg = window.__player.body; if (!window.__versCadre) return null;
-          const p = agg.transformNode.position; window.__retourVoyage = [p.x, p.y, p.z];
-          const s0 = window.__shipRef; window.__vaisseauAvant = Math.round(Math.hypot(s0.pos.x, s0.pos.y, s0.pos.z));
-          const P = window.__versCadre([11599, 3, 151], "BrittleHollow_Body");
-          agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
-          agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); return true; }""")
-        if voyage:
-            try:
-                page.wait_for_function("() => /BrittleHollow|Sun/.test(window.__origin ? window.__origin.anchorName : '')", timeout=20000)
-            except Exception:
-                page.wait_for_timeout(8000)
-            page.evaluate("""() => { const agg = window.__player.body;
-              const P = window.__versCadre([-1, -26, -8721], "TimberHearth_Body");
-              agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
-              agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); }""")
-            try:
-                page.wait_for_function("() => /HomePlanet/.test(window.__origin ? window.__origin.anchorName : '')", timeout=20000)
-            except Exception:
-                page.wait_for_timeout(8000)
-            page.wait_for_timeout(2000)
-            revenu = page.evaluate("""() => { const s = window.__shipRef;
-              const r = window.__retourVoyage, agg = window.__player.body;
-              agg.transformNode.position.set(r[0], r[1], r[2]); agg.body.disablePreStep = false;
-              agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
-              return [Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)) - window.__vaisseauAvant,
-                      Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
-            rep.eq("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
-                   revenu, [0, 0, True])
-
         # --- ce que « pose » veut dire (docs/89-pose.md) ----------------------
         #
         # `padLanding` etait ecrite, eprouvee, et appelee par personne : le
@@ -3597,6 +3562,50 @@ def _run(url, heavy, profil=None, zip_path=None):
           window.__pdata.knowsLaunchCodes = codes;
         }""", codesAvant)
         page.wait_for_timeout(600)
+
+        # --- le vaisseau stationne survit a un changement de repere ------------
+        #
+        # EN DERNIER : le joueur y est deplace a la main dans un repere qui
+        # file a deux cents unites par seconde, et sans GPU il arrive dans le
+        # vide avant d'etre rattrape. Rien apres ne doit en heriter.
+        #
+        # Le joueur part pour Brittle Hollow — le repere passe au corps
+        # d'arrivee, puis au Soleil — et revient. Le vaisseau stationne ne
+        # doit pas bouger de ses pads : l'ecart de vitesse de chaque changement
+        # le decrochait, et le retour le lancait a six cents unites par seconde.
+        voyage = page.evaluate("""() => { const agg = window.__player.body; if (!window.__versCadre) return null;
+          const p = agg.transformNode.position; window.__retourVoyage = [p.x, p.y, p.z];
+          const s0 = window.__shipRef; window.__vaisseauAvant = Math.round(Math.hypot(s0.pos.x, s0.pos.y, s0.pos.z));
+          const P = window.__versCadre([11599, 3, 151], "BrittleHollow_Body");
+          agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); return true; }""")
+        if voyage:
+            try:
+                page.wait_for_function("() => /BrittleHollow|Sun/.test(window.__origin ? window.__origin.anchorName : '')", timeout=20000)
+            except Exception:
+                page.wait_for_timeout(8000)
+            page.evaluate("""() => { const agg = window.__player.body;
+              const P = window.__versCadre([-1, -26, -8721], "TimberHearth_Body");
+              agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); }""")
+            try:
+                page.wait_for_function("() => /HomePlanet/.test(window.__origin ? window.__origin.anchorName : '')", timeout=20000)
+            except Exception:
+                page.wait_for_timeout(8000)
+            page.wait_for_timeout(2000)
+            revenu = page.evaluate("""() => { const s = window.__shipRef;
+              const r = window.__retourVoyage, agg = window.__player.body;
+              agg.transformNode.position.set(r[0], r[1], r[2]); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+              // Le joueur deplace a la main a recu, au changement de repere du
+              // retour, l'ecart de vitesse des deux corps : on la lui retire,
+              // sans quoi il file a deux cents unites par seconde et les
+              // controles suivants le cherchent ailleurs.
+              const v = window.__player.vel; v.x = 0; v.y = 0; v.z = 0;
+              return [Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)) - window.__vaisseauAvant,
+                      Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
+            rep.eq("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
+                   revenu, [0, 0, True])
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
