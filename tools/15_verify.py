@@ -3185,8 +3185,13 @@ def _run(url, heavy, profil=None, zip_path=None):
             page.wait_for_timeout(300)
             att3 = page.evaluate("() => ({ on: window.__atterrissage.on,"
                                  " roule: window.__atterrissage.rollByDefault,"
-                                 " flip: window.__atterrissage.flipRollFactor })")
+                                 " flip: window.__atterrissage.flipRollFactor,"
+                                 " mode: window.__modes.mode })")
             rep.eq("ressortir la referme", att3["on"], False)
+            # `ExitLandingView` rend l'ensemble SAUVE en entrant — celui du
+            # poste (`Modes.sort` : « rendu »). Le portage restait dans celui
+            # de l'atterrissage (docs/132).
+            rep.eq("et rend les commandes du poste", att3["mode"], "rendu")
             rep.eq("le manche relace", att3["roule"], False)
             rep.eq("et le roulis reprend son sens", att3["flip"], 1)
 

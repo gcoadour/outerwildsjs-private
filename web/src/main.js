@@ -3475,6 +3475,10 @@ async function boot() {
     if (est("Landing Camera") && ship && ship.boarded) {
       const t = atterrissage.toggle(performance.now() / 1000,
                                     viseeVitesseRelative());
+      // `ExitLandingView` rend les commandes du poste. L'annonce partait dans
+      // `atterrissage.events` et n'allait nulle part : ressorti de la vue, on
+      // restait dans le jeu de commandes de l'atterrissage (docs/132).
+      if (t && t.sortie) modes.annonce("ExitLandingView");
       if (t && t.snap) {
         // Le regard bascule des l'APPUI, la camera 0,45 s plus tard : on voit
         // le sol arriver avant d'y etre.

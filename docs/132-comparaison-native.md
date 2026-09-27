@@ -1730,3 +1730,14 @@ pas, ou pas à cette place :
   enfants dans l'ordre de la scène — arrière, avant, gauche, droite, haut —,
   qui clignotent à la demi-seconde, un par pièce touchée. Le portage
   calculait tout cela (`DamageDisplay`) et n'en dessinait rien.
+
+### Ressortir de la vue d'atterrissage rendait mal les commandes
+
+En menant le portage au poste puis en vol (`scripts/pw-poste.mjs` : poste,
+vue d'atterrissage, retour, décollage, verrou), une trace a montré le jeu de
+commandes resté sur « atterrissage » après la sortie de la vue. `toggle`
+poussait bien `ExitLandingView` dans les annonces de la vue, mais rien ne la
+portait jusqu'aux modes : l'entrée passait par `update`, la sortie par la
+touche, et seule l'entrée était relayée. Ressortir de la vue rend
+maintenant l'ensemble sauvé en entrant — celui du poste —, comme
+`OWInput.OnExitLandingView`.
