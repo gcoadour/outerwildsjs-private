@@ -154,6 +154,14 @@ export const YEUX_CAPSULE = 0.9;
 export const EYE_HEIGHT = CENTRE_CAPSULE - PLAYER_RADIUS + YEUX_CAPSULE;
 
 /**
+ * Et `PlayerCamera` est 0,15 DEVANT le centre du corps, dans son avant
+ * horizontal. Le portage mettait l'oeil a l'aplomb : assis a l'ordinateur, il
+ * etait 15 centimetres plus loin de l'ecran que dans l'alpha, et l'ecran
+ * paraissait un dixieme plus petit a zoom egal (docs/132).
+ */
+export const AVANT_CAMERA = 0.15;
+
+/**
  * `PlayerAttachPoint.AttachPlayer` pose le transform du joueur — le centre de
  * la capsule — sur le point. Le centre de la sphere du portage est 0,4 plus
  * bas, dans le repere du point : c'est ce qui met les yeux a 0,9 au-dessus du

@@ -1378,8 +1378,9 @@ def _run(url, heavy, profil=None, zip_path=None):
             # soit 1,3 du centre de la sphere de 0,6 du portage (docs/132).
             rep.near("les yeux sont a 1,3 u au-dessus du centre du joueur",
                      round(depart["haut"], 3), 1.3, 0.05)
-            rep.at_most("... et exactement au-dessus, pas de cote",
-                        round(depart["cote"], 3), 0.01)
+            # `PlayerCamera` est a 0,15 DEVANT le centre du corps (docs/132).
+            rep.near("... et 0,15 devant, comme PlayerCamera",
+                     round(depart["cote"], 3), 0.15, 0.01)
             # On tombe d'une garde d'un demi-metre, pas de quarante unites.
             rep.at_most("on se pose au point d'apparition",
                         round(depart["derive"], 2), 10)

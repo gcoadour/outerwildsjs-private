@@ -38,7 +38,7 @@ import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
 import { crustCarriers, Crust, detachVelocity } from "./crust.js";
 import { Interactables, OBSERVATORY_EVENTS } from "./interact.js";
 import { Ship, shipSpawn } from "./ship.js";
-import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT,
+import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT, AVANT_CAMERA,
          REVEIL, Reveil } from "./start.js";
 import { loadAudioMap, AudioField, AudioMixer, signalStrength,
          audioShells, AudioShells } from "./audio.js";
@@ -4288,9 +4288,11 @@ async function boot() {
         maxZAvantAtterrissage = null;
       }
       if (grainPose && grainAtterrissage) { camera.detachPostProcess(grainAtterrissage); grainPose = false; }
-      camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
-                          player.pos.y + up.y * EYE_HEIGHT,
-                          player.pos.z + up.z * EYE_HEIGHT);
+      // L'avant du CORPS, horizontal : `PlayerCamera` est a 0,15 devant.
+      const avCorps = north.scale(cy).add(east.scale(sy));
+      camera.position.set(player.pos.x + up.x * EYE_HEIGHT + avCorps.x * AVANT_CAMERA,
+                          player.pos.y + up.y * EYE_HEIGHT + avCorps.y * AVANT_CAMERA,
+                          player.pos.z + up.z * EYE_HEIGHT + avCorps.z * AVANT_CAMERA);
       camera.upVector = up;
       camera.setTarget(camera.position.add(fwd));
     }
@@ -5024,6 +5026,7 @@ async function boot() {
         // Le tangage du portage BAISSE le regard quand il croit.
         pitch = borneTangage(pitch - ecartY * Math.PI / 180
           * Math.min(1, verrouCamera.followRate * dt), cfgRegard);
+        window.__verrouTangage = { ecart: ecartY, pitch };
       } else verrouFOV = null;
     }
 

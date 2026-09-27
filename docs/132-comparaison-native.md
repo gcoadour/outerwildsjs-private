@@ -1561,5 +1561,12 @@ Côte à côte, cinq écarts sont tombés :
 - **le seuil d'alpha** : `AlphaTest Greater 0`, et non les 0,4 de Babylon, qui
   jetaient l'entrelacement (alpha 0,11) tout entier.
 
-Reste la taille des invites, que les deux captures ne tranchent pas : l'alpha a
-été prise en 640 × 360 et le portage en 960 × 540.
+La taille des invites, elle, se tranche à résolution égale : l'alpha les
+dessine à taille fixe en pixels (grandes en 640 × 360, petites en 1280 × 720),
+le portage à l'échelle de la hauteur, et les deux coïncident en 1280 × 720.
+Ce qui restait d'écart dans le cadrage venait de l'**œil** : `PlayerCamera`
+est à (0 ; 0,9 ; **0,15**) dans `Player_Body`, quinze centimètres devant le
+centre du corps, et le portage le mettait à l'aplomb — plus loin de l'écran,
+qui paraissait un dixième plus petit. Mesuré en 1280 × 720 : l'écran remplit
+le champ dans les deux versions, le titre, « [records available] » et les
+invites aux mêmes places.
