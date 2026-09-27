@@ -1508,3 +1508,24 @@ entrait dans un courant resté à sa place de repos et en recevait la vitesse. L
 joueur avait le même défaut. Chaque milieu suit désormais le corps qui le porte
 (`fluidAt` lit le point dans la scène au repos de ce corps), et l'extraction des
 océans donne leur corps.
+
+### La supernova, côte à côte (F12)
+
+Les touches de mise au point donnent enfin un moyen de comparer la fin de la
+boucle sans attendre dix-huit minutes à une image par seconde : F12 dans les
+deux versions, réveillé au feu de camp, la tour en face.
+
+- **L'alpha native** : la nuit du réveil vire au plein jour — le sol, les
+  sapins et la tour éclairés de face par l'explosion —, le reste une
+  trentaine de secondes d'horloge murale, puis retombe à la nuit. Pas de mort
+  dans les cent secondes capturées.
+- **Le portage** : la même séquence, la même lumière de plein jour sur la
+  même scène, puis le retour à la nuit ; l'onde est lancée et son son de mort
+  demandé, sans mort non plus dans la fenêtre mesurée.
+
+Les délais ne se comparent pas à la montre : l'effondrement est **par image**
+(`Lerp(échelle, fin, 3 × deltaTime)`, 1,6 s à 60 images par seconde), et sous
+Xvfb le rendu logiciel fait tomber l'alpha à quelques images par seconde, où
+Unity borne chaque `deltaTime` : son horloge de jeu retarde sur la montre. Le
+portage, lui, a été mesuré sur son horloge de jeu. Ce qui se compare est la
+suite des états et leur rendu, et ils concordent.
