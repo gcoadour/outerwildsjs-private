@@ -3205,6 +3205,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         # le decrochait, et le retour le lancait a six cents unites par seconde.
         voyage = page.evaluate("""() => { const agg = window.__player.body; if (!window.__versCadre) return null;
           const p = agg.transformNode.position; window.__retourVoyage = [p.x, p.y, p.z];
+          const s0 = window.__shipRef; window.__vaisseauAvant = Math.round(Math.hypot(s0.pos.x, s0.pos.y, s0.pos.z));
           const P = window.__versCadre([11599, 3, 151], "BrittleHollow_Body");
           agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
           agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); return true; }""")
@@ -3226,10 +3227,10 @@ def _run(url, heavy, profil=None, zip_path=None):
               const r = window.__retourVoyage, agg = window.__player.body;
               agg.transformNode.position.set(r[0], r[1], r[2]); agg.body.disablePreStep = false;
               agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
-              return [Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)),
+              return [Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)) - window.__vaisseauAvant,
                       Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
             rep.eq("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
-                   revenu, [172, 0, True])
+                   revenu, [0, 0, True])
 
         # --- ce que « pose » veut dire (docs/89-pose.md) ----------------------
         #
@@ -3458,8 +3459,23 @@ def _run(url, heavy, profil=None, zip_path=None):
         for cle, dist, face in (("face", 2.2, True), ("dos", 2.2, False), ("loin", 4.5, True)):
             if not page.evaluate(essai, [dist, face]):
                 break
+            # Sans GPU une image dure une seconde : on attend la VISEE avant
+            # d'appuyer, et la conversation apres, au lieu de durees fixes.
+            if face and dist < 3:
+                try:
+                    page.wait_for_function("() => { const v = window.__interaction.vise; return !!(v && v.name === 'ConversationZone'); }", timeout=15000)
+                except Exception:
+                    pass
             page.keyboard.down("KeyE"); page.wait_for_timeout(250)
-            page.keyboard.up("KeyE"); page.wait_for_timeout(600)
+            page.keyboard.up("KeyE")
+            if face and dist < 3:
+                try:
+                    page.wait_for_function("() => !!(window.__dialogue && window.__dialogue.active)", timeout=15000)
+                except Exception:
+                    pass
+            else:
+                page.evaluate("""() => new Promise((fini) => { let n = 0; const sc = BABYLON.EngineStore.LastCreatedScene;
+                  const o = sc.onAfterRenderObservable.add(() => { if (++n >= 4) { sc.onAfterRenderObservable.remove(o); fini(); } }); })""")
             parle[cle] = page.evaluate("""() => { const a = !!(window.__dialogue && window.__dialogue.active);
                 if (a) window.__dialogue.active = null; return a; }""")
         if parle:

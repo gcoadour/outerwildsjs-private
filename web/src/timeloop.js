@@ -135,7 +135,16 @@ export function effondrementsDuBuild(gameplay) {
 export class ResetTrigger {
   constructor(volume = null) {
     this.volume = volume;
-    // `Awake` : le collider nait desactive.
+    this.awake();
+  }
+
+  /**
+   * `Awake` : le collider nait desactive. Et il RENAIT a chaque boucle, car
+   * chaque boucle recharge la scene : le portage ne l'armait qu'au demarrage
+   * de la page et ne le desarmait jamais, si bien que la sphere restait armee
+   * au deuxieme tour — la ou le build, rechargeant, la reveille eteinte.
+   */
+  awake() {
     this.armed = false;
     this.fired = false;
   }

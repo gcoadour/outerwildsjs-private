@@ -2395,6 +2395,10 @@ async function boot() {
     // pas les codes de lancement, l'etoile n'explose pas.
     loop.restart(pdata.knows("knowsLaunchCodes"));
     pdata.setLoopCount(loop.loopCount);
+    // La scene rechargee : la sphere de l'observatoire se reveille eteinte,
+    // puis `OnStartOfTimeLoop` ne l'arme qu'au premier tour sans les codes.
+    remiseAZero.awake();
+    remiseAZero.startOfTimeLoop(loop.loopCount + 1, pdata.knows("knowsLaunchCodes"));
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
     if (starPCS) {

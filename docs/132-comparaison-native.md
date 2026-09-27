@@ -1482,3 +1482,12 @@ remise chaque image dans le repère du moment, et le changement de repère ne
 lui ajoute rien. Mesuré dans Chromium :
 aller à Brittle Hollow (repère Brittle Hollow, puis Soleil) et revenir le
 laisse à 172 u du centre, immobile, sur ses pads.
+
+### La sphère de l'observatoire au deuxième tour
+
+`ResetSimulationTrigger` naît désactivé (`Awake`) et `OnStartOfTimeLoop(n)`
+ne l'arme qu'au premier tour, codes inconnus. Le build recharge la scène à
+chaque boucle : la sphère se réveille donc éteinte à chaque tour. Le portage
+ne l'armait qu'au chargement de la page et ne la désarmait jamais : armée au
+premier tour, elle l'était encore au deuxième. Elle se réveille désormais à
+chaque boucle, comme la scène rechargée.

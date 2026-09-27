@@ -8814,6 +8814,12 @@ check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
   check("F11 : quatre-vingt-douze secondes", Math.round(b.secondsRemaining), 92);
   check("F12 : l'annonce, une fois", [b.triggerSupernova(), b.triggerSupernova(), b.events.includes("TriggerSupernova")].join(),
         "true,false,true");
+  // La sphere de l'observatoire au deuxieme tour : la scene rechargee la
+  // reveille eteinte, et `OnStartOfTimeLoop(2)` ne l'arme pas.
+  const sphere = new ResetTrigger(null);
+  sphere.startOfTimeLoop(1, false);
+  sphere.awake(); sphere.startOfTimeLoop(2, false);
+  check("au deuxieme tour, la sphere de remise a zero est desarmee", sphere.armed, false);
   const tp = new Teleporters([{ name: "t1", volume: null }, { name: "t2", volume: null }]);
   tp.fireAll();
   tp.update(0.01, null, [0, 0, 0], () => ({ self: [0, 0, 0], up: [0, 1, 0], target: [1, 0, 0] }));
