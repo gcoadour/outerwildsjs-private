@@ -810,6 +810,10 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.keyboard.press("F11")
         page.wait_for_timeout(300)
         eteint_dbg = page.evaluate(etat_dbg)
+        # `DebugHUD.OnGUI` : le mode de mise au point montre les cinq lignes de
+        # l'alpha (docs/132).
+        page.wait_for_timeout(500)
+        texte_dbg = page.evaluate("() => { const e = document.getElementById('debughud'); return e && !e.hidden ? e.textContent.split('\\n').filter(Boolean).map((l) => l.split(':')[0]) : null; }")
         page.evaluate("() => { window.__miseAuPoint = true; }")
         page.keyboard.press("F2")
         page.keyboard.press("F11")
@@ -818,6 +822,8 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.evaluate("""(a) => { window.__miseAuPoint = false; window.__gui.guiMode.index = a.i;
           Object.assign(window.__lots.equipment, a.eq); window.__loop.elapsed = a.t; }""", avant_dbg)
         rep.eq("F1 : le mode d'affichage suivant", eteint_dbg["i"] != avant_dbg["i"], True)
+        rep.eq("F1 : les lignes de DebugHUD", texte_dbg,
+               ["Time Scale", "Time Remaining", "Net Field Accel", "G-Force", "Load Time"])
         rep.eq("F2 et F11 eteints, comme DebugInputManager dans l'alpha",
                [eteint_dbg["eq"], eteint_dbg["reste"] > 200],
                [[avant_dbg["eq"]["suit"], avant_dbg["eq"]["probe"], avant_dbg["eq"]["minimap"]], True])

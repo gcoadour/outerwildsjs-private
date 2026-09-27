@@ -1820,3 +1820,13 @@ Et une lumière à zéro ne prend plus de place dans le budget : la
 `NightLight` du village, que le jour mène à zéro, passait devant les lampes
 de la cabine. `LightField.allumee` écarte aussi celles qu'un `Disable` a
 coupées.
+
+### Le mode de mise au point montre `DebugHUD`
+
+F1 dans l'alpha affiche, en haut à gauche, cinq lignes de `GUI.Label` :
+« Time Scale », « Time Remaining », « Net Field Accel », « G-Force »,
+« Load Time » (x 10 ; y 10, 25, 55, 70, 100). Le portage montrait à la place
+son bandeau d'état. `DebugHUD.OnGUI` est désormais refait avec ses formules —
+y compris celle des secondes restantes, `Round(s % 60 × 100 / 100)`, qui
+arrondit à l'unité et n'écrit pas de zéro devant (« 17:5 ») ; le bandeau du
+portage ne revient qu'avec `?debug`.

@@ -339,7 +339,15 @@ body:not(.playing) #ui { display: none; }
 /* Le bandeau d'etat et l'aide des touches sont des outils du PORTAGE : l'alpha
    n'affiche en jeu que son reticule (`DebugHUD.OnGUI`). Masques par defaut,
    ils reviennent avec F3 ou `?debug` (docs/132). */
-body:not(.debug):not(.gui-debug) #hud { display: none; }
+body:not(.debug) #hud { display: none; }
+/* `DebugHUD.OnGUI` : `GUI.Label` du skin par defaut d'Unity 4 — blanc, sans
+   ombre —, en x 10 et y 10, 25, 55, 70, 100 (lignes de 20). Le mode de mise
+   au point de l'alpha (F1) montre CECI, et non le bandeau du portage. */
+#debughud {
+  position: fixed; left: 10px; top: 10px; z-index: 7; pointer-events: none;
+  font: 12px Arial, "Liberation Sans", sans-serif; color: #fff; line-height: 15px;
+  white-space: pre;
+}
 #reticule {
   position: fixed; left: calc(50% - 6.5px); top: calc(50% - 6.5px);
   z-index: 6; pointer-events: none; image-rendering: pixelated;

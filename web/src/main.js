@@ -265,6 +265,7 @@ async function ecranTitre(BABYLON, engine, cmds) {
 }
 
 async function boot() {
+  const debutBoot = performance.now();
   const BABYLON = window.BABYLON;
   const canvas = document.getElementById("view");
   // audioEngine: true est indispensable — depuis Babylon 8 le moteur audio
@@ -3104,6 +3105,9 @@ async function boot() {
     titre.ecran.dispose();
   }
   window.__ready = true;
+  // `LoadTimeTracker.GetLatestLoadTime` : le temps de chargement du niveau,
+  // en secondes — ici, du lancement de `boot` au premier etat pret.
+  window.__tempsChargement = (performance.now() - debutBoot) / 1000;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal
   // Sonde de verification du depart : le pose lu dans le build, la marche
@@ -5269,6 +5273,27 @@ async function boot() {
       reticule.hidden = guiMode.hidden || death.dead;
       // Le texte de mise au point n'apparait qu'en mode `IsDebugMode`.
       document.body.classList.toggle("gui-debug", guiMode.debug);
+      // `DebugHUD.OnGUI`, en mode de mise au point : cinq lignes, aux formules
+      // du build — y compris ses secondes restantes, `Round(s % 60 * 100 / 100)`,
+      // arrondies a l'unite et sans zero devant (« 17:5 »).
+      {
+        const el = document.getElementById("debughud");
+        if (el) {
+          el.hidden = !guiMode.debug;
+          if (guiMode.debug) {
+            const r2 = (x) => Math.round(x * 100) / 100;
+            const s = loop.secondsRemaining;
+            const echelle = (settings && settings.open) ? 0
+              : (window.__miseAuPoint && keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1);
+            const champ = player.field ? player.field.magnitude : 0;
+            el.textContent = `Time Scale: ${r2(echelle)}\n`
+              + `Time Remaining: ${Math.floor(s / 60)}:${Math.round(s % 60 * 100 / 100)}\n\n`
+              + `Net Field Accel: ${r2(champ)}\n`
+              + `G-Force: ${r2(player.grounded ? champ : 0)}\n\n`
+              + `Load Time: ${window.__tempsChargement || 0}`;
+          }
+        }
+      }
     }
 
     // --- minicarte : le declencheur du secteur majeur, et rien d'autre ---
