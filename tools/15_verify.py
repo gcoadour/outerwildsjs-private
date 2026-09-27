@@ -3602,7 +3602,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         try:
             page.wait_for_function("() => { const s = window.__shipRef; return s.parked && Math.hypot(s.vel.x, s.vel.y, s.vel.z) < 0.01; }", timeout=20000)
         except Exception:
-            pass
+            print("       le vaisseau ne s'est pas repose en vingt secondes")
         voyage = page.evaluate("""() => { const agg = window.__player.body; if (!window.__versCadre) return null;
           const p = agg.transformNode.position; window.__retourVoyage = [p.x, p.y, p.z];
           const s0 = window.__shipRef; window.__vaisseauAvant = Math.round(Math.hypot(s0.pos.x, s0.pos.y, s0.pos.z));
@@ -3636,8 +3636,9 @@ def _run(url, heavy, profil=None, zip_path=None):
                       Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
             # A deux unites pres : le vaisseau relance par le controle des pads
             # s'est repose sur ses capteurs, et s'y tasse encore.
-            rep.eq("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
-                   [abs(revenu[0]) <= 3, revenu[1], revenu[2]], [True, 0, True])
+            rep.near("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
+                     revenu[0], 0, 3)
+            rep.eq("... ni vitesse, et toujours stationne", [revenu[1], revenu[2]], [0, True])
             if not (abs(revenu[0]) <= 3 and revenu[1] == 0 and revenu[2]):
                 print("       journal du vaisseau :")
                 for l in page.evaluate("() => window.__journalVaisseau || []"):
