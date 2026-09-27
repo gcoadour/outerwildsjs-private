@@ -3139,7 +3139,13 @@ def _run(url, heavy, profil=None, zip_path=None):
             # le decale de quatre unites et lui donne celle du siege, ce que
             # les controles suivants n'ont pas demande.
             page.keyboard.press("KeyR")
-            page.wait_for_timeout(900)
+            # La vue s'ouvre 0,45 s de JEU apres l'appui : sans GPU, une image
+            # peut durer plus que l'attente fixe qui la mesurait. On attend
+            # qu'elle soit la, comme les autres controles minutes.
+            try:
+                page.wait_for_function("() => window.__atterrissage.on", timeout=15000)
+            except Exception:
+                pass
             avant_leve = page.evaluate("""() => {
               const p = window.__player;
               return { on: window.__atterrissage.on,
