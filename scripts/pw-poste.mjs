@@ -42,6 +42,37 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(3000);
 await page.screenshot({ path: `${prefixe}-debout.png` });
+// PW_ARRIERE=<degres> : debout devant le poste, le regard tourne de ce lacet
+// — l'arriere de la cabine, ordinateur, reacteur et trappe (docs/132).
+if (process.env.PW_ARRIERE) {
+  // PW_RECUL=<unites> : reculer d'abord vers l'arriere du vaisseau.
+  await page.evaluate((recul) => {
+    const s = window.__shipRef, a = s.axes, agg = window.__player.body, p = agg.transformNode.position;
+    p.set(p.x - a.fwd[0] * recul, p.y - a.fwd[1] * recul, p.z - a.fwd[2] * recul);
+    agg.body.disablePreStep = false;
+  }, +(process.env.PW_RECUL || 0));
+  await page.waitForTimeout(1500);
+  await page.evaluate((deg) => { const r = window.__regardCam(); window.__look(r.yaw + deg * Math.PI / 180, 0); },
+                      +process.env.PW_ARRIERE);
+  await page.waitForTimeout(4000);
+  await page.screenshot({ path: `${prefixe}-arriere.png` });
+  if (process.env.PW_LUMIERES) console.log(JSON.stringify(await page.evaluate(() => {
+    const L = window.__world.lighting, p = window.__player.pos;
+    return [...L.live].map(([l, n]) => ({ nom: l.name, corps: l.body, i: n.intensity,
+      d: n.position ? Math.round(Math.hypot(n.position.x - p.x, n.position.y - p.y, n.position.z - p.z) * 10) / 10 : null }));
+  })));
+  // Ce qui est sous quelques points de l'ecran : tous les maillages touches.
+  console.log(JSON.stringify(await page.evaluate(() => {
+    const sc = BABYLON.EngineStore.LastCreatedScene, out = {};
+    for (const [x, y] of [[640, 120], [520, 300], [800, 450]]) {
+      const r = sc.multiPick(x, y, (m) => m.isVisible && m.isEnabled()) || [];
+      out[`${x},${y}`] = r.slice(0, 5).map((h) => ({ m: h.pickedMesh.name, mat: h.pickedMesh.material && h.pickedMesh.material.name,
+        a: h.pickedMesh.material && +(h.pickedMesh.material.alpha ?? 1).toFixed(2), d: +h.distance.toFixed(2) }));
+    }
+    return out;
+  }), null, 1));
+  await ctx.close(); s.close(); process.exit(0);
+}
 for (let i = 0; i < 4 && !(await page.evaluate(() => window.__shipRef.boarded)); i++) {
   await page.keyboard.down("KeyE"); await page.waitForTimeout(400); await page.keyboard.up("KeyE");
   await page.waitForTimeout(2000);

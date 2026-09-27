@@ -52,6 +52,8 @@ const PLACED = [
                 "ThrusterParticlesBehavior", "RandomParticleBursts",
                 "AncientTeleporter", "AncientTeleportReceiver", "MeteorLauncher",
                 "DerelictWarp", "Elevator", "HatchController", "BlinkingRenderer",
+                // Le rayon tracteur : ce qui l'allume et l'eteint (docs/132).
+                "TractorBeamSwitch",
                 // §4 les volumes et zones de jeu.
                 "InteractZone", "SuitBarrier", "SuitRemovalVolume", "HazardVolume",
                 "DarkZone", "InterferenceVolume", "ZeroGField", "ZeroGSector",
@@ -210,6 +212,9 @@ const WANT_VOLUME = new RegExp([
   // collider de « HatchControls » : c'est lui qui dit quand la trappe se
   // referme derriere vous (docs/116-trappe.md).
   "|LaunchTerminal|LaunchElevatorController|HatchController",
+  // `TractorBeamSwitch.OnTriggerExit` : sortir de ce volume, hors du
+  // vaisseau, rallume le rayon (docs/132).
+  "|TractorBeamSwitch",
   // `FirstPersonManipulator` vise le collider de l'`InteractReceiver` : c'est
   // la capsule d'un personnage qu'on regarde pour lui parler (docs/132).
   "|InteractReceiver)$",

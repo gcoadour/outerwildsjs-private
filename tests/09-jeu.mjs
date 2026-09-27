@@ -2181,6 +2181,16 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la plus proche vient en tete", names[0], "Feu");
   check("le budget borne la liste",
         pickLights(lights, [0, 0, 0], 1).length, 1);
+  // La cabine : des lampes de 2 a 3 unites de portee, a 3 ou 4 unites du
+  // joueur. Elles eclairent les murs qu'il regarde : toutes comptent, et
+  // celle dont la sphere est la plus proche passe devant (docs/132).
+  const cabine = [
+    { name: "A", type: "point", position: [4, 0, 0], range: 2, intensity: 1 },
+    { name: "B", type: "point", position: [0, 3, 0], range: 3, intensity: 1 },
+    { name: "C", type: "point", position: [0, 0, 9], range: 2, intensity: 1 },
+  ];
+  check("les lampes de la cabine comptent, meme joueur hors de leur sphere",
+        pickLights(cabine, [0, 0, 0]).map((p) => p.light.name).join(), "B,A");
 }
 
 // --- zones d'oxygene et sources de chaleur -------------------------------

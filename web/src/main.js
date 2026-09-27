@@ -86,7 +86,7 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody, hideUnrendered, propagerExtras, hiddenMesh,
-         disableInactive, underInactive, ombresDuRenderer } from "./physics.js";
+         disableInactive, underInactive, ombresDuRenderer, rendererOff } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
@@ -1029,6 +1029,15 @@ async function boot() {
   // l'appui et se referme toute seule QUAND ON EST ENTRE (docs/116-trappe.md).
   const trappeData = hatchControllers(gameplay);
   const trappe = new Hatch(trappeData[0] || {});
+  // `TractorBeamSwitch` : le rayon tracteur s'allume et s'eteint (visuel et
+  // `TractorBeamFluid`). ETEINT au depart — le renderer de `BeamVisual` l'est
+  // dans la scene —, eteint a `EnterShip`, rallume en sortant de son volume
+  // hors du vaisseau. Le portage le dessinait toujours (docs/132).
+  const rayon = {
+    switch: ((gameplay.placed || {}).TractorBeamSwitch || [])[0] || null,
+    actif: false, dansVaisseau: false, dedans: null, visuels: null, montre: null,
+  };
+  window.__rayon = rayon;
   let noeudTrappeOn = true;     // etat pose sur le collider, pour n'y toucher
   let trappeSansNoeud = false;  // qu'aux transitions
   console.log(`attaches : ${alignes.length} alignements, ${heritiers.length} heritiers,`
@@ -1448,7 +1457,10 @@ async function boot() {
         for (const m of node.getChildMeshes(false)) {
           // Rallumer la coque, pas ce que le build tient eteint.
           m.setEnabled(!underInactive(m));
-          m.isVisible = !hiddenMesh(m);
+          // `m_Enabled` a 0 compte aussi : le rayon tracteur (`BeamVisual`)
+          // est eteint dans la scene, et cette ligne le rallumait — une
+          // colonne orange du sol au plafond, devant l'ordinateur (docs/132).
+          m.isVisible = !hiddenMesh(m) && !rendererOff(m);
           MeshLOD.pin(m);
         }
       }
@@ -7073,6 +7085,24 @@ async function boot() {
         const c = pointVivant(trappe.data.position, decalageDuCorps(trappe.data.body, anchorPos));
         const d = Math.hypot(playerWorld.x - c[0], playerWorld.y - c[1], playerWorld.z - c[2]);
         const franchi = trappe.setInside(d <= trappe.data.volume.radius);
+        // `TractorBeamSwitch.OnTriggerExit` : SORTIR de son volume, hors du
+        // vaisseau, rallume le rayon — visuel et fluide. Il est eteint dans la
+        // scene : on ne le voit qu'une fois redescendu par la trappe.
+        if (rayon.switch && rayon.switch.volume) {
+          const p = restingPoint([playerWorld.x, playerWorld.y, playerWorld.z],
+                                 decalageDuCorps(rayon.switch.body, anchorPos));
+          const dedans = insideVolume(rayon.switch, p);
+          if (rayon.dedans === true && !dedans && !rayon.dansVaisseau) rayon.actif = true;
+          rayon.dedans = dedans;
+        }
+        if (ship.node && rayon.montre !== rayon.actif) {
+          if (!rayon.visuels) {
+            rayon.visuels = ship.node.getChildMeshes(false)
+              .filter((m) => /^BeamVisual/.test(m.name));
+          }
+          for (const m of rayon.visuels) m.isVisible = rayon.actif;
+          rayon.montre = rayon.actif;
+        }
         // `_hatchObject.SetActive` : ouvrir RETIRE le collider, il n'y a pas
         // d'animation. On le cherche dans le modele du vaisseau sous le nom
         // que la scene donne (`Hatch_Collider`) ; s'il n'y est pas, la trappe
@@ -7113,6 +7143,10 @@ async function boot() {
             resources.health = resources.maxHealth;
             resources.dead = false;
           }
+          // `TractorBeamSwitch.OnEnterShip` : le rayon s'eteint ; `OnExitShip`
+          // ne le rallume pas, il note seulement qu'on est dehors.
+          if (franchi === "entre") { rayon.dansVaisseau = true; rayon.actif = false; }
+          if (franchi === "sort") rayon.dansVaisseau = false;
           trappe.drain();
           for (const e of trappe.events.splice(0)) {
             console.log(`annonce : ${e}`);

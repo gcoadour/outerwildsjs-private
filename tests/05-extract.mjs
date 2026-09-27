@@ -1568,6 +1568,19 @@ check("tous sur le satellite casse",
 check("et tous reparent vers le meme materiau vert",
       new Set(nodes.map((n) => n.fields._repairedMaterial.name)).size, 1);
 check("une trappe", (gp.placed.HatchController || []).length, 1);
+// Le rayon tracteur (docs/132) : un commutateur, son volume, et le visuel
+// ETEINT dans la scene — le portage le dessinait toujours.
+{
+  const rs = gp.placed.TractorBeamSwitch || [];
+  check("un commutateur de rayon tracteur, avec son volume",
+        [rs.length, !!(rs[0] && rs[0].volume)].join(), "1,true");
+  let beam = null;
+  for (const [gid, go] of ctx.gameObjects) {
+    if (go.m_Name !== "BeamVisual") continue;
+    for (const o of ctx.componentsOf(gid, ["MeshRenderer"])) beam = ctx.readEngine(o).m_Enabled;
+  }
+  check("BeamVisual : renderer eteint dans la scene", !!beam, false);
+}
 // Les six buses du vaisseau MINIATURE, et non celui du joueur : c'est le champ
 // `body` qui le dit (docs/58-suivi.md).
 const buses = (gp.placed.ThrusterParticleController || []);

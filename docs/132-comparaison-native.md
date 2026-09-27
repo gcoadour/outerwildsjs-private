@@ -1793,3 +1793,25 @@ Et l'équateur tombait au-dessus du joueur de la tour, que l'alpha montre
 dessus : `GetLocalMapPosition` est `InverseTransformPoint` du **secteur**, et
 le portage retirait la rotation du corps mais pas celle, au repos, de
 l'objet secteur.
+
+### L'arrière de la cabine : le rayon tracteur et les lampes
+
+Né devant le poste et retourné vers l'arrière, l'alpha montre l'ordinateur
+de bord, le réacteur et la trappe dans une lumière brune et chaude. Le
+portage montrait, au même endroit, une **colonne orange translucide** du sol
+au plafond, et une cabine grise.
+
+- **La colonne** est `BeamVisual`, le rayon tracteur (`Alpha-Diffuse`,
+  orange à 0,18). Son renderer est **éteint dans la scène**, et le portage
+  le cachait bien au chargement… puis le rallumait en préparant le vaisseau
+  détaché, qui recalculait la visibilité sans le drapeau. Et rien ne le
+  commandait : `TractorBeamSwitch` l'éteint à `EnterShip` et ne le rallume
+  que lorsqu'on SORT de son volume hors du vaisseau — redescendu par la
+  trappe. C'est maintenant ce que fait le portage (le volume est extrait,
+  `tests/05-extract.mjs` garde le renderer éteint).
+- **Les lampes.** La cabine en porte six, de 1,5 à 3 unités de portée. Le
+  choix des lumières (`pickLights`) ne gardait que celles dont la sphère
+  contient le joueur : une seule. Elles éclairent pourtant les murs qu'on
+  regarde ; Unity, en rendu différé, les dessine toutes. Une lumière compte
+  désormais si le bord de sa sphère est à moins de six unités, et le rang se
+  prend au bord, pas au centre.

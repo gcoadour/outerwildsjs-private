@@ -14,6 +14,15 @@
 export const LIGHT_BUDGET = 8;
 /** Multiple de la portee au-dela duquel une lumiere ne sert plus a rien. */
 export const LIGHT_REACH = 1.25;
+/**
+ * Ecart, en unites, entre le joueur et le BORD de la sphere d'une lumiere en
+ * deca duquel elle compte encore : elle eclaire les murs qu'on regarde, pas
+ * seulement l'endroit ou l'on se tient. La cabine du vaisseau fait cinq
+ * unites ; ses six lampes ont 1,5 a 3 de portee, et la regle « le joueur dans
+ * la sphere » n'en gardait qu'une — une cabine grise la ou l'alpha la montre
+ * brune et chaude (docs/132).
+ */
+export const LIGHT_MARGIN = 6;
 
 /**
  * Combien de lumieres un materiau peut recevoir sur CE processeur graphique.
@@ -297,12 +306,16 @@ export function pickLights(lights, listener, budget = LIGHT_BUDGET,
     const d = Math.hypot(q[0] - listener[0],
                          q[1] - listener[1],
                          q[2] - listener[2]);
-    if (l.type === "directional") { near.push({ light: l, distance: 0 }); continue; }
-    if (!(l.range > 0) || d > l.range * reach) continue;
-    near.push({ light: l, distance: d });
+    if (l.type === "directional") { near.push({ light: l, distance: 0, bord: 0 }); continue; }
+    if (!(l.range > 0)) continue;
+    const bord = d - l.range;
+    if (d > l.range * reach && bord > LIGHT_MARGIN) continue;
+    near.push({ light: l, distance: d, bord });
   }
-  // A budget egal, la plus proche gagne : c'est celle dont l'absence se voit.
-  near.sort((a, b) => a.distance - b.distance);
+  // A budget egal, gagne celle dont la sphere est la plus proche — celle dont
+  // l'absence se voit. Le centre ne dit rien : une grande lumiere lointaine
+  // peut eclairer le sol sous nos pieds, une petite voisine le mur d'en face.
+  near.sort((a, b) => a.bord - b.bord);
   return near.slice(0, budget);
 }
 
