@@ -1466,3 +1466,17 @@ quantique et le belvédère, qui n'en ont pas.
 Deux choses se corrigeaient en passant : le bouton tactile « bord » ouvrait
 encore un ordinateur de bord qui s'allume désormais à sa zone, et celui du
 mode d'affichage envoie F1.
+
+### Le vaisseau stationné et le changement de repère
+
+Une mesure du vérificateur a trouvé le vaisseau parti à 609 u/s, soit à peu
+près l'écart de vitesse orbitale entre Timber Hearth et le Soleil. La boucle
+recale le repère sur le corps dominant, et ajoute à tout ce qui y vit l'écart
+de vitesse entre les deux corps. Le vaisseau stationné le recevait aussi : il
+dépassait le seuil de stationnement, le sol du nouveau repère lui retirait
+cette vitesse, et le retour lui ajoutait l'opposé. Un joueur passé par un
+téléporteur perdait donc son vaisseau en revenant. Stationné, il est
+désormais posé à sa pose de repos portée par Timber Hearth, dans le repère du
+moment, et le changement de repère ne lui ajoute rien. Mesuré dans Chromium :
+aller à Brittle Hollow (repère Brittle Hollow, puis Soleil) et revenir le
+laisse à 172 u du centre, immobile, sur ses pads.

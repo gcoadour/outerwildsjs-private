@@ -421,6 +421,7 @@ async function boot() {
 
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
+  window.__origin = origin;   // controles : le corps ancre du moment
 
   // Orbites : positions d'origine conservees, l'etat orbital vit dans `orbits`.
   for (const b of bodies) b.position0 = (b.bodyPosition || b.position).slice();
@@ -4133,9 +4134,16 @@ async function boot() {
       // on volait vers une planete et il se retrouvait a des milliers d'unites,
       // le temps que le pilote automatique le ramene. Les sondes en vol ont le
       // meme probleme, en plus court.
+      //
+      // SAUF le vaisseau STATIONNE : il est pose sur Timber Hearth, et c'est
+      // la planete qui le porte (plus bas, `parkPos`). Lui ajouter l'ecart de
+      // vitesse le decrochait de son stationnement ; le sol du nouveau repere
+      // lui retirait cette vitesse, et le retour lui en ajoutait l'oppose — il
+      // repartait a six cents unites par seconde. Un joueur qui passait par un
+      // teleporteur le perdait en revenant.
       if (ship) {
         ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
-        ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2];
+        if (!ship.parked) { ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2]; }
       }
       if (probes.last) {
         const p = probes.last;
@@ -4300,6 +4308,12 @@ async function boot() {
                         c.dir.z * c.magnitude] : [0, 0, 0],
           vitesseCible: (autopilot.target && autopilot.target.velocity) || [0, 0, 0],
         });
+      }
+      // Stationne, le vaisseau est a sa pose de repos PORTEE par Timber
+      // Hearth, dans le repere du moment — quel que soit le corps ancre.
+      if (ship.parked && shipRest) {
+        const p = pointVivant(shipRest, decalageDuCorps("TimberHearth_Body", anchorPos));
+        ship.parkPos = { x: p[0] - anchorPos[0], y: p[1] - anchorPos[1], z: p[2] - anchorPos[2] };
       }
       ship.update(dt, bodies, input, { fwd, right, up }, world);
       // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
