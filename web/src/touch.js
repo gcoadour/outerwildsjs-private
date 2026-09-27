@@ -218,8 +218,9 @@ const FACE = [
 // Boutons du milieu, ceux qu'une manette met entre ses deux manches : ce qui ne
 // sert qu'entre deux vols.
 const CENTER = [
-  { code: "KeyN", label: "bord", title: "Ordinateur de bord" },
-  { code: "KeyG", label: "vue", title: "Affichage" },
+  // `GUIMode` tourne sur F1 dans le build (`DebugKeyCode`). L'ordinateur de
+  // bord n'a plus de bouton : il s'allume a sa zone, comme tout le reste.
+  { code: "F1", label: "vue", title: "Affichage" },
   { code: "Escape", label: "menu", title: "Menu" },
 ];
 

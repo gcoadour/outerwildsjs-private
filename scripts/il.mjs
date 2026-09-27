@@ -15,6 +15,7 @@
 //   node scripts/il.mjs <Classe>                 methodes et champs
 //   node scripts/il.mjs <Classe>.<Methode>       le corps, instruction par instruction
 //   node scripts/il.mjs --grep <motif>           les classes dont le nom colle
+//   node scripts/il.mjs --champ <motif>          les methodes qui lisent ce champ
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -223,6 +224,26 @@ function principal() {
   // complet (`Type::Membre`) correspond au motif. C'est la question « qui
   // rallume un GameObject ? » (`GameObject::SetActive`), que `--string` ne
   // pose pas : un appel n'est pas une chaine.
+  // `--champ <motif>` : les methodes qui LISENT un champ dont le nom colle.
+  // `DebugKeyCode` n'a que des champs statiques, et c'est la seule facon de
+  // savoir qui ecoute ses touches : un `ldsfld` n'est ni un appel ni une chaine.
+  if (args[0] === "--champ") {
+    const re = new RegExp(`^(${args[1]})$`, "i");
+    for (const { asm } of assemblies()) {
+      const n = asm.rows(TABLE.TypeDef);
+      for (let i = 1; i <= n; i++) {
+        const clsName = asm.str(asm.row(TABLE.TypeDef, i)[1]);
+        for (const m of methodsOf(asm, i)) {
+          const vus = disassemble(asm, m.index)
+            .filter((l) => /\s(ldsfld|ldfld)\s/.test(l) && re.test(l.split(/\s+/).pop()));
+          if (vus.length) {
+            console.log(`${clsName}.${m.name}: ${[...new Set(vus.map((l) => l.split(/\s+/).pop()))].join(", ")}`);
+          }
+        }
+      }
+    }
+    return;
+  }
   if (args[0] === "--appel") {
     const re = new RegExp(args[1], "i");
     for (const { asm } of assemblies()) {

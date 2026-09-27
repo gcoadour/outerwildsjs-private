@@ -6015,7 +6015,9 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("vingt-deux canaux du build", Object.keys(COMMANDES).length, 22);
   // L'ordinateur de bord n'en est plus un : il s'ouvre a sa zone « Boot Up »,
   // dans la cabine, comme dans le build (docs/132).
-  check("et quatre ajouts nommes", Object.keys(AJOUTS).length, 4);
+  // Le mode d'affichage non plus : `GUIMode` tourne sur F1, une touche de
+  // mise au point du build (debug.js).
+  check("et trois ajouts nommes", Object.keys(AJOUTS).length, 3);
   check("dont sortir le baton, qui n'a pas de canal dans l'alpha",
         !!AJOUTS.Stick, true);
   // Les trois boutons de souris, que le portage n'avait pas.
@@ -8784,6 +8786,44 @@ check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
   const siege = new AttachPoint({ position: [10, 1, 0], rotation: [0, 0, 0, 1] });
   check("un point d'accrochage du vaisseau suit sa rotation",
         siege.frame(pose).position.map((v) => +v.toFixed(3) + 0).join(), "20,0,1");
+}
+
+// --- les touches de mise au point du build (`DebugKeyCode`) ------------------
+{
+  const { toucheDebug, pointDeSaut, transfertSable, LIEU_DU_SAUT, SECONDES_FIN } =
+    await import("../web/src/debug.js");
+  const { Teleporters } = await import("../web/src/decor.js");
+  const { Crust } = await import("../web/src/crust.js");
+  check("F1 fait tourner le mode d'affichage, pas g", [toucheDebug("F1"), toucheDebug("KeyG")].join(), "cycleGUIMode,");
+  check("F12 declenche la supernova", toucheDebug("F12"), "triggerSupernova");
+  check("0 vise le vaisseau, 3 Timber Hearth",
+        [LIEU_DU_SAUT[toucheDebug("Digit0")], LIEU_DU_SAUT[toucheDebug("Digit3")]].join(), "8,2");
+  const pts = [{ name: "a", fields: { _spawnLocation: 2, _isShipSpawn: false } },
+               { name: "b", fields: { _spawnLocation: 2, _isShipSpawn: true } }];
+  check("dans le vaisseau, seul le point de vaisseau repond", pointDeSaut(pts, 2, true).name, "b");
+  check("a pied, le point du joueur", pointDeSaut(pts, 2, false).name, "a");
+  check("aucun point de vaisseau pour le vaisseau lui-meme", pointDeSaut(pts, 8, true), null);
+  const col = { startMinutes: 2, endMinutes: 17 };
+  transfertSable(col, 0.5);
+  check("le sable qui n'a pas commence commence maintenant, et coule en 0,01 minute",
+        [col.startMinutes, +col.endMinutes.toFixed(3)].join(), "0.5,0.51");
+  const tard = transfertSable({ startMinutes: 2, endMinutes: 17 }, 5);
+  check("commence, il garde son debut", [tard.startMinutes, +tard.endMinutes.toFixed(2)].join(), "2,2.01");
+  const b = new TimeLoop(20);
+  b.setSecondsRemaining(SECONDES_FIN);
+  check("F11 : quatre-vingt-douze secondes", Math.round(b.secondsRemaining), 92);
+  check("F12 : l'annonce, une fois", [b.triggerSupernova(), b.triggerSupernova(), b.events.includes("TriggerSupernova")].join(),
+        "true,false,true");
+  const tp = new Teleporters([{ name: "t1", volume: null }, { name: "t2", volume: null }]);
+  tp.fireAll();
+  tp.update(0.01, null, [0, 0, 0], () => ({ self: [0, 0, 0], up: [0, 1, 0], target: [1, 0, 0] }));
+  check("F5 : les teleporteurs tirent sans attendre leur alignement", !!tp.depart, true);
+  const cr = new Crust([], 12, 200);
+  cr.shatterable.push({ node: { name: "polySurface18", setEnabled() {} }, carrier: { integrity: 50 }, gone: false });
+  cr.fragments.push({ node: { name: "solide" }, carrier: { integrity: 100 }, gone: false });
+  check("F10 : cinquante points brisent un fragment d'integrite 50",
+        cr.endommager("polySurface18", 50, () => null), "brise");
+  check("et pas un fragment d'integrite 100", cr.endommager("solide", 50, () => ({})), null);
 }
 
 check("Timber Hearth : un bleu de nuit a 0,12",

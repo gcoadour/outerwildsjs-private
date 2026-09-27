@@ -366,6 +366,7 @@ export function teleporterFires(t, alignAngle, occlusionAngle, since) {
 export class Teleporters {
   constructor(list = []) {
     this.list = list;
+    this.tousTirent = false;
     this.since = list.map(() => TELEPORT_COOLDOWN);
     this.lastFired = null;
     // Ce qui vient de PARTIR — particules et son — et qui n'est pas encore
@@ -375,6 +376,9 @@ export class Teleporters {
   }
 
   get count() { return this.list.length; }
+
+  /** `FireAllTeleporters` : tous tirent a la prochaine image. */
+  fireAll() { this.tousTirent = true; }
 
   /**
    * @param at    position monde du joueur, ou null s'il n'est nulle part
@@ -394,6 +398,30 @@ export class Teleporters {
         this.enVol = null;
         return this.lastFired;
       }
+    }
+    // `FireAllTeleporters` (F5, debug.js) : chaque `AncientTeleporter` tire
+    // sans attendre son alignement (`OnFireAllTeleporters` -> `FireTeleporter`).
+    // Un seul passage se suit ici — celui qui porte le joueur s'il y en a un.
+    if (this.tousTirent) {
+      this.tousTirent = false;
+      let pris = null;
+      for (let i = 0; i < this.list.length; i++) {
+        const t = this.list[i];
+        const w = world(t);
+        if (!w || !w.self || !w.target) continue;
+        this.since[i] = 0;
+        const carries = !!(at && t.volume && insideVolume(t, at));
+        if (!pris || (carries && !pris.carries)) pris = { t, w, carries };
+      }
+      if (pris) {
+        const { t, w, carries } = pris;
+        const record = { teleporter: t, carries, arrival: w.receiver || w.target,
+                         forward: w.receiverForward || null, up: w.receiverUp || null,
+                         tous: true };
+        this.depart = record;
+        this.enVol = { record, reste: TELEPORT_DELAY };
+      }
+      return null;
     }
     for (let i = 0; i < this.list.length; i++) {
       const t = this.list[i];

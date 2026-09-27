@@ -66,12 +66,15 @@ export const COMMANDES = {
 /**
  * Ce que le portage ajoute, faute d'equivalent dans le build.
  *
- * Quatre choses seulement, et elles sont nommees ici plutot que dispersees
+ * Trois choses seulement, et elles sont nommees ici plutot que dispersees
  * dans `main.js` : la guimauve se mange au feu de camp ; sortir le
- * baton est appele par le tutoriel, qui n'est pas porte ; le mode d'affichage
- * est un outil de mise au point ; recentrer la carte n'a pas de canal parce que
- * le build recentre autrement. Aucune n'est dans l'alpha, et on ne pretend pas
- * le contraire.
+ * baton est appele par le tutoriel, qui n'est pas porte ; recentrer la carte
+ * n'a pas de canal parce que le build recentre autrement. Aucune n'est dans
+ * l'alpha, et on ne pretend pas le contraire.
+ *
+ * Le mode d'affichage en etait une quatrieme, sur `g`. Il n'en est pas une :
+ * `GUIMode.Update` le fait tourner sur `DebugKeyCode.cycleGUIMode`, F1, avec
+ * les autres touches de mise au point du build (debug.js).
  */
 export const AJOUTS = {
   Marshmallow: { pos: ["b"] },
@@ -85,7 +88,6 @@ export const AJOUTS = {
   // et non un manque du build — elle reste parce qu'elle est commode, et parce
   // que le baton se range aussi tout seul quand on a mange.
   Stick: { pos: ["v"] },
-  "Display Mode": { pos: ["g"] },
   "Recenter Map": { pos: ["c"] },
 };
 

@@ -792,6 +792,27 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("portee de la lampe", cons["portee"], 80)
         rep.near("guimauve grillee en trois secondes", cons["grillage"], 0.6, 0.001)
 
+        # --- les touches de mise au point du build (`DebugKeyCode`) ------------
+        #
+        # `DebugInputManager` est pose dans la scene : F1 fait tourner le mode
+        # d'affichage (le portage l'avait mis sur g), F2 donne la combinaison
+        # et ce qu'elle porte, F11 laisse quatre-vingt-douze secondes.
+        avant_dbg = page.evaluate("""() => ({ i: window.__gui.guiMode.index,
+          eq: { suit: window.__lots.equipment.suit, probe: window.__lots.equipment.probe,
+                minimap: window.__lots.equipment.minimap }, t: window.__loop.elapsed })""")
+        page.keyboard.press("F1")
+        page.keyboard.press("F2")
+        page.keyboard.press("F11")
+        page.wait_for_timeout(300)
+        apres_dbg = page.evaluate("""() => ({ i: window.__gui.guiMode.index,
+          eq: [window.__lots.equipment.suit, window.__lots.equipment.probe, window.__lots.equipment.minimap],
+          reste: Math.round(window.__loop.secondsRemaining) })""")
+        page.evaluate("""(a) => { window.__gui.guiMode.index = a.i; Object.assign(window.__lots.equipment, a.eq);
+          window.__loop.elapsed = a.t; }""", avant_dbg)
+        rep.eq("F1 : le mode d'affichage suivant", apres_dbg["i"] != avant_dbg["i"], True)
+        rep.eq("F2 : combinaison, sonde et minicarte", apres_dbg["eq"], [True, True, True])
+        rep.near("F11 : la fin des temps a 92 s", apres_dbg["reste"], 92, 3)
+
         # --- signaux et mixage -------------------------------------------------
         audio = page.evaluate("""() => {
           const m = window.__audioMix.mixer;
@@ -1049,6 +1070,16 @@ def _run(url, heavy, profil=None, zip_path=None):
             oeil_pilote = page.evaluate("""() => { const s = window.__shipRef, a = s.axes, c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
               const d = [c.position.x - s.pos.x, c.position.y - s.pos.y, c.position.z - s.pos.z];
               return [a.right, a.up, a.fwd].map((ax) => +(d[0]*ax[0] + d[1]*ax[1] + d[2]*ax[2]).toFixed(1)); }""")
+            # `PlayerSpawner` : dans le vaisseau, 3 le pose sur le point de
+            # vaisseau de Timber Hearth (`SpawnPoint_Ship`, 332 u du centre).
+            saut = None
+            if assis:
+                page.keyboard.press("Digit3")
+                try:
+                    page.wait_for_function("() => { const p = window.__shipRef.pos; return Math.hypot(p.x, p.y, p.z) > 300; }", timeout=10000)
+                except Exception:
+                    pass
+                saut = page.evaluate("() => { const p = window.__shipRef.pos; return Math.round(Math.hypot(p.x, p.y, p.z)); }")
             # On se LEVE par la touche, comme un joueur : ecrire `boarded` a
             # faux laissait les commandes du vaisseau en place, et la marche
             # qu'on mesure plus loin se faisait a la poussee.
@@ -1090,6 +1121,8 @@ def _run(url, heavy, profil=None, zip_path=None):
                        [False, True, False])
             if assis:
                 rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.7])
+            if saut is not None:
+                rep.near("3, dans le vaisseau : le point de vaisseau de Timber Hearth", saut, 332, 3)
 
         # --- la console du satellite : des instantanes (docs/132) ----------------
         #

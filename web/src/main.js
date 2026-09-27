@@ -123,6 +123,8 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
 import { EcranOrdinateur } from "./ecranordinateur.js";
+import { toucheDebug, TOUCHES_DEBUG, ACCELERATION, SECONDES_FIN, LIEU_DU_SAUT,
+         pointDeSaut, transfertSable } from "./debug.js";
 import { LockOn, aimedFrame, canFlyTo,
          ancientProbeAcceleration } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
@@ -2157,6 +2159,8 @@ async function boot() {
   }
 
   // --- croute de Brittle Hollow : les fragments tombent pour de bon ---
+  // F10 (`DebugBreakAllChildren`) : pris par le bloc de la croute.
+  let casserCroute = false;
   const crust = bhBody
     ? new Crust(crustCarriers(gameplay),
                 bhBody.gravity.surfaceAcceleration || 12,
@@ -3220,6 +3224,50 @@ async function boot() {
     console.log("annonce : ExitShipComputer");
   }
 
+  /**
+   * `DebugInputManager.Update`, `GUIMode.Update`, `DebugBreakAllChildren` et
+   * les sauts de `PlayerSpawner` : les touches de mise au point du build,
+   * actives dans l'alpha (debug.js).
+   */
+  function toucheDeMiseAuPoint(nom) {
+    console.log(`mise au point : ${nom}`);
+    if (nom === "cycleGUIMode") { console.log("mode d'affichage :", guiMode.cycle()); return; }
+    if (nom === "suitUp") {
+      // "SuitUp", "AquireProbe", "AquireMinimap" : la combinaison et ce
+      // qu'elle porte, sans passer par le paquetage.
+      equipment.suit = true; equipment.probe = true; equipment.minimap = true;
+      return;
+    }
+    if (nom === "learnLaunchCodes") { pdata.learn("knowsLaunchCodes"); return; }
+    if (nom === "fireAllTeleporters") { passages.fireAll(); return; }
+    if (nom === "rapidSandTransfer") {
+      for (const c of sand.columns) transfertSable(c, loop.elapsed / 60);
+      return;
+    }
+    if (nom === "triggerEndTimes") { loop.setSecondsRemaining(SECONDES_FIN); return; }
+    if (nom === "triggerSupernova") { loop.triggerSupernova(); return; }
+    // Les fragments se detachent dans le repere de leur conteneur : c'est le
+    // bloc de la croute qui l'a, et qui prend la commande a l'image suivante.
+    if (nom === "destroyAllBreakable") { casserCroute = true; return; }
+    if (nom in LIEU_DU_SAUT) {
+      // `Warp` puis `FixedUpdate` : le VAISSEAU seul, et seulement joueur dedans.
+      const dedans = !!(trappe && trappe.inside) || !!(ship && ship.boarded);
+      const pt = pointDeSaut((gameplay.placed || {}).SpawnPoint, LIEU_DU_SAUT[nom], dedans);
+      if (!pt || !dedans || !ship) return;
+      const dec = decalageDuCorps(pt.body, framePos) || [0, 0, 0];
+      ship.pos.x = pt.position[0] + dec[0] - framePos[0];
+      ship.pos.y = pt.position[1] + dec[1] - framePos[1];
+      ship.pos.z = pt.position[2] + dec[2] - framePos[2];
+      if (pt.rotation) ship.quat = pt.rotation.slice();
+      // `GetPointVelocity` : le vaisseau part a l'arret sur le corps du point.
+      const corps = bodies.find((b) => b.bodyName === pt.body);
+      const dv = corps ? sub3(frameVelocity(orbits, corps), frameVelocity(orbits, anchorBody)) : [0, 0, 0];
+      ship.vel.x = dv[0]; ship.vel.y = dv[1]; ship.vel.z = dv[2];
+      ship.landed = false; ship.parked = false;
+      console.log(`saut : ${pt.name} (${pt.body})`);
+    }
+  }
+
   function command(code) {
     const est = (canal) => {
       const c = cmds.get(canal);
@@ -3384,8 +3432,9 @@ async function boot() {
     if (est("Stick")) {
       console.log(baton.toggle() ? "baton sorti" : "baton range");
     }
-    // GUIMode fait tourner ses quatre modes sur une touche de debogage
-    if (est("Display Mode")) console.log("mode d'affichage :", guiMode.cycle());
+    // Les touches de mise au point du build (`DebugKeyCode`, debug.js).
+    const dbg = toucheDebug(code);
+    if (dbg) toucheDeMiseAuPoint(dbg);
     // Le menu des reglages, comme dans le jeu, met le temps en pause.
     // `Menu.Update` : `cancel` FERME, et c'est la meme sortie que l'option
     // « Back ». Ouvrir releve `EnterMenuMode`, fermer `ExitMenuMode`, et
@@ -3693,7 +3742,9 @@ async function boot() {
   scene.registerBeforeRender(() => {
     // SettingsMenu.Open met Time.timeScale a 0 : le menu fige la partie
     const { n, h } = decoupeImage(
-      (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
+      // Et `timeLapse` (=) le triple tant qu'on le tient (`DebugInputManager`).
+      (settings && settings.open) ? 0
+        : engine.getDeltaTime() / 1000 * (keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1),
       cmds.maxTimestep);
     const now = performance.now() / 1000;
     // Le regard de l'image, avant les pas : `UpdateInput` est dans `Update`.
@@ -5687,7 +5738,7 @@ async function boot() {
           body.computeWorldMatrix(true);
           const c = BABYLON.Vector3.TransformCoordinates(
             body.getWorldMatrix().getTranslation(), inv);
-          crust.update(dt, loop.fraction, [c.x, c.y, c.z], (f) => {
+          const detacheur = (f) => {
             f.node.computeWorldMatrix(true);
             const local = BABYLON.Vector3.TransformCoordinates(
               f.node.getWorldMatrix().getTranslation(), inv);
@@ -5710,7 +5761,17 @@ async function boot() {
                 if (debris) debris.swallow(f.node.name);
               },
             };
-          });
+          };
+          crust.update(dt, loop.fraction, [c.x, c.y, c.z], detacheur);
+          // `DebugBreakAllChildren.Update` (F10) : `AddDamage(_damageToAdd)`
+          // a chaque fragment sous les deux objets qui le portent.
+          if (casserCroute) {
+            casserCroute = false;
+            for (const d of (gameplay.placed || {}).DebugBreakAllChildren || []) {
+              const r = crust.endommager(d.name, (d.fields || {})._damageToAdd ?? 50, detacheur);
+              console.log(`mise au point : ${d.name} ${r || "tient"}`);
+            }
+          }
         }
       }
       blackHole.fragmentsDetached = crust.detached;
