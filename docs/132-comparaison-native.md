@@ -1847,3 +1847,26 @@ nuit —, pendant que « G-Force » reste à 12. Le portage ne suit que le champ
 dominant ([`gravity.js`](../web/src/gravity.js)) et affiche 12 : la planète
 tombe vers le Soleil comme le joueur, le sol ne sent pas la différence, et
 la ligne de mise au point est la seule à la voir.
+
+### Au feu de camp : la caméra du HUD, la guimauve, l'invite
+
+Au feu du réveil, l'alpha montre « Roast Marshmallow » sous le réticule ; E
+l'efface, sort le bâton — thermomètre compris — et la guimauve apparaît au
+bout. Trois écarts dans le portage :
+
+- **Les objets tenus ne se dessinaient plus.** Le bâton et la lunette sont
+  sur le calque 23, que `PlayerCamera` exclut (masque `0xBE7FFFFF`) : c'est
+  `HUDCamera` qui les rend — enfant de la caméra du joueur, 80 degrés, plan
+  proche 0,1, masque `0x800000`, par-dessus la scène. Le portage n'avait pas
+  cette caméra ; elle existe maintenant, active seulement quand un objet
+  tenu se voit. Les sprites de l'écran de l'ordinateur, qui occupaient le
+  calque 23, passent au 24.
+- **La guimauve cuisait bâton rangé.** `Marshmallow.Update` ne grille que si
+  `_mallowRenderer.enabled`, qui suit `_isOut`. Le portage la faisait cuire
+  dès qu'on passait près d'un feu : arrivé au feu, E la mangeait au lieu de
+  sortir le bâton, qui se rangeait aussitôt.
+- **L'invite restait.** `RoastPromptEvent._interactVolume` est servi à
+  l'appui et n'est rendu que par `StopRoasting` (`ResetInteraction`).
+
+`scripts/pw-guimauve.mjs` mène le portage au feu le plus proche et capture
+la séquence.
