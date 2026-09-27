@@ -23,7 +23,7 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI, SuiviHUD } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI, SuiviHUD, DegatsHUD } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
@@ -1740,6 +1740,7 @@ async function boot() {
   const uiRoot = document.getElementById("ui");
   const resHUD = iface && uiRoot ? new ResourceHUD(uiRoot, iface) : null;
   const suiviHUD = iface && uiRoot ? new SuiviHUD(uiRoot, iface) : null;
+  const degatsHUD = iface && uiRoot ? new DegatsHUD(uiRoot, iface) : null;
   const prompts = iface && uiRoot ? new Prompts(uiRoot, iface) : null;
   window.__prompts = prompts;   // sonde : les trois zones et leur arbitrage
   let lastHealth = resources.health;
@@ -2427,6 +2428,8 @@ async function boot() {
     // La scene rechargee : la sphere de l'observatoire se reveille eteinte,
     // puis `OnStartOfTimeLoop` ne l'arme qu'au premier tour sans les codes.
     remiseAZero.awake();
+    // La scene rechargee : `ShipPromptController.Awake` rearme le centre.
+    centreAtterrissage = true;
     remiseAZero.startOfTimeLoop(loop.loopCount + 1, pdata.knows("knowsLaunchCodes"));
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
@@ -3219,6 +3222,11 @@ async function boot() {
   // La vue d'atterrissage : une camera, un regard, et des commandes qui
   // changent de main (docs/87-atterrissage.md).
   const atterrissage = new LandingView();
+  // `ShipPromptController._centerLandingPrompt` : vrai a l'`Awake`, faux des
+  // que « Landing Mode » s'est affiche. `OnEnterFlightConsole` le lit pour
+  // poser l'invite AU CENTRE (1) ou a gauche (2) : la premiere fois qu'on
+  // s'assied dans une boucle, elle est sous le reticule (docs/132).
+  let centreAtterrissage = true, atterrissageAuCentre = true;
   // LA VUE D'ATTERRISSAGE EST UNE CAMERA. `UpdateLandingMode`, 0,45 s apres
   // l'appui : `_landingCam.enabled = true; _playerCam.enabled = false`, et
   // `SwitchActiveCamera`. `LandingCam` est posee sous le cockpit et regarde
@@ -4634,6 +4642,7 @@ async function boot() {
         } else if (estPoste(focusPrecedent) && equipment.suit
                    && interactables.appui(focusPrecedent)) {
           ship.boarded = true;
+          atterrissageAuCentre = centreAtterrissage;
           const sonBoucle = sonsUI.buckleUp();
           if (sonBoucle) audio.playOneShot(sonBoucle.file, { volume: sonBoucle.volume });
           // `OnPressInteract` appelle `ResetRollSettings` : c'est le SEUL
@@ -5303,7 +5312,44 @@ async function boot() {
       // `UpdatePromptDisplay` : l'invite ne s'affiche que tant qu'on n'a PAS
       // interagi (`!_hasInteracted`). Une conversation ouverte la retire ; le
       // portage la laissait sous le reticule pendant tout le dialogue.
-      const centre = (focus && dialogue.active) ? null
+      // `ShipPromptController.Update` (consoles.js) : ce que la situation
+      // permet, dans l'ordre ou `OnEnterFlightConsole` les a poses. Calcule
+      // avant le centre : « Landing Mode » peut y aller.
+      let listeVaisseau = null;
+      if (ship && ship.boarded && !(solarMap && solarMap.open) && !consoles.active
+          && !computer.open && !telescope.active) {
+        const cible = lockOn.current ? lockOn.current.body : null;
+        const dCible = cible
+          ? Math.hypot(cible.position[0] - ship.pos.x, cible.position[1] - ship.pos.y,
+                       cible.position[2] - ship.pos.z)
+          : Infinity;
+        const cadre = cible
+          ? autopilotDistances(declared.frames, cible.name,
+                               (cible.gravity && cible.gravity.upperSurfaceRadius) || 0)
+          : null;
+        const vc = (cible && cible.velocity) || [0, 0, 0];
+        const pose = !!ship.onPad;
+        listeVaisseau = shipPrompts({
+          mapView: false,
+          landingMode: !!atterrissage.mode,
+          allowLandingMode: allowLandingMode({ frame: cadre, landed: pose, distance: dCible }),
+          landed: pose, landingCam: !!atterrissage.on, playerCam: !atterrissage.on,
+          autopilotAvailable: autopilotAvailable({
+            arrival: cadre && cadre.declared ? cadre.arrival : 0, landed: pose, distance: dCible }),
+          flyingToDestination: !!(autopilot && autopilot.flying),
+          matchAvailable: !!cible && !pose,
+          matching: !!(autopilot && autopilot.matching),
+          localSpeed: Math.hypot(ship.vel.x - vc[0], ship.vel.y - vc[1], ship.vel.z - vc[2]),
+        });
+        // `Update` : `_centerLandingPrompt = false` des que l'invite s'affiche
+        // — mais sa PLACE a ete choisie en s'asseyant.
+        if (listeVaisseau.includes("_landingPrompt")) centreAtterrissage = false;
+      }
+      const centreVaisseau = listeVaisseau && atterrissageAuCentre
+        && listeVaisseau.includes("_landingPrompt")
+        ? P("ShipPromptController._landingPrompt") : null;
+      const centre = centreVaisseau ? centreVaisseau
+        : (focus && dialogue.active) ? null
         // `InteractReceiver.Init("Repair", ...)` : l'invite du volume vise.
         : reparationVisee_ ? P("InteractVolume._screenPrompt", "Repair")
         // `UpdatePromptDisplay` : plus d'invite une fois le volume servi.
@@ -5348,32 +5394,13 @@ async function boot() {
         }
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
-      } else if (ship && ship.boarded) {
-        // `ShipPromptController.Update` (consoles.js) : ce que la situation
-        // permet, dans l'ordre ou `OnEnterFlightConsole` les a poses.
-        const cible = lockOn.current ? lockOn.current.body : null;
-        const dCible = cible
-          ? Math.hypot(cible.position[0] - ship.pos.x, cible.position[1] - ship.pos.y,
-                       cible.position[2] - ship.pos.z)
-          : Infinity;
-        const cadre = cible
-          ? autopilotDistances(declared.frames, cible.name,
-                               (cible.gravity && cible.gravity.upperSurfaceRadius) || 0)
-          : null;
-        const vc = (cible && cible.velocity) || [0, 0, 0];
-        const pose = !!ship.onPad;
-        for (const k of shipPrompts({
-          mapView: !!(solarMap && solarMap.open),
-          landingMode: !!atterrissage.mode,
-          allowLandingMode: allowLandingMode({ frame: cadre, landed: pose, distance: dCible }),
-          landed: pose, landingCam: !!atterrissage.on, playerCam: !atterrissage.on,
-          autopilotAvailable: autopilotAvailable({
-            arrival: cadre && cadre.declared ? cadre.arrival : 0, landed: pose, distance: dCible }),
-          flyingToDestination: !!(autopilot && autopilot.flying),
-          matchAvailable: !!cible && !pose,
-          matching: !!(autopilot && autopilot.matching),
-          localSpeed: Math.hypot(ship.vel.x - vc[0], ship.vel.y - vc[1], ship.vel.z - vc[2]),
-        })) left.push(P(`ShipPromptController.${k}`));
+      } else if (listeVaisseau) {
+        // `ShipPromptController.Update` : a gauche, sauf « Landing Mode » quand
+        // `OnEnterFlightConsole` l'a pose au centre.
+        for (const k of listeVaisseau) {
+          if (k === "_landingPrompt" && atterrissageAuCentre) continue;
+          left.push(P(`ShipPromptController.${k}`));
+        }
       } else {
         // §U LES INVITES DU SAC DORSAL N'EXISTENT QU'EN APESANTEUR, et les
         // trois poussees qu'a l'ENTRAINEMENT. Le portage les affichait des
@@ -7066,9 +7093,14 @@ async function boot() {
       // `ShipDamage.alerted` disait cette liste depuis le lot de docs/49, et
       // personne ne la lui demandait.
       const touchees = ship.damage.alerted;
-      voyants.update(now, ship.damage.damaged,
+      const etatsVoyants = voyants.update(now, ship.damage.damaged,
                      ALERT_ORDER.map((k) => touchees.includes(k)),
                      presDuVaisseau);
+      // Sur la visiere, comme les jauges : casque pose, hors carte et hors
+      // vue d'atterrissage (`HUDCameraScript`).
+      if (degatsHUD) {
+        degatsHUD.set(etatsVoyants, casque.worn && !guiMode.hidden && !vueCarte.open && !enVueAtterrissage());
+      }
     }
     const avis = notifications.update(now);
     if (resHUD) resHUD.setNotice(avis);

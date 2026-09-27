@@ -1705,3 +1705,28 @@ du centre ; le portage, un sol noir et rien.
   Et la visée part de la **caméra active** (`UpdateTargeting` lance son rayon
   depuis `_activeCam`) : en vue d'atterrissage, la caméra du dessous regarde
   Timber Hearth, qui devient la cible possible.
+
+### En vol, cible tenue : « Landing Mode » au centre, et le tableau des avaries
+
+Décollé de la tour (le vaisseau a heurté la charpente au passage), Timber
+Hearth verrouillé, l'alpha montre trois choses que le portage ne montrait
+pas, ou pas à cette place :
+
+- **« Landing Mode » sous le réticule**, et non dans la colonne de gauche.
+  `ShipPromptController.Awake` pose `_centerLandingPrompt = true`,
+  `OnEnterFlightConsole` s'en sert pour ranger l'invite au CENTRE (1) plutôt
+  qu'à gauche (2), et `Update` le remet à faux dès qu'elle s'affiche : la
+  première fois qu'on s'assied dans une boucle, on la voit au milieu de
+  l'écran ; ensuite, à gauche. « Stop Relative To Target », lui, est à
+  gauche, seul — le pilote automatique ne s'offre pas sous la distance
+  d'arrivée.
+- **Le tableau des avaries, sur la visière** : un vaisseau rouge et
+  « WARNING — EXIT SHIP TO REPAIR », entre les jauges et la minicarte.
+  `ShipDamageHUD` est un quatrième panneau du casque, à
+  (0,16 ; 0,017 ; 0,544), tourné comme les autres ; projeté en 1280 × 720,
+  il tient de y 206 à 406 — l'alpha le montre de 205 à 405.
+  `_damageIndicatorArray` est `GetComponentsInChildren<Renderer>()` : le
+  panneau lui-même d'abord, allumé tant qu'il y a une avarie, puis ses cinq
+  enfants dans l'ordre de la scène — arrière, avant, gauche, droite, haut —,
+  qui clignotent à la demi-seconde, un par pièce touchée. Le portage
+  calculait tout cela (`DamageDisplay`) et n'en dessinait rien.

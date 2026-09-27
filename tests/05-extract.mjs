@@ -1896,6 +1896,15 @@ console.time("mainData");
         arr(r.position), "0.16,0.084,0.136");
   check("... tourne d'un demi-tour, champ de 80 degres", [r.mirrorX, r.fov].join(), "true,80");
   check("MinimapHUD : sous les jauges", arr(m.position), "0.162,-0.075,0.136");
+  const dg = panneauRessources(ctx, "ShipDamageHUD");
+  check("ShipDamageHUD : entre les deux", arr(dg.position), "0.16,0.017,0.136");
+  // L'ordre de `GetComponentsInChildren`, qui range les voyants.
+  check("... ses cinq voyants, dans l'ordre de la scene", dg.enfants.map((e) => e.nom).join(),
+        "HUDDamageBack,HUDDamageFront,HUDDamageLeft,HUDDamageRight,HUDDamageTop");
+  const { DEGATS_REPLI } = await import("../web/src/hud.js");
+  check("le repli des avaries est cette mesure",
+        DEGATS_REPLI.enfants.map((e) => e.position.map((v) => v.toFixed(2)).join(":")).join(),
+        dg.enfants.map((e) => e.position.map((v) => v.toFixed(2)).join(":")).join());
   check("les replis du moteur sont ces mesures",
         [arr(PANNEAU_REPLI.position), arr(PANNEAU_REPLI.scale), arr(MINIMAP_REPLI.position),
          arr(MINIMAP_REPLI.scale)].join("|"),

@@ -89,7 +89,7 @@ import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts, shipPrompts, autopilotAvailable } from "../web/src/consoles.js";
 import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
 import { crosshairPixels, CROSSHAIR, InviteCodes, rectPanneau, PANNEAU_REPLI,
-         MINIMAP_REPLI } from "../web/src/hud.js";
+         MINIMAP_REPLI, DEGATS_REPLI } from "../web/src/hud.js";
 import { actifsSeulement } from "../web/src/config.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
@@ -7824,6 +7824,11 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la minicarte en bas a droite, carree, un tiers de la hauteur",
         [Math.round(M.left * 1280), Math.round(M.top * 720),
          Math.round(M.width * 1280), Math.round(M.height * 720)].join(), "1025,471,253,253");
+  // `ShipDamageHUD` : dans l'alpha, vaisseau heurte, le vaisseau rouge et son
+  // avertissement tiennent de y 205 a 405, a droite.
+  const D = rectPanneau(DEGATS_REPLI, 1280 / 720);
+  check("le tableau des avaries entre jauges et minicarte (y 206 a 406)",
+        [Math.round(D.top * 720), Math.round((D.top + D.height) * 720)].join(), "206,406");
   // Le champ est VERTICAL : la taille suit la hauteur, pas la largeur.
   const R43 = rectPanneau(PANNEAU_REPLI, 4 / 3);
   check("en 4:3, meme hauteur, plus large en fraction de largeur",

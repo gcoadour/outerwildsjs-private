@@ -417,6 +417,97 @@ export class Prompts {
  */
 export const GUI_MODES = ["complet", "debogage", "capture", "masque"];
 
+/** `ShipDamageHUD`, repli mesure : entre les jauges et la minicarte. */
+export const DEGATS_REPLI = {
+  position: [0.16, 0.017, 0.13578], scale: [0.0317, 0.0317], mirrorX: true, fov: 80,
+  couleurs: { ShipDamageHUD: [0.5, 0.5, 0.5, 0.502] },
+  enfants: [
+    { nom: "HUDDamageBack", position: [0, -0.2966], scale: [0.2, 0.2] },
+    { nom: "HUDDamageFront", position: [0, 0.6799], scale: [0.2, 0.2] },
+    { nom: "HUDDamageLeft", position: [-0.53, 0.1428], scale: [0.2, 0.2] },
+    { nom: "HUDDamageRight", position: [0.52, 0.1568], scale: [0.2, 0.2] },
+    { nom: "HUDDamageTop", position: [0, 0.1777], scale: [0.2, 0.2] },
+  ],
+};
+
+/**
+ * `HUDDamageDisplay` : le tableau des avaries, sur la visiere.
+ *
+ * Le portage calculait les voyants (`DamageDisplay`, helmet.js) et n'en
+ * dessinait aucun ; l'alpha, vaisseau heurte, montre un vaisseau rouge et
+ * « WARNING — EXIT SHIP TO REPAIR » a droite, entre les jauges et la
+ * minicarte (docs/132). `_damageIndicatorArray` est
+ * `GetComponentsInChildren<Renderer>()` : le panneau LUI-MEME d'abord (le
+ * vaisseau, allume tant qu'il y a une avarie), puis ses cinq enfants dans
+ * l'ordre de la scene — arriere, avant, gauche, droite, haut —, qui
+ * clignotent un par piece touchee.
+ */
+export class DegatsHUD {
+  constructor(root, conf) {
+    const c = (conf && conf.degats) || {};
+    this.panel = c.panel || DEGATS_REPLI;
+    this.box = document.createElement("div");
+    this.box.className = "ow-degats";
+    const img = (src, cls) => {
+      const i = document.createElement("img");
+      i.className = cls; i.hidden = true;
+      if (src) i.src = DIR + src;
+      this.box.appendChild(i);
+      return i;
+    };
+    this.icone = img(c.icone, "ow-degats-plein");
+    const col = (this.panel.couleurs || {}).ShipDamageHUD || [0.5, 0.5, 0.5, 0.5];
+    this.icone.style.filter = `brightness(${col[0]})`;
+    this.icone.style.opacity = String(col[3]);
+    this.voyants = (this.panel.enfants || []).map((e) => {
+      const i = img(c.voyant, "ow-degats-voyant");
+      i.dataset.nom = e.nom;
+      return { e, i };
+    });
+    root.appendChild(this.box);
+    this.place();
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("resize", () => this.place());
+    }
+  }
+
+  place() {
+    const R = rectPanneau(this.panel, (window.innerWidth || 16) / (window.innerHeight || 9));
+    const st = this.box.style;
+    st.setProperty("--dg-left", `${R.left * 100}%`);
+    st.setProperty("--dg-top", `${R.top * 100}%`);
+    st.setProperty("--dg-width", `${R.width * 100}%`);
+    st.setProperty("--dg-height", `${R.height * 100}%`);
+    const sens = R.mirrorX ? -1 : 1;
+    const pct = (v) => `${(v + 1) * 50}%`;
+    for (const { e, i } of this.voyants) {
+      i.style.left = pct(sens * e.position[0] - e.scale[0]);
+      i.style.bottom = pct(e.position[1] - e.scale[1]);
+      i.style.width = `${e.scale[0] * 100}%`;
+      i.style.height = `${e.scale[1] * 100}%`;
+    }
+  }
+
+  /**
+   * @param etats celui de `DamageDisplay.update` : le general, puis un par
+   *              piece dans `ALERT_ORDER` (arriere, avant, droite, gauche, haut)
+   * @param visible le casque allume
+   */
+  set(etats, visible = true) {
+    this.box.hidden = !visible;
+    const e = etats || [];
+    this.icone.hidden = !e[0];
+    // Piece -> enfant : arriere, avant, puis DROITE sur `HUDDamageLeft` et
+    // GAUCHE sur `HUDDamageRight` — le demi-tour du panneau les remet du bon
+    // cote de l'ecran —, et haut.
+    const ordre = ["HUDDamageBack", "HUDDamageFront", "HUDDamageLeft", "HUDDamageRight", "HUDDamageTop"];
+    for (const { e: en, i } of this.voyants) {
+      const k = ordre.indexOf(en.nom);
+      i.hidden = !(k >= 0 && e[k + 1]);
+    }
+  }
+}
+
 /**
  * `ReferenceFrameTracker.OnGUI`, peint : un canevas plein ecran qui execute
  * les commandes de `commandesSuivi` (tracker.js). `GUI.color` teinte les

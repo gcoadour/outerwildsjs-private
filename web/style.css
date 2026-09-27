@@ -683,3 +683,11 @@ body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
 body.titre #hud, body.titre #touch, body.titre #touchui { display: none; }
 /* `ReferenceFrameTracker.OnGUI` : crochets, lecture, fleches, « Set Target » */
 .ow-suivi { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* `ShipDamageHUD` sur la visiere (DegatsHUD, hud.js) : 16:9 par defaut */
+.ow-degats {
+  position: absolute; pointer-events: none;
+  left: var(--dg-left, 81.7%); top: var(--dg-top, 28.6%);
+  width: var(--dg-width, 15.65%); height: var(--dg-height, 27.8%);
+}
+.ow-degats > img { position: absolute; }
+.ow-degats-plein { inset: 0; width: 100%; height: 100%; object-fit: fill; }

@@ -39,6 +39,8 @@ const TEXTURES = [
   // `ReferenceFrameTracker` : le cercle des crochets et la fleche de derive,
   // chargees par `Resources.Load` et donc portees par aucun materiau.
   "RFCircleIcon", "RFArrowIcon",
+  // `HUDDamageDisplay` : le vaisseau (et son avertissement) et les voyants.
+  "Ship_Damage_Icon", "Ship_Damage_New",
   "Short_Dialog_BG", "Dialog_Choice_BG", "NPC_Name_BG",
   "Short_Dialog_Btn", "White_Dialog_Btn", "LocationText_Bar",
 ];
@@ -202,12 +204,25 @@ export function panneauRessources(ctx, nomPanneau = "ResourcesHUD") {
       }
     }
   }
+  // Les enfants directs, dans l'ordre de la scene (`m_Children`) — c'est
+  // celui de `GetComponentsInChildren`, qui range les voyants de degats — avec
+  // leur place et leur echelle dans le repere du panneau.
+  const enfants = [];
+  for (const ch of tp.m_Children || []) {
+    const o = ctx.env.read(ctx.env.deref(ch, ctx.sceneObj));
+    if (!o || !o.m_GameObject) continue;
+    const t = ctx.transformOf.get(o.m_GameObject.pathId);
+    enfants.push({ nom: nom(o.m_GameObject.pathId),
+                   position: [t.m_LocalPosition.x, t.m_LocalPosition.y],
+                   scale: [t.m_LocalScale.x, t.m_LocalScale.y] });
+  }
   return {
     position: [p[0] + c[0], p[1] + c[1], p[2] + c[2]],
     scale: [tp.m_LocalScale.x, tp.m_LocalScale.y],
     mirrorX: miroir,
     fov,
     couleurs,
+    enfants,
   };
 }
 
@@ -307,6 +322,11 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
     fonts,
     // Le globe de la minicarte, sur la visiere comme les jauges.
     minimapPanel: panneauRessources(ctx, "MinimapHUD"),
+    // Le tableau des avaries, entre les jauges et la minicarte.
+    degats: {
+      panel: panneauRessources(ctx, "ShipDamageHUD"),
+      icone: written.Ship_Damage_Icon || null, voyant: written.Ship_Damage_New || null,
+    },
     // Le texte pose dans le monde (`TextMesh`).
     textes: textesDeScene(ctx),
     // L'ecran de la console du satellite : carte postale au repos, schema une
