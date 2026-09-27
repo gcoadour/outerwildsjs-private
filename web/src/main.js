@@ -5283,7 +5283,18 @@ async function boot() {
         // position extraite ait un sens, et c'est ce que fait
         // `InverseTransformPoint` sur un secteur enfant de sa planete.
         const dec = decalageDuCorps(secMaj.body, anchorPos);
-        const repos = (w) => restingPoint(w, dec);
+        // `GetLocalMapPosition` est `InverseTransformPoint` du SECTEUR : sa
+        // rotation au repos compte aussi, pas seulement la rotation du corps.
+        // Sans elle l'equateur du globe tombait au-dessus du joueur de la
+        // tour, que l'alpha montre sur l'equateur (docs/132).
+        const qs = secMaj.rotation;
+        const c0 = secMaj.position;
+        const repos = (w) => {
+          const r = restingPoint(w, dec);
+          if (!qs) return r;
+          const l = qrotDecor([-qs[0], -qs[1], -qs[2], qs[3]], [r[0] - c0[0], r[1] - c0[1], r[2] - c0[2]]);
+          return [c0[0] + l[0], c0[1] + l[1], c0[2] + l[2]];
+        };
         const monde = (x, y, z) =>
           [x + anchorPos[0], y + anchorPos[1], z + anchorPos[2]];
         const shipW = ship && !ship.boarded

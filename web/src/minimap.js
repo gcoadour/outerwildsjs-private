@@ -199,7 +199,7 @@ export class Minimap {
     if (!cv || !cv.getContext) return;
     const ctx = cv.getContext("2d");
     const w = cv.width, h = cv.height;
-    const R = Math.min(w, h) * 0.44;
+    const R = Math.min(w, h) * 0.31;
     ctx.clearRect(0, 0, w, h);
     if (!pd) return;
     pd = norm(pd);
@@ -219,11 +219,71 @@ export class Minimap {
       return [w / 2 + dot(d, right) * R, h / 2 - dot(d, top) * R, z];
     };
 
-    ctx.fillStyle = "rgba(10, 16, 26, .78)";
+    // LE GLOBE DU BUILD, et non un disque (docs/132). `MiniMapMesh` est une
+    // sphere habillee de `Minimap_Texture_2x` — seize meridiens et huit
+    // bandes, tous les 22,5 degres, l'equateur plus clair —, gris translucide
+    // (`_Color` 0,24 a 0,64, `Illumin-Diffuse`). Deux cones aux poles, rouge au
+    // nord et bleu au sud, a 0,514. Le marqueur du joueur est une fleche verte
+    // (`MinimapPlayerMarker`, eclairee). Le tout est vu par `MinimapCamera`
+    // et pose dans l'anneau `map_outline`, a 0,65 du quad : dans l'alpha le
+    // globe fait 78 pixels de rayon sur un panneau de 253, soit 0,31. Le
+    // portage dessinait un disque sombre de 0,44, un point blanc, et rien
+    // d'autre. Les couleurs sont celles MESUREES a l'ecran de l'alpha.
+    ctx.fillStyle = "rgba(128, 126, 130, .42)";
     ctx.beginPath(); ctx.arc(w / 2, h / 2, R, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(230, 216, 184, .45)";
-    ctx.lineWidth = 1;
+
+    // La grille : une ligne est une suite de points de la sphere, tracee sur
+    // la seule face visible.
+    const ligne = (points, style, largeur) => {
+      ctx.strokeStyle = style; ctx.lineWidth = largeur;
+      ctx.beginPath();
+      let pose = false;
+      for (const d of points) {
+        const q = project(d);
+        if (!q) { pose = false; continue; }
+        if (pose) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]);
+        pose = true;
+      }
+      ctx.stroke();
+    };
+    const PAS = Math.PI / 8;   // 22,5 degres
+    for (let i = 0; i < 16; i++) {
+      const lon = i * PAS, pts = [];
+      for (let k = 0; k <= 32; k++) {
+        const lat = -Math.PI / 2 + k * Math.PI / 32;
+        pts.push([Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)]);
+      }
+      ligne(pts, "rgba(215, 212, 218, .32)", 1);
+    }
+    for (let j = 1; j < 8; j++) {
+      const lat = -Math.PI / 2 + j * PAS, pts = [];
+      for (let k = 0; k <= 64; k++) {
+        const lon = k * Math.PI * 2 / 64;
+        pts.push([Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)]);
+      }
+      ligne(pts, j === 4 ? "rgba(235, 232, 238, .55)" : "rgba(215, 212, 218, .32)", j === 4 ? 1.5 : 1);
+    }
+    // L'anneau `map_outline`.
+    ctx.strokeStyle = "rgba(205, 205, 212, .55)";
+    ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(w / 2, h / 2, R, 0, Math.PI * 2); ctx.stroke();
+
+    // Les cones des poles : ils depassent du globe et se voient au bord.
+    const cone = (d, couleur) => {
+      const z = dot(norm(d), pd);
+      if (z < -0.35) return;
+      const x = dot(d, right), y = dot(d, top), l = Math.hypot(x, y) || 1;
+      const bx = w / 2 + x * R, by = h / 2 - y * R;
+      const ux = x / l, uy = -y / l, L = R * 0.16, E = R * 0.07;
+      ctx.fillStyle = couleur;
+      ctx.beginPath();
+      ctx.moveTo(bx + ux * L, by + uy * L);
+      ctx.lineTo(bx - uy * E, by + ux * E);
+      ctx.lineTo(bx + uy * E, by - ux * E);
+      ctx.closePath(); ctx.fill();
+    };
+    cone([0, 1, 0], "rgb(255, 0, 0)");
+    cone([0, -1, 0], "rgb(15, 165, 243)");
 
     const trail = (ring, color) => {
       ctx.fillStyle = color;
@@ -244,9 +304,10 @@ export class Minimap {
       ctx.fillStyle = color;
       ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2); ctx.fill();
     };
-    marker(shipDir, "#ffd9a0", 3.5);
-    marker(probeDir, "#7fa8ff", 2.5);
+    // `ShipMarker` porte le materiau du joueur, `ProbeMarker` le sien, orange.
+    marker(shipDir, "rgb(65, 180, 1)", R * 0.05);
+    marker(probeDir, "rgb(240, 110, 20)", R * 0.04);
     // le joueur est au centre par construction : la camera le regarde
-    marker(pd, "#ffffff", 3);
+    marker(pd, "rgb(65, 180, 1)", R * 0.09);
   }
 }

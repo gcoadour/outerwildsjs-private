@@ -1775,3 +1775,21 @@ l'instance, type que le portage ne lit pas) : le portage écrivait
 « Lampe (F) ». L'écran dit **« Flashlight »**, avec l'icône de la croix
 directionnelle vers le haut, à gauche. C'est ce qu'écrit désormais le
 portage.
+
+### La minicarte est un globe
+
+Côte à côte, l'alpha montre un **globe quadrillé** — seize méridiens et
+huit bandes, l'équateur plus clair —, un cône rouge au pôle nord, un bleu
+au sud, et une flèche verte au centre ; le portage, un disque sombre et un
+point blanc. `Minimap_Root` est une petite scène : `MiniMapMesh`, sphère
+habillée de `Minimap_Texture_2x` (grille tous les 22,5 degrés), grise et
+translucide ; `NorthPole` et `SouthPole` à 0,514 ; les marqueurs du joueur
+et du vaisseau (vert, éclairé) et de la sonde (orange) ; le tout vu par
+`MinimapCamera` et posé dans l'anneau `map_outline`, à 0,65 du quad — un
+globe de 78 pixels de rayon sur un panneau de 253. Le portage le dessine
+désormais ainsi, aux couleurs mesurées à l'écran de l'alpha.
+
+Et l'équateur tombait au-dessus du joueur de la tour, que l'alpha montre
+dessus : `GetLocalMapPosition` est `InverseTransformPoint` du **secteur**, et
+le portage retirait la rotation du corps mais pas celle, au repos, de
+l'objet secteur.
