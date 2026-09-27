@@ -4350,7 +4350,11 @@ async function boot() {
       }
       const etaitStationne = ship.parked;
       ship.update(dt, bodies, input, { fwd, right, up }, world);
-      if (etaitStationne && !ship.parked) journalVaisseau("stationnement leve");
+      if (etaitStationne && !ship.parked) {
+        const f = ship.field;
+        journalVaisseau(`stationnement leve (pas ${dt.toFixed(3)} s, champ ${f ? f.body.name : "-"}`
+          + ` ${f ? f.magnitude.toFixed(1) : 0} u/s2, r ${Math.round(Math.hypot(ship.pos.x, ship.pos.y, ship.pos.z))})`);
+      }
       // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
       // seconde durant, et relacher annule (docs/66-allumage.md). Les trois
       // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils

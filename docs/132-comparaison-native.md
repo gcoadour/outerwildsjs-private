@@ -1491,3 +1491,10 @@ chaque boucle : la sphère se réveille donc éteinte à chaque tour. Le portage
 ne l'armait qu'au chargement de la page et ne la désarmait jamais : armée au
 premier tour, elle l'était encore au deuxième. Elle se réveille désormais à
 chaque boucle, comme la scène rechargée.
+
+Le journal du vaisseau (`window.__journalVaisseau`, imprimé par le contrôle qui
+le perd) a trouvé la cause de l'autre moitié : le stationnement se jugeait sur
+la vitesse **en sortie** du pas, gravité du pas comprise. À 12 u/s², un pas de
+0,42 s passe les 5 u/s de `LANDED_SPEED` : dès qu'une image ralentissait, le
+vaisseau posé se destationnait tout seul. Il se juge désormais sur la vitesse
+**apportée** dans le pas — une poussée, un choc.

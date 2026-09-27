@@ -1170,6 +1170,22 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("detruit, il ne pousse plus", ship.effectiveThrust, 0);
 }
 
+// --- le stationnement se juge sur la vitesse apportee, pas sur la gravite ---
+{
+  // Un corps a 12 u/s² sous le vaisseau stationne, et un pas d'une seconde :
+  // la gravite du pas donne 12 u/s, au-dela des cinq de `LANDED_SPEED`. Le
+  // vaisseau se destationnait alors tout seul des qu'une image durait.
+  const corps = [{ name: "sol", position: [0, -200, 0],
+                   gravity: { surfaceAcceleration: 12, upperSurfaceRadius: 190, falloff: "linear" } }];
+  const posé = new Ship({}, null, [0, 0, 0]);
+  posé.update(1, corps, null, null);
+  check("un pas d'une seconde sous la gravite ne le destationne pas",
+        [posé.parked, Math.hypot(posé.vel.x, posé.vel.y, posé.vel.z)].join(), "true,0");
+  posé.vel.x = 40;
+  posé.update(0.02, corps, null, null);
+  check("une poussee de quarante unites, si", posé.parked, false);
+}
+
 // --- lune quantique : occlusion et inclinaison ---------------------------
 {
   // `occludes` porte la loi entiere : une sphere de rayon `_sphereCheckRadius`

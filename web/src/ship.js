@@ -334,6 +334,9 @@ export class Ship {
 
   update(dt, bodies, input, basis, world = null) {
     this.now = (this.now || 0) + dt;
+    // La vitesse APPORTEE dans le pas — une poussee, un choc — avant que la
+    // gravite du pas ne s'y ajoute : c'est elle que le stationnement juge.
+    this.vitesseEntree = Math.hypot(this.vel.x, this.vel.y, this.vel.z);
     this.thrustFraction = (this.boarded && input)
       ? Math.hypot(input.forward || 0, input.right || 0, input.up ? 1 : 0) : 0;
     const f = dominantField(bodies, this.pos, world);
@@ -558,7 +561,13 @@ export class Ship {
     // de le compter pose (`LANDED_SPEED`), il glisse, et il n'est plus
     // stationne. Le fixer quoi qu'il arrive le rendait inamovible jusqu'a
     // l'allumage (docs/132).
-    if (this.parked && Math.hypot(this.vel.x, this.vel.y, this.vel.z) > LANDED_SPEED) {
+    //
+    // Et juge sur la vitesse d'ENTREE du pas. Celle de sortie contient la
+    // gravite du pas : 12 u/s² fois un pas de 0,42 s passent les cinq unites,
+    // et un vaisseau pose se destationnait tout seul des que les images
+    // ralentissaient — a une image par seconde, il repartait dans l'espace.
+    const vIn = this.vitesseEntree ?? Math.hypot(this.vel.x, this.vel.y, this.vel.z);
+    if (this.parked && vIn > LANDED_SPEED) {
       this.parked = false;
     }
     if (this.parked && this.landed) {
