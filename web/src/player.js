@@ -431,13 +431,22 @@ export class Player {
     const o = (world && world.framePos) || [0, 0, 0];
     // Le facteur de trainee est celui du DETECTEUR pose sur le joueur, pas une
     // constante uniforme : `SimpleFluidDetector._dragFactor` vaut 0,5 ou 1.
+    const avant = { x: this.vel.x, y: this.vel.y, z: this.vel.z };
     const hit = field.apply([this.pos.x + o[0], this.pos.y + o[1], this.pos.z + o[2]],
                             this.vel, dt, this.field,
                             { dragFactor: field.dragFactor("player"), ignore: "Player_Body" });
+    // Le CHANGEMENT de vitesse, en impulsion (`AddVelocityChange` du build) :
+    // reecrire la vitesse du corps effacait la gravite que la force posee
+    // juste avant devait lui donner au pas suivant, et le joueur restait
+    // suspendu dans l'atmosphere — ce qui ne se voyait pas tant que les
+    // volumes, restes a leur place de repos, ne le contenaient presque jamais.
     if (hit && this.physics) {
+      const m = this.mass || 1;
       try {
-        this.body.body.setLinearVelocity(
-          new this.BABYLON.Vector3(this.vel.x, this.vel.y, this.vel.z));
+        this.body.body.applyImpulse(
+          new this.BABYLON.Vector3((this.vel.x - avant.x) * m, (this.vel.y - avant.y) * m,
+                                   (this.vel.z - avant.z) * m),
+          this.body.transformNode.absolutePosition);
       } catch (e) { /* corps deja libere */ }
     }
     return hit;
