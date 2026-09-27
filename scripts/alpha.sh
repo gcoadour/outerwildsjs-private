@@ -6,6 +6,7 @@
 #   ALPHA_CLAVIER=1 ... start         ... le regard aux fleches, la lunette a t,
 #                                     le verrou a g (scripts/alpha-clavier.mjs)
 #   ALPHA_CABINE=1 ... start          ... le joueur nait dans la cabine du vaisseau
+#                                     (ALPHA_POSTE=1 en plus : devant le poste)
 #                                     (scripts/alpha-cabine.mjs)
 #   scripts/alpha.sh shot <fichier>   capture l'ecran
 #   scripts/alpha.sh key <touche...>  envoie des touches (noms xdotool)

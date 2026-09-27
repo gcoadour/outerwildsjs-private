@@ -98,6 +98,81 @@ export function trackerReadout(distance, zSpeed) {
   return ` ${Math.round(d)}${unite}\n ${Math.round(zSpeed)}m/s`;
 }
 
+/** `ColorHSV.ToColorRGB`, teinte en degres, le reste en 0-1. */
+export function hsvVersRgb(h, s, v) {
+  const c = v * s, hp = ((h % 360) + 360) % 360 / 60, x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x]
+    : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  const m = v - c;
+  return [r + m, g + m, b + m];
+}
+
+/**
+ * `ReferenceFrameTracker.OnGUI` : ce qui se dessine autour d'une cible, en
+ * commandes a peindre. Le portage calculait la lecture, la couleur et les
+ * fleches (`relativeMotion`), et n'en dessinait RIEN : la distance allait a
+ * cote des jauges, et ni crochets, ni fleches, ni « Set Target » (docs/132).
+ *
+ *   rien en mode cache, ni sur la carte dans la zone brouillee
+ *   une cible POSSIBLE (visee, pas tenue)  « LB Set Target », 60 a gauche et
+ *                                          80 au-dessus du point, blanc a 0,8
+ *                                          (pas en mode capture) ; crochets
+ *                                          x 2, blancs a 0,2
+ *   la cible tenue (ou la derniere)        crochets x (1 + ouverture) tant
+ *                                          qu'ils se referment
+ *   la cible tenue                         la lecture a droite du cercle ;
+ *                                          trajectoire directe hors carte :
+ *                                          crochets x 1,2 ; sinon six fleches
+ *
+ * `projeter(p)` rend le point d'ecran d'Unity (y vers le HAUT) et sa
+ * profondeur, ou null ; les commandes sont en coordonnees de GUI (y vers le
+ * bas), comme `GUI.DrawTexture`.
+ */
+export function commandesSuivi({
+  cible = null, derniere = null, possible = null, montrerInvite = false,
+  mode = "full", carte = false, brouillee = false, ouverture = 1,
+  mouvement = null, projeter, hauteur, cercle = [100, 100], fleche = [128, 128],
+} = {}) {
+  const out = [];
+  if (mode === "hidden" || (carte && brouillee) || !projeter) return out;
+  const couleur = mouvement
+    ? [...hsvVersRgb(mouvement.hue, mouvement.saturation, 1), 1] : [1, 1, 1, 1];
+  const crochets = (sx, sy, k, c) => out.push({
+    type: "crochets", x: sx - cercle[0] * k / 2, y: hauteur - sy - cercle[1] * k / 2,
+    l: cercle[0] * k, h: cercle[1] * k, couleur: c,
+  });
+  if (montrerInvite && possible && mode !== "capture") {
+    const q = projeter(possible);
+    if (q && q.z > 0) {
+      out.push({ type: "invite", x: q.x - 60, y: hauteur - q.y - 80, couleur: [1, 1, 1, 0.8] });
+      crochets(q.x, q.y, 2, [1, 1, 1, 0.2]);
+    }
+  }
+  const pos = cible || derniere;
+  const q = pos ? projeter(pos) : null;
+  if (q && q.z > 0) {
+    if (ouverture < 1) crochets(q.x, q.y, 1 + ouverture, couleur);
+    if (cible) {
+      out.push({ type: "lecture", x: q.x + cercle[0] / 2, y: hauteur - q.y, couleur });
+      if (mouvement && mouvement.direct && !carte) crochets(q.x, q.y, 1.2, couleur);
+    }
+  }
+  // `DrawMotionArrows` : six fleches le long du decalage lateral, chacune
+  // tournee vers le point de la cible.
+  if (cible && mouvement && !mouvement.direct && !carte && q) {
+    for (let i = 0; i < 6; i++) {
+      const t = (i + 1) / 6;
+      const o = mouvement.xyOffset;
+      const r = projeter([cible[0] - o[0] * t, cible[1] - o[1] * t, cible[2] - o[2] * t]);
+      if (!r || !(r.z > 0)) continue;
+      const angle = Math.atan2(q.y - r.y, q.x - r.x) * 180 / Math.PI;
+      out.push({ type: "fleche", x: r.x, y: hauteur - r.y, rotation: -angle - 90,
+                 l: fleche[0], h: fleche[1], couleur });
+    }
+  }
+  return out;
+}
+
 /**
  * Les particules de mouvement : la poussiere qui defile quand on file.
  *

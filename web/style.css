@@ -339,7 +339,15 @@ body:not(.playing) #ui { display: none; }
 /* Le bandeau d'etat et l'aide des touches sont des outils du PORTAGE : l'alpha
    n'affiche en jeu que son reticule (`DebugHUD.OnGUI`). Masques par defaut,
    ils reviennent avec F3 ou `?debug` (docs/132). */
-body:not(.debug):not(.gui-debug) #hud { display: none; }
+body:not(.debug) #hud { display: none; }
+/* `DebugHUD.OnGUI` : `GUI.Label` du skin par defaut d'Unity 4 — blanc, sans
+   ombre —, en x 10 et y 10, 25, 55, 70, 100 (lignes de 20). Le mode de mise
+   au point de l'alpha (F1) montre CECI, et non le bandeau du portage. */
+#debughud {
+  position: fixed; left: 10px; top: 10px; z-index: 7; pointer-events: none;
+  font: 12px Arial, "Liberation Sans", sans-serif; color: #fff; line-height: 15px;
+  white-space: pre;
+}
 #reticule {
   position: fixed; left: calc(50% - 6.5px); top: calc(50% - 6.5px);
   z-index: 6; pointer-events: none; image-rendering: pixelated;
@@ -681,3 +689,13 @@ body.gui-hidden #help, body.gui-hidden #help-touch { display: none; }
 }
 /* Pendant le titre, rien de la partie : ni l'aide, ni les commandes tactiles. */
 body.titre #hud, body.titre #touch, body.titre #touchui { display: none; }
+/* `ReferenceFrameTracker.OnGUI` : crochets, lecture, fleches, « Set Target » */
+.ow-suivi { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* `ShipDamageHUD` sur la visiere (DegatsHUD, hud.js) : 16:9 par defaut */
+.ow-degats {
+  position: absolute; pointer-events: none;
+  left: var(--dg-left, 81.7%); top: var(--dg-top, 28.6%);
+  width: var(--dg-width, 15.65%); height: var(--dg-height, 27.8%);
+}
+.ow-degats > img { position: absolute; }
+.ow-degats-plein { inset: 0; width: 100%; height: 100%; object-fit: fill; }

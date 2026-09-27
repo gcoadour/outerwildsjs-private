@@ -23,7 +23,7 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI, SuiviHUD, DegatsHUD } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
@@ -86,7 +86,7 @@ import { ProbeLauncher, SONDE, snapshotSize, probeIcon, probeLabelPos,
 import { DialogueUI } from "./dialogueui.js";
 import { initPhysics, buildColliders, disposeColliders,
          createPlayerBody, teleportBody, hideUnrendered, propagerExtras, hiddenMesh,
-         disableInactive, underInactive, ombresDuRenderer } from "./physics.js";
+         disableInactive, underInactive, ombresDuRenderer, rendererOff } from "./physics.js";
 import { TouchControls, touchAvailable, bindMapGestures } from "./touch.js";
 import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 // Les commandes du BUILD, lues dans `mainData` (docs/61-commandes.md).
@@ -126,7 +126,7 @@ import { EcranOrdinateur } from "./ecranordinateur.js";
 import { toucheDebug, TOUCHES_DEBUG, ACCELERATION, SECONDES_FIN, LIEU_DU_SAUT,
          pointDeSaut, transfertSable } from "./debug.js";
 import { LockOn, aimedFrame, canFlyTo,
-         ancientProbeAcceleration } from "./tracker.js";
+         ancientProbeAcceleration, commandesSuivi } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
 // existait, ses quarante verifications passaient, et aucun module du moteur ne
 // l'importait (docs/68-lois.md).
@@ -265,6 +265,7 @@ async function ecranTitre(BABYLON, engine, cmds) {
 }
 
 async function boot() {
+  const debutBoot = performance.now();
   const BABYLON = window.BABYLON;
   const canvas = document.getElementById("view");
   // audioEngine: true est indispensable — depuis Babylon 8 le moteur audio
@@ -1029,6 +1030,15 @@ async function boot() {
   // l'appui et se referme toute seule QUAND ON EST ENTRE (docs/116-trappe.md).
   const trappeData = hatchControllers(gameplay);
   const trappe = new Hatch(trappeData[0] || {});
+  // `TractorBeamSwitch` : le rayon tracteur s'allume et s'eteint (visuel et
+  // `TractorBeamFluid`). ETEINT au depart — le renderer de `BeamVisual` l'est
+  // dans la scene —, eteint a `EnterShip`, rallume en sortant de son volume
+  // hors du vaisseau. Le portage le dessinait toujours (docs/132).
+  const rayon = {
+    switch: ((gameplay.placed || {}).TractorBeamSwitch || [])[0] || null,
+    actif: false, dansVaisseau: false, dedans: null, visuels: null, montre: null,
+  };
+  window.__rayon = rayon;
   let noeudTrappeOn = true;     // etat pose sur le collider, pour n'y toucher
   let trappeSansNoeud = false;  // qu'aux transitions
   console.log(`attaches : ${alignes.length} alignements, ${heritiers.length} heritiers,`
@@ -1448,7 +1458,10 @@ async function boot() {
         for (const m of node.getChildMeshes(false)) {
           // Rallumer la coque, pas ce que le build tient eteint.
           m.setEnabled(!underInactive(m));
-          m.isVisible = !hiddenMesh(m);
+          // `m_Enabled` a 0 compte aussi : le rayon tracteur (`BeamVisual`)
+          // est eteint dans la scene, et cette ligne le rallumait — une
+          // colonne orange du sol au plafond, devant l'ordinateur (docs/132).
+          m.isVisible = !hiddenMesh(m) && !rendererOff(m);
           MeshLOD.pin(m);
         }
       }
@@ -1739,6 +1752,8 @@ async function boot() {
   notifications.table = notificationsDuBuild((iface && iface.textes) || []);
   const uiRoot = document.getElementById("ui");
   const resHUD = iface && uiRoot ? new ResourceHUD(uiRoot, iface) : null;
+  const suiviHUD = iface && uiRoot ? new SuiviHUD(uiRoot, iface) : null;
+  const degatsHUD = iface && uiRoot ? new DegatsHUD(uiRoot, iface) : null;
   const prompts = iface && uiRoot ? new Prompts(uiRoot, iface) : null;
   window.__prompts = prompts;   // sonde : les trois zones et leur arbitrage
   let lastHealth = resources.health;
@@ -2426,6 +2441,8 @@ async function boot() {
     // La scene rechargee : la sphere de l'observatoire se reveille eteinte,
     // puis `OnStartOfTimeLoop` ne l'arme qu'au premier tour sans les codes.
     remiseAZero.awake();
+    // La scene rechargee : `ShipPromptController.Awake` rearme le centre.
+    centreAtterrissage = true;
     remiseAZero.startOfTimeLoop(loop.loopCount + 1, pdata.knows("knowsLaunchCodes"));
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
@@ -2586,12 +2603,42 @@ async function boot() {
   // majeur : la dimension abandonnee les bride a CENT. Piloter dedans se fait
   // donc a la lueur du tableau de bord, et c'est une des rares choses que le
   // build dit explicitement d'un lieu.
-  const phares = new BABYLON.SpotLight("shiplight", BABYLON.Vector3.Zero(),
-    new BABYLON.Vector3(0, 0, 1), Math.PI / 2.6, 2, scene);
-  phares.range = SHIPLIGHT_RANGE;
-  phares.intensity = 1.1;
-  phares.setEnabled(false);
+  //
+  // ET ILS SONT DEUX. `ExternalLightController` est pose sur `Headlights`
+  // (spot de 90 degres, vers l'avant) ET sur `LandingCam` (spot de 100
+  // degres, sous le cockpit, vers le sol) ; `OnEnterFlightConsole` allume les
+  // deux. C'est le second qui eclaire la piste en vue d'atterrissage — l'alpha
+  // montre un disque blanc sous le vaisseau, le portage un sol noir. Le portage
+  // n'avait qu'un phare, a 69 degres et 1,1 d'intensite choisis a l'oeil ; les
+  // deux prennent maintenant l'angle, l'intensite et la couleur de la scene
+  // (docs/132).
+  const lumiereVaisseau = (nom, repli) => {
+    const l = (lighting.lights || []).find((x) => x.name === nom && x.type === "spot") || repli;
+    const s = new BABYLON.SpotLight(`ow_${nom}`, BABYLON.Vector3.Zero(),
+      new BABYLON.Vector3(0, 0, 1), (l.spotAngle || 90) * Math.PI / 180, 2, scene);
+    s.range = SHIPLIGHT_RANGE;
+    s.intensity = l.intensity ?? 0.5;
+    if (l.color) s.diffuse = new BABYLON.Color3(l.color[0], l.color[1], l.color[2]);
+    s.setEnabled(false);
+    return s;
+  };
+  const phares = lumiereVaisseau("Headlights",
+    { spotAngle: 90, intensity: 0.5, color: [1, 1, 1] });
+  const phareAtterrissage = lumiereVaisseau("LandingCam",
+    { spotAngle: 100, intensity: 0.5, color: [1, 1, 1] });
   window.__phares = phares;
+  window.__phareAtterrissage = phareAtterrissage;
+  // Les deux suivent leur noeud du modele : l'avant d'Unity est l'oppose du
+  // +Z du noeud glTF (comme la camera d'atterrissage).
+  const noeudsPhares = new Map();
+  const poserPhare = (lum, nom, repli) => {
+    if (!noeudsPhares.has(nom)) noeudsPhares.set(nom, scene.getTransformNodeByName(nom) || null);
+    const n = noeudsPhares.get(nom);
+    if (!n) { repli(lum); return; }
+    n.computeWorldMatrix(true);
+    lum.position.copyFrom(n.getAbsolutePosition());
+    lum.direction.copyFrom(n.getDirection(BABYLON.Axis.Z).scale(-1));
+  };
   // Portee de ramassage. Le `GearPickup` du build n'a pas de forme a lui : sa
   // zone d'interaction est un objet ENFANT (`InteractVolume`, une capsule de
   // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
@@ -3058,6 +3105,9 @@ async function boot() {
     titre.ecran.dispose();
   }
   window.__ready = true;
+  // `LoadTimeTracker.GetLatestLoadTime` : le temps de chargement du niveau,
+  // en secondes — ici, du lancement de `boot` au premier etat pret.
+  window.__tempsChargement = (performance.now() - debutBoot) / 1000;
   window.__bodies = bodies;   // sonde de verification
   window.__player = player;   // sonde de verification : marche, saut, sac dorsal
   // Sonde de verification du depart : le pose lu dans le build, la marche
@@ -3188,6 +3238,11 @@ async function boot() {
   // La vue d'atterrissage : une camera, un regard, et des commandes qui
   // changent de main (docs/87-atterrissage.md).
   const atterrissage = new LandingView();
+  // `ShipPromptController._centerLandingPrompt` : vrai a l'`Awake`, faux des
+  // que « Landing Mode » s'est affiche. `OnEnterFlightConsole` le lit pour
+  // poser l'invite AU CENTRE (1) ou a gauche (2) : la premiere fois qu'on
+  // s'assied dans une boucle, elle est sous le reticule (docs/132).
+  let centreAtterrissage = true, atterrissageAuCentre = true;
   // LA VUE D'ATTERRISSAGE EST UNE CAMERA. `UpdateLandingMode`, 0,45 s apres
   // l'appui : `_landingCam.enabled = true; _playerCam.enabled = false`, et
   // `SwitchActiveCamera`. `LandingCam` est posee sous le cockpit et regarde
@@ -3436,6 +3491,10 @@ async function boot() {
     if (est("Landing Camera") && ship && ship.boarded) {
       const t = atterrissage.toggle(performance.now() / 1000,
                                     viseeVitesseRelative());
+      // `ExitLandingView` rend les commandes du poste. L'annonce partait dans
+      // `atterrissage.events` et n'allait nulle part : ressorti de la vue, on
+      // restait dans le jeu de commandes de l'atterrissage (docs/132).
+      if (t && t.sortie) modes.annonce("ExitLandingView");
       if (t && t.snap) {
         // Le regard bascule des l'APPUI, la camera 0,45 s plus tard : on voit
         // le sol arriver avant d'y etre.
@@ -3878,7 +3937,13 @@ async function boot() {
     // depuis `(0, 1, 0)` — 1,8 s pendant lesquelles le regard pose au point
     // d'apparition ne designe pas ce qu'il designait. Six controles de la sonde
     // l'ont dit, et son tir depend justement du regard (docs/106).
-    const upVoulu = ad ? [-ad.x, -ad.y, -ad.z] : null;
+    // ASSIS, LE HAUT EST CELUI DU VAISSEAU. `PlayerAttachPoint.AttachPlayer`
+    // coupe l'alignement sur le champ et fait tourner le corps avec le siege :
+    // la camera, enfant du joueur, prend l'assiette de la coque. Le portage
+    // gardait la verticale du champ dominant — en vol, celle du Soleil —, et
+    // la verriere roulait dans le cadre a chaque manoeuvre (docs/132).
+    const upVoulu = (ship && ship.boarded && ship.axes) ? ship.axes.up.slice()
+      : ad ? [-ad.x, -ad.y, -ad.z] : null;
     const upAvant = redressement.up;
     const pas = redressement.update(upVoulu, dt);
     const u0 = pas.up || [0, 1, 0];
@@ -4436,9 +4501,22 @@ async function boot() {
           siegePilotage.follow(cible);
           const etat = pointsAttache.update(dt, now);
           if (etat) {
+            const avantSiege = [player.pos.x, player.pos.y, player.pos.z];
             player.pos.x = etat.position[0] - anchorPos[0];
             player.pos.y = etat.position[1] - anchorPos[1];
             player.pos.z = etat.position[2] - anchorPos[2];
+            // LA CAMERA EST DEJA POSEE pour cette image, depuis la place
+            // d'avant le pas du vaisseau. Au sol la difference ne se voit pas ;
+            // en vol, dans le repere du Soleil, le vaisseau file a mille unites
+            // par seconde et l'oeil restait cinquante unites en arriere, hors
+            // de la coque : un ciel noir la ou l'alpha montre la verriere
+            // (docs/132). Dans Unity la camera est ENFANT du joueur, lui-meme
+            // accroche au siege : elle suit dans le meme pas.
+            if (!(solarMap && solarMap.open) && !enVueAtterrissage()) {
+              camera.position.x += player.pos.x - avantSiege[0];
+              camera.position.y += player.pos.y - avantSiege[1];
+              camera.position.z += player.pos.z - avantSiege[2];
+            }
             // `_matchRotation` : le corps pivote vers l'avant du siege, sur la
             // duree tiree de l'angle de depart. Le portage tient le regard en
             // deux scalaires plutot qu'en quaternion : c'est donc le LACET que
@@ -4603,6 +4681,7 @@ async function boot() {
         } else if (estPoste(focusPrecedent) && equipment.suit
                    && interactables.appui(focusPrecedent)) {
           ship.boarded = true;
+          atterrissageAuCentre = centreAtterrissage;
           const sonBoucle = sonsUI.buckleUp();
           if (sonBoucle) audio.playOneShot(sonBoucle.file, { volume: sonBoucle.volume });
           // `OnPressInteract` appelle `ResetRollSettings` : c'est le SEUL
@@ -5194,6 +5273,30 @@ async function boot() {
       reticule.hidden = guiMode.hidden || death.dead;
       // Le texte de mise au point n'apparait qu'en mode `IsDebugMode`.
       document.body.classList.toggle("gui-debug", guiMode.debug);
+      // `DebugHUD.OnGUI`, en mode de mise au point : cinq lignes, aux formules
+      // du build — y compris ses secondes restantes, `Round(s % 60 * 100 / 100)`,
+      // arrondies a l'unite et sans zero devant (« 17:5 »).
+      {
+        const el = document.getElementById("debughud");
+        if (el) {
+          el.hidden = !guiMode.debug;
+          if (guiMode.debug) {
+            const r2 = (x) => Math.round(x * 100) / 100;
+            // `GetSecondsRemaining` n'est PAS borne a zero : sans les codes,
+            // la boucle depasse sa duree et l'alpha affiche des minutes et des
+            // secondes negatives. `loop.secondsRemaining`, lui, l'est.
+            const s = loop.duration - loop.elapsed;
+            const echelle = (settings && settings.open) ? 0
+              : (window.__miseAuPoint && keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1);
+            const champ = player.field ? player.field.magnitude : 0;
+            el.textContent = `Time Scale: ${r2(echelle)}\n`
+              + `Time Remaining: ${Math.floor(s / 60)}:${Math.round(s % 60 * 100 / 100)}\n\n`
+              + `Net Field Accel: ${r2(champ)}\n`
+              + `G-Force: ${r2(player.grounded ? champ : 0)}\n\n`
+              + `Load Time: ${window.__tempsChargement || 0}`;
+          }
+        }
+      }
     }
 
     // --- minicarte : le declencheur du secteur majeur, et rien d'autre ---
@@ -5220,7 +5323,18 @@ async function boot() {
         // position extraite ait un sens, et c'est ce que fait
         // `InverseTransformPoint` sur un secteur enfant de sa planete.
         const dec = decalageDuCorps(secMaj.body, anchorPos);
-        const repos = (w) => restingPoint(w, dec);
+        // `GetLocalMapPosition` est `InverseTransformPoint` du SECTEUR : sa
+        // rotation au repos compte aussi, pas seulement la rotation du corps.
+        // Sans elle l'equateur du globe tombait au-dessus du joueur de la
+        // tour, que l'alpha montre sur l'equateur (docs/132).
+        const qs = secMaj.rotation;
+        const c0 = secMaj.position;
+        const repos = (w) => {
+          const r = restingPoint(w, dec);
+          if (!qs) return r;
+          const l = qrotDecor([-qs[0], -qs[1], -qs[2], qs[3]], [r[0] - c0[0], r[1] - c0[1], r[2] - c0[2]]);
+          return [c0[0] + l[0], c0[1] + l[1], c0[2] + l[2]];
+        };
         const monde = (x, y, z) =>
           [x + anchorPos[0], y + anchorPos[1], z + anchorPos[2]];
         const shipW = ship && !ship.boarded
@@ -5272,7 +5386,44 @@ async function boot() {
       // `UpdatePromptDisplay` : l'invite ne s'affiche que tant qu'on n'a PAS
       // interagi (`!_hasInteracted`). Une conversation ouverte la retire ; le
       // portage la laissait sous le reticule pendant tout le dialogue.
-      const centre = (focus && dialogue.active) ? null
+      // `ShipPromptController.Update` (consoles.js) : ce que la situation
+      // permet, dans l'ordre ou `OnEnterFlightConsole` les a poses. Calcule
+      // avant le centre : « Landing Mode » peut y aller.
+      let listeVaisseau = null;
+      if (ship && ship.boarded && !(solarMap && solarMap.open) && !consoles.active
+          && !computer.open && !telescope.active) {
+        const cible = lockOn.current ? lockOn.current.body : null;
+        const dCible = cible
+          ? Math.hypot(cible.position[0] - ship.pos.x, cible.position[1] - ship.pos.y,
+                       cible.position[2] - ship.pos.z)
+          : Infinity;
+        const cadre = cible
+          ? autopilotDistances(declared.frames, cible.name,
+                               (cible.gravity && cible.gravity.upperSurfaceRadius) || 0)
+          : null;
+        const vc = (cible && cible.velocity) || [0, 0, 0];
+        const pose = !!ship.onPad;
+        listeVaisseau = shipPrompts({
+          mapView: false,
+          landingMode: !!atterrissage.mode,
+          allowLandingMode: allowLandingMode({ frame: cadre, landed: pose, distance: dCible }),
+          landed: pose, landingCam: !!atterrissage.on, playerCam: !atterrissage.on,
+          autopilotAvailable: autopilotAvailable({
+            arrival: cadre && cadre.declared ? cadre.arrival : 0, landed: pose, distance: dCible }),
+          flyingToDestination: !!(autopilot && autopilot.flying),
+          matchAvailable: !!cible && !pose,
+          matching: !!(autopilot && autopilot.matching),
+          localSpeed: Math.hypot(ship.vel.x - vc[0], ship.vel.y - vc[1], ship.vel.z - vc[2]),
+        });
+        // `Update` : `_centerLandingPrompt = false` des que l'invite s'affiche
+        // — mais sa PLACE a ete choisie en s'asseyant.
+        if (listeVaisseau.includes("_landingPrompt")) centreAtterrissage = false;
+      }
+      const centreVaisseau = listeVaisseau && atterrissageAuCentre
+        && listeVaisseau.includes("_landingPrompt")
+        ? P("ShipPromptController._landingPrompt") : null;
+      const centre = centreVaisseau ? centreVaisseau
+        : (focus && dialogue.active) ? null
         // `InteractReceiver.Init("Repair", ...)` : l'invite du volume vise.
         : reparationVisee_ ? P("InteractVolume._screenPrompt", "Repair")
         // `UpdatePromptDisplay` : plus d'invite une fois le volume servi.
@@ -5317,32 +5468,13 @@ async function boot() {
         }
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
-      } else if (ship && ship.boarded) {
-        // `ShipPromptController.Update` (consoles.js) : ce que la situation
-        // permet, dans l'ordre ou `OnEnterFlightConsole` les a poses.
-        const cible = lockOn.current ? lockOn.current.body : null;
-        const dCible = cible
-          ? Math.hypot(cible.position[0] - ship.pos.x, cible.position[1] - ship.pos.y,
-                       cible.position[2] - ship.pos.z)
-          : Infinity;
-        const cadre = cible
-          ? autopilotDistances(declared.frames, cible.name,
-                               (cible.gravity && cible.gravity.upperSurfaceRadius) || 0)
-          : null;
-        const vc = (cible && cible.velocity) || [0, 0, 0];
-        const pose = !!ship.onPad;
-        for (const k of shipPrompts({
-          mapView: !!(solarMap && solarMap.open),
-          landingMode: !!atterrissage.mode,
-          allowLandingMode: allowLandingMode({ frame: cadre, landed: pose, distance: dCible }),
-          landed: pose, landingCam: !!atterrissage.on, playerCam: !atterrissage.on,
-          autopilotAvailable: autopilotAvailable({
-            arrival: cadre && cadre.declared ? cadre.arrival : 0, landed: pose, distance: dCible }),
-          flyingToDestination: !!(autopilot && autopilot.flying),
-          matchAvailable: !!cible && !pose,
-          matching: !!(autopilot && autopilot.matching),
-          localSpeed: Math.hypot(ship.vel.x - vc[0], ship.vel.y - vc[1], ship.vel.z - vc[2]),
-        })) left.push(P(`ShipPromptController.${k}`));
+      } else if (listeVaisseau) {
+        // `ShipPromptController.Update` : a gauche, sauf « Landing Mode » quand
+        // `OnEnterFlightConsole` l'a pose au centre.
+        for (const k of listeVaisseau) {
+          if (k === "_landingPrompt" && atterrissageAuCentre) continue;
+          left.push(P(`ShipPromptController.${k}`));
+        }
       } else {
         // §U LES INVITES DU SAC DORSAL N'EXISTENT QU'EN APESANTEUR, et les
         // trois poussees qu'a l'ENTRAINEMENT. Le portage les affichait des
@@ -5395,12 +5527,13 @@ async function boot() {
           inDarkZone: zonesSombres.sunless,
           onDaySide: !night,
         })) {
-          // Le texte, lui, n'est pas extractible : `_flashlightPrompt` est un
+          // Le texte n'est pas extractible : `_flashlightPrompt` est un
           // `ScreenPrompt` serialise sur l'instance, et le portage ne sait pas
           // lire ce type-la — `composants.mjs` rend un objet vide pour tout le
-          // composant. La REGLE vient du build, le mot est du portage, et
-          // c'est dit ici plutot que passe sous silence.
-          left.push({ text: "Lampe (F)", priority: 0, button: null });
+          // composant. Il a donc ete LU A L'ECRAN, dans l'alpha native :
+          // « Flashlight », icone de la croix directionnelle vers le haut, a
+          // gauche (docs/132). Le portage ecrivait « Lampe (F) ».
+          left.push({ text: "Flashlight", priority: 0, button: "DPadUp" });
         }
       }
       // GUIMode : le mode capture n'affiche ni le bas ni la gauche, le mode
@@ -5534,15 +5667,21 @@ async function boot() {
       if (ship) {
         const allumes = !!ship.boarded;
         phares.setEnabled(allumes);
+        phareAtterrissage.setEnabled(allumes);
         if (allumes) {
           const a = ship.axes;
-          phares.position.set(ship.pos.x + a.fwd[0] * 2,
-                              ship.pos.y + a.fwd[1] * 2,
-                              ship.pos.z + a.fwd[2] * 2);
-          phares.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          poserPhare(phares, "Headlights", (l) => {
+            l.position.set(ship.pos.x + a.fwd[0] * 2, ship.pos.y + a.fwd[1] * 2,
+                           ship.pos.z + a.fwd[2] * 2);
+            l.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          });
+          poserPhare(phareAtterrissage, "LandingCam", (l) => {
+            l.position.set(ship.pos.x, ship.pos.y, ship.pos.z);
+            l.direction.set(-a.up[0], -a.up[1], -a.up[2]);
+          });
           // `SectorDetector.GetShiplightRangeLimit` : le secteur ACTIF, et lui
           // seul. Giant's Deep bride les phares a 200, l'epave a 100.
-          phares.range = shiplightRange(
+          phares.range = phareAtterrissage.range = shiplightRange(
             secMaj ? secMaj.shiplightLimit : null, !!secMaj);
         }
       }
@@ -6974,6 +7113,24 @@ async function boot() {
         const c = pointVivant(trappe.data.position, decalageDuCorps(trappe.data.body, anchorPos));
         const d = Math.hypot(playerWorld.x - c[0], playerWorld.y - c[1], playerWorld.z - c[2]);
         const franchi = trappe.setInside(d <= trappe.data.volume.radius);
+        // `TractorBeamSwitch.OnTriggerExit` : SORTIR de son volume, hors du
+        // vaisseau, rallume le rayon — visuel et fluide. Il est eteint dans la
+        // scene : on ne le voit qu'une fois redescendu par la trappe.
+        if (rayon.switch && rayon.switch.volume) {
+          const p = restingPoint([playerWorld.x, playerWorld.y, playerWorld.z],
+                                 decalageDuCorps(rayon.switch.body, anchorPos));
+          const dedans = insideVolume(rayon.switch, p);
+          if (rayon.dedans === true && !dedans && !rayon.dansVaisseau) rayon.actif = true;
+          rayon.dedans = dedans;
+        }
+        if (ship.node && rayon.montre !== rayon.actif) {
+          if (!rayon.visuels) {
+            rayon.visuels = ship.node.getChildMeshes(false)
+              .filter((m) => /^BeamVisual/.test(m.name));
+          }
+          for (const m of rayon.visuels) m.isVisible = rayon.actif;
+          rayon.montre = rayon.actif;
+        }
         // `_hatchObject.SetActive` : ouvrir RETIRE le collider, il n'y a pas
         // d'animation. On le cherche dans le modele du vaisseau sous le nom
         // que la scene donne (`Hatch_Collider`) ; s'il n'y est pas, la trappe
@@ -7014,6 +7171,10 @@ async function boot() {
             resources.health = resources.maxHealth;
             resources.dead = false;
           }
+          // `TractorBeamSwitch.OnEnterShip` : le rayon s'eteint ; `OnExitShip`
+          // ne le rallume pas, il note seulement qu'on est dehors.
+          if (franchi === "entre") { rayon.dansVaisseau = true; rayon.actif = false; }
+          if (franchi === "sort") rayon.dansVaisseau = false;
           trappe.drain();
           for (const e of trappe.events.splice(0)) {
             console.log(`annonce : ${e}`);
@@ -7029,9 +7190,14 @@ async function boot() {
       // `ShipDamage.alerted` disait cette liste depuis le lot de docs/49, et
       // personne ne la lui demandait.
       const touchees = ship.damage.alerted;
-      voyants.update(now, ship.damage.damaged,
+      const etatsVoyants = voyants.update(now, ship.damage.damaged,
                      ALERT_ORDER.map((k) => touchees.includes(k)),
                      presDuVaisseau);
+      // Sur la visiere, comme les jauges : casque pose, hors carte et hors
+      // vue d'atterrissage (`HUDCameraScript`).
+      if (degatsHUD) {
+        degatsHUD.set(etatsVoyants, casque.worn && !guiMode.hidden && !vueCarte.open && !enVueAtterrissage());
+      }
     }
     const avis = notifications.update(now);
     if (resHUD) resHUD.setNotice(avis);
@@ -7044,8 +7210,9 @@ async function boot() {
         const moi = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
         const vRel = [player.vel.x, player.vel.y, player.vel.z];
-        const m = relativeMotion(vRel, moi, cible.position);
-        resHUD.setTracker(trackerReadout(m.distance, m.zSpeed));
+        // La lecture ne va plus a cote des jauges : `DrawReadout` la pose a
+        // droite du cercle de la cible (plus bas, `SuiviHUD`).
+        resHUD.setTracker(null);
         // §M LA POUSSIERE DE VITESSE. `MotionDust` ne seme RIEN sous trente
         // unites par seconde : en dessous, l'espace reste vide, et c'est ce qui
         // donne son prix a la vitesse. Au-dessus, le debit monte pendant que la
@@ -7055,7 +7222,6 @@ async function boot() {
         // La loi etait ecrite, eprouvee, et seulement IMPORTEE (docs/71).
         poussiere = motionDust(Math.hypot(vRel[0], vRel[1], vRel[2]),
                                { targeting: true, mapView: solarMap.open });
-        window.__suivi = m;
       } else { resHUD.setTracker(null); poussiere = motionDust(0, { targeting: false }); }
     }
 
@@ -7083,7 +7249,17 @@ async function boot() {
         v.position[1] = v.body.position[1] + anchorPos[1];
         v.position[2] = v.body.position[2] + anchorPos[2];
       }
-      const vise = solarMap.open ? null : aimedFrame(visables, moi, [fwd.x, fwd.y, fwd.z]);
+      // `UpdateTargeting` vise depuis la camera ACTIVE (`_activeCam`, que
+      // `SwitchActiveCamera` change) : en vue d'atterrissage, c'est la camera
+      // du dessous qui regarde, et Timber Hearth sous le vaisseau devient la
+      // cible possible — « LB Set Target », dans l'alpha comme ici (docs/132).
+      const camVise = enVueAtterrissage() ? camera : null;
+      const origineVise = camVise
+        ? [camVise.position.x + anchorPos[0], camVise.position.y + anchorPos[1], camVise.position.z + anchorPos[2]]
+        : moi;
+      const avantVise = camVise ? camVise.getDirection(BABYLON.Axis.Z) : fwd;
+      const vise = solarMap.open ? null
+        : aimedFrame(visables, origineVise, [avantVise.x, avantVise.y, avantVise.z]);
       const avant = lockOn.current;
       lockOn.update(dt, lockPressed, vise);
       lockPressed = false;
@@ -7160,6 +7336,39 @@ async function boot() {
       }
       autoPressed = false;
       window.__visee = lockOn;
+
+      // `ReferenceFrameTracker.OnGUI` : les crochets, la lecture, les fleches
+      // et « LB Set Target », peints a l'ecran autour de la cible (tracker.js).
+      if (suiviHUD) {
+        const W = innerWidth, H = innerHeight;
+        const vp = camera.viewport.toGlobal(W, H);
+        const tm = scene.getTransformMatrix();
+        const cf = camera.getDirection(BABYLON.Axis.Z);
+        const projeter = (p) => {
+          const v = new BABYLON.Vector3(p[0] - anchorPos[0], p[1] - anchorPos[1], p[2] - anchorPos[2]);
+          const z = BABYLON.Vector3.Dot(v.subtract(camera.globalPosition || camera.position), cf);
+          const e = BABYLON.Vector3.Project(v, BABYLON.Matrix.IdentityReadOnly, tm, vp);
+          // Le point d'ecran d'Unity : y vers le HAUT.
+          return { x: e.x, y: H - e.y, z };
+        };
+        const cible = lockOn.current ? lockOn.current.position : null;
+        let mouvement = null;
+        if (cible) {
+          const vc = lockOn.current.body.velocity || [0, 0, 0];
+          mouvement = relativeMotion([player.vel.x - vc[0], player.vel.y - vc[1], player.vel.z - vc[2]],
+                                     moi, cible);
+        }
+        const tailles = (iface && iface.suivi && iface.suivi.tailles) || {};
+        suiviHUD.draw(commandesSuivi({
+          cible, derniere: lockOn.last ? lockOn.last.position : null,
+          possible: lockOn.possible ? lockOn.possible.position : null,
+          montrerInvite: lockOn.showPrompt,
+          mode: guiMode.hidden ? "hidden" : guiMode.capture ? "capture" : "full",
+          carte: !!solarMap.open, brouillee: dansEpave, ouverture: lockOn.bracket,
+          mouvement, projeter, hauteur: H, cercle: tailles.cercle, fleche: tailles.fleche,
+        }), cible && mouvement && !solarMap.open ? trackerReadout(mouvement.distance, mouvement.zSpeed) : "");
+        window.__suivi = mouvement;
+      }
     }
 
     // --- LA TOUR DE LANCEMENT, de bout en bout (docs/92-tour.md) ---

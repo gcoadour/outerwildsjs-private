@@ -1568,6 +1568,19 @@ check("tous sur le satellite casse",
 check("et tous reparent vers le meme materiau vert",
       new Set(nodes.map((n) => n.fields._repairedMaterial.name)).size, 1);
 check("une trappe", (gp.placed.HatchController || []).length, 1);
+// Le rayon tracteur (docs/132) : un commutateur, son volume, et le visuel
+// ETEINT dans la scene — le portage le dessinait toujours.
+{
+  const rs = gp.placed.TractorBeamSwitch || [];
+  check("un commutateur de rayon tracteur, avec son volume",
+        [rs.length, !!(rs[0] && rs[0].volume)].join(), "1,true");
+  let beam = null;
+  for (const [gid, go] of ctx.gameObjects) {
+    if (go.m_Name !== "BeamVisual") continue;
+    for (const o of ctx.componentsOf(gid, ["MeshRenderer"])) beam = ctx.readEngine(o).m_Enabled;
+  }
+  check("BeamVisual : renderer eteint dans la scene", !!beam, false);
+}
 // Les six buses du vaisseau MINIATURE, et non celui du joueur : c'est le champ
 // `body` qui le dit (docs/58-suivi.md).
 const buses = (gp.placed.ThrusterParticleController || []);
@@ -1896,6 +1909,15 @@ console.time("mainData");
         arr(r.position), "0.16,0.084,0.136");
   check("... tourne d'un demi-tour, champ de 80 degres", [r.mirrorX, r.fov].join(), "true,80");
   check("MinimapHUD : sous les jauges", arr(m.position), "0.162,-0.075,0.136");
+  const dg = panneauRessources(ctx, "ShipDamageHUD");
+  check("ShipDamageHUD : entre les deux", arr(dg.position), "0.16,0.017,0.136");
+  // L'ordre de `GetComponentsInChildren`, qui range les voyants.
+  check("... ses cinq voyants, dans l'ordre de la scene", dg.enfants.map((e) => e.nom).join(),
+        "HUDDamageBack,HUDDamageFront,HUDDamageLeft,HUDDamageRight,HUDDamageTop");
+  const { DEGATS_REPLI } = await import("../web/src/hud.js");
+  check("le repli des avaries est cette mesure",
+        DEGATS_REPLI.enfants.map((e) => e.position.map((v) => v.toFixed(2)).join(":")).join(),
+        dg.enfants.map((e) => e.position.map((v) => v.toFixed(2)).join(":")).join());
   check("les replis du moteur sont ces mesures",
         [arr(PANNEAU_REPLI.position), arr(PANNEAU_REPLI.scale), arr(MINIMAP_REPLI.position),
          arr(MINIMAP_REPLI.scale)].join("|"),

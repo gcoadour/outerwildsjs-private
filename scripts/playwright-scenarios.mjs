@@ -543,19 +543,18 @@ try {
   // ==========================================
   console.log("\n--- Scenario 13: Mort du joueur et boucle temporelle ---");
   const loop0 = await page.evaluate(() => window.__pdata?.loopCount ?? 0);
-  await page.evaluate(() => {
+  // La mort et le premier pas dans le MEME appel : sans GPU une image dure
+  // plus d'une seconde, et entre deux `evaluate` la boucle du jeu avait deja
+  // consomme les trois secondes de l'effet — la phase lue etait « attente ».
+  const { dead, effet } = await page.evaluate(() => {
     window.__death.kill("impact");
-  });
-  const dead = await page.evaluate(() => window.__death?.dead === true);
-  assert("Mort du joueur déclenchée (PlayerDeath)", dead === true);
-
-  // L'effet de mort tient l'ecran d'abord : `TriggerFlashback` n'est annonce
-  // qu'a sa fin (`PlayerCameraEffectController.Update`, docs/132). On le joue
-  // ici a la main, comme le reste de la sequence.
-  const effet = await page.evaluate(() => {
+    const dead = window.__death?.dead === true;
+    // L'effet de mort tient l'ecran d'abord : `TriggerFlashback` n'est annonce
+    // qu'a sa fin (`PlayerCameraEffectController.Update`, docs/132).
     window.__death.update(0.1);
-    return window.__death.state.phase;
+    return { dead, effet: window.__death.state.phase };
   });
+  assert("Mort du joueur déclenchée (PlayerDeath)", dead === true);
   assert("L'effet de mort passe avant le flashback", effet === "effet", effet);
   await page.evaluate(() => {
     window.__death.declencherFlashback();

@@ -417,6 +417,181 @@ export class Prompts {
  */
 export const GUI_MODES = ["complet", "debogage", "capture", "masque"];
 
+/** `ShipDamageHUD`, repli mesure : entre les jauges et la minicarte. */
+export const DEGATS_REPLI = {
+  position: [0.16, 0.017, 0.13578], scale: [0.0317, 0.0317], mirrorX: true, fov: 80,
+  couleurs: { ShipDamageHUD: [0.5, 0.5, 0.5, 0.502] },
+  enfants: [
+    { nom: "HUDDamageBack", position: [0, -0.2966], scale: [0.2, 0.2] },
+    { nom: "HUDDamageFront", position: [0, 0.6799], scale: [0.2, 0.2] },
+    { nom: "HUDDamageLeft", position: [-0.53, 0.1428], scale: [0.2, 0.2] },
+    { nom: "HUDDamageRight", position: [0.52, 0.1568], scale: [0.2, 0.2] },
+    { nom: "HUDDamageTop", position: [0, 0.1777], scale: [0.2, 0.2] },
+  ],
+};
+
+/**
+ * `HUDDamageDisplay` : le tableau des avaries, sur la visiere.
+ *
+ * Le portage calculait les voyants (`DamageDisplay`, helmet.js) et n'en
+ * dessinait aucun ; l'alpha, vaisseau heurte, montre un vaisseau rouge et
+ * « WARNING — EXIT SHIP TO REPAIR » a droite, entre les jauges et la
+ * minicarte (docs/132). `_damageIndicatorArray` est
+ * `GetComponentsInChildren<Renderer>()` : le panneau LUI-MEME d'abord (le
+ * vaisseau, allume tant qu'il y a une avarie), puis ses cinq enfants dans
+ * l'ordre de la scene — arriere, avant, gauche, droite, haut —, qui
+ * clignotent un par piece touchee.
+ */
+export class DegatsHUD {
+  constructor(root, conf) {
+    const c = (conf && conf.degats) || {};
+    this.panel = c.panel || DEGATS_REPLI;
+    this.box = document.createElement("div");
+    this.box.className = "ow-degats";
+    const img = (src, cls) => {
+      const i = document.createElement("img");
+      i.className = cls; i.hidden = true;
+      if (src) i.src = DIR + src;
+      this.box.appendChild(i);
+      return i;
+    };
+    this.icone = img(c.icone, "ow-degats-plein");
+    const col = (this.panel.couleurs || {}).ShipDamageHUD || [0.5, 0.5, 0.5, 0.5];
+    this.icone.style.filter = `brightness(${col[0]})`;
+    this.icone.style.opacity = String(col[3]);
+    this.voyants = (this.panel.enfants || []).map((e) => {
+      const i = img(c.voyant, "ow-degats-voyant");
+      i.dataset.nom = e.nom;
+      return { e, i };
+    });
+    root.appendChild(this.box);
+    this.place();
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("resize", () => this.place());
+    }
+  }
+
+  place() {
+    const R = rectPanneau(this.panel, (window.innerWidth || 16) / (window.innerHeight || 9));
+    const st = this.box.style;
+    st.setProperty("--dg-left", `${R.left * 100}%`);
+    st.setProperty("--dg-top", `${R.top * 100}%`);
+    st.setProperty("--dg-width", `${R.width * 100}%`);
+    st.setProperty("--dg-height", `${R.height * 100}%`);
+    const sens = R.mirrorX ? -1 : 1;
+    const pct = (v) => `${(v + 1) * 50}%`;
+    for (const { e, i } of this.voyants) {
+      i.style.left = pct(sens * e.position[0] - e.scale[0]);
+      i.style.bottom = pct(e.position[1] - e.scale[1]);
+      i.style.width = `${e.scale[0] * 100}%`;
+      i.style.height = `${e.scale[1] * 100}%`;
+    }
+  }
+
+  /**
+   * @param etats celui de `DamageDisplay.update` : le general, puis un par
+   *              piece dans `ALERT_ORDER` (arriere, avant, droite, gauche, haut)
+   * @param visible le casque allume
+   */
+  set(etats, visible = true) {
+    this.box.hidden = !visible;
+    const e = etats || [];
+    this.icone.hidden = !e[0];
+    // Piece -> enfant : arriere, avant, puis DROITE sur `HUDDamageLeft` et
+    // GAUCHE sur `HUDDamageRight` — le demi-tour du panneau les remet du bon
+    // cote de l'ecran —, et haut.
+    const ordre = ["HUDDamageBack", "HUDDamageFront", "HUDDamageLeft", "HUDDamageRight", "HUDDamageTop"];
+    for (const { e: en, i } of this.voyants) {
+      const k = ordre.indexOf(en.nom);
+      i.hidden = !(k >= 0 && e[k + 1]);
+    }
+  }
+}
+
+/**
+ * `ReferenceFrameTracker.OnGUI`, peint : un canevas plein ecran qui execute
+ * les commandes de `commandesSuivi` (tracker.js). `GUI.color` teinte les
+ * icones blanches : on les peint en `multiply` sur un calque, puis on les
+ * pose avec l'alpha de la couleur.
+ */
+export class SuiviHUD {
+  constructor(root, conf) {
+    this.c = (conf && conf.suivi) || null;
+    this.boutons = (conf && conf.prompts && conf.prompts.buttons) || {};
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "ow-suivi";
+    root.appendChild(this.canvas);
+    this.g = this.canvas.getContext("2d");
+    const img = (f) => { if (!f) return null; const i = new Image(); i.src = DIR + f; return i; };
+    this.cercle = img(this.c && this.c.cercle);
+    this.fleche = img(this.c && this.c.fleche);
+    this.lb = img(this.boutons.LeftBumper || this.boutons.LB);
+    this.teinte = document.createElement("canvas");
+    this.lecture = "";
+  }
+
+  /** Une icone blanche, teintee et posee. */
+  icone(img, x, y, l, h, couleur, rotation = 0) {
+    if (!img || !img.complete || !img.naturalWidth) return;
+    const t = this.teinte, tg = t.getContext("2d");
+    t.width = Math.max(1, Math.ceil(l)); t.height = Math.max(1, Math.ceil(h));
+    tg.clearRect(0, 0, t.width, t.height);
+    tg.drawImage(img, 0, 0, t.width, t.height);
+    tg.globalCompositeOperation = "source-atop";
+    tg.fillStyle = `rgb(${couleur.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
+    tg.fillRect(0, 0, t.width, t.height);
+    tg.globalCompositeOperation = "multiply";
+    tg.drawImage(img, 0, 0, t.width, t.height);
+    tg.globalCompositeOperation = "source-over";
+    const g = this.g;
+    g.save();
+    g.globalAlpha = couleur[3];
+    if (rotation) {
+      g.translate(x, y); g.rotate(rotation * Math.PI / 180);
+      g.drawImage(t, -l / 2, -h / 2, l, h);
+    } else g.drawImage(t, x, y, l, h);
+    g.restore();
+  }
+
+  /** @param commandes celles de `commandesSuivi` ; `lecture` le texte a deux lignes */
+  draw(commandes, lecture = "") {
+    const cv = this.canvas, W = cv.clientWidth | 0, H = cv.clientHeight | 0;
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const g = this.g;
+    g.clearRect(0, 0, W, H);
+    const rgba = (c) => `rgba(${c.slice(0, 3).map((v) => Math.round(v * 255)).join(",")},${c[3]})`;
+    for (const k of commandes || []) {
+      if (k.type === "crochets") this.icone(this.cercle, k.x, k.y, k.l, k.h, k.couleur);
+      else if (k.type === "fleche") this.icone(this.fleche, k.x, k.y, k.l, k.h, k.couleur, k.rotation);
+      else if (k.type === "invite") {
+        // `GUIContent(icone LB, " Set Target")`, style de 20 : l'icone a la
+        // hauteur de la ligne, puis le texte.
+        const taille = (this.c && this.c.policeInvite) || 20;
+        g.save();
+        g.globalAlpha = k.couleur[3];
+        if (this.lb && this.lb.complete && this.lb.naturalWidth) {
+          g.drawImage(this.lb, k.x, k.y, taille * 1.2, taille * 1.2);
+        }
+        g.fillStyle = rgba([...k.couleur.slice(0, 3), 1]);
+        g.font = `${taille}px "OW Dialogue", sans-serif`;
+        g.textBaseline = "top";
+        g.fillText((this.c && this.c.invite) || " Set Target", k.x + taille * 1.2, k.y + 2);
+        g.restore();
+      } else if (k.type === "lecture" && lecture) {
+        const taille = (this.c && this.c.policeLecture) || 18;
+        const lignes = lecture.split("\n");
+        g.save();
+        g.fillStyle = rgba(k.couleur);
+        g.font = `${taille}px "OW Dialogue", sans-serif`;
+        g.textBaseline = "top";
+        const hLigne = taille * 1.15;
+        lignes.forEach((l, i) => g.fillText(l, k.x, k.y - hLigne * lignes.length / 2 + i * hLigne));
+        g.restore();
+      }
+    }
+  }
+}
+
 export class GuiMode {
   constructor() { this.index = 0; }
   get mode() { return GUI_MODES[this.index]; }

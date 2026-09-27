@@ -48,7 +48,7 @@ import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo,
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
          ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
          ancientProbeAcceleration, ANCIENT_PROBE_THRUST,
-         SHIP_NOZZLES } from "../web/src/tracker.js";
+         SHIP_NOZZLES, commandesSuivi, hsvVersRgb } from "../web/src/tracker.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
          hatchControllers, Hatch, BLINK } from "../web/src/attachments.js";
@@ -89,7 +89,7 @@ import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts, shipPrompts, autopilotAvailable } from "../web/src/consoles.js";
 import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
 import { crosshairPixels, CROSSHAIR, InviteCodes, rectPanneau, PANNEAU_REPLI,
-         MINIMAP_REPLI } from "../web/src/hud.js";
+         MINIMAP_REPLI, DEGATS_REPLI } from "../web/src/hud.js";
 import { actifsSeulement } from "../web/src/config.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
@@ -182,7 +182,7 @@ import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
          trainee, vitesseLimite, densityAt, mediumVelocity, lawOf, curveAt,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
-         NIGHT_FADE } from "../web/src/lights.js";
+         NIGHT_FADE, LightField } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone,
          Resources as Ressources } from "../web/src/resources.js";
 import { heatAt, remoteConsoles, RemoteConsoles,
@@ -2181,6 +2181,26 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la plus proche vient en tete", names[0], "Feu");
   check("le budget borne la liste",
         pickLights(lights, [0, 0, 0], 1).length, 1);
+  // La cabine : des lampes de 2 a 3 unites de portee, a 3 ou 4 unites du
+  // joueur. Elles eclairent les murs qu'il regarde : toutes comptent, et
+  // celle dont la sphere est la plus proche passe devant (docs/132).
+  const cabine = [
+    { name: "A", type: "point", position: [4, 0, 0], range: 2, intensity: 1 },
+    { name: "B", type: "point", position: [0, 3, 0], range: 3, intensity: 1 },
+    { name: "C", type: "point", position: [0, 0, 9], range: 2, intensity: 1 },
+  ];
+  // Une lumiere a zero n'entre pas dans le budget : la `NightLight` de jour
+  // dont le multiplicateur est nul, ou celle qu'un `Disable` a coupee.
+  const etat = { eteintes: new Set(["Coupee"]), night: false, nightSince: 0, t: 30 };
+  const allumee = (l) => LightField.prototype.allumee.call(etat, l);
+  check("de jour, une NightLight a multiplicateur nul est eteinte, une autre non",
+        [allumee({ name: "Village", intensity: 1,
+                   behaviours: [{ kind: "NightLight", fields: { _dayIntensityMultiplier: 0 } }] }),
+         allumee({ name: "Lanterne", intensity: 1,
+                   behaviours: [{ kind: "NightLight", fields: { _dayIntensityMultiplier: 0.5 } }] }),
+         allumee({ name: "Coupee", intensity: 1 })].join(), "false,true,false");
+  check("les lampes de la cabine comptent, meme joueur hors de leur sphere",
+        pickLights(cabine, [0, 0, 0]).map((p) => p.light.name).join(), "B,A");
 }
 
 // --- zones d'oxygene et sources de chaleur -------------------------------
@@ -7762,6 +7782,52 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
 }
 
 {
+  // --- `ReferenceFrameTracker.OnGUI`, en commandes (docs/132) ---
+  // Une projection simple : x, y tels quels, z = profondeur.
+  const projeter = (p) => ({ x: p[0], y: p[1], z: p[2] });
+  const H = 720;
+  const types = (l) => l.map((k) => k.type).join();
+  // L'alpha en vue d'atterrissage : Timber Hearth sous le vaisseau, visee et
+  // pas tenue — « LB Set Target », et ses crochets pales.
+  const pos = commandesSuivi({ possible: [640, 500, 10], montrerInvite: true, projeter, hauteur: H });
+  check("cible possible : l'invite puis les crochets", types(pos), "invite,crochets");
+  check("l'invite 60 a gauche et 80 au-dessus du point, blanche a 0,8",
+        [pos[0].x, pos[0].y, pos[0].couleur[3]].join(), "580,140,0.8");
+  check("crochets x 2, blancs a 0,2, centres sur le point",
+        [pos[1].l, pos[1].x + pos[1].l / 2, pos[1].y + pos[1].h / 2, pos[1].couleur[3]].join(), "200,640,220,0.2");
+  check("en mode capture, rien de la cible possible",
+        commandesSuivi({ possible: [640, 500, 10], montrerInvite: true, mode: "capture",
+                         projeter, hauteur: H }).length, 0);
+  check("en mode cache, rien du tout",
+        commandesSuivi({ cible: [1, 1, 1], ouverture: 0, mode: "hidden", projeter, hauteur: H }).length, 0);
+  check("derriere la camera, rien",
+        commandesSuivi({ possible: [640, 500, -5], montrerInvite: true, projeter, hauteur: H }).length, 0);
+  // La cible tenue, trajectoire directe : la lecture et les crochets x 1,2.
+  const direct = { direct: true, hue: 0, saturation: 0, xyOffset: [0, 0, 0] };
+  const tenue = commandesSuivi({ cible: [640, 360, 50], ouverture: 0, mouvement: direct,
+                                 projeter, hauteur: H });
+  // `_bracketScale < 1` : refermes (0), les crochets restent a x 1 tant
+  // qu'on tient la cible ; ils ne disparaissent qu'une fois rouverts a 1.
+  check("cible tenue, directe : crochets x 1, lecture, crochets x 1,2", types(tenue),
+        "crochets,lecture,crochets");
+  check("... x 1 puis x 1,2", [tenue[0].l, tenue[2].l].join(), "100,120");
+  check("la lecture a droite du cercle (x + 50)", tenue[1].x, 690);
+  check("sur la carte, pas de crochets de trajectoire",
+        types(commandesSuivi({ cible: [640, 360, 50], ouverture: 0, mouvement: direct, carte: true,
+                               projeter, hauteur: H })), "crochets,lecture");
+  check("cible relachee, crochets rouverts a 1 : plus rien",
+        commandesSuivi({ derniere: [640, 360, 50], ouverture: 1, projeter, hauteur: H }).length, 0);
+  const derive = { direct: false, hue: 140, saturation: 1, xyOffset: [60, 0, 0] };
+  const fl = commandesSuivi({ cible: [640, 360, 50], ouverture: 0, mouvement: derive, projeter, hauteur: H });
+  check("derive laterale : six fleches", fl.filter((k) => k.type === "fleche").length, 6);
+  // `RotateAroundPivot(-atan2(cible - fleche) - 90)` : la cible a +x de la
+  // fleche donne un angle nul, donc -90.
+  check("... tournees par -atan2 - 90", fl.find((k) => k.type === "fleche").rotation, -90);
+  check("s'eloigner est vert : ColorHSV(140, 1, 1)", hsvVersRgb(140, 1, 1).map((v) => +v.toFixed(3)).join(), "0,1,0.333");
+  check("se rapprocher est rouge : ColorHSV(0, 1, 1)", hsvVersRgb(0, 1, 1).join(), "1,0,0");
+}
+
+{
   // --- LE PANNEAU DES JAUGES ET LA MINICARTE, SUR LA VISIERE (docs/132) ---
   // Mesure dans l'alpha en 1280 x 720 : jauges de y 35 a 158, oxygene vers
   // x 1 072, carburant 1 128, silhouette 1 208 ; en haut a droite, oxygene a
@@ -7778,6 +7844,11 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("la minicarte en bas a droite, carree, un tiers de la hauteur",
         [Math.round(M.left * 1280), Math.round(M.top * 720),
          Math.round(M.width * 1280), Math.round(M.height * 720)].join(), "1025,471,253,253");
+  // `ShipDamageHUD` : dans l'alpha, vaisseau heurte, le vaisseau rouge et son
+  // avertissement tiennent de y 205 a 405, a droite.
+  const D = rectPanneau(DEGATS_REPLI, 1280 / 720);
+  check("le tableau des avaries entre jauges et minicarte (y 206 a 406)",
+        [Math.round(D.top * 720), Math.round((D.top + D.height) * 720)].join(), "206,406");
   // Le champ est VERTICAL : la taille suit la hauteur, pas la largeur.
   const R43 = rectPanneau(PANNEAU_REPLI, 4 / 3);
   check("en 4:3, meme hauteur, plus large en fraction de largeur",

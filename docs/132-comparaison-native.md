@@ -1679,3 +1679,171 @@ trappe franchie, pas le siège. Le portage prenait « dans le vaisseau » pour
 écouteurs de `EnterShip` — `PlayerData.OnEnterShip`, qui lève la protection
 du premier tour, et `PlayerResources.OnEnterShip`, qui rend toute la santé.
 Tous suivent désormais la trappe.
+
+### La vue d'atterrissage : la lumière du dessous et « LB Set Target »
+
+Assis au sommet de la tour, vue d'atterrissage (R) : l'alpha montre la piste
+dans un **disque de lumière blanche**, et un petit « LB Set Target » au-dessus
+du centre ; le portage, un sol noir et rien.
+
+- **La lumière.** `ExternalLightController` est posé **deux fois** :
+  sur `Headlights` (spot de 90 degrés, vers l'avant) et sur `LandingCam`
+  (spot de 100 degrés, sous le cockpit, vers le sol), tous deux à 0,5
+  d'intensité et 600 de portée ; `OnEnterFlightConsole` allume les deux. Le
+  portage n'avait qu'un phare, à 69 degrés et 1,1 d'intensité choisis à
+  l'œil. Les deux spots prennent maintenant l'angle, l'intensité et la
+  couleur de la scène, et suivent leur nœud du modèle.
+- **« Set Target ».** C'est `ReferenceFrameTracker.OnGUI`, dont le portage
+  calculait tout — la vitesse d'approche, la couleur, les flèches — sans
+  rien en dessiner : la distance allait à côté des jauges, et ni crochets,
+  ni flèches, ni invite. Il y a maintenant un canevas (`SuiviHUD`) qui peint
+  les commandes de `commandesSuivi` (`tracker.js`) : l'invite 60 pixels à
+  gauche et 80 au-dessus d'une cible *possible*, blanche à 0,8, avec des
+  crochets doubles à 0,2 ; autour de la cible tenue, les crochets qui se
+  referment, la lecture à droite du cercle, et selon la trajectoire des
+  crochets ×1,2 ou six flèches de dérive, teintés rouge, blanc ou vert.
+  Et la visée part de la **caméra active** (`UpdateTargeting` lance son rayon
+  depuis `_activeCam`) : en vue d'atterrissage, la caméra du dessous regarde
+  Timber Hearth, qui devient la cible possible.
+
+### En vol, cible tenue : « Landing Mode » au centre, et le tableau des avaries
+
+Décollé de la tour (le vaisseau a heurté la charpente au passage), Timber
+Hearth verrouillé, l'alpha montre trois choses que le portage ne montrait
+pas, ou pas à cette place :
+
+- **« Landing Mode » sous le réticule**, et non dans la colonne de gauche.
+  `ShipPromptController.Awake` pose `_centerLandingPrompt = true`,
+  `OnEnterFlightConsole` s'en sert pour ranger l'invite au CENTRE (1) plutôt
+  qu'à gauche (2), et `Update` le remet à faux dès qu'elle s'affiche : la
+  première fois qu'on s'assied dans une boucle, on la voit au milieu de
+  l'écran ; ensuite, à gauche. « Stop Relative To Target », lui, est à
+  gauche, seul — le pilote automatique ne s'offre pas sous la distance
+  d'arrivée.
+- **Le tableau des avaries, sur la visière** : un vaisseau rouge et
+  « WARNING — EXIT SHIP TO REPAIR », entre les jauges et la minicarte.
+  `ShipDamageHUD` est un quatrième panneau du casque, à
+  (0,16 ; 0,017 ; 0,544), tourné comme les autres ; projeté en 1280 × 720,
+  il tient de y 206 à 406 — l'alpha le montre de 205 à 405.
+  `_damageIndicatorArray` est `GetComponentsInChildren<Renderer>()` : le
+  panneau lui-même d'abord, allumé tant qu'il y a une avarie, puis ses cinq
+  enfants dans l'ordre de la scène — arrière, avant, gauche, droite, haut —,
+  qui clignotent à la demi-seconde, un par pièce touchée. Le portage
+  calculait tout cela (`DamageDisplay`) et n'en dessinait rien.
+
+### Ressortir de la vue d'atterrissage rendait mal les commandes
+
+En menant le portage au poste puis en vol (`scripts/pw-poste.mjs` : poste,
+vue d'atterrissage, retour, décollage, verrou), une trace a montré le jeu de
+commandes resté sur « atterrissage » après la sortie de la vue. `toggle`
+poussait bien `ExitLandingView` dans les annonces de la vue, mais rien ne la
+portait jusqu'aux modes : l'entrée passait par `update`, la sortie par la
+touche, et seule l'entrée était relayée. Ressortir de la vue rend
+maintenant l'ensemble sauvé en entrant — celui du poste —, comme
+`OWInput.OnExitLandingView`.
+
+### En vol, l'œil sortait de la coque
+
+Poussé à fond depuis la tour, le portage passe dans le repère du Soleil et
+file à mille unités par seconde. La capture montrait alors un ciel noir, sans
+verrière : la caméra était à **46 unités** du centre du vaisseau. Elle est
+posée en début d'image, depuis la place d'avant le pas du vaisseau, et le
+siège ne rattrapait le joueur qu'après : à mille unités par seconde, un pas
+de cinq centièmes, c'est cinquante unités. Dans Unity la caméra est enfant du
+joueur, lui-même accroché au siège — elle suit dans le même pas ; ici elle
+suit maintenant le déplacement du siège.
+
+Et la verrière roulait dans le cadre : assis, le portage gardait la verticale
+du champ dominant — en vol, celle du Soleil. `PlayerAttachPoint.AttachPlayer`
+coupe l'alignement sur le champ et fait tourner le corps avec le siège : le
+haut est celui du vaisseau. Capturé en vol, l'arc de la verrière et le
+tableau de bord tombent aux places de l'alpha.
+
+### Devant le poste, et l'invite de la lampe lue à l'écran
+
+`ALPHA_POSTE=1` (avec `ALPHA_CABINE=1`) pose en plus le point de la cabine
+**devant le poste**, regard vers l'avant : `scripts/alpha-cabine.mjs` réécrit
+sa `Transform` (rotation à l'octet 8, position à l'octet 24 d'un objet de
+60 octets, parent `Volumes` à l'identité), après avoir relu l'ancienne
+position. Marcher de la trappe au siège échouait une fois sur deux.
+
+Né ainsi, le joueur n'a pas franchi la trappe : pour l'alpha il n'est pas
+« dans le vaisseau », et elle montre ce qu'elle montre dehors — la minicarte
+en bas à droite, et, la nuit, l'invite de la lampe. Celle-ci n'était pas
+extractible (`_flashlightPrompt` est un `ScreenPrompt` sérialisé sur
+l'instance, type que le portage ne lit pas) : le portage écrivait
+« Lampe (F) ». L'écran dit **« Flashlight »**, avec l'icône de la croix
+directionnelle vers le haut, à gauche. C'est ce qu'écrit désormais le
+portage.
+
+### La minicarte est un globe
+
+Côte à côte, l'alpha montre un **globe quadrillé** — seize méridiens et
+huit bandes, l'équateur plus clair —, un cône rouge au pôle nord, un bleu
+au sud, et une flèche verte au centre ; le portage, un disque sombre et un
+point blanc. `Minimap_Root` est une petite scène : `MiniMapMesh`, sphère
+habillée de `Minimap_Texture_2x` (grille tous les 22,5 degrés), grise et
+translucide ; `NorthPole` et `SouthPole` à 0,514 ; les marqueurs du joueur
+et du vaisseau (vert, éclairé) et de la sonde (orange) ; le tout vu par
+`MinimapCamera` et posé dans l'anneau `map_outline`, à 0,65 du quad — un
+globe de 78 pixels de rayon sur un panneau de 253. Le portage le dessine
+désormais ainsi, aux couleurs mesurées à l'écran de l'alpha.
+
+Et l'équateur tombait au-dessus du joueur de la tour, que l'alpha montre
+dessus : `GetLocalMapPosition` est `InverseTransformPoint` du **secteur**, et
+le portage retirait la rotation du corps mais pas celle, au repos, de
+l'objet secteur.
+
+### L'arrière de la cabine : le rayon tracteur et les lampes
+
+Né devant le poste et retourné vers l'arrière, l'alpha montre l'ordinateur
+de bord, le réacteur et la trappe dans une lumière brune et chaude. Le
+portage montrait, au même endroit, une **colonne orange translucide** du sol
+au plafond, et une cabine grise.
+
+- **La colonne** est `BeamVisual`, le rayon tracteur (`Alpha-Diffuse`,
+  orange à 0,18). Son renderer est **éteint dans la scène**, et le portage
+  le cachait bien au chargement… puis le rallumait en préparant le vaisseau
+  détaché, qui recalculait la visibilité sans le drapeau. Et rien ne le
+  commandait : `TractorBeamSwitch` l'éteint à `EnterShip` et ne le rallume
+  que lorsqu'on SORT de son volume hors du vaisseau — redescendu par la
+  trappe. C'est maintenant ce que fait le portage (le volume est extrait,
+  `tests/05-extract.mjs` garde le renderer éteint).
+- **Les lampes.** La cabine en porte six, de 1,5 à 3 unités de portée. Le
+  choix des lumières (`pickLights`) ne gardait que celles dont la sphère
+  contient le joueur : une seule. Elles éclairent pourtant les murs qu'on
+  regarde ; Unity, en rendu différé, les dessine toutes. Une lumière compte
+  désormais si le bord de sa sphère est à moins de six unités, et le rang se
+  prend au bord, pas au centre.
+
+Et une lumière à zéro ne prend plus de place dans le budget : la
+`NightLight` du village, que le jour mène à zéro, passait devant les lampes
+de la cabine. `LightField.allumee` écarte aussi celles qu'un `Disable` a
+coupées.
+
+### Le mode de mise au point montre `DebugHUD`
+
+F1 dans l'alpha affiche, en haut à gauche, cinq lignes de `GUI.Label` :
+« Time Scale », « Time Remaining », « Net Field Accel », « G-Force »,
+« Load Time » (x 10 ; y 10, 25, 55, 70, 100). Le portage montrait à la place
+son bandeau d'état. `DebugHUD.OnGUI` est désormais refait avec ses formules —
+y compris celle des secondes restantes, `Round(s % 60 × 100 / 100)`, qui
+arrondit à l'unité et n'écrit pas de zéro devant (« 17:5 ») ; le bandeau du
+portage ne revient qu'avec `?debug`.
+
+### Une nouvelle expédition passe zéro sans exploser
+
+Laissée courir depuis « New Expedition » (sans les codes), l'alpha atteint
+0:00 au feu de camp et **rien ne se passe** : `TimeLoop.Update` ne lève
+`TriggerSupernova` que si `_preventSupernova` est faux, et le compteur
+continue sous zéro — `DebugHUD` affiche « -1:-23 », « -2:-28 », « -4:-7 »
+(`GetSecondsRemaining` n'est pas borné). Le portage fait de même, et son
+`DebugHUD` lit maintenant le temps non borné.
+
+Reste un écart assumé : « Net Field Accel » oscille dans l'alpha entre 6,8
+(jour) et 17,1 (nuit) — `FieldDetector.GetFieldAcceleration` somme tous les
+champs, Soleil compris, qui tire vers le ciel le jour et vers le sol la
+nuit —, pendant que « G-Force » reste à 12. Le portage ne suit que le champ
+dominant ([`gravity.js`](../web/src/gravity.js)) et affiche 12 : la planète
+tombe vers le Soleil comme le joueur, le sol ne sent pas la différence, et
+la ligne de mise au point est la seule à la voir.
