@@ -1741,3 +1741,20 @@ portait jusqu'aux modes : l'entrée passait par `update`, la sortie par la
 touche, et seule l'entrée était relayée. Ressortir de la vue rend
 maintenant l'ensemble sauvé en entrant — celui du poste —, comme
 `OWInput.OnExitLandingView`.
+
+### En vol, l'œil sortait de la coque
+
+Poussé à fond depuis la tour, le portage passe dans le repère du Soleil et
+file à mille unités par seconde. La capture montrait alors un ciel noir, sans
+verrière : la caméra était à **46 unités** du centre du vaisseau. Elle est
+posée en début d'image, depuis la place d'avant le pas du vaisseau, et le
+siège ne rattrapait le joueur qu'après : à mille unités par seconde, un pas
+de cinq centièmes, c'est cinquante unités. Dans Unity la caméra est enfant du
+joueur, lui-même accroché au siège — elle suit dans le même pas ; ici elle
+suit maintenant le déplacement du siège.
+
+Et la verrière roulait dans le cadre : assis, le portage gardait la verticale
+du champ dominant — en vol, celle du Soleil. `PlayerAttachPoint.AttachPlayer`
+coupe l'alignement sur le champ et fait tourner le corps avec le siège : le
+haut est celui du vaisseau. Capturé en vol, l'arc de la verrière et le
+tableau de bord tombent aux places de l'alpha.

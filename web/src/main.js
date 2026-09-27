@@ -3921,7 +3921,13 @@ async function boot() {
     // depuis `(0, 1, 0)` — 1,8 s pendant lesquelles le regard pose au point
     // d'apparition ne designe pas ce qu'il designait. Six controles de la sonde
     // l'ont dit, et son tir depend justement du regard (docs/106).
-    const upVoulu = ad ? [-ad.x, -ad.y, -ad.z] : null;
+    // ASSIS, LE HAUT EST CELUI DU VAISSEAU. `PlayerAttachPoint.AttachPlayer`
+    // coupe l'alignement sur le champ et fait tourner le corps avec le siege :
+    // la camera, enfant du joueur, prend l'assiette de la coque. Le portage
+    // gardait la verticale du champ dominant — en vol, celle du Soleil —, et
+    // la verriere roulait dans le cadre a chaque manoeuvre (docs/132).
+    const upVoulu = (ship && ship.boarded && ship.axes) ? ship.axes.up.slice()
+      : ad ? [-ad.x, -ad.y, -ad.z] : null;
     const upAvant = redressement.up;
     const pas = redressement.update(upVoulu, dt);
     const u0 = pas.up || [0, 1, 0];
@@ -4479,9 +4485,22 @@ async function boot() {
           siegePilotage.follow(cible);
           const etat = pointsAttache.update(dt, now);
           if (etat) {
+            const avantSiege = [player.pos.x, player.pos.y, player.pos.z];
             player.pos.x = etat.position[0] - anchorPos[0];
             player.pos.y = etat.position[1] - anchorPos[1];
             player.pos.z = etat.position[2] - anchorPos[2];
+            // LA CAMERA EST DEJA POSEE pour cette image, depuis la place
+            // d'avant le pas du vaisseau. Au sol la difference ne se voit pas ;
+            // en vol, dans le repere du Soleil, le vaisseau file a mille unites
+            // par seconde et l'oeil restait cinquante unites en arriere, hors
+            // de la coque : un ciel noir la ou l'alpha montre la verriere
+            // (docs/132). Dans Unity la camera est ENFANT du joueur, lui-meme
+            // accroche au siege : elle suit dans le meme pas.
+            if (!(solarMap && solarMap.open) && !enVueAtterrissage()) {
+              camera.position.x += player.pos.x - avantSiege[0];
+              camera.position.y += player.pos.y - avantSiege[1];
+              camera.position.z += player.pos.z - avantSiege[2];
+            }
             // `_matchRotation` : le corps pivote vers l'avant du siege, sur la
             // duree tiree de l'angle de depart. Le portage tient le regard en
             // deux scalaires plutot qu'en quaternion : c'est donc le LACET que

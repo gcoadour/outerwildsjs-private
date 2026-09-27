@@ -63,7 +63,7 @@ await page.keyboard.down("KeyR"); await page.waitForTimeout(400); await page.key
 await page.waitForTimeout(3000);
 if (process.env.PW_ALLUMAGE) console.log("  vue apres R", JSON.stringify(await vue()));
 await page.keyboard.down("ShiftLeft");
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 25; i++) {
   await page.waitForTimeout(1000);
   if (process.env.PW_ALLUMAGE) console.log("  allumage", JSON.stringify(await page.evaluate(() => {
     const s = window.__shipRef;
@@ -71,12 +71,17 @@ for (let i = 0; i < 12; i++) {
              parque: s.parked, v: Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), mode: window.__modes && window.__modes.mode };
   })));
 }
-await page.keyboard.up("ShiftLeft");
+console.log("  pendant la poussee", JSON.stringify(await page.evaluate(() => {
+  const s = window.__shipRef;
+  return { v: Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), pose: s.landed, pos: Object.values(s.pos).map(Math.round),
+           journal: (window.__journalVaisseau || []).slice(-4) };
+})));
 await page.waitForTimeout(3000);
 await page.mouse.move(640, 360);
 await page.mouse.down(); await page.waitForTimeout(300); await page.mouse.up();
 await page.waitForTimeout(4000);
 await page.screenshot({ path: `${prefixe}-vol.png` });
+await page.keyboard.up("ShiftLeft");
 console.log(await page.evaluate(() => ({
   invites: [...document.querySelectorAll(".ow-prompt")].map((d) => d.textContent.trim()),
   cible: window.__visee && window.__visee.current ? window.__visee.current.name : null,
