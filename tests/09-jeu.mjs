@@ -178,7 +178,7 @@ import { bodySpin, spinPeriod, rotateAbout, SpinField,
 import { directionalFields, insideVolume, strongestDirectional,
          dominantField } from "../web/src/gravity.js";
 import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
-         applyDrag, terminalSpeed, densityAt, mediumVelocity, lawOf, curveAt,
+         trainee, vitesseLimite, densityAt, mediumVelocity, lawOf, curveAt,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
          NIGHT_FADE } from "../web/src/lights.js";
@@ -1961,52 +1961,49 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("un ocean suit sa planete qui orbite",
         (fluidAt(vols, [9000, 0, 100], suit) || { volume: {} }).volume.name, "Ocean");
   check("et n'est plus a sa place de repos", fluidAt(vols, [0, 0, 100], suit), null);
+  const rayon = [{ ...vols.find((x) => x.name === "Ocean"), body: "Ship_Body" }];
+  check("un mobile ne baigne pas dans un volume de son propre corps",
+        [!!fluidAt(rayon, [0, 0, 100]), fluidAt(rayon, [0, 0, 100], null, "Ship_Body")].join(), "true,");
 
-  const v = applyDrag({ x: 0, y: -10, z: 0 }, 2, 0.1);
-  check("la trainee retire k dt de la vitesse", round(v.y, 3), -8);
+  // `SimpleFluidDetector.AddDrag` : quadratique, en densite.
+  const v = trainee({ x: 0, y: -10, z: 0 }, 1.2, 1, 0.02);
+  check("dans l'atmosphere, dix unites par seconde perdent 0,0047 par pas",
+        round(v.y, 4), -9.9953);
   check("un pas trop long ne renvoie pas le mobile en arriere",
-        applyDrag({ x: 0, y: -10, z: 0 }, 20, 0.5).y, -0);
-  check("vitesse limite de chute : g / k", terminalSpeed(12, 4), 3);
+        trainee({ x: 0, y: -10, z: 0 }, 1000, 1, 1).y, -0);
+  check("sans densite, pas de trainee", trainee({ x: 0, y: -10, z: 0 }, 0, 1, 1).y, -10);
+  check("vitesse limite a densite 10 : sqrt(2g / (rho x 0,00392))",
+        round(vitesseLimite(12, 10), 2), 24.74);
 
-  // Vitesse limite atteinte par integration : la gravite pousse, la trainee
-  // retient, et la vitesse se stabilise a g/k.
+  // La vitesse limite atteinte par integration : la gravite pousse, la
+  // trainee retient.
   const field = new FluidField([{ name: "Ocean", position: [0, 0, 0], radius: 700,
-                                  drag: 4, density: 0 }]);
+                                  drag: 4, density: 10 }]);
   const vel = { x: 0, y: 0, z: 0 };
   const g = { magnitude: 12, dir: { x: 0, y: -1, z: 0 } };
-  for (let i = 0; i < 2000; i++) {
+  for (let i = 0; i < 20000; i++) {
     vel.y += g.dir.y * g.magnitude * 0.01;
     field.apply([0, 0, 0], vel, 0.01, g);
   }
-  // Un pas discret ne peut pas atteindre exactement g/k : la vitesse s'y
-  // stabilise a un facteur (1 - k dt) pres.
   check("la chute se stabilise a la vitesse limite",
-        Math.abs(-vel.y - terminalSpeed(12, 4)) < 0.2, true);
-
-  // Le facteur du detecteur divise la trainee, donc double la vitesse limite.
+        Math.abs(-vel.y - vitesseLimite(12, 10)) < 0.2, true);
+  // Le facteur du detecteur divise la trainee : la vitesse limite croit
+  // comme sa racine.
   const lent = { x: 0, y: 0, z: 0 };
-  for (let i = 0; i < 4000; i++) {
+  for (let i = 0; i < 40000; i++) {
     lent.y += g.dir.y * g.magnitude * 0.01;
     field.apply([0, 0, 0], lent, 0.01, g, { dragFactor: 0.5 });
   }
-  check("un detecteur a 0,5 double la vitesse limite",
-        Math.abs(-lent.y - terminalSpeed(12, 2)) < 0.3, true);
+  check("un detecteur a 0,5 multiplie la vitesse limite par racine de deux",
+        Math.abs(-lent.y - vitesseLimite(12, 10, 0.5)) < 0.3, true);
 
-  // Poussee d'Archimede : a = -g (rho - 1). A densite 1 un corps ne monte ni
-  // ne descend ; a densite 2 il remonte a une pesanteur. L'ancienne formule
-  // rendait 2 g, et `density ?? 0` la mettait a zero partout.
-  const neutre = new FluidField([{ name: "Neutre", position: [0, 0, 0], radius: 100,
-                                   drag: 0, density: 1 }]);
-  const vn = { x: 0, y: 0, z: 0 };
-  neutre.apply([0, 0, 0], vn, 1, g);
-  check("a densite 1, le fluide ne porte ni ne coule", round(vn.y, 6), 0);
-
-  const flot = new FluidField([{ name: "Eau", position: [0, 0, 0], radius: 100,
-                                 drag: 0, density: 2 }]);
+  // Pas de poussee d'Archimede : un corps immobile dans un fluide dense y
+  // reste immobile, quel que soit le champ.
+  const dense = new FluidField([{ name: "Eau", position: [0, 0, 0], radius: 100,
+                                  drag: 0, density: 2 }]);
   const vf = { x: 0, y: 0, z: 0 };
-  flot.apply([0, 0, 0], vf, 1, g);
-  check("a densite 2, la poussee remonte le mobile a une pesanteur",
-        round(vf.y, 3), 12);
+  dense.apply([0, 0, 0], vf, 1, g);
+  check("un fluide dense ne porte pas un corps au repos", round(vf.y, 6), 0);
 
   // `_deepDensity` : l'ocean porte 10 en surface et 100 au fond, ce qui rend
   // le fond infranchissable sans etre un mur.
@@ -2051,7 +2048,10 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     vc.y -= 12 * 0.01;
     cyclone.apply([0, 0, 0], vc, 0.01, { magnitude: 12, dir: { x: 0, y: -1, z: 0 } });
   }
-  check("la tornade ejecte vers le haut", vc.y > 250, true);
+  // Le mobile suit le courant a la vitesse limite pres : la trainee egale la
+  // pesanteur quand il a 55 u/s de retard sur les 300 du milieu.
+  check("la tornade ejecte vers le haut, a la vitesse limite pres du courant",
+        Math.abs(vc.y - (300 - vitesseLimite(12, 2))) < 1, true);
 
   // Les QUATRE lois de vitesse du build (docs/39-fluides.md). Trois d'entre
   // elles calculent leur direction a partir du point : elles ne serialisent

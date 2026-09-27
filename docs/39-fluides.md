@@ -168,3 +168,25 @@ Dans [`tests/05-extract.mjs`](../tests/05-extract.mjs), sur le build : les
 formes réelles des volumes à courant (11 capsules, 6 sphères), les quatre
 constantes de l'océan, et surtout — **aucun volume portant un `_flowSpeed` ne
 reste immobile**. C'est celui-là qui aurait vu le défaut.
+
+## La traînée, relue (docs/132)
+
+`SimpleFluidDetector.AddDrag` — que `ShipFluidDetector` appelle aussi, après
+son couple d'autoroulis — n'est pas une traînée linéaire :
+
+```
+rel = vitesse du corps - GetPointFluidVelocity(point)
+F   = 0,5 × GetPointDensity(point) × |rel|² × _dragFactor × 0,00392
+dv  = min(|F| × fixedDeltaTime, |rel|)
+AddVelocityChange(-rel.normalized × dv)
+```
+
+Elle est **quadratique, en densité** ; le `_dragCoefficient` du volume n'y
+entre pas. Et il n'y a **pas de poussée d'Archimède** : `GetPointDensity` n'a
+que deux lecteurs, cette traînée et `PlayerResources`. Le portage multipliait
+la vitesse par `1 − drag·dt` et retirait `g·(ρ − 1)` à la pesanteur. Les deux
+passaient inaperçus parce que les volumes restaient à leur place de repos :
+le joueur en sortait en quelques secondes, quand sa planète s'éloignait. Les
+volumes suivent désormais leur corps, un mobile ignore ceux de son propre corps
+(le rayon tracteur du vaisseau), et la loi est celle du build : vitesse limite
+`√(2g / (ρ·f·0,00392))`, soit 24,7 u/s à densité 10.

@@ -433,7 +433,7 @@ export class Player {
     // constante uniforme : `SimpleFluidDetector._dragFactor` vaut 0,5 ou 1.
     const hit = field.apply([this.pos.x + o[0], this.pos.y + o[1], this.pos.z + o[2]],
                             this.vel, dt, this.field,
-                            { dragFactor: field.dragFactor("player") });
+                            { dragFactor: field.dragFactor("player"), ignore: "Player_Body" });
     if (hit && this.physics) {
       try {
         this.body.body.setLinearVelocity(

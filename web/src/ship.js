@@ -417,7 +417,7 @@ export class Ship {
           [this.pos.x + (world.framePos ? world.framePos[0] : 0),
            this.pos.y + (world.framePos ? world.framePos[1] : 0),
            this.pos.z + (world.framePos ? world.framePos[2] : 0)],
-          this.vel, dt, f, { dragFactor: world.fluids.dragFactor("ship") })
+          this.vel, dt, f, { dragFactor: world.fluids.dragFactor("ship"), ignore: "Ship_Body" })
       : null;
     return f;
   }
