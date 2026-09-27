@@ -1423,5 +1423,10 @@ avait sa cible et son réglage, mais pas de clé : il ne se posait jamais. Et la
 notification du tir refusé dit ce que dit son `TextMesh`, « Launch Window
 Obstructed », et non « PROBE LAUNCH WINDOW OBSTRUCTED ».
 
-Reste une différence assumée : le flou de mouvement de `MovingCamera` (0,6),
-un effet d'accumulation qui n'adoucit qu'un glissement d'une demi-seconde.
+Et le flou de `MovingCamera`, lu dans `MotionBlur.OnRenderImage` : une
+**accumulation**, `sortie = image × 0,4 + précédente × 0,6` (la part bornée à
+0,92), dont la première image est une copie. Il est posé sur la caméra
+mobile, donc avant `StaticCamera` : les sprites laissent une traînée quand
+l'écran glisse d'un lieu à l'autre, et le texte reste net. Le portage refait
+les trois temps — sprites, fondu entre deux textures qui alternent, texte
+composé par-dessus.

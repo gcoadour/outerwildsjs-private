@@ -8774,6 +8774,13 @@ check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
         "12,1,0");
   check("les yeux a 1,9 du sol, comme `PlayerCamera`", +(0.6 + EYE_HEIGHT).toFixed(3), 1.9);
   check("assis, a 0,9 au-dessus du point", +(EYE_HEIGHT + DECALAGE_ASSISE[1]).toFixed(3), 0.9);
+  // `MotionBlur.OnRenderImage` : la part de l'image d'avant, bornee a 0,92.
+  const { partFlou, accumule } = await import("../web/src/ecranordinateur.js");
+  check("le flou de la camera mobile garde 0,6 de l'image d'avant", partFlou(0.6), 0.6);
+  check("et le build le borne a 0,92", partFlou(1.5), 0.92);
+  check("la premiere image est une copie", accumule(1, null, 0.6), 1);
+  check("un sprite qui s'eteint laisse 0,6, puis 0,36",
+        [accumule(0, 1, 0.6), accumule(0, accumule(0, 1, 0.6), 0.6)].map((v) => +v.toFixed(2)).join(), "0.6,0.36");
   const siege = new AttachPoint({ position: [10, 1, 0], rotation: [0, 0, 0, 1] });
   check("un point d'accrochage du vaisseau suit sa rotation",
         siege.frame(pose).position.map((v) => +v.toFixed(3) + 0).join(), "20,0,1");

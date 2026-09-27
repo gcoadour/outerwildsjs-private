@@ -17,9 +17,20 @@
 // Les deux ne partagent que la texture : elles regardent deux endroits
 // differents du vaisseau, vingt et trente-sept unites au-dessus de
 // l'ordinateur, avec un plan lointain a 2 — ce qui les garde chacune chez
-// elle. Le portage n'a qu'une camera par texture ; le texte est donc pose
-// DEVANT la camera mobile, a l'echelle de sa taille du moment, ce qui revient
-// a le rendre par une camera fixe de taille 5.
+// elle. Et entre les deux passe le `MotionBlur` de la camera mobile : un flou
+// d'ACCUMULATION, qui ne touche donc que les sprites.
+//
+//   MotionBlur.OnRenderImage
+//     accumTexture cree a la premiere image : copie de l'image
+//     blurAmount = Clamp(blurAmount, 0, 0.92)
+//     _AccumOrig = 1 - blurAmount ; l'image se fond dans accumTexture
+//     a cette opacite, et c'est accumTexture qui sort
+//
+// Soit, a chaque image, `sortie = image x 0,4 + precedente x 0,6`. Le portage
+// refait les trois temps : les sprites dans leur texture, le fondu dans une
+// paire de textures qui alternent, puis le texte de la camera fixe par-dessus,
+// net — un changement de fiche est instantane, un deplacement laisse sa
+// trainee.
 //
 // Eteint, l'ecran montre autre chose : `SplashScreen` (un aplat bleu) et le
 // logo de `VenturesIcon` ; et si un lieu s'est decouvert entre-temps,
@@ -33,15 +44,44 @@
 // `GetDescription`, `GetOrthoSize` et `IsRevealed` sont les champs de
 // `shipRecords` (consoles.js).
 //
-// @autrement MotionBlur : le flou de la camera mobile (0,6) est un effet
-// d'accumulation d'images ; il n'adoucit qu'un deplacement d'une demi-seconde,
-// et le portage ne l'a pas.
+// @lit MotionBlur
 
 /** `ShipComputerCamera.Awake` : `camera.aspect = 1.3333334`. */
 export const ASPECT_ECRAN = 4 / 3;
 const CALQUE_CARTE = 1 << 23;
 /** Pixels de la texture de texte par unite de la camera fixe (taille 5). */
 const PX = 76.8;
+
+/** `MotionBlur` : la part de l'image precedente, bornee comme le build. */
+export function partFlou(blurAmount = 0.6) {
+  return Math.max(0, Math.min(0.92, blurAmount));
+}
+
+/** Une image de l'accumulation, sur des valeurs : ce que fait le shader. */
+export function accumule(image, precedente, blurAmount) {
+  const k = partFlou(blurAmount);
+  return precedente == null ? image : image * (1 - k) + precedente * k;
+}
+
+const FONDU = `precision highp float;
+varying vec2 vUV;
+uniform sampler2D image;
+uniform sampler2D precedente;
+uniform float part;
+void main(void) {
+  gl_FragColor = mix(texture2D(image, vUV), texture2D(precedente, vUV), part);
+}`;
+
+// Le texte de `StaticCamera` par-dessus, sans effacer : un « over » alpha.
+const COMPOSE = `precision highp float;
+varying vec2 vUV;
+uniform sampler2D fond;
+uniform sampler2D texte;
+void main(void) {
+  vec4 f = texture2D(fond, vUV);
+  vec4 t = texture2D(texte, vUV);
+  gl_FragColor = vec4(mix(f.rgb, t.rgb, t.a), 1.0);
+}`;
 
 /**
  * La taille d'un `TextMesh`, en unites du monde, par pixel de police :
@@ -133,36 +173,41 @@ export class EcranOrdinateur {
     rtt.renderList = [...[...this.lieux.values()].map((l) => l.sprite)];
     // Les coordonnees de texture de l'ecran sont celles d'Unity, dont les
     // textures de rendu ont l'origine en bas ; celles de Babylon l'ont en
-    // haut. Sans ce retournement, la fiche s'affichait tete en bas, le nom
-    // sous le bord de l'ecran.
-    rtt.vScale = -1;
+    // haut. Sans retournement (`sortie.vScale`), la fiche s'affichait tete en
+    // bas, le nom sous le bord de l'ecran.
     this.rtt = rtt;
 
-    // Le texte de la camera fixe : un plan pendu a la camera mobile.
-    const dt = new B.DynamicTexture("ShipComputerTexte", { width: 1024, height: 768 }, sc, true);
+    // Le texte de la camera fixe : sa propre texture, cadree comme elle
+    // (4/3 sur une texture carree, comme la texture de rendu du build).
+    const dt = new B.DynamicTexture("ShipComputerTexte", { width: 1024, height: 768 }, sc, false);
     dt.hasAlpha = true;
-    const mt = new B.StandardMaterial("ShipComputerTexte", sc);
-    mt.disableLighting = true;
-    mt.emissiveTexture = dt;
-    mt.opacityTexture = dt;
-    mt.backFaceCulling = false;
-    mt.fogEnabled = false;
-    const plan = B.MeshBuilder.CreatePlane("ShipComputerTexte", { width: 1, height: 1 }, sc);
-    plan.material = mt;
-    plan.parent = cam;
-    plan.position.set(0, 0, (cam.minZ + cam.maxZ) / 4);
-    plan.layerMask = CALQUE_CARTE;
-    plan.isPickable = false;
-    plan.isVisible = false;
-    rtt.renderList.push(plan);
-    this.plan = plan;
     this.texte = dt;
 
-    // L'ecran lui-meme : la texture de rendu a la place de `_MainTex`.
+    // `MotionBlur` (0,6 sur `MovingCamera`), puis le texte.
+    const flou = (donnees.effects && donnees.effects.MotionBlur || [])[0];
+    this.part = partFlou(flou ? flou.amount : 0.6);
+    const tex = (nom) => new B.RenderTargetTexture(nom, 1024, sc, false);
+    this.accum = [tex("ShipComputerAccumA"), tex("ShipComputerAccumB")];
+    this.sortie = tex("ShipComputerSortie");
+    this.sortie.vScale = -1;
+    this.courant = 0;
+    this.premiere = true;
+    const eng = sc.getEngine();
+    this.effets = new B.EffectRenderer(eng);
+    this.fondu = new B.EffectWrapper({ engine: eng, name: "MotionBlur", fragmentShader: FONDU,
+                                       uniformNames: ["part"], samplerNames: ["image", "precedente"] });
+    this.compose = new B.EffectWrapper({ engine: eng, name: "StaticCamera", fragmentShader: COMPOSE,
+                                         samplerNames: ["fond", "texte"] });
+    // Apres TOUTES les textures de rendu de l'image, avant la scene : le
+    // fondu lie ses propres tampons, ce qu'il ne doit pas faire au milieu du
+    // rendu des sprites.
+    sc.onAfterRenderTargetsRenderObservable.add(() => { if (this.allume) this.composer(); });
+
+    // L'ecran lui-meme : la texture composee a la place de `_MainTex`.
     const m = this.ecran.material;
     if (m) {
       for (const k of ["diffuseTexture", "albedoTexture", "emissiveTexture"]) {
-        if (m[k] !== undefined) m[k] = rtt;
+        if (m[k] !== undefined) m[k] = this.sortie;
       }
     }
     // « database updated » : un `TextMesh` sous `UpdateElements`.
@@ -246,7 +291,6 @@ export class EcranOrdinateur {
       this.ecran.isVisible = ouvert;
       if (this.splash) this.splash.isVisible = !ouvert;
       for (const { sprite } of this.lieux.values()) sprite.isVisible = ouvert;
-      this.plan.isVisible = ouvert;
       const liste = this.scene.customRenderTargets;
       if (ouvert && !liste.includes(this.rtt)) liste.push(this.rtt);
       if (!ouvert && liste.includes(this.rtt)) liste.splice(liste.indexOf(this.rtt), 1);
@@ -278,6 +322,31 @@ export class EcranOrdinateur {
     this.ecrire(computer.display());
   }
 
+  /**
+   * Apres les sprites : le fondu dans l'accumulation, puis le texte net.
+   * Tant que les deux effets compilent, l'ecran garde son image d'avant.
+   */
+  composer() {
+    if (!this.fondu.effect.isReady() || !this.compose.effect.isReady()) return;
+    const prec = this.accum[this.courant], dest = this.accum[1 - this.courant];
+    // `accumTexture` nait comme une copie de l'image : pas de fondu depuis
+    // du noir a la premiere mise en route.
+    const part = this.premiere ? 0 : this.part;
+    this.fondu.onApplyObservable.addOnce(() => {
+      this.fondu.effect.setTexture("image", this.rtt);
+      this.fondu.effect.setTexture("precedente", prec);
+      this.fondu.effect.setFloat("part", part);
+    });
+    this.effets.render(this.fondu, dest);
+    this.compose.onApplyObservable.addOnce(() => {
+      this.compose.effect.setTexture("fond", dest);
+      this.compose.effect.setTexture("texte", this.texte);
+    });
+    this.effets.render(this.compose, this.sortie);
+    this.courant = 1 - this.courant;
+    this.premiere = false;
+  }
+
   /** La camera mobile, rendue a sa place dans le vaisseau du moment. */
   poser() {
     const B = this.B, cam = this.cam, e = this.etat;
@@ -294,6 +363,5 @@ export class EcranOrdinateur {
     cam.orthoBottom = -t;
     cam.orthoLeft = -t * ASPECT_ECRAN;
     cam.orthoRight = t * ASPECT_ECRAN;
-    this.plan.scaling.set(2 * t * ASPECT_ECRAN, 2 * t, 1);
   }
 }
