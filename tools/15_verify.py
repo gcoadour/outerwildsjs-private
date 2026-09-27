@@ -1132,7 +1132,9 @@ def _run(url, heavy, profil=None, zip_path=None):
                 rep.eq("et eteint, l'aplat revient", [ecran_q["ecran"], ecran_q["splash"], ecran_q["rendu"]],
                        [False, True, False])
             if assis:
-                rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.7])
+                # Le siege a 3,74 dans le vaisseau, plus les 0,15 que PlayerCamera
+                # porte devant Player_Body (AVANT_CAMERA) : l'oeil est a 3,9.
+                rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.9])
             if saut is not None:
                 rep.near("3, dans le vaisseau : le point de vaisseau de Timber Hearth", saut, 332, 3)
 
