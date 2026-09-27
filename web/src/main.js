@@ -422,6 +422,16 @@ async function boot() {
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
   window.__origin = origin;   // controles : le corps ancre du moment
+  // Ce qui arrive au vaisseau quand personne ne le regarde : les controles
+  // l'impriment quand il n'est plus la ou on l'attend.
+  const journalV = [];
+  window.__journalVaisseau = journalV;
+  function journalVaisseau(quoi) {
+    if (!ship) return;
+    journalV.push(`${loop.elapsed.toFixed(1)} ${quoi} : ${ship.parked ? "stationne" : "libre"}`
+      + `${ship.boarded ? ", a bord" : ""}, ${Math.hypot(ship.vel.x, ship.vel.y, ship.vel.z).toFixed(1)} u/s`);
+    if (journalV.length > 40) journalV.shift();
+  }
 
   // Orbites : positions d'origine conservees, l'etat orbital vit dans `orbits`.
   for (const b of bodies) b.position0 = (b.bodyPosition || b.position).slice();
@@ -4149,6 +4159,7 @@ async function boot() {
       if (ship) {
         ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
         if (!ship.parked) { ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2]; }
+        journalVaisseau("repere " + fb.name);
       }
       if (probes.last) {
         const p = probes.last;
@@ -4337,7 +4348,9 @@ async function boot() {
                               decalageDuCorps(ship.parkBody || "TimberHearth_Body", anchorPos));
         ship.parkPos = { x: p[0] - anchorPos[0], y: p[1] - anchorPos[1], z: p[2] - anchorPos[2] };
       }
+      const etaitStationne = ship.parked;
       ship.update(dt, bodies, input, { fwd, right, up }, world);
+      if (etaitStationne && !ship.parked) journalVaisseau("stationnement leve");
       // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
       // seconde durant, et relacher annule (docs/66-allumage.md). Les trois
       // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils

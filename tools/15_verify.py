@@ -3212,6 +3212,10 @@ def _run(url, heavy, profil=None, zip_path=None):
         if pose:
             # Le vaisseau commence pose sur la piste de Timber Hearth.
             rep.eq("au demarrage, le vaisseau est pose", pose["pose"], True)
+            if not pose["pose"]:
+                print("       journal du vaisseau :")
+                for l in page.evaluate("() => window.__journalVaisseau || []"):
+                    print("         ", l)
             rep.at_most("et il ne bouge pas", pose["vitesse"], 5)
             rep.eq("le toucher s'est annonce", pose["annonces"][:1],
                    ["ShipTouchdown"])
