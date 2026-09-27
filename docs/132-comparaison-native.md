@@ -1498,3 +1498,13 @@ la vitesse **en sortie** du pas, gravité du pas comprise. À 12 u/s², un pas d
 0,42 s passe les 5 u/s de `LANDED_SPEED` : dès qu'une image ralentissait, le
 vaisseau posé se destationnait tout seul. Il se juge désormais sur la vitesse
 **apportée** dans le pas — une poussée, un choc.
+
+Et l'autre moitié, la vraie : le journal disait « 284 u/s apportés, pas de
+0,05 s ». La vitesse venait des **fluides**, appliqués après le sol :
+`ship.update` cherchait son milieu à sa position du moment, et les volumes de
+fluide — atmosphères, océans, courants — restaient où la scène les avait posés.
+Timber Hearth orbite ; au bout de quatre minutes, le vaisseau garé sur la tour
+entrait dans un courant resté à sa place de repos et en recevait la vitesse. Le
+joueur avait le même défaut. Chaque milieu suit désormais le corps qui le porte
+(`fluidAt` lit le point dans la scène au repos de ce corps), et l'extraction des
+océans donne leur corps.

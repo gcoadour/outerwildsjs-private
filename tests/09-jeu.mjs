@@ -1955,6 +1955,12 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("le plus profond l'emporte",
         fluidAt(vols, [0, 0, 100]).volume.name, "Ocean");
   check("loin de tout : aucun fluide", fluidAt(vols, [9000, 0, 0]), null);
+  // Le milieu suit son corps : la planete s'est deplacee de 9000 unites, et
+  // son ocean avec elle (`shiftOf`, le deplacement du corps depuis le repos).
+  const suit = (v) => [9000, 0, 0];
+  check("un ocean suit sa planete qui orbite",
+        (fluidAt(vols, [9000, 0, 100], suit) || { volume: {} }).volume.name, "Ocean");
+  check("et n'est plus a sa place de repos", fluidAt(vols, [0, 0, 100], suit), null);
 
   const v = applyDrag({ x: 0, y: -10, z: 0 }, 2, 0.1);
   check("la trainee retire k dt de la vitesse", round(v.y, 3), -8);

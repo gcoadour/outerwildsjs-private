@@ -1163,6 +1163,9 @@ async function boot() {
   // Giant's Deep a enfin un ocean qui porte, des tornades qui poussent, et une
   // trainee lue sur les detecteurs plutot qu'une constante uniforme.
   const fluids = new FluidField(fluidVolumes(gameplay, data), fluidDetectors(gameplay));
+  // Chaque milieu suit le corps qui le porte (`decalageDuCorps`, du repere
+  // du moment).
+  fluids.shiftOf = (v) => (v.body ? decalageDuCorps(v.body, framePos) : null);
   // Seul le vaisseau rechargeait l'oxygene ; on regarde maintenant ce que la
   // scene propose. Liste vide = l'alpha n'en pose aucune, ce qui est une
   // reponse et non un oubli.

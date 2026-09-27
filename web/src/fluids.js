@@ -119,6 +119,7 @@ export function fluidVolumes(gameplay = {}, solar = {}) {
       if (!radius) continue;   // sans rayon, pas de volume : on ne l'invente pas
       out.push(makeVolume({
         name: v.name, kind: cls, position: v.position, rotation: v.rotation || null,
+        body: v.body || null,
         volume: shape, radius,
         drag: NUM(f._dragCoefficient) ?? NUM(f._drag) ?? DEFAULT_DRAG,
         density: NUM(f._density) ?? 0,
@@ -144,7 +145,7 @@ export function fluidVolumes(gameplay = {}, solar = {}) {
   // L'ocean d'un corps : meme centre que lui, rayon de sa surface.
   for (const b of (solar.fluids || [])) {
     out.push(makeVolume({
-      name: b.name, kind: b.kind || "SphereOceanFluidVolume",
+      name: b.name, kind: b.kind || "SphereOceanFluidVolume", body: b.body || null,
       position: b.position, rotation: null, volume: null, radius: b.radius,
       drag: b.drag ?? DEFAULT_DRAG, density: b.density ?? 0,
       deepDensity: NUM(b.deepDensity), law: lawOf(b.kind || ""),
@@ -311,16 +312,30 @@ function localPoint(volume, world) {
  * d'abord — l'interieur du vaisseau est a 100, le centre d'une tornade a 5,
  * l'ocean a 1 — et la profondeur ne departage qu'a priorite egale.
  */
-export function fluidAt(volumes, world) {
+export function fluidAt(volumes, world, shiftOf = null) {
   let best = null;
   for (const v of volumes) {
-    const depth = depthIn(v, world);
+    // Le volume est pose sur un corps qui ORBITE : le point se lit dans la
+    // scene au repos de ce corps, comme les zones et les volumes du reste du
+    // moteur. Sans ce passage, les atmospheres, les oceans et les courants
+    // restaient la ou la scene les avait poses, et un vaisseau gare sur
+    // Timber Hearth rencontrait, quatre minutes plus tard, un courant
+    // d'ailleurs qui le lancait a deux cent quatre-vingts unites par seconde.
+    const point = auRepos(world, shiftOf ? shiftOf(v) : null);
+    const depth = depthIn(v, point);
     if (depth <= 0) continue;
-    if (!best) { best = { volume: v, depth }; continue; }
+    if (!best) { best = { volume: v, depth, point }; continue; }
     const p = v.priority ?? 0, bp = best.volume.priority ?? 0;
-    if (p > bp || (p === bp && depth > best.depth)) best = { volume: v, depth };
+    if (p > bp || (p === bp && depth > best.depth)) best = { volume: v, depth, point };
   }
   return best;
+}
+
+/** `restingPoint` de frames.js, sans l'importer : translation, ou passage complet. */
+function auRepos(w, sh) {
+  if (!sh) return w;
+  if (typeof sh.repos === "function") return sh.repos(w);
+  return [w[0] - sh[0], w[1] - sh[1], w[2] - sh[2]];
 }
 
 /**
@@ -506,6 +521,8 @@ export class FluidField {
     this.detectors = detectors;
     this.submerged = 0;      // corps dans un fluide a la derniere image
     this.current = null;     // fluide portant le joueur, pour l'affichage
+    // (volume) -> deplacement de son corps depuis le repos, pose par main.js
+    this.shiftOf = null;
   }
 
   get count() { return this.volumes.length; }
@@ -523,7 +540,7 @@ export class FluidField {
    * @returns le fluide traverse, ou null
    */
   apply(world, vel, dt, field = null, opts = {}) {
-    const hit = fluidAt(this.volumes, world);
+    const hit = fluidAt(this.volumes, world, this.shiftOf);
     if (!hit) return null;
     this.submerged += 1;
     const vol = hit.volume;
@@ -531,7 +548,7 @@ export class FluidField {
 
     // La trainee s'applique a la vitesse RELATIVE au milieu, sinon un courant
     // ne pousse rien : une tornade a 300 u/s ne faisait que freiner.
-    const vm = mediumVelocity(vol, world);
+    const vm = mediumVelocity(vol, hit.point);
     const rel = vm ? { x: vel.x - vm[0], y: vel.y - vm[1], z: vel.z - vm[2] }
                    : { x: vel.x, y: vel.y, z: vel.z };
     const d = applyDrag(rel, vol.drag * factor, dt);

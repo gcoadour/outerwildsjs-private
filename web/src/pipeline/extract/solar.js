@@ -197,6 +197,8 @@ export function extractSolarSystem(ctx) {
       // sur deux, celui que `gameplay.json` decrit correctement.
       fluids.push({
         name: ctx.name(gid), kind: cls,
+        // Le corps porteur : l'ocean suit sa planete (fluids.js, `fluidAt`).
+        body: ctx.bodyOf(gid),
         position: ctx.world(gid)[0].map((v) => round(v, 3)),
         radius: round(radius, 3),
         drag: drag ? drag[1] : null,
