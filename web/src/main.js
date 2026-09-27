@@ -5476,12 +5476,13 @@ async function boot() {
           inDarkZone: zonesSombres.sunless,
           onDaySide: !night,
         })) {
-          // Le texte, lui, n'est pas extractible : `_flashlightPrompt` est un
+          // Le texte n'est pas extractible : `_flashlightPrompt` est un
           // `ScreenPrompt` serialise sur l'instance, et le portage ne sait pas
           // lire ce type-la — `composants.mjs` rend un objet vide pour tout le
-          // composant. La REGLE vient du build, le mot est du portage, et
-          // c'est dit ici plutot que passe sous silence.
-          left.push({ text: "Lampe (F)", priority: 0, button: null });
+          // composant. Il a donc ete LU A L'ECRAN, dans l'alpha native :
+          // « Flashlight », icone de la croix directionnelle vers le haut, a
+          // gauche (docs/132). Le portage ecrivait « Lampe (F) ».
+          left.push({ text: "Flashlight", priority: 0, button: "DPadUp" });
         }
       }
       // GUIMode : le mode capture n'affiche ni le bas ni la gauche, le mode

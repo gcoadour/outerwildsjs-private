@@ -1758,3 +1758,20 @@ du champ dominant — en vol, celle du Soleil. `PlayerAttachPoint.AttachPlayer`
 coupe l'alignement sur le champ et fait tourner le corps avec le siège : le
 haut est celui du vaisseau. Capturé en vol, l'arc de la verrière et le
 tableau de bord tombent aux places de l'alpha.
+
+### Devant le poste, et l'invite de la lampe lue à l'écran
+
+`ALPHA_POSTE=1` (avec `ALPHA_CABINE=1`) pose en plus le point de la cabine
+**devant le poste**, regard vers l'avant : `scripts/alpha-cabine.mjs` réécrit
+sa `Transform` (rotation à l'octet 8, position à l'octet 24 d'un objet de
+60 octets, parent `Volumes` à l'identité), après avoir relu l'ancienne
+position. Marcher de la trappe au siège échouait une fois sur deux.
+
+Né ainsi, le joueur n'a pas franchi la trappe : pour l'alpha il n'est pas
+« dans le vaisseau », et elle montre ce qu'elle montre dehors — la minicarte
+en bas à droite, et, la nuit, l'invite de la lampe. Celle-ci n'était pas
+extractible (`_flashlightPrompt` est un `ScreenPrompt` sérialisé sur
+l'instance, type que le portage ne lit pas) : le portage écrivait
+« Lampe (F) ». L'écran dit **« Flashlight »**, avec l'icône de la croix
+directionnelle vers le haut, à gauche. C'est ce qu'écrit désormais le
+portage.

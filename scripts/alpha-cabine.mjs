@@ -53,5 +53,30 @@ for (const { obj, avant, apres } of cibles) {
   }
   buf.writeInt32LE(apres, at);
 }
+// ALPHA_POSTE=1 : le point de la cabine passe DEVANT le poste, regard vers
+// l'avant du vaisseau. Le point du build est sous la trappe, et marcher
+// jusqu'au siege a une ou deux images par seconde echoue une fois sur deux
+// (docs/132) ; d'ici, un appui sur E suffit a s'asseoir. `Transform` d'Unity
+// 4.1 : PPtr du GameObject (8 octets), rotation (4 flottants), position (3).
+// Le parent, `Volumes`, est a l'identite : les valeurs sont celles du
+// vaisseau. On relit l'ancienne position avant d'ecrire.
+if (process.env.ALPHA_POSTE) {
+  const cabine = cibles.find((c) => c.avant === 8);
+  const gid = ctx.ownerId(cabine.obj);
+  let fait = false;
+  for (const o of ctx.env.objects({ type: "Transform", file: ctx.sceneFile })) {
+    const v = ctx.env.read(o);
+    if (!v.m_GameObject || v.m_GameObject.pathId !== gid) continue;
+    const z0 = buf.readFloatLE(o.byteStart + 32);
+    if (Math.abs(z0 - 3.9589) > 1e-3) {
+      console.error(`Transform ${o.pathId} : z ${z0}, 3,9589 attendu — rien n'est ecrit`);
+      process.exit(1);
+    }
+    [0, 0, 0, 1].forEach((x, i) => buf.writeFloatLE(x, o.byteStart + 8 + 4 * i));
+    [0, 0.5, 3.0].forEach((x, i) => buf.writeFloatLE(x, o.byteStart + 24 + 4 * i));
+    fait = true;
+  }
+  if (!fait) { console.error("Transform du point de la cabine introuvable"); process.exit(1); }
+}
 writeFileSync(dst, buf);
 console.log(`${dst} : le joueur nait dans la cabine (points ${cibles.map((c) => c.obj.pathId).join(", ")})`);
