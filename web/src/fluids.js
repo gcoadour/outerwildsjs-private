@@ -119,6 +119,7 @@ export function fluidVolumes(gameplay = {}, solar = {}) {
       if (!radius) continue;   // sans rayon, pas de volume : on ne l'invente pas
       out.push(makeVolume({
         name: v.name, kind: cls, position: v.position, rotation: v.rotation || null,
+        body: v.body || null,
         volume: shape, radius,
         drag: NUM(f._dragCoefficient) ?? NUM(f._drag) ?? DEFAULT_DRAG,
         density: NUM(f._density) ?? 0,
@@ -144,7 +145,7 @@ export function fluidVolumes(gameplay = {}, solar = {}) {
   // L'ocean d'un corps : meme centre que lui, rayon de sa surface.
   for (const b of (solar.fluids || [])) {
     out.push(makeVolume({
-      name: b.name, kind: b.kind || "SphereOceanFluidVolume",
+      name: b.name, kind: b.kind || "SphereOceanFluidVolume", body: b.body || null,
       position: b.position, rotation: null, volume: null, radius: b.radius,
       drag: b.drag ?? DEFAULT_DRAG, density: b.density ?? 0,
       deepDensity: NUM(b.deepDensity), law: lawOf(b.kind || ""),
@@ -311,16 +312,35 @@ function localPoint(volume, world) {
  * d'abord — l'interieur du vaisseau est a 100, le centre d'une tornade a 5,
  * l'ocean a 1 — et la profondeur ne departage qu'a priorite egale.
  */
-export function fluidAt(volumes, world) {
+export function fluidAt(volumes, world, shiftOf = null, ignore = null) {
   let best = null;
   for (const v of volumes) {
-    const depth = depthIn(v, world);
+    // Unity ne declenche rien entre les colliders d'un MEME rigidbody : le
+    // vaisseau ne baigne pas dans son propre rayon tracteur (`BeamFluid`,
+    // sur `Ship_Body`). Des que les volumes ont suivi leur corps, il y
+    // etait en permanence, et le rayon le poussait.
+    if (ignore && v.body === ignore) continue;
+    // Le volume est pose sur un corps qui ORBITE : le point se lit dans la
+    // scene au repos de ce corps, comme les zones et les volumes du reste du
+    // moteur. Sans ce passage, les atmospheres, les oceans et les courants
+    // restaient la ou la scene les avait poses, et un vaisseau gare sur
+    // Timber Hearth rencontrait, quatre minutes plus tard, un courant
+    // d'ailleurs qui le lancait a deux cent quatre-vingts unites par seconde.
+    const point = auRepos(world, shiftOf ? shiftOf(v) : null);
+    const depth = depthIn(v, point);
     if (depth <= 0) continue;
-    if (!best) { best = { volume: v, depth }; continue; }
+    if (!best) { best = { volume: v, depth, point }; continue; }
     const p = v.priority ?? 0, bp = best.volume.priority ?? 0;
-    if (p > bp || (p === bp && depth > best.depth)) best = { volume: v, depth };
+    if (p > bp || (p === bp && depth > best.depth)) best = { volume: v, depth, point };
   }
   return best;
+}
+
+/** `restingPoint` de frames.js, sans l'importer : translation, ou passage complet. */
+function auRepos(w, sh) {
+  if (!sh) return w;
+  if (typeof sh.repos === "function") return sh.repos(w);
+  return [w[0] - sh[0], w[1] - sh[1], w[2] - sh[2]];
 }
 
 /**
@@ -478,19 +498,40 @@ export function mediumVelocity(volume, world) {
 }
 
 /**
- * Vitesse apres un pas de trainee. `SimpleFluidDetector` applique le
- * coefficient a la maniere d'un rigidbody Unity : la vitesse est multipliee par
- * `1 - k dt`, bornee a zero. La vitesse limite de chute vaut donc `g / k`.
+ * `SimpleFluidDetector.AddDrag`, relu dans l'IL :
+ *
+ *     rel = vitesse du corps - GetPointFluidVelocity(point)
+ *     F   = 0,5 x GetPointDensity(point) x |rel|² x _dragFactor x 0,00392
+ *     dv  = min(|F| x fixedDeltaTime, |rel|)
+ *     AddVelocityChange(-rel.normalized x dv)
+ *
+ * UNE TRAINEE QUADRATIQUE, en densite — et pas le `_dragCoefficient` du
+ * volume, que la methode ne lit pas. Le portage multipliait la vitesse par
+ * `1 - drag x dt`, une trainee lineaire d'une unite par seconde : a peine
+ * remarquee tant que les volumes restaient a leur place de repos et que le
+ * joueur en sortait en quelques secondes, elle mangeait les deux tiers d'un
+ * saut des qu'ils ont suivi leur planete. Dans l'atmosphere de Timber Hearth
+ * (densite 1,2), un saut a 6 u/s perd 0,08 u/s² ; a cent unites par seconde,
+ * on en perd vingt-trois.
+ *
+ * `dv` est borne par la vitesse relative : un pas trop long ne renvoie pas le
+ * mobile en arriere.
  */
-export function applyDrag(vel, drag, dt) {
-  const k = Math.max(0, 1 - drag * dt);
-  return { x: vel.x * k, y: vel.y * k, z: vel.z * k };
+export const CONVERSION_TRAINEE = 0.00392;
+
+export function trainee(rel, densite, facteur, dt) {
+  const m = Math.hypot(rel.x, rel.y, rel.z);
+  if (!(m > 0) || !(densite > 0)) return { x: rel.x, y: rel.y, z: rel.z };
+  const f = 0.5 * densite * m * m * facteur * CONVERSION_TRAINEE;
+  const k = 1 - Math.min(f * dt, m) / m;
+  return { x: rel.x * k, y: rel.y * k, z: rel.z * k };
 }
 
-/** Vitesse limite de chute dans un fluide, pour une gravite donnee. */
-// @mesure — le regime vers lequel `applyDrag` converge, mesure de l'exterieur.
-export function terminalSpeed(gravity, drag) {
-  return drag > 0 ? gravity / drag : Infinity;
+/** La vitesse de chute ou la trainee egale la gravite : sqrt(2g / (rho f c)). */
+// @mesure — le regime vers lequel `trainee` converge, mesure de l'exterieur.
+export function vitesseLimite(gravite, densite, facteur = 1) {
+  const k = 0.5 * densite * facteur * CONVERSION_TRAINEE;
+  return k > 0 ? Math.sqrt(gravite / k) : Infinity;
 }
 
 /**
@@ -506,6 +547,8 @@ export class FluidField {
     this.detectors = detectors;
     this.submerged = 0;      // corps dans un fluide a la derniere image
     this.current = null;     // fluide portant le joueur, pour l'affichage
+    // (volume) -> deplacement de son corps depuis le repos, pose par main.js
+    this.shiftOf = null;
   }
 
   get count() { return this.volumes.length; }
@@ -523,7 +566,7 @@ export class FluidField {
    * @returns le fluide traverse, ou null
    */
   apply(world, vel, dt, field = null, opts = {}) {
-    const hit = fluidAt(this.volumes, world);
+    const hit = fluidAt(this.volumes, world, this.shiftOf, opts.ignore || null);
     if (!hit) return null;
     this.submerged += 1;
     const vol = hit.volume;
@@ -531,23 +574,19 @@ export class FluidField {
 
     // La trainee s'applique a la vitesse RELATIVE au milieu, sinon un courant
     // ne pousse rien : une tornade a 300 u/s ne faisait que freiner.
-    const vm = mediumVelocity(vol, world);
+    const vm = mediumVelocity(vol, hit.point);
     const rel = vm ? { x: vel.x - vm[0], y: vel.y - vm[1], z: vel.z - vm[2] }
                    : { x: vel.x, y: vel.y, z: vel.z };
-    const d = applyDrag(rel, vol.drag * factor, dt);
+    // La densite du point porte toute la loi. Il n'y a PAS de poussee
+    // d'Archimede dans le build : `GetPointDensity` n'a que deux lecteurs,
+    // la trainee et `PlayerResources`. Celle qu'avait le portage retirait 2,4
+    // u/s² a la pesanteur dans chaque atmosphere ; ce qui remonte un corps
+    // dans l'ocean est la repulsion de `SphereOceanFluidVolume`, et ce qui
+    // rend son fond infranchissable, la trainee a densite 100.
+    const d = trainee(rel, densityAt(vol, hit.depth), factor, dt);
     vel.x = d.x + (vm ? vm[0] : 0);
     vel.y = d.y + (vm ? vm[1] : 0);
     vel.z = d.z + (vm ? vm[2] : 0);
-
-    // Poussee d'Archimede : opposee a la gravite, nulle a densite 1 — un corps
-    // aussi dense que son milieu ne monte ni ne descend.
-    const rho = densityAt(vol, hit.depth);
-    if (field && rho) {
-      const a = field.magnitude * (rho - 1) * dt;
-      vel.x -= field.dir.x * a;
-      vel.y -= field.dir.y * a;
-      vel.z -= field.dir.z * a;
-    }
     return hit;
   }
 

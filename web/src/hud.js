@@ -40,6 +40,58 @@ export async function loadInterface() {
 }
 
 /**
+ * Le panneau des jauges tel que la scene le pose (`panneauRessources`, dans
+ * pipeline/extract/interface.js) : repli mesure, pour une extraction qui ne
+ * l'a pas encore.
+ */
+export const PANNEAU_REPLI = {
+  position: [0.16, 0.084, 0.13578], scale: [0.04, 0.03], mirrorX: true, fov: 80,
+  couleurs: {
+    ResourcesHUD: [0, 0, 0, 1],
+    HUDLayer1OuterBars: [1, 1, 1, 1],
+    HUDPlayerHealth: [1, 1, 1, 0.498],
+    HUDLayer2OxyBar: [0.2314, 0.7765, 0.3412, 0.1765],
+    HUDLayer2FuelBar: [0.9137, 0.7725, 0.3412, 0.1765],
+  },
+};
+
+/** Un `_Color` d'Unity en couleur CSS. */
+export function couleurCSS([r, g, b, a = 1]) {
+  const c = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+  return `rgba(${c(r)}, ${c(g)}, ${c(b)}, ${+a.toFixed(3)})`;
+}
+
+/** `MinimapHUD`, repli mesure : sous les jauges, a droite. */
+export const MINIMAP_REPLI = {
+  position: [0.162, -0.075, 0.13578], scale: [0.04, 0.04], mirrorX: true, fov: 80,
+};
+
+/**
+ * Le rectangle d'ecran du panneau, en fractions de la largeur et de la
+ * hauteur, pour un rapport largeur / hauteur donne.
+ *
+ * Le panneau est le carre local [-1, 1]² de `ResourcesHUD`, projete par la
+ * camera du HUD (perspective, champ VERTICAL `fov`) : il vit a une profondeur
+ * fixe, sa taille a l'ecran suit donc la hauteur, et sa place horizontale
+ * suit le rapport. Mesure dans l'alpha en 1280 x 720 : jauges de y 35 a 158,
+ * oxygene centre vers x 1 072, silhouette vers 1 208 — et la projection rend
+ * 39 a 152, 1 072 et 1 208 (docs/132).
+ */
+export function rectPanneau(panel = PANNEAU_REPLI, aspect = 16 / 9) {
+  const [x, y, z] = panel.position;
+  const t = Math.tan((panel.fov * Math.PI) / 360);
+  const nx = (v) => v / (z * t * aspect), ny = (v) => v / (z * t);
+  const [sx, sy] = panel.scale;
+  return {
+    left: (1 + nx(x - sx)) / 2,
+    width: (nx(x + sx) - nx(x - sx)) / 2,
+    top: (1 - ny(y + sy)) / 2,
+    height: (ny(y + sy) - ny(y - sy)) / 2,
+    mirrorX: !!panel.mirrorX,
+  };
+}
+
+/**
  * Jauges d'oxygene, de carburant et de sante.
  *
  * PlayerResourceGUI ne dessine pas ces jauges en 2D : il met a l'echelle et
@@ -68,29 +120,49 @@ export class ResourceHUD {
     };
     this.box = el("ow-res");
     const t = this.r.textures;
+    const couleurs = { ...PANNEAU_REPLI.couleurs,
+                       ...((this.r.panel && this.r.panel.couleurs) || {}) };
+    const plein = (src, cls) => {
+      const img = el(cls, "img");
+      img.src = DIR + src;
+      this.box.appendChild(img);
+      return img;
+    };
 
-    // Chaque jauge est un cadre decoupe dans la planche du jeu, et un
-    // remplissage qu'on rogne par le bas.
-    const bar = (key, frame) => {
+    // LE PANNEAU EST UNE PILE DE QUADS, pas trois images decoupees
+    // (docs/132). Du fond vers l'avant :
+    //
+    //   ResourcesHUD         ResourceBar_Layer01, teinte NOIR : des lignes de
+    //                        balayage sombres sous les jauges et la silhouette
+    //   HUDLayer2*Bar        deux aplats sans texture, vert et ambre a 0,18
+    //   HUDLayer1OuterBars   ResourceBar_Layer1 en blanc : les deux cadres
+    //   HUDPlayerHealth      la silhouette, blanche a 0,5
+    //
+    // Le portage decoupait les cadres dans la planche et les serrait a la
+    // largeur des remplissages, remplissait d'un degrade et posait la
+    // silhouette presque opaque : des jauges vides, etroites, et une
+    // silhouette claire la ou l'alpha la montre sombre.
+    if (t.layer0) {
+      this.fond = plein(t.layer0, "ow-res-plein");
+      // `c = tex x _Color` : le noir garde l'alpha de la texture.
+      this.fond.style.filter = "brightness(0)";
+    }
+    const bar = (nom) => {
       const wrap = el("ow-bar");
-      // Le jeu MET A L'ECHELLE le quad de remplissage, il ne le rogne pas
-      // (localScale.y = 0,61 x fraction) : le degrade s'etire donc avec la
-      // jauge au lieu d'etre revele par le bas.
-      const fill = el("ow-bar-fill", "img");
-      fill.src = DIR + t.fill;
-      const img = el("ow-bar-frame", "img");
-      img.src = DIR + frame;
+      const fill = el("ow-bar-fill");
+      fill.style.background = couleurCSS(couleurs[nom]);
       wrap.appendChild(fill);
-      wrap.appendChild(img);
       this.box.appendChild(wrap);
       return { wrap, fill };
     };
+    this.oxygen = bar("HUDLayer2OxyBar");
+    this.fuel = bar("HUDLayer2FuelBar");
+    if (t.layer1) this.cadres = plein(t.layer1, "ow-res-plein");
 
     this.health = el("ow-health", "img");
     this.health.src = DIR + t.health[3];
+    this.health.style.opacity = String(couleurs.HUDPlayerHealth[3]);
     this.box.appendChild(this.health);
-    this.oxygen = bar("oxygen", t.frameOxygen);
-    this.fuel = bar("fuel", t.frameFuel);
 
     this.vignette = el("ow-vignette", "img");
     this.vignette.src = DIR + t.vignette;
@@ -102,14 +174,35 @@ export class ResourceHUD {
     root.appendChild(this.vignette);
     root.appendChild(this.warnings);
     this.place();
+    // Le panneau suit le rapport de la fenetre : sa place horizontale en
+    // depend, sa taille non.
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("resize", () => this.place());
+    }
   }
 
-  /** Repartit les trois elements dans l'espace local du panneau, x et y en [-1, 1]. */
+  /**
+   * Repartit les trois elements dans l'espace local du panneau, x et y en
+   * [-1, 1], et pose le panneau la ou la camera du HUD le voit. `ResourcesHUD`
+   * est tourne d'un demi-tour : son x local part vers la GAUCHE de l'ecran,
+   * et l'oxygene (x = 0,577) se retrouve a gauche de la silhouette.
+   */
   place() {
     const L = this.r.layout;
+    const R = rectPanneau(this.r.panel || PANNEAU_REPLI,
+                          (window.innerWidth || 16) / (window.innerHeight || 9));
+    const sens = R.mirrorX ? -1 : 1;
     const pct = (v) => `${(v + 1) * 50}%`;
+    // Les variables CSS, et non le style du panneau : la mise en page tactile
+    // garde la sienne (style.css).
+    const st = this.box.style;
+    st.setProperty("--res-left", `${R.left * 100}%`);
+    st.setProperty("--res-top", `${R.top * 100}%`);
+    st.setProperty("--res-width", `${R.width * 100}%`);
+    st.setProperty("--res-height", `${R.height * 100}%`);
+    const gauche = (e) => pct(sens * e.x - e.halfWidth);
     const set = (node, e, top, height) => {
-      node.style.left = pct(e.x - e.halfWidth);
+      node.style.left = gauche(e);
       node.style.width = `${e.halfWidth * 100}%`;
       node.style.bottom = top;
       node.style.height = height;
@@ -117,7 +210,7 @@ export class ResourceHUD {
     set(this.health, L.health, pct(-L.health.halfHeight), `${L.health.halfHeight * 100}%`);
     for (const [k, e] of [["oxygen", L.oxygen], ["fuel", L.fuel]]) {
       const n = this[k].wrap;
-      n.style.left = pct(e.x - e.halfWidth);
+      n.style.left = gauche(e);
       n.style.width = `${e.halfWidth * 100}%`;
       n.style.bottom = pct(this.r.barBaseY);
       n.style.height = `${e.halfHeight * 2 * 50}%`;

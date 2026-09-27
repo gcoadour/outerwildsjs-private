@@ -509,8 +509,24 @@ def _run(url, heavy, profil=None, zip_path=None):
               options: window.__titre.lignes.map((l) => l.textContent),
               verrous: window.__titre.menu.locked })""")
             rep.eq("cinq lignes au menu-titre", len(titre["options"]), 5)
-            page.keyboard.press("KeyE")
-        page.wait_for_function("window.__ready===true", timeout=300000)
+            # Une IMAGE peut durer plus d'une seconde en rendu logiciel : un
+            # appui instantane tombe entre deux, et le menu reste a attendre
+            # jusqu'au bout des cinq minutes. On TIENT la touche, et l'on
+            # recommence tant que le menu n'est pas passe a « Loading... » (`menu.loading`).
+            for _ in range(20):
+                page.keyboard.down("KeyE"); page.wait_for_timeout(600); page.keyboard.up("KeyE")
+                page.wait_for_timeout(4000)
+                if page.evaluate("() => window.__ready === true || !window.__titre || window.__titre.menu.loading"):
+                    break
+        try:
+            page.wait_for_function("window.__ready===true", timeout=300000)
+        except Exception:
+            # Dire POURQUOI le moteur n'a pas demarre, plutot qu'une trace
+            # d'appel sur une attente : l'erreur de la page est la cause.
+            print("  !!   le moteur n'a pas demarre ; erreurs de la page :")
+            for e in errors[:10]:
+                print("       " + e[:300])
+            raise
         page.wait_for_timeout(3000)
 
         rep.eq("erreurs console au demarrage", errors[:3], [])
@@ -776,6 +792,38 @@ def _run(url, heavy, profil=None, zip_path=None):
         rep.eq("portee de la lampe", cons["portee"], 80)
         rep.near("guimauve grillee en trois secondes", cons["grillage"], 0.6, 0.001)
 
+        # --- les touches de mise au point du build (`DebugKeyCode`) ------------
+        #
+        # F1 (`GUIMode`) fait tourner le mode d'affichage (le portage l'avait mis
+        # sur g). `DebugInputManager`, lui, est pose ETEINT : F2 et F11 ne font
+        # rien dans l'alpha (mesure dans l'alpha native, docs/132), ni dans le
+        # portage — sauf outillage allume (`__miseAuPoint`), ou F2 donne la
+        # combinaison et ce qu'elle porte, F11 quatre-vingt-douze secondes.
+        etat_dbg = """() => ({ i: window.__gui.guiMode.index,
+          eq: [window.__lots.equipment.suit, window.__lots.equipment.probe, window.__lots.equipment.minimap],
+          reste: Math.round(window.__loop.secondsRemaining) })"""
+        avant_dbg = page.evaluate("""() => ({ i: window.__gui.guiMode.index,
+          eq: { suit: window.__lots.equipment.suit, probe: window.__lots.equipment.probe,
+                minimap: window.__lots.equipment.minimap }, t: window.__loop.elapsed })""")
+        page.keyboard.press("F1")
+        page.keyboard.press("F2")
+        page.keyboard.press("F11")
+        page.wait_for_timeout(300)
+        eteint_dbg = page.evaluate(etat_dbg)
+        page.evaluate("() => { window.__miseAuPoint = true; }")
+        page.keyboard.press("F2")
+        page.keyboard.press("F11")
+        page.wait_for_timeout(300)
+        apres_dbg = page.evaluate(etat_dbg)
+        page.evaluate("""(a) => { window.__miseAuPoint = false; window.__gui.guiMode.index = a.i;
+          Object.assign(window.__lots.equipment, a.eq); window.__loop.elapsed = a.t; }""", avant_dbg)
+        rep.eq("F1 : le mode d'affichage suivant", eteint_dbg["i"] != avant_dbg["i"], True)
+        rep.eq("F2 et F11 eteints, comme DebugInputManager dans l'alpha",
+               [eteint_dbg["eq"], eteint_dbg["reste"] > 200],
+               [[avant_dbg["eq"]["suit"], avant_dbg["eq"]["probe"], avant_dbg["eq"]["minimap"]], True])
+        rep.eq("outillage : F2 donne combinaison, sonde et minicarte", apres_dbg["eq"], [True, True, True])
+        rep.near("outillage : F11 met la fin des temps a 92 s", apres_dbg["reste"], 92, 3)
+
         # --- signaux et mixage -------------------------------------------------
         audio = page.evaluate("""() => {
           const m = window.__audioMix.mixer;
@@ -903,10 +951,261 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (!s) return null;
           return { r: Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)),
                    pads: s.onPad, immobile: Math.hypot(s.vel.x, s.vel.y, s.vel.z) < 0.01 }; }""")
+        # `PlayerSave..ctor` : Timber Hearth est explore des la sauvegarde
+        # neuve. L'ecran de l'ordinateur ne s'annonce donc pas au reveil : il
+        # montre son logo, comme l'alpha (docs/132).
+        maj_reveil = page.evaluate("() => window.__consoles && window.__consoles.computer ? window.__consoles.computer.misAJour : null")
+        if maj_reveil is not None:
+            rep.eq("au reveil, l'ordinateur n'annonce pas de mise a jour", maj_reveil, False)
         if depart_vaisseau:
             rep.eq("le vaisseau attend au sommet de la tour, sur ses pads, immobile",
                    [depart_vaisseau["r"], depart_vaisseau["pads"], depart_vaisseau["immobile"]],
                    [172, True, True])
+
+        # --- on embarque a pied (docs/132) ---------------------------------------
+        #
+        # Le vaisseau a des colliders : on se tient dans sa cabine. Le paquetage
+        # se prend par sa zone « Gear Up » (on y entre, regard dans sa
+        # fenetre), le poste par la sienne, « Suit Required » puis « Buckle
+        # Up ». Le portage embarquait a quarante unites, codes en poche, et
+        # ramassait a trois unites sans regarder.
+        embarque = page.evaluate("""() => {
+          const s = window.__shipRef, L = window.__lots;
+          if (!s || !window.__shipRest || !window.__collidersVaisseau) return null;
+          const agg = window.__player.body;
+          const e = L.equipment;
+          const avant = { p: agg.transformNode.position.clone(), regard: window.__regardCam(),
+                          eq: { suit: e.suit, probe: e.probe, minimap: e.minimap },
+                          pris: new Set(e.taken), posVaisseau: { ...s.pos }, vitVaisseau: { ...s.vel },
+                          etatVaisseau: { landed: s.landed, parked: s.parked, onPad: s.onPad,
+                                          quat: s.quat.slice(), groundBody: s.groundBody } };
+          window.__retourEmbarque = avant;
+          const rest = window.__shipRest, q = window.__shipRestRot, sc = BABYLON.EngineStore.LastCreatedScene;
+          const rot = (q, v) => { const [x, y, zz, w] = q; const tx = 2 * (y * v[2] - zz * v[1]), ty = 2 * (zz * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+            return [v[0] + w * tx + (y * tz - zz * ty), v[1] + w * ty + (zz * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]; };
+          window.__placerZone = (nom) => {
+            const z = window.__interactables.items.find((i) => i.kind === "zone" && i.name === nom && i.body === "Ship_Body");
+            const inv = [-q[0], -q[1], -q[2], q[3]], a = s.axes;
+            const cadre = (v) => [0, 1, 2].map((i) => v[0] * a.right[i] + v[1] * a.up[i] + v[2] * a.fwd[i]);
+            const C = cadre(rot(inv, [z.world[0] - rest[0], z.world[1] - rest[1], z.world[2] - rest[2]])).map((v, i) => v + s.pos[["x", "y", "z"][i]]);
+            const de = new BABYLON.Vector3(C[0] + a.up[0] * 0.5, C[1] + a.up[1] * 0.5, C[2] + a.up[2] * 0.5);
+            const r = sc.getPhysicsEngine().raycast(de, de.add(new BABYLON.Vector3(...a.up).scale(-4)));
+            const P = r.hasHit ? [0, 1, 2].map((i) => [r.hitPointWorld.x, r.hitPointWorld.y, r.hitPointWorld.z][i] + a.up[i] * 0.65) : C;
+            agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false; agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+            window.__regarder = cadre(rot(inv, rot(z.rotation, [0, 0, 1])));
+            return r.hasHit;
+          };
+          if (!window.__regardeur) {
+            window.__regardeur = sc.onAfterRenderObservable.add(() => {
+              if (!window.__regarder || s.boarded) return;
+              const cam = sc.activeCamera, f = cam.getDirection(BABYLON.Axis.Z), U = cam.upVector.clone().normalize(); const { yaw, pitch } = window.__regardCam();
+              const cp = Math.cos(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw); const h = f.add(U.scale(Math.sin(pitch))).scale(1 / cp);
+              const N = h.scale(cy).subtract(BABYLON.Vector3.Cross(U, h).scale(sy)); const E = BABYLON.Vector3.Cross(U, N);
+              const F = new BABYLON.Vector3(...window.__regarder); const Fh = F.subtract(U.scale(BABYLON.Vector3.Dot(F, U))).normalize();
+              window.__look(Math.atan2(BABYLON.Vector3.Dot(Fh, E), BABYLON.Vector3.Dot(Fh, N)), 0);
+            });
+          }
+          s.boarded = false; L.equipment.suit = false; L.equipment.probe = false; L.equipment.minimap = false;
+          return { colliders: window.__collidersVaisseau.poses, trappe: window.__collidersVaisseau.trappe,
+                   sol: window.__placerZone("FlightConsole") };
+        }""")
+        if embarque:
+            invites = lambda: page.evaluate("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].filter((n) => n.offsetParent).map((n) => n.textContent.trim())")
+            def appui():
+                page.keyboard.down("KeyE"); page.wait_for_timeout(700); page.keyboard.up("KeyE"); page.wait_for_timeout(2000)
+            def attendre_invite():
+                # Une image dure plus d'une seconde sans GPU : on attend que
+                # l'invite paraisse, sans compter sur une duree fixe.
+                try:
+                    page.wait_for_function("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].some((n) => n.offsetParent)", timeout=10000)
+                except Exception:
+                    pass
+            # Sans trop attendre : le joueur, pose contre le siege, finit par
+            # glisser hors de la capsule du poste.
+            attendre_invite()
+            sans = invites()
+            appui()
+            assis_sans = page.evaluate("() => window.__shipRef.boarded")
+            page.evaluate("() => window.__placerZone('InteractVolume')")
+            attendre_invite()
+            paquetage = invites()
+            appui()
+            combi = page.evaluate("() => window.__lots.equipment.suit")
+            # L'ordinateur de bord, a sa zone « Boot Up » : on s'y assied, ses
+            # touches sont celles de `ComputerInput` (Move X, Interact,
+            # Cancel), et Cancel fait se lever.
+            page.evaluate("() => window.__placerZone('ShipComputer')")
+            attendre_invite()
+            ordi_invite = invites()
+            for _ in range(4):
+                appui()
+                if page.evaluate("() => window.__consoles.computer.open"):
+                    break
+            ordi = page.evaluate("""() => ({ open: window.__consoles.computer.open,
+              index: window.__consoles.computer.index,
+              assis: window.__assise.points.current ? window.__assise.points.current.name : null,
+              gauche: [...document.querySelectorAll('.ow-prompts-left .ow-prompt')].map((n) => n.textContent.trim()) })""")
+            # L'ecran de la cabine : la texture de rendu a la place de l'aplat,
+            # et devant les yeux — le verrou du regard converge lentement sans
+            # GPU, on attend donc que l'ecran entre dans le champ.
+            ecran_js = """() => { const e = window.__ecranOrdi, sc = BABYLON.EngineStore.LastCreatedScene;
+              if (!e || !e.pret) return null; const cam = sc.activeCamera, eng = sc.getEngine();
+              e.ecran.computeWorldMatrix(true);
+              const p = BABYLON.Vector3.Project(e.ecran.getAbsolutePosition(), BABYLON.Matrix.Identity(),
+                sc.getTransformMatrix(), cam.viewport.toGlobal(eng.getRenderWidth(), eng.getRenderHeight()));
+              const u = p.x / eng.getRenderWidth(), v = p.y / eng.getRenderHeight();
+              return { ecran: e.ecran.isVisible, splash: e.splash ? e.splash.isVisible : null,
+                       rendu: sc.customRenderTargets.includes(e.rtt),
+                       texte: e.dernierTexte, champ: p.z > 0 && p.z < 1 && u > 0.1 && u < 0.9 && v > 0.1 && v < 0.9 }; }"""
+            try:
+                page.wait_for_function(f"() => {{ const r = ({ecran_js})(); return r && r.champ; }}", timeout=30000)
+            except Exception:
+                pass
+            ecran = page.evaluate(ecran_js)
+            page.keyboard.down("KeyD"); page.wait_for_timeout(600); page.keyboard.up("KeyD"); page.wait_for_timeout(1500)
+            ordi_d = page.evaluate("() => window.__consoles.computer.index")
+            page.keyboard.down("KeyQ"); page.wait_for_timeout(600); page.keyboard.up("KeyQ"); page.wait_for_timeout(2000)
+            ordi_q = page.evaluate("""() => ({ open: window.__consoles.computer.open,
+              assis: window.__assise.points.current ? window.__assise.points.current.name : null })""")
+            ecran_q = page.evaluate(ecran_js)
+            page.evaluate("() => window.__placerZone('FlightConsole')")
+            attendre_invite()
+            avec = invites()
+            # Le casque descend encore apres « Gear Up » : sans GPU, une image
+            # dure plus d'une seconde, et le premier appui peut tomber pendant.
+            # On retente, comme le controle de l'assise plus bas.
+            assis = False
+            for _ in range(4):
+                appui()
+                assis = page.evaluate("() => window.__shipRef.boarded")
+                if assis:
+                    break
+            # Le pilote au poste, les yeux a 0,9 au-dessus du point : dans le
+            # repere du vaisseau, (0 ; 1,4 ; 3,74). Le siege appliquait deux
+            # fois l'orientation de repos, et l'on s'asseyait dans le toit.
+            page.wait_for_timeout(3000)
+            # `ShipPromptController` : pose au sommet de la tour, l'alpha montre
+            # Toggle View, View Map, Liftoff, Exit de haut en bas — l'ordre
+            # d'ajout empile depuis le bas, et sans pilote automatique.
+            invites_poste = page.evaluate("""() => [...document.querySelectorAll('.ow-prompts-left .ow-prompt')]
+              .map((d) => d.textContent.trim())""")
+            oeil_pilote = page.evaluate("""() => { const s = window.__shipRef, a = s.axes, c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
+              const d = [c.position.x - s.pos.x, c.position.y - s.pos.y, c.position.z - s.pos.z];
+              return [a.right, a.up, a.fwd].map((ax) => +(d[0]*ax[0] + d[1]*ax[1] + d[2]*ax[2]).toFixed(1)); }""")
+            # `PlayerSpawner` : dans le vaisseau, 3 le pose sur le point de
+            # vaisseau de Timber Hearth (`SpawnPoint_Ship`, 332 u du centre).
+            # Mesure et retour dans la meme instruction : sans GPU, une image
+            # dure une seconde, et le vaisseau pose en l'air tombait et
+            # s'ecrasait avant qu'on le relise.
+            saut = None
+            if assis:
+                saut = page.evaluate("""() => { const s = window.__shipRef;
+                  const avant = { pos: { ...s.pos }, vel: { ...s.vel }, quat: s.quat.slice(),
+                                  landed: s.landed, parked: s.parked };
+                  dispatchEvent(new KeyboardEvent("keydown", { code: "Digit3" }));
+                  dispatchEvent(new KeyboardEvent("keyup", { code: "Digit3" }));
+                  const r = Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z));
+                  Object.assign(s.pos, avant.pos); Object.assign(s.vel, avant.vel);
+                  s.quat = avant.quat; s.landed = avant.landed; s.parked = avant.parked;
+                  return r; }""")
+            # On se LEVE par la touche, comme un joueur : ecrire `boarded` a
+            # faux laissait les commandes du vaisseau en place, et la marche
+            # qu'on mesure plus loin se faisait a la poussee.
+            if assis:
+                appui()
+            page.evaluate("""() => { window.__regarder = null; const s = window.__shipRef, r = window.__retourEmbarque;
+              s.boarded = false; Object.assign(window.__lots.equipment, r.eq);
+              window.__lots.equipment.taken = new Set(r.pris);
+              Object.assign(s.pos, r.posVaisseau); Object.assign(s.vel, r.vitVaisseau);
+              Object.assign(s, r.etatVaisseau);
+              window.__assise.points.detach([0, 0, 0]);
+              const siege = window.__assise.points.points.find((p) => p.name === "FlightConsole");
+              if (siege && siege.follow) siege.follow(null);
+              const agg = window.__player.body; agg.transformNode.position.copyFrom(r.p); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+              window.__look(r.regard.yaw, r.regard.pitch); }""")
+            page.wait_for_timeout(1500)
+            rep.at_least("le vaisseau a des colliders, on tient dans sa cabine", embarque["colliders"], 10)
+            # `Hatch_Collider` n'a pas de maillage a voir : l'exportateur emet
+            # celui de son `MeshCollider`, et la trappe fermee barre l'entree.
+            rep.eq("et la trappe en est un", embarque["trappe"], 1)
+            rep.eq("au poste sans combinaison : « Suit Required », et l'on ne s'assoit pas",
+                   [sans, assis_sans], [["Suit Required"], False])
+            rep.eq("au paquetage : « Gear Up », et la combinaison", [paquetage, combi], [["Gear Up"], True])
+            rep.eq("a l'ordinateur : « Boot Up », on s'y assied, ecran allume",
+                   [ordi_invite, ordi["open"], ordi["assis"]], [["Boot Up"], True, "ShipComputer"])
+            rep.eq("ses invites : Cancel, Select, Navigate", ordi["gauche"], ["Cancel", "Select", "Navigate"])
+            rep.eq("D parcourt (Move X), Q fait se lever (Cancel)",
+                   [ordi_d - ordi["index"], ordi_q["open"], ordi_q["assis"]], [1, False, None])
+            rep.eq("au poste avec : « Buckle Up », et l'on s'assoit", [avec, assis], [["Buckle Up"], True])
+            if ecran:
+                rep.eq("l'ordinateur allume : l'ecran de la cabine rend sa camera, l'aplat s'eteint, "
+                       "l'ecran est dans le champ",
+                       [ecran["ecran"], ecran["splash"], ecran["rendu"], ecran["champ"]], [True, False, True, True])
+                rep.eq("son texte : le nom du build, avec ses espaces",
+                       (ecran["texte"] or "").split("\n")[0], "<   Timber Hearth   >")
+            if ecran_q:
+                rep.eq("et eteint, l'aplat revient", [ecran_q["ecran"], ecran_q["splash"], ecran_q["rendu"]],
+                       [False, True, False])
+            if assis:
+                # Le siege a 3,74 dans le vaisseau, plus les 0,15 que PlayerCamera
+                # porte devant Player_Body (AVANT_CAMERA) : l'oeil est a 3,9.
+                rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.9])
+                rep.eq("au poste, pose : les invites de ShipPromptController, de bas en haut",
+                       invites_poste, ["Exit", "Liftoff", "View Map", "Toggle View"])
+            if saut is not None:
+                rep.near("3, dans le vaisseau : le point de vaisseau de Timber Hearth", saut, 332, 3)
+
+        # --- la console du satellite : des instantanes (docs/132) ----------------
+        #
+        # « Establish Satellite Link » : l'ecran passe de la carte postale au
+        # schema, `Probe` y pose un instantane de la camera du satellite, et
+        # `Cancel` rend la carte postale. Plus de vue deportee dans un coin.
+        sat = page.evaluate("""() => {
+          const z = window.__interactables.items.find((i) => i.kind === "zone" && i.name === "ProjectorControls");
+          if (!z || !window.__satellite || !window.__versCadre) return null;
+          const agg = window.__player.body;
+          window.__retourSat = { p: agg.transformNode.position.clone(), regard: window.__regardCam() };
+          const P = window.__versCadre(z.world, z.body);
+          agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+          const m = BABYLON.EngineStore.LastCreatedScene.getMeshByName("Projection");
+          return { repos: m && m.material && m.material.diffuseTexture ? m.material.diffuseTexture.name : null };
+        }""")
+        if sat:
+            ecran = lambda: page.evaluate("""() => { const m = BABYLON.EngineStore.LastCreatedScene.getMeshByName("Projection");
+              return m && m.material && m.material.diffuseTexture ? m.material.diffuseTexture.name : null; }""")
+            try:
+                page.wait_for_function("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].some((n) => n.offsetParent)", timeout=10000)
+            except Exception:
+                pass
+            sat_invite = page.evaluate("() => [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].map((n) => n.textContent.trim())")
+            for _ in range(4):
+                page.keyboard.down("KeyE"); page.wait_for_timeout(600); page.keyboard.up("KeyE"); page.wait_for_timeout(2000)
+                if page.evaluate("() => !!window.__tools.consoles.active"):
+                    break
+            sat_pris = page.evaluate("""() => ({ active: window.__tools.consoles.active ? window.__tools.consoles.active.name : null,
+              centre: [...document.querySelectorAll('.ow-prompts-center .ow-prompt')].map((n) => n.textContent.trim()),
+              gauche: [...document.querySelectorAll('.ow-prompts-left .ow-prompt')].map((n) => n.textContent.trim()) })""")
+            ecran_pris = ecran()
+            page.evaluate("() => window.__satellite.instantane(false)")
+            page.wait_for_timeout(1500)
+            ecran_photo = ecran()
+            page.keyboard.down("KeyQ"); page.wait_for_timeout(600); page.keyboard.up("KeyQ"); page.wait_for_timeout(2000)
+            sat_lache = page.evaluate("() => !!window.__tools.consoles.active")
+            ecran_lache = ecran()
+            page.evaluate("""() => { const r = window.__retourSat, agg = window.__player.body;
+              agg.transformNode.position.copyFrom(r.p); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); window.__look(r.regard.yaw, r.regard.pitch); }""")
+            page.wait_for_timeout(1500)
+            nom = lambda t: (t or "").split("/")[-1].split(".")[0]
+            rep.eq("le satellite : carte postale au repos, « Establish Satellite Link »",
+                   [nom(sat["repos"]), sat_invite], ["PostcardsFromSpacePSD", ["Establish Satellite Link"]])
+            rep.eq("prise : le schema, plus d'invite au centre, Leave / Rearview / Snapshots",
+                   [sat_pris["active"], nom(ecran_pris), sat_pris["centre"], sat_pris["gauche"]],
+                   ["ProjectorControls", "SatelliteDiagramPSD", [], ["Leave", "Take Rearview Snapshots", "Take Snapshots"]])
+            rep.eq("Probe pose l'instantane sur l'ecran, Cancel rend la carte postale",
+                   [ecran_photo, sat_lache, nom(ecran_lache)], ["satelliteSnapshot", False, "PostcardsFromSpacePSD"])
 
         # --- degats du vaisseau -------------------------------------------------
         # Les valeurs de l'alpha eteignent les degats localises : on verifie que
@@ -1095,10 +1394,13 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         if depart:
             rep.eq("le regard de depart vient du build", depart["oriente"], True)
-            rep.near("les yeux sont a 1,2 u au-dessus du joueur",
-                     round(depart["haut"], 3), 1.2, 0.05)
-            rep.at_most("... et exactement au-dessus, pas de cote",
-                        round(depart["cote"], 3), 0.01)
+            # `PlayerCamera` a 0,9 du centre d'une capsule de 2 : 1,9 du sol,
+            # soit 1,3 du centre de la sphere de 0,6 du portage (docs/132).
+            rep.near("les yeux sont a 1,3 u au-dessus du centre du joueur",
+                     round(depart["haut"], 3), 1.3, 0.05)
+            # `PlayerCamera` est a 0,15 DEVANT le centre du corps (docs/132).
+            rep.near("... et 0,15 devant, comme PlayerCamera",
+                     round(depart["cote"], 3), 0.15, 0.01)
             # On tombe d'une garde d'un demi-metre, pas de quarante unites.
             rep.at_most("on se pose au point d'apparition",
                         round(depart["derive"], 2), 10)
@@ -2603,12 +2905,13 @@ def _run(url, heavy, profil=None, zip_path=None):
         # et le saut a sa propre place — `Jump` et `Move Up` sont deux canaux.
         rep.eq("la manette en vol, en combinaison", tactile["enVol"],
                ["Telescope", "Sonde", "Carte du systeme", "Lampe",
-                "Ordinateur de bord", "Affichage", "Menu",
+                "Affichage", "Menu",
                 "Monter", "Descendre", "Sauter", "Interagir, parler"])
         rep.eq("un menu la remplace par la croix et les deux reponses",
                tactile["enMenu"],
                ["Haut", "Gauche", "Droite", "Bas", "Valider", "Retour"])
-        rep.eq("boutons tactiles en tout", tactile["boutons"], 19)
+        # L'ordinateur de bord n'a plus de bouton : il s'allume a sa zone.
+        rep.eq("boutons tactiles en tout", tactile["boutons"], 18)
 
         # Le dialogue au doigt. Sans conversation dans la scene il n'y a rien a
         # mesurer ; avec le build, il y en a quatorze.
@@ -2838,6 +3141,15 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("avec les deux annonces du build", att2["annonces"],
                    ["SwitchActiveCamera", "EnterLandingView"])
             rep.eq("et le jeu de commandes change", att2["mode"], "atterrissage")
+            # Et c'est une CAMERA : `LandingCam`, sous le vaisseau, champ de
+            # 100 degres, qui regarde vers le bas (docs/132).
+            vue_att = page.evaluate("""() => { const c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
+              const s = window.__shipRef, d = c.getDirection(BABYLON.Axis.Z), u = s.axes.up;
+              return { fov: Math.round(c.fov * 180 / Math.PI),
+                       bas: d.x * -u[0] + d.y * -u[1] + d.z * -u[2] > 0.9,
+                       pres: Math.hypot(c.position.x - s.pos.x, c.position.y - s.pos.y, c.position.z - s.pos.z) < 5 }; }""")
+            rep.eq("la vue est celle de LandingCam : 100 degres, vers le bas, sous la coque",
+                   [vue_att["fov"], vue_att["bas"], vue_att["pres"]], [100, True, True])
             page.keyboard.press("KeyR")
             page.wait_for_timeout(300)
             att3 = page.evaluate("() => ({ on: window.__atterrissage.on,"
@@ -2854,7 +3166,13 @@ def _run(url, heavy, profil=None, zip_path=None):
             # le decale de quatre unites et lui donne celle du siege, ce que
             # les controles suivants n'ont pas demande.
             page.keyboard.press("KeyR")
-            page.wait_for_timeout(900)
+            # La vue s'ouvre 0,45 s de JEU apres l'appui : sans GPU, une image
+            # peut durer plus que l'attente fixe qui la mesurait. On attend
+            # qu'elle soit la, comme les autres controles minutes.
+            try:
+                page.wait_for_function("() => window.__atterrissage.on", timeout=15000)
+            except Exception:
+                pass
             avant_leve = page.evaluate("""() => {
               const p = window.__player;
               return { on: window.__atterrissage.on,
@@ -2921,6 +3239,10 @@ def _run(url, heavy, profil=None, zip_path=None):
         if pose:
             # Le vaisseau commence pose sur la piste de Timber Hearth.
             rep.eq("au demarrage, le vaisseau est pose", pose["pose"], True)
+            if not pose["pose"]:
+                print("       journal du vaisseau :")
+                for l in page.evaluate("() => window.__journalVaisseau || []"):
+                    print("         ", l)
             rep.at_most("et il ne bouge pas", pose["vitesse"], 5)
             rep.eq("le toucher s'est annonce", pose["annonces"][:1],
                    ["ShipTouchdown"])
@@ -2931,6 +3253,13 @@ def _run(url, heavy, profil=None, zip_path=None):
             # en moins d'un dixieme de seconde : le vaisseau decolle des
             # capteurs, glisse, et se repose — et sans GPU les trois tiennent
             # dans une seule image. Lire `onPad` ensuite mesurait le repos.
+            # Pose d'abord : les controles d'embarquement qui precedent
+            # peuvent le laisser se reposer, et un toucher en retard passait
+            # alors devant le decollage mesure.
+            try:
+                page.wait_for_function("() => window.__shipRef.onPad", timeout=15000)
+            except Exception:
+                pass
             n0 = page.evaluate("""() => {
               const s = window.__shipRef;
               const n = s.pads.events.length;
@@ -2979,6 +3308,13 @@ def _run(url, heavy, profil=None, zip_path=None):
         }""")
         if tour:
             rep.eq("une borne de lancement montee", tour["bornes"], 1)
+            # Elle se VISE : son recepteur (portee 2), et plus d'objet pris a la
+            # proximite (docs/132).
+            visee_borne = page.evaluate("""() => { const it = window.__interactables.items;
+              const b = it.find((i) => i.terminal);
+              return [it.filter((i) => i.kind === "terminal").length, b ? b.kind : null, b ? b.range : null]; }""")
+            rep.eq("la borne se vise : un recepteur de portee 2, rien a la proximite",
+                   visee_borne, [0, "interact", 2])
             rep.eq("un declencheur d'en haut", tour["declencheurs"], 1)
             rep.eq("une cabine", tour["cabines"], 1)
             # `LaunchElevatorController.Start` ferme les commandes : tant que la
@@ -3119,8 +3455,23 @@ def _run(url, heavy, profil=None, zip_path=None):
         for cle, dist, face in (("face", 2.2, True), ("dos", 2.2, False), ("loin", 4.5, True)):
             if not page.evaluate(essai, [dist, face]):
                 break
+            # Sans GPU une image dure une seconde : on attend la VISEE avant
+            # d'appuyer, et la conversation apres, au lieu de durees fixes.
+            if face and dist < 3:
+                try:
+                    page.wait_for_function("() => { const v = window.__interaction.vise; return !!(v && v.name === 'ConversationZone'); }", timeout=15000)
+                except Exception:
+                    pass
             page.keyboard.down("KeyE"); page.wait_for_timeout(250)
-            page.keyboard.up("KeyE"); page.wait_for_timeout(600)
+            page.keyboard.up("KeyE")
+            if face and dist < 3:
+                try:
+                    page.wait_for_function("() => !!(window.__dialogue && window.__dialogue.active)", timeout=15000)
+                except Exception:
+                    pass
+            else:
+                page.evaluate("""() => new Promise((fini) => { let n = 0; const sc = BABYLON.EngineStore.LastCreatedScene;
+                  const o = sc.onAfterRenderObservable.add(() => { if (++n >= 4) { sc.onAfterRenderObservable.remove(o); fini(); } }); })""")
             parle[cle] = page.evaluate("""() => { const a = !!(window.__dialogue && window.__dialogue.active);
                 if (a) window.__dialogue.active = null; return a; }""")
         if parle:
@@ -3167,6 +3518,9 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (window.__dialogue && window.__dialogue.active) window.__dialogue.active = null;
           s.boarded = false;
           window.__assise.points.detach([0, 0, 0]);
+          // On embarque par le POSTE, une zone ou l'on entre (docs/132) : a
+          // deux unites de la coque, le portage asseyait ; le build, non.
+          if (window.__placerZone) { window.__placerZone("FlightConsole"); return true; }
           const agg = p.body;
           agg.transformNode.position.set(s.pos.x + 2, s.pos.y + 2, s.pos.z + 2);
           agg.body.disablePreStep = false;
@@ -3227,6 +3581,7 @@ def _run(url, heavy, profil=None, zip_path=None):
         # controle ne doit pas effacer ce qu'un autre a mesure.
         page.evaluate("""(codes) => {
           const s = window.__shipRef;
+          window.__regarder = null;
           s.boarded = false;
           window.__assise.points.detach([0, 0, 0]);
           window.__assise.points.drain();
@@ -3238,6 +3593,63 @@ def _run(url, heavy, profil=None, zip_path=None):
           window.__pdata.knowsLaunchCodes = codes;
         }""", codesAvant)
         page.wait_for_timeout(600)
+
+        # --- le vaisseau stationne survit a un changement de repere ------------
+        #
+        # EN DERNIER : le joueur y est deplace a la main dans un repere qui
+        # file a deux cents unites par seconde, et sans GPU il arrive dans le
+        # vide avant d'etre rattrape. Rien apres ne doit en heriter.
+        #
+        # Le joueur part pour Brittle Hollow — le repere passe au corps
+        # d'arrivee, puis au Soleil — et revient. Le vaisseau stationne ne
+        # doit pas bouger de ses pads : l'ecart de vitesse de chaque changement
+        # le decrochait, et le retour le lancait a six cents unites par seconde.
+        # Le controle des pads vient de lancer le vaisseau a quarante unites :
+        # on attend qu'il se soit repose avant de relever sa place.
+        try:
+            page.wait_for_function("() => { const s = window.__shipRef; return s.parked && Math.hypot(s.vel.x, s.vel.y, s.vel.z) < 0.01; }", timeout=20000)
+        except Exception:
+            print("       le vaisseau ne s'est pas repose en vingt secondes")
+        voyage = page.evaluate("""() => { const agg = window.__player.body; if (!window.__versCadre) return null;
+          const p = agg.transformNode.position; window.__retourVoyage = [p.x, p.y, p.z];
+          const s0 = window.__shipRef; window.__vaisseauAvant = Math.round(Math.hypot(s0.pos.x, s0.pos.y, s0.pos.z));
+          const P = window.__versCadre([11599, 3, 151], "BrittleHollow_Body");
+          agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
+          agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); return true; }""")
+        if voyage:
+            try:
+                page.wait_for_function("() => /BrittleHollow|Sun/.test(window.__origin ? window.__origin.anchorName : '')", timeout=20000)
+            except Exception:
+                page.wait_for_timeout(8000)
+            page.evaluate("""() => { const agg = window.__player.body;
+              const P = window.__versCadre([-1, -26, -8721], "TimberHearth_Body");
+              agg.transformNode.position.set(P[0], P[1], P[2]); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero()); }""")
+            try:
+                page.wait_for_function("() => /HomePlanet/.test(window.__origin ? window.__origin.anchorName : '')", timeout=20000)
+            except Exception:
+                page.wait_for_timeout(8000)
+            page.wait_for_timeout(2000)
+            revenu = page.evaluate("""() => { const s = window.__shipRef;
+              const r = window.__retourVoyage, agg = window.__player.body;
+              agg.transformNode.position.set(r[0], r[1], r[2]); agg.body.disablePreStep = false;
+              agg.body.setLinearVelocity(BABYLON.Vector3.Zero());
+              // Le joueur deplace a la main a recu, au changement de repere du
+              // retour, l'ecart de vitesse des deux corps : on la lui retire,
+              // sans quoi il file a deux cents unites par seconde et les
+              // controles suivants le cherchent ailleurs.
+              const v = window.__player.vel; v.x = 0; v.y = 0; v.z = 0;
+              return [Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)) - window.__vaisseauAvant,
+                      Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
+            # A deux unites pres : le vaisseau relance par le controle des pads
+            # s'est repose sur ses capteurs, et s'y tasse encore.
+            rep.near("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
+                     revenu[0], 0, 3)
+            rep.eq("... ni vitesse, et toujours stationne", [revenu[1], revenu[2]], [0, True])
+            if not (abs(revenu[0]) <= 3 and revenu[1] == 0 and revenu[2]):
+                print("       journal du vaisseau :")
+                for l in page.evaluate("() => window.__journalVaisseau || []"):
+                    print("         ", l)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()

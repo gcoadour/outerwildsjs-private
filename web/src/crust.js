@@ -180,6 +180,36 @@ export class Crust {
   }
 
   /**
+   * `BreakableFragment.AddDamage(degats)` sur un fragment nomme : il cede si
+   * les degats atteignent l'integrite de son porteur. C'est le chemin de
+   * `DebugBreakAllChildren` (F10, debug.js) — cinquante points, et un seul
+   * fragment les prend dans ce build : `polySurface18`, sous `TheNarrows`,
+   * d'integrite 50. L'autre instance est posee sur un objet sans fragment.
+   *
+   * @returns "detache" | "brise" | null
+   */
+  endommager(nom, degats, detach) {
+    for (const f of this.fragments) {
+      if (f.gone || f.node.name !== nom) continue;
+      f.degats = (f.degats || 0) + degats;
+      if (f.degats < f.carrier.integrity) return null;
+      f.gone = true;
+      const state = detach(f);
+      if (state) this.falling.push(state);
+      return "detache";
+    }
+    for (const sh of this.shatterable) {
+      if (sh.gone || sh.node.name !== nom) continue;
+      sh.degats = (sh.degats || 0) + degats;
+      if (sh.degats < sh.carrier.integrity) return null;
+      if (sh.node.setEnabled) sh.node.setEnabled(false);
+      sh.gone = true;
+      return "brise";
+    }
+    return null;
+  }
+
+  /**
    * Detache ce qui doit l'etre a cet instant de la boucle, puis fait tomber ce
    * qui est detache.
    *
@@ -196,12 +226,15 @@ export class Crust {
     while (this.shattered < wantShatter && this.shattered < this.shatterable.length) {
       const sh = this.shatterable[this.shattered];
       this.shattered += 1;
+      if (sh.gone) continue;
       if (sh.node.setEnabled) sh.node.setEnabled(false);
       sh.gone = true;
     }
     while (this.detached < want && this.detached < this.fragments.length) {
       const f = this.fragments[this.detached];
       this.detached += 1;
+      if (f.gone) continue;
+      f.gone = true;
       const state = detach(f);
       if (state) this.falling.push(state);
     }

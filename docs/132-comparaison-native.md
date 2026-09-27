@@ -1231,3 +1231,451 @@ Le portage l'y pose désormais, dans l'orientation de la scène — celle dont
 les capteurs de pad et les volumes de réparation sont exprimés —, et l'y
 remet à chaque boucle. Mesuré dans Chromium : posé sur ses pads, immobile, de
 la 38ᵉ à la 60ᵉ seconde.
+
+### La borne, puis le vaisseau, à pied
+
+Le regard aux flèches a mené l'alpha jusqu'à la borne de lancement. Ce qu'on y
+voit, puis ce que le portage faisait à la place :
+
+- **la borne se vise.** Son `InteractReceiver` est une sphère de 0,42, de
+  portée 2 : il faut la regarder, à deux pas. L'invite est « ⓧ Enter Launch
+  Codes » (avec Skip Intro, qui donne les codes), l'icône de la manette même
+  au clavier. Appuyer éteint l'invite — `_interactVolume.Disable()` — et la
+  tour passe au **vert** : `OnActivateLaunchTower` allume `ElevatorLight`,
+  éteinte dans la scène. Le portage avait deux voies de plus, prises à la
+  seule proximité (un objet « borne » à 2,5 unités, et une boucle à 3), sans
+  regarder la borne ; il n'allumait pas la lumière verte, et sans les codes
+  n'affichait rien là où le build dit « Requires Launch Codes » ;
+- **la touche de la borne asseyait aux commandes.** Le portage embarquait à
+  quarante unités de la coque, codes de lancement en poche : depuis que le
+  vaisseau attend au sommet de la tour, la même touche vous posait dans le
+  siège. Dans le build, on embarque par `FlightConsole`, une `InteractZone`
+  (capsule autour du siège) : « Suit Required » au réveil, « Buckle Up » une
+  fois la combinaison enfilée — et c'est la combinaison qu'il faut, pas les
+  codes ;
+- **le vaisseau n'avait pas de colliders.** Il était exclu de la physique —
+  « il se déplace » — et le joueur le traversait. Ses dix-sept colliders sont
+  désormais des corps **animés**, que Havok recale sur le nœud avant chaque
+  pas : on se tient dans la cabine ;
+- **une zone ne se vise pas, on y entre.** `InteractZone.UpdateFocus` :
+  pas de focus hors du volume (`_isPlayerInsideVolume`, la capsule du
+  `PlayerDetector`), puis l'angle entre l'avant de la **caméra** et l'avant
+  de la **zone**, comparé à `_viewingWindow` tel quel. Le portage prenait la
+  zone à portée, mesurait la direction zone → joueur, contre une
+  demi-fenêtre ;
+- **le paquetage se prend par sa zone**, « Gear Up » — et la combinaison de
+  la grotte par son récepteur « Suit Up » —, non plus à trois unités sans
+  regarder.
+
+La trappe, elle, est un `MeshCollider` **sans maillage à voir** :
+`Hatch_Collider` n'a pas de `MeshFilter`, et l'exportateur glTF n'émettait
+que ceux-là. Six objets de `level0` sont dans ce cas — la trappe, une grille
+des jumelles, quatre `ProxyCollider` de Giant's Deep —, et aucun n'était
+solide dans le portage. Leur maillage de collision est désormais émis, caché :
+la trappe fermée barre l'entrée, et l'ouvrir la retire.
+
+Mesuré dans Chromium : au poste sans combinaison, « Suit Required » et l'on
+ne s'assoit pas ; au paquetage, « Gear Up » et la combinaison ; au poste,
+« Buckle Up », et l'on s'assoit.
+
+### L'ordinateur de bord, dans la cabine
+
+Le portage n'ayant « pas d'intérieur », il ouvrait l'ordinateur de bord
+d'une touche à lui (`N`), depuis le poste de pilotage, et le parcourait aux
+flèches, Entrée et Retour arrière. Le build le pose dans la cabine :
+`ShipComputer` est une zone « Boot Up » ; y appuyer assied le joueur à son
+point d'accrochage, verrouille le regard sur l'écran (`LockOn(_targetPoint,
+1, zoom, 8)`) et pose trois invites à gauche, Cancel, Select, Navigate. Ses
+touches sont celles de `ComputerInput` : **Interact** choisit, **Cancel**
+revient d'un niveau puis fait se lever, **Move X** parcourt — au premier
+niveau seulement, le second n'écoute que Cancel.
+
+C'est désormais le chemin du portage, et la touche ajoutée n'existe plus.
+Mesuré dans Chromium : « Boot Up », assis à `ShipComputer`, l'écran sur
+Timber Hearth « [records available] » ; D passe à « UNEXPLORED » ; Q relève
+le joueur et éteint l'écran.
+
+### Les consoles de l'observatoire, et l'appui déjà servi
+
+Les deux consoles déportées — « Fly Model Ship », « Establish Satellite
+Link » — sont des `InteractZone`. Le portage les prenait **et** les lâchait
+aussi par la touche `Landing Camera`, qui à pied est `Alt Probe` : près d'une
+console, le tir en arrière de la sonde prenait la console. Et il affichait
+pour toutes deux une **vue déportée** dans un coin de l'écran — pour le
+modèle réduit, une caméra posée… sur le vrai vaisseau ; pour le satellite,
+une caméra posée sur la console qui visait le centre de la planète. Le build
+n'a rien de tel :
+
+- le **modèle réduit** se regarde par le verrou du regard
+  (`LockOn(_modelShipBody, 5, zoom, 1)`), depuis la console ;
+- le **satellite** prend des **instantanés**. `SatelliteSnapshotController` :
+  l'écran de l'observatoire montre une carte postale au repos
+  (`_splashTexture`), le schéma du satellite une fois la console prise
+  (`_diagramTexture`) ; `Probe` rend la caméra du satellite **une fois**,
+  sa lumière allumée le temps du rendu, dans la texture de l'écran —
+  `Alt Probe` la même, tournée d'un demi-tour — et en gris (`GrayscaleEffect`
+  à fond). `Cancel` rend la carte postale et rallume la salle.
+
+Les deux textures n'étaient portées par aucun matériau, donc jamais
+extraites ; elles le sont. L'avant d'Unity, lu sur le nœud glTF de
+`SatelliteCamera`, est l'opposé de son `+Z` Babylon : le premier instantané
+montre Timber Hearth, le second la lune. Au passage, le tir en arrière de la
+sonde était coupé partout (`!consoles.count`, le nombre de consoles du
+monde, toujours non nul).
+
+Et une règle de l'`InteractVolume`, que le portage n'avait pas :
+**`_hasInteracted`**. Un appui pris retire l'invite du centre et rend le
+volume sourd aux appuis suivants, jusqu'à `ResetInteraction` — que chaque
+script appelle à sa sortie (quitter la console, l'ordinateur, le siège,
+l'ascenseur arrivé, la trappe refermée), ou que la perte de focus déclenche
+quand `_resetOnLoseFocus` le veut. Le portage laissait « Establish Satellite
+Link » sous le réticule pendant qu'on regardait l'écran.
+
+### La vue d'atterrissage est une caméra
+
+`FlightConsole.UpdateLandingMode`, 0,45 s après l'appui :
+`_landingCam.enabled = true; _playerCam.enabled = false`, puis
+`SwitchActiveCamera`. `LandingCam` est posée sous le cockpit et regarde sous
+le vaisseau, champ de 100 degrés, plan proche à 0,5, avec un `NoiseAndGrain`
+de force 4. Le portage avait la bascule, le délai, les annonces et le roulis
+inversé — mais gardait la caméra du joueur, pivotée de 70 degrés : on voyait
+le tableau de bord, pas le sol. La caméra du joueur est désormais menée à la
+place de `LandingCam` le temps de la vue, avec son grain, comme la carte mène
+la sienne ; le casque s'éteint (`HUDCameraScript`). Mesuré dans Chromium :
+champ de 100, 0,66 unité du centre du vaisseau, regard sur la plateforme
+sous la coque.
+
+Le satellite reçoit de même son `NoiseEffect` monochrome — grain et rayures —
+par-dessus le gris.
+
+### La cabine était retournée bout pour bout
+
+Assis à l'ordinateur de bord, le portage regardait… par le hublot. La mesure
+dans le repère du vaisseau l'a dit tout de suite : le point d'accrochage de
+`ShipComputer` est à z = −2,24 dans `Ship_Body` — à l'**arrière** de la
+cabine, tourné vers la paroi du fond, où se trouve l'écran (z = −3,53) —, et
+le nœud glTF du même objet se dessinait à z = +2,24. Tout l'intérieur était en
+miroir : cockpit à l'arrière, ordinateur à l'avant.
+
+L'exportateur écrit le glTF en z miroir (`[x, y, −z]`) ; la racine du chargeur
+de Babylon puis le conteneur tourné d'un demi-tour le remettent à l'endroit,
+et la scène statique retombe exactement sur les coordonnées d'Unity. Le
+vaisseau, lui, est **détaché** de cette hiérarchie pour être mené par la
+simulation — et perdait le retournement avec. Il se rend désormais sur le
+nœud (`scaling (1, 1, −1)`), et tout ce qui pend au vaisseau suit : colliders
+animés, trappe, fissures.
+
+Deux défauts se cachaient derrière :
+
+- **le siège du pilote** appliquait l'orientation *absolue* du vaisseau à un
+  décalage déjà exprimé dans la scène, donc déjà tourné une fois. Depuis que
+  le vaisseau part de sa pose de repos (couché à −90 degrés), le pilote
+  s'asseyait cinq unités au-dessus du poste, dans le toit. Il est à
+  (0 ; 1,4 ; 3,7) dans le repère du vaisseau : le poste, plus 0,9 ;
+- **les zones de la cabine** ne suivaient que la *translation* du vaisseau.
+  Posé ailleurs qu'au sommet de la tour, dans une autre assiette, « Open
+  Hatch », « Gear Up », « Boot Up » et le poste restaient à l'orientation de
+  repos. Le décalage du vaisseau porte désormais le passage complet
+  (`frames.js`, `poseMobile`), que `restingPoint`, les zones et les points
+  d'accrochage savent lire.
+
+### La hauteur des yeux
+
+`PlayerCamera` est à (0 ; 0,9 ; 0,15) dans `Player_Body`, dont la capsule
+(rayon 0,5, hauteur 2) est centrée sur l'origine : les yeux sont à 1,9 du sol.
+Le portage a une sphère de 0,6 et posait les yeux à 1,2 de son centre — 1,8
+du sol debout, un dixième trop bas. Et un point d'accrochage pose le
+**centre** du corps : assis, les yeux étaient à 1,2 au-dessus du point au lieu
+de 0,9, et l'écran de l'ordinateur passait sous le regard. Les yeux sont
+désormais à 1,3 du centre de la sphère, et le point d'accrochage pose la
+sphère 0,4 plus bas (`start.js`, `DECALAGE_ASSISE`).
+
+### L'écran de l'ordinateur de bord
+
+Le portage affichait la consultation dans une boîte HTML au milieu de l'écran.
+Le build n'a pas de boîte : il a **un écran dans la cabine**, `ComputerScreen`,
+et une `RenderTexture` de 1024 × 1024 que remplissent deux caméras :
+
+- `MovingCamera`, orthographique, 4/3 forcé : elle voit les sept sprites de
+  lieu (`SectorData`, pleins si le lieu est exploré, en contour sinon) et s'en
+  approche à cinq par seconde (`ShipComputerCamera.Update`) — taille 5 au
+  premier niveau, celle du lieu dans sa fiche (0,85 pour Timber Hearth) ;
+- `StaticCamera`, taille 5, sans effacer : les deux `TextMesh`, le nom en haut
+  et la fiche en bas à gauche.
+
+C'est ce que rend désormais `ecranordinateur.js`. Les `TextMesh` — neuf dans la
+scène, classe absente de `unity41-types.json` — se lisent à la main, bornés
+par l'oracle de `byteSize`. Éteint, l'écran montre l'aplat bleu et le logo ;
+un lieu découvert entre-temps y met « database updated » et son icône qui
+clignote (`OnEnterSector`).
+
+Trois écarts de données tombaient au passage :
+
+- **l'ordre des lieux** est celui de `_locationData`, du Soleil au Nomade ; le
+  portage triait par numéro de secteur, ce qui permutait les deux bouts ;
+- **les noms** sont ceux de `SectorData.Awake` — « Timber Hearth », « The
+  Nomad » — et non ceux de l'énumération (« TimberHearth ») ;
+- **l'exploration** s'enregistre à l'**entrée d'un secteur**, par
+  l'ordinateur lui-même, et non à trois rayons d'une surface.
+
+Enfin, le verrou du regard sur l'écran (`LockOn(_targetPoint, 1, zoom, 8)`)
+avait sa cible et son réglage, mais pas de clé : il ne se posait jamais. Et la
+notification du tir refusé dit ce que dit son `TextMesh`, « Launch Window
+Obstructed », et non « PROBE LAUNCH WINDOW OBSTRUCTED ».
+
+Et le flou de `MovingCamera`, lu dans `MotionBlur.OnRenderImage` : une
+**accumulation**, `sortie = image × 0,4 + précédente × 0,6` (la part bornée à
+0,92), dont la première image est une copie. Il est posé sur la caméra
+mobile, donc avant `StaticCamera` : les sprites laissent une traînée quand
+l'écran glisse d'un lieu à l'autre, et le texte reste net. Le portage refait
+les trois temps — sprites, fondu entre deux textures qui alternent, texte
+composé par-dessus.
+
+### Les touches de mise au point du build
+
+> **Corrigé par la mesure** (§ « Les touches mortes », plus bas). Ce qui suit
+> a été écrit d'après l'IL seul : `DebugInputManager` est bien posé, mais
+> **éteint**, et F2, F3, F5, F6, =, F11 et F12 ne font rien dans l'alpha.
+
+`DebugInputManager` est **posé dans la scène** (sur `SolarSystemRoot`), et
+l'on a cru ses touches actives : l'alpha qu'on télécharge répondrait à F12
+en faisant exploser le soleil. `DebugKeyCode..cctor` les range toutes, en
+`KeyCode` d'Unity, et le portage n'en avait aucune — il donnait même au mode
+d'affichage (`GUIMode`) une touche à lui, `g`, là où le build le fait tourner
+sur **F1**. `scripts/il.mjs --champ` dit qui les lit :
+
+| touche | champ | ce que fait le build |
+|---|---|---|
+| F1 | `cycleGUIMode` | `GUIMode.Update` : mode d'affichage suivant |
+| F2 | `suitUp` | `SuitUp`, `AquireProbe`, `AquireMinimap` |
+| F3 | `learnLaunchCodes` | `PlayerData.LearnLaunchCodes` |
+| F5 | `fireAllTeleporters` | chaque `AncientTeleporter` tire (`FireTeleporter`) |
+| F6 | `rapidSandTransfer` | `DebugSandTransfer` (0,01) : le sable coule en six dixièmes de seconde |
+| = | `timeLapse` | `Time.timeScale = 3` tant qu'on tient |
+| F9 | `resetSimulation` | lue par personne |
+| F10 | `destroyAllBreakable` | `DebugBreakAllChildren` : 50 de dégâts — un seul fragment les prend, `polySurface18` sous `TheNarrows`, d'intégrité 50 |
+| F11 | `triggerEndTimes` | `TimeLoop.SetSecondsRemaining(92)` |
+| F12 | `triggerSupernova` | `TriggerSupernova` |
+| 1–8, 0 | `…Warp` | `PlayerSpawner` : les sauts |
+
+**Les sauts ne portent que le vaisseau.** `Warp` retient le point et
+`FixedUpdate` ne l'applique que si `_isPlayerInShip` : il pose alors le
+vaisseau sur le point, avec sa rotation et la vitesse du corps. À pied, un
+chiffre ne fait rien — ce qui ferme aussi la voie qu'on espérait pour amener
+l'alpha native dans la cabine sans y marcher. Et `GetSpawnPoint` ne rend
+qu'un point dont `IsShipSpawn` vaut `_isPlayerInShip` : seuls les six points
+de vaisseau répondent (1 à 6) ; 0, 7 et 8 visent le vaisseau lui-même, la lune
+quantique et le belvédère, qui n'en ont pas.
+
+Deux choses se corrigeaient en passant : le bouton tactile « bord » ouvrait
+encore un ordinateur de bord qui s'allume désormais à sa zone, et celui du
+mode d'affichage envoie F1.
+
+### Le vaisseau stationné et le changement de repère
+
+Une mesure du vérificateur a trouvé le vaisseau parti à 609 u/s, soit à peu
+près l'écart de vitesse orbitale entre Timber Hearth et le Soleil. La boucle
+recale le repère sur le corps dominant, et ajoute à tout ce qui y vit l'écart
+de vitesse entre les deux corps. Le vaisseau stationné le recevait aussi : il
+dépassait le seuil de stationnement, le sol du nouveau repère lui retirait
+cette vitesse, et le retour lui ajoutait l'opposé. Un joueur passé par un
+téléporteur perdait donc son vaisseau en revenant. Posé, à l'arrêt
+et sans personne à bord — au départ comme partout où on le laisse —, il est
+désormais tenu à sa place dans la scène au repos du corps qui le porte,
+remise chaque image dans le repère du moment, et le changement de repère ne
+lui ajoute rien. Mesuré dans Chromium :
+aller à Brittle Hollow (repère Brittle Hollow, puis Soleil) et revenir le
+laisse à 172 u du centre, immobile, sur ses pads.
+
+### La sphère de l'observatoire au deuxième tour
+
+`ResetSimulationTrigger` naît désactivé (`Awake`) et `OnStartOfTimeLoop(n)`
+ne l'arme qu'au premier tour, codes inconnus. Le build recharge la scène à
+chaque boucle : la sphère se réveille donc éteinte à chaque tour. Le portage
+ne l'armait qu'au chargement de la page et ne la désarmait jamais : armée au
+premier tour, elle l'était encore au deuxième. Elle se réveille désormais à
+chaque boucle, comme la scène rechargée.
+
+Le journal du vaisseau (`window.__journalVaisseau`, imprimé par le contrôle qui
+le perd) a trouvé la cause de l'autre moitié : le stationnement se jugeait sur
+la vitesse **en sortie** du pas, gravité du pas comprise. À 12 u/s², un pas de
+0,42 s passe les 5 u/s de `LANDED_SPEED` : dès qu'une image ralentissait, le
+vaisseau posé se destationnait tout seul. Il se juge désormais sur la vitesse
+**apportée** dans le pas — une poussée, un choc.
+
+Et l'autre moitié, la vraie : le journal disait « 284 u/s apportés, pas de
+0,05 s ». La vitesse venait des **fluides**, appliqués après le sol :
+`ship.update` cherchait son milieu à sa position du moment, et les volumes de
+fluide — atmosphères, océans, courants — restaient où la scène les avait posés.
+Timber Hearth orbite ; au bout de quatre minutes, le vaisseau garé sur la tour
+entrait dans un courant resté à sa place de repos et en recevait la vitesse. Le
+joueur avait le même défaut. Chaque milieu suit désormais le corps qui le porte
+(`fluidAt` lit le point dans la scène au repos de ce corps), et l'extraction des
+océans donne leur corps.
+
+### La supernova, côte à côte (F12)
+
+> **Faux, remesuré** (§ « Les touches mortes », plus bas) : F12 ne fait rien
+> dans l'alpha. Le « plein jour » capturé côté natif était l'éclairage
+> ordinaire du réveil, qui passe du jour à la nuit en quelques dizaines de
+> secondes d'horloge murale (§ « Le plein jour », plus haut) ; l'absence de
+> mort dans les cent secondes le disait déjà. La comparaison de la supernova
+> reste à faire en laissant courir la boucle.
+
+Les touches de mise au point donnent enfin un moyen de comparer la fin de la
+boucle sans attendre dix-huit minutes à une image par seconde : F12 dans les
+deux versions, réveillé au feu de camp, la tour en face.
+
+- **L'alpha native** : la nuit du réveil vire au plein jour — le sol, les
+  sapins et la tour éclairés de face par l'explosion —, le reste une
+  trentaine de secondes d'horloge murale, puis retombe à la nuit. Pas de mort
+  dans les cent secondes capturées.
+- **Le portage** : la même séquence, la même lumière de plein jour sur la
+  même scène, puis le retour à la nuit ; l'onde est lancée et son son de mort
+  demandé, sans mort non plus dans la fenêtre mesurée.
+
+Les délais ne se comparent pas à la montre : l'effondrement est **par image**
+(`Lerp(échelle, fin, 3 × deltaTime)`, 1,6 s à 60 images par seconde), et sous
+Xvfb le rendu logiciel fait tomber l'alpha à quelques images par seconde, où
+Unity borne chaque `deltaTime` : son horloge de jeu retarde sur la montre. Le
+portage, lui, a été mesuré sur son horloge de jeu. Ce qui se compare est la
+suite des états et leur rendu, et ils concordent.
+
+### La cabine de l'alpha, enfin atteinte
+
+Le clavier seul, à une ou deux images par seconde, ne menait pas l'alpha
+jusqu'au vaisseau. La scène le permet : `PlayerSpawner.OnStartOfTimeLoop`
+pose le joueur sur `GetSpawnPoint(2)` — le 2 en dur, `_debugSpawnLocation`
+n'est lu par personne — et la scène a un point DANS le vaisseau, au lieu 8.
+`ALPHA_CABINE=1 scripts/alpha.sh start` échange localement les deux
+`_spawnLocation` (`scripts/alpha-cabine.mjs`, deux entiers à leur place) : le
+joueur de l'alpha naît sous la trappe, le rayon tracteur le monte dans la
+cabine, et l'ordinateur se compare enfin.
+
+Côte à côte, cinq écarts sont tombés :
+
+- **l'exploration de départ** : `PlayerSave..ctor` pose `exploredPlanets[1]`,
+  Timber Hearth, et `HasExploredPlanet` rend vrai hors des six planètes (le
+  Soleil, la Lune quantique). L'alpha montre son logo au réveil ; le portage,
+  parti de rien, annonçait « database updated » et gardait le Soleil
+  « UNEXPLORED » ;
+- **le tangage du verrou** : `FirstPersonCameraController.UpdateLockOnTargeting`
+  lève ou baisse aussi le regard vers la cible. Le portage ne tournait que le
+  corps, et regardait au-dessus de l'écran ;
+- **le zoom du verrou** : `SetTargetFieldOfView(max(500 / d, 20), _zoomSpeed)`,
+  à la vitesse du verrou (8 à l'ordinateur), vers un champ qui persiste
+  (`UpdateFieldOfView`). Le portage repartait chaque image du champ de la
+  lunette, à vitesse commune : l'écran restait petit ;
+- **l'émission teintée** : `Self-Illumin/Transparent` rend
+  `tex × _Color × lightStrength`, et le portage émettait un blanc pur — le
+  logo trop clair, l'entrelacement noir ;
+- **le seuil d'alpha** : `AlphaTest Greater 0`, et non les 0,4 de Babylon, qui
+  jetaient l'entrelacement (alpha 0,11) tout entier.
+
+La taille des invites, elle, se tranche à résolution égale : l'alpha les
+dessine à taille fixe en pixels (grandes en 640 × 360, petites en 1280 × 720),
+le portage à l'échelle de la hauteur, et les deux coïncident en 1280 × 720.
+Ce qui restait d'écart dans le cadrage venait de l'**œil** : `PlayerCamera`
+est à (0 ; 0,9 ; **0,15**) dans `Player_Body`, quinze centimètres devant le
+centre du corps, et le portage le mettait à l'aplomb — plus loin de l'écran,
+qui paraissait un dixième plus petit. Mesuré en 1280 × 720 : l'écran remplit
+le champ dans les deux versions, le titre, « [records available] » et les
+invites aux mêmes places.
+
+### Les touches mortes : `DebugInputManager` est éteint
+
+Dans la cabine, l'invite du poste dit « Suit Required ». F2 devait régler
+cela : `DebugInputManager.Update` lève `SuitUp`, que `FlightConsole.OnSuitUp`
+écoute pour passer à « Buckle Up ». F2 tenu une seconde et demie, deux fois,
+dans l'alpha native : l'invite ne bouge pas, et E ne fait pas asseoir. F1,
+tenu de même, fait apparaître le mode d'affichage de mise au point
+(« Time Scale », « Time Remaining », « Net Field Accel ») — la touche
+arrive donc bien.
+
+La scène tranche : le `MonoBehaviour` de `DebugInputManager` a
+**`m_Enabled` = 0**. Son `Update` ne tourne jamais, et avec lui F2, F3, F5,
+F6, =, F11 et F12. `GUIMode` (F1), les deux `DebugBreakAllChildren` (F10) et
+`PlayerSpawner` (les chiffres) sont allumés et répondent. Le portage suivait
+l'IL, qui ne dit rien du drapeau : il donnait la combinaison, les codes, la
+fin des temps et la supernova à qui appuyait.
+
+Désormais (`web/src/debug.js`) ces sept touches ne font rien par défaut ;
+l'outillage les allume par `?miseaupoint` ou `window.__miseAuPoint`.
+`tests/05-extract.mjs` relit les trois drapeaux dans la scène,
+`tests/09-jeu.mjs` garde le filtrage, et `tools/15_verify.py` mesure F2 et
+F11 éteints, puis allumés par l'outillage.
+
+La leçon est celle de [`46`](46-migration-lots.md), une fois de plus : le code
+seul fait écrire une mécanique que la scène désactive.
+
+
+### Au poste, les invites de `ShipPromptController`
+
+La combinaison se prend au râtelier de la cabine (« Gear Up »), le poste
+passe alors à « Buckle Up », et l'on s'assoit. L'alpha montre à gauche, de
+haut en bas : **Toggle View**, **View Map**, **Liftoff**, **Exit**. Le
+portage montrait Exit, Liftoff, View Map et **Engage Autopilot** — toujours
+les quatre, posé sur la tour et sans cible.
+
+`OnEnterFlightConsole` pose les sept invites dans un ordre fixe (sortie,
+décollage, carte, vue, pilote, accord, atterrissage) ; `Update` les éteint
+toutes puis rallume ce que la situation permet : posé, la carte (hors vue
+d'atterrissage), la sortie, la vue et le décollage ; en vol, le pilote si
+`IsAutopilotAvailable` (une cible dont `_autopilotArrivalDistance > 0`, plus
+loin que cette distance) et l'accord de vitesse au-delà de 10 u/s relatives ;
+et « Landing Mode » dès que `GetAllowLandingMode` le permet. La colonne de
+gauche s'empile depuis le bas (`hauteur − 100 − n × (h + 5)`) : l'ordre
+d'ajout est celui de bas en haut. `shipPrompts` (`consoles.js`) le refait,
+`tests/09-jeu.mjs` en garde les cas, et `tools/15_verify.py` relit la
+colonne au poste.
+
+Décollé à Maj gauche (`Move Up`), sans cible : plus aucune invite à gauche,
+dans l'alpha comme dans le portage.
+
+### Les jauges et la minicarte sont sur la visière
+
+Côte à côte dans la cabine, les jauges ne sont pas au même endroit : l'alpha
+les montre **en haut à droite**, oxygène à gauche, carburant au milieu,
+silhouette à droite ; le portage les posait en bas à droite, à la main, dans
+l'ordre inverse, et la minicarte en haut à droite.
+
+Tout est dans la scène. `ResourcesHUD` est un quad du casque, à
+(0,16 ; 0,084 ; 0,544) sous `HUDHelmetHighPoly`, lui-même à z = −0,408 :
+0,136 devant la caméra du HUD, au-dessus et à droite de l'axe. Il est
+**tourné d'un demi-tour** autour de y — son x local part vers la gauche de
+l'écran, et l'oxygène (x = 0,577) passe à gauche de la silhouette
+(x = −0,5). La caméra du HUD voit à 80 degrés verticaux. Projeté en
+1280 × 720 : jauges de y 39 à 154, oxygène vers x 1 072, carburant 1 128,
+silhouette 1 208 — l'alpha mesure 35 à 158, 1 072, 1 128, 1 208.
+`MinimapHUD` est posé de même, sous les jauges : en bas à droite, un carré
+de 253 pixels. `panneauRessources` (pipeline) le lit, `rectPanneau`
+(`hud.js`) le projette pour le rapport de la fenêtre.
+
+Le panneau lui-même est **une pile de quads**, et le portage l'avait
+démonté : il découpait les deux cadres dans leur planche, les serrait à la
+largeur des remplissages, remplissait d'un « dégradé » qui n'en était pas un
+et posait la silhouette presque opaque. Dans la scène :
+
+| quad | texture | `_Color` |
+|---|---|---|
+| `ResourcesHUD` | `ResourceBar_Layer01` (lignes de balayage) | noir, opaque : le fond |
+| `HUDLayer2OxyBar`, `HUDLayer2FuelBar` | aucune | vert (0,23 ; 0,78 ; 0,34), ambre (0,91 ; 0,77 ; 0,34), à 0,18 |
+| `HUDLayer1OuterBars` | `ResourceBar_Layer1` | blanc : les deux cadres |
+| `HUDPlayerHealth` | `ResourceBar_Layer2_HP*` | blanc à 0,5 |
+
+Les deux planches couvrent le **même carré** : rien n'était à découper. Le
+vert mesuré dans l'alpha au milieu de la jauge d'oxygène, (9 ; 33 ; 20), est
+celui d'un aplat à 0,18 sur le fond noir, (10 ; 36 ; 16).
+
+### `EnterShip` part de la trappe
+
+L'alpha, debout dans la cabine la nuit, n'affiche pas l'invite de la lampe ;
+le portage affichait « Lampe (F) ». `Flashlight._inShip` est posé par
+`OnEnterShip`, et `EnterShip` est levé par `HatchController.OnEntry` — la
+trappe franchie, pas le siège. Le portage prenait « dans le vaisseau » pour
+« assis au poste », partout : l'invite de la lampe, la minicarte
+(`Minimap.OnEnterShip`), le refus de la sonde (`IsInsideShip() &&
+!AtFlightConsole()`, qui ne se déclenchait donc jamais), et les deux
+écouteurs de `EnterShip` — `PlayerData.OnEnterShip`, qui lève la protection
+du premier tour, et `PlayerResources.OnEnterShip`, qui rend toute la santé.
+Tous suivent désormais la trappe.

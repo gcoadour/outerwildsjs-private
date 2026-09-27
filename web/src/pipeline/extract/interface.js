@@ -31,6 +31,11 @@ const TEXTURES = [
   // sans options, le fond large avec, le bandeau du nom (qui sert aussi de
   // curseur d'option), le bouton « Next / Close », l'icone du curseur, et la
   // barre des panneaux de musee (docs/132).
+  // `SatelliteSnapshotController` : l'ecran de l'observatoire montre sa carte
+  // postale au repos (`_splashTexture`), le schema du satellite une fois la
+  // console prise (`_diagramTexture`). Aucun materiau ne les porte : seul le
+  // script les pose, et elles n'etaient donc jamais extraites (docs/132).
+  "PostcardsFromSpacePSD", "SatelliteDiagramPSD",
   "Short_Dialog_BG", "Dialog_Choice_BG", "NPC_Name_BG",
   "Short_Dialog_Btn", "White_Dialog_Btn", "LocationText_Bar",
 ];
@@ -58,20 +63,14 @@ const XBOX_BUTTONS = {
   RightBumper: "RB", LeftBumper: "LB", DPadUp: "DPadUp",
 };
 
-// Decoupes mesurees sur les textures, par balayage du canal alpha.
-//
-// ResourceBar_Layer1 (512x256) porte les DEUX cadres cote a cote, separes par
-// un creux vertical vide : a gauche celui marque « O2 », a droite « FUEL ».
-// ResourceBar_Layer01 porte les degrades de remplissage, a des positions qui
-// ne correspondent pas a celles des cadres : les deux textures habillent des
-// quads 3D distincts du casque, chacun avec sa propre transformation, et rien
-// ne les aligne dans l'espace de la texture. On decoupe donc chaque element
-// pour le reposer soi-meme.
-const CROPS = {
-  "bar_frame_oxygen.png": ["ResourceBar_Layer1", [63, 43, 153, 217]],
-  "bar_frame_fuel.png": ["ResourceBar_Layer1", [176, 43, 265, 217]],
-  "bar_fill.png": ["ResourceBar_Layer01", [57, 41, 272, 220]],
-};
+// Plus de decoupes. ResourceBar_Layer1 (les deux cadres) et
+// ResourceBar_Layer01 (des lignes de balayage) semblaient ne pas s'aligner, et
+// l'on decoupait chaque element pour le reposer soi-meme. Ils s'alignent : le
+// premier habille `HUDLayer1OuterBars`, le second `ResourcesHUD` lui-meme, et
+// les deux quads couvrent le MEME carre, a la meme place et a la meme echelle.
+// Layer01 n'est pas un degrade de remplissage mais le FOND, teinte en noir ;
+// les remplissages sont des aplats sans texture (docs/132).
+const CROPS = {};
 
 /** Meme conversion que ColorHSV.ToColorRGB : teinte en degres, s et v en 0-1. */
 export function hsvToHex(h, s, v) {
@@ -92,6 +91,121 @@ function crop(img, [x0, y0, x1, y1]) {
     out.set(img.rgba.subarray(from, from + w * 4), y * w * 4);
   }
   return { width: w, height: h, rgba: out, format: img.format };
+}
+
+/**
+ * Les `TextMesh` de la scene : le texte ecrit DANS le monde.
+ *
+ * Neuf dans `level0`, et le portage n'en lisait aucun : l'ecran de
+ * l'ordinateur de bord (`NameText`, `DescriptionText`), son avis « database
+ * updated », les cinq notifications du casque — dont « Launch Window
+ * Obstructed », que le portage recrivait en capitales de son invention.
+ *
+ * La classe 102 n'est pas dans `unity41-types.json` ; sa structure d'Unity 4
+ * est courte et se lit a la main :
+ *
+ *   m_GameObject PPtr, m_Text string, m_OffsetZ, m_CharacterSize,
+ *   m_LineSpacing (float), m_Anchor, m_Alignment (int16), m_TabSize (float),
+ *   m_FontSize, m_FontStyle (int32), m_RichText (bool, aligne), m_Font PPtr
+ *
+ * L'oracle est le meme qu'ailleurs : la lecture doit consommer exactement
+ * `byteSize` octets, sinon l'objet est ecarte plutot que mal lu. La couleur
+ * n'est pas un champ de la classe en 4.1 — elle vient du materiau de police.
+ */
+export function textesDeScene(ctx) {
+  const out = [];
+  for (const o of ctx.env.objects({ file: ctx.sceneFile, type: "TextMesh" })) {
+    try {
+      const r = o.file.reader(o);
+      const debut = r.pos;
+      const go = { fileId: r.i32(), pathId: r.i32() };
+      const t = {
+        text: r.string(), offsetZ: r.f32(), characterSize: r.f32(), lineSpacing: r.f32(),
+        anchor: r.i16(), alignment: r.i16(), tabSize: r.f32(),
+        fontSize: r.i32(), fontStyle: r.i32(),
+      };
+      t.richText = r.i32() !== 0;
+      const police = { fileId: r.i32(), pathId: r.i32() };
+      if (r.pos - debut !== o.byteSize) continue;
+      const cible = ctx.env.deref(police, o.file);
+      const chaine = ctx.ancestors(go.pathId);
+      out.push({ name: ctx.name(go.pathId), parent: chaine[chaine.length - 1] || null,
+                 path: [...chaine, ctx.name(go.pathId)].join("/"),
+                 ...t, font: cible ? ctx.assetName(cible) : null });
+    } catch (e) { /* objet illisible : ecarte */ }
+  }
+  return out;
+}
+
+/**
+ * Ou le casque pose ses jauges a l'ecran : `ResourcesHUD`, sous le casque,
+ * sous la camera du HUD.
+ *
+ * Le portage les avait posees en bas a droite, a la main, et dans l'ordre de
+ * l'espace local : sante a gauche, oxygene a droite. L'alpha les montre EN
+ * HAUT a droite, oxygene a gauche et silhouette a droite (docs/132). Les deux
+ * ecarts sont dans la scene : `ResourcesHUD` est a (0,16 ; 0,084 ; 0,544) sous
+ * `HUDHelmetHighPoly`, lui-meme a z = -0,408 — 0,136 devant la camera du HUD,
+ * au-dessus et a droite de l'axe —, et il est TOURNE d'un demi-tour autour de
+ * y (quaternion (0, 1, 0, 0)) : son x local part vers la gauche de l'ecran.
+ * La camera du HUD voit a 80 degres verticaux.
+ *
+ * `MinimapHUD`, le globe de la minicarte, est pose de la meme facon, SOUS les
+ * jauges : (0,162 ; -0,075), echelle 0,04 — en bas a droite, un carre d'un
+ * bon tiers de la hauteur. Le portage le mettait en haut a droite, a 168 px.
+ *
+ * On rend ce qu'il faut pour projeter : la position du panneau dans le repere
+ * de la camera, son echelle, le miroir, et le champ. Rien si la chaine manque.
+ */
+export function panneauRessources(ctx, nomPanneau = "ResourcesHUD") {
+  const parent = (gid) => {
+    const t = ctx.transformOf.get(gid);
+    const pt = t && t.m_Father ? ctx.env.read(ctx.env.deref(t.m_Father, ctx.sceneObj)) : null;
+    return pt && pt.m_GameObject ? pt.m_GameObject.pathId : 0;
+  };
+  const nom = (gid) => (ctx.gameObjects.get(gid) || {}).m_Name;
+  let panneau = 0;
+  for (const [gid, go] of ctx.gameObjects) {
+    if (go.m_Name === nomPanneau && nom(parent(gid)) === "HUDHelmetHighPoly") { panneau = gid; break; }
+  }
+  if (!panneau) return null;
+  const casque = parent(panneau), camera = parent(casque);
+  if (nom(camera) !== "HUDCamera") return null;
+  let fov = null;
+  for (const o of ctx.componentsOf(camera, ["Camera"])) fov = ctx.readEngine(o)["field of view"];
+  const tp = ctx.transformOf.get(panneau), tc = ctx.transformOf.get(casque);
+  const v = (a) => [a.x, a.y, a.z];
+  const p = v(tp.m_LocalPosition), c = v(tc.m_LocalPosition), q = tp.m_LocalRotation;
+  // Le casque n'est ni tourne ni mis a l'echelle : la position s'ajoute.
+  // Le demi-tour autour de y retourne x (et z, sans effet sur un quad).
+  const miroir = Math.abs(Math.abs(q.y) - 1) < 1e-3;
+  // Les `_Color` des quads du panneau, par nom d'objet : le fond noir
+  // (`HUDLayer0Mat`), les cadres, la silhouette a demi transparente, et les
+  // deux remplissages, des aplats sans texture a 0,18 d'opacite.
+  const couleurs = {};
+  const sous = (gid) => { for (let g = gid; g; g = parent(g)) if (g === panneau) return true; return false; };
+  for (const [gid, go] of ctx.gameObjects) {
+    if (!sous(gid)) continue;
+    for (const o of ctx.componentsOf(gid, ["MeshRenderer"])) {
+      const r = ctx.readEngine(o);
+      const m = (r.m_Materials || [])[0];
+      const mo = m && ctx.env.deref(m, ctx.env.get(ctx.sceneFile));
+      const mat = mo && ctx.readEngine(mo);
+      for (const k of (mat && mat.m_SavedProperties && mat.m_SavedProperties.m_Colors) || []) {
+        if (k.first && k.first.name === "_Color" && k.second) {
+          const { r: cr, g: cg, b: cb, a: ca } = k.second;
+          couleurs[go.m_Name] = [cr, cg, cb, ca];
+        }
+      }
+    }
+  }
+  return {
+    position: [p[0] + c[0], p[1] + c[1], p[2] + c[2]],
+    scale: [tp.m_LocalScale.x, tp.m_LocalScale.y],
+    mirrorX: miroir,
+    fov,
+    couleurs,
+  };
 }
 
 export function extractInterface(ctx, emitImage, emitFile, assembly) {
@@ -170,15 +284,17 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
       // ResourcesHUD/HUDLayer1OuterBars. Les quads font 2 unites de cote :
       // c'est la seule lecture qui rende le bas des jauges FIXE quand elles se
       // vident (-0.6 - 0.03 f, contre -0.6 + 0.275 f pour un quad unitaire).
+      panel: panneauRessources(ctx),
       layout: {
         oxygen: { x: 0.577, halfWidth: 0.12, halfHeight: 0.61 },
         fuel: { x: 0.135, halfWidth: 0.12, halfHeight: 0.61 },
         health: { x: -0.5, halfWidth: 0.5, halfHeight: 0.64 },
       },
       textures: {
-        frameOxygen: cropped["bar_frame_oxygen.png"] || null,
-        frameFuel: cropped["bar_frame_fuel.png"] || null,
-        fill: cropped["bar_fill.png"] || null,
+        // Le panneau entier, comme dans le jeu : le fond (`ResourcesHUD`,
+        // teinte en noir) et les deux cadres (`HUDLayer1OuterBars`).
+        layer0: written.ResourceBar_Layer01 || null,
+        layer1: written.ResourceBar_Layer1 || null,
         vignette: written.redVignette || null,
         health: ["ResourceBar_Layer2_HP25", "ResourceBar_Layer2_HP50",
                  "ResourceBar_Layer2_HP75", "ResourceBar_Layer2_HP100"]
@@ -186,6 +302,16 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
       },
     },
     fonts,
+    // Le globe de la minicarte, sur la visiere comme les jauges.
+    minimapPanel: panneauRessources(ctx, "MinimapHUD"),
+    // Le texte pose dans le monde (`TextMesh`).
+    textes: textesDeScene(ctx),
+    // L'ecran de la console du satellite : carte postale au repos, schema une
+    // fois la console prise.
+    satellite: {
+      splash: written.PostcardsFromSpacePSD || null,
+      diagram: written.SatelliteDiagramPSD || null,
+    },
     // SettingsMenu.UpdateOptionText et Axis. La sensibilite est un entier de 1 a
     // 10 qui BOUCLE (11 ramene a 1), 5 etant le neutre : l'axe vaut
     // brut x inversion x sensibilite / 5.

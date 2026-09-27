@@ -395,6 +395,18 @@ export class LightField {
     if (on) this.eteintes.delete(nom); else this.eteintes.add(nom);
   }
 
+  /**
+   * `light.enabled = on` depuis un script, par NOM : la lumiere entre dans la
+   * selection, ou en sort. C'est l'etat serialise `m_Enabled` que
+   * `pickLights` lit ; `LaunchElevatorController.OnActivateLaunchTower`
+   * allume ainsi la lumiere verte de la tour, eteinte dans la scene.
+   */
+  allumeScript(nom, on) {
+    let n = 0;
+    for (const l of this.lights) if (l.name === nom) { l.enabled = !!on; n++; }
+    return n;
+  }
+
   /** Le jour se leve, ou tombe : `NightLight` s'en sert, et rien d'autre. */
   setNight(night, t) {
     if (night === this.night) return;

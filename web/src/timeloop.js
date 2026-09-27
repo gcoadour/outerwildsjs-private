@@ -135,7 +135,16 @@ export function effondrementsDuBuild(gameplay) {
 export class ResetTrigger {
   constructor(volume = null) {
     this.volume = volume;
-    // `Awake` : le collider nait desactive.
+    this.awake();
+  }
+
+  /**
+   * `Awake` : le collider nait desactive. Et il RENAIT a chaque boucle, car
+   * chaque boucle recharge la scene : le portage ne l'armait qu'au demarrage
+   * de la page et ne le desarmait jamais, si bien que la sphere restait armee
+   * au deuxieme tour — la ou le build, rechargeant, la reveille eteinte.
+   */
+  awake() {
     this.armed = false;
     this.fired = false;
   }
@@ -223,6 +232,13 @@ export class TimeLoop {
   }
 
   get secondsRemaining() { return Math.max(0, this.duration - this.elapsed); }
+
+  /**
+   * `TimeLoop.SetSecondsRemaining(s)` — la touche F11 du build
+   * (`DebugInputManager`, debug.js) l'appelle avec 92 : la musique de fin
+   * des temps et l'effondrement du soleil dans la minute et demie.
+   */
+  setSecondsRemaining(s) { this.elapsed = Math.max(0, this.duration - s); }
   get fraction() { return Math.min(1, this.elapsed / this.duration); }
   get supernova() { return this.supernovaAt !== null; }
   /** Entre `TriggerSupernova` et `SunExploded` : l'etoile s'effondre. */
@@ -255,10 +271,7 @@ export class TimeLoop {
 
     // `TimeLoop.Update` : l'annonce part UNE fois, et le composant se coupe.
     if (this.triggerAt === null && this.elapsed >= this.duration && !this.preventSupernova) {
-      this.triggerAt = this.elapsed;
-      this.effondrement = new Effondrement(this.surface || EFFONDREMENT_SURFACE);
-      this.couronne = new Effondrement(this.corona || EFFONDREMENT_COURONNE);
-      this.events.push("TriggerSupernova");
+      this.triggerSupernova();
     }
     // `ShrinkSunBehavior.Update` : la couronne, a son propre pas, qui survit
     // a l'explosion de la surface d'une demi-seconde.
@@ -277,6 +290,20 @@ export class TimeLoop {
       return "supernova";
     }
     return null;
+  }
+
+  /**
+   * `"TriggerSupernova"` : la fin de la boucle l'annonce, et la touche F12 du
+   * build aussi (`DebugInputManager`, debug.js) — a tout moment, sans egard a
+   * `preventSupernova` : elle ne passe pas par `TimeLoop`.
+   */
+  triggerSupernova() {
+    if (this.triggerAt !== null) return false;
+    this.triggerAt = this.elapsed;
+    this.effondrement = new Effondrement(this.surface || EFFONDREMENT_SURFACE);
+    this.couronne = new Effondrement(this.corona || EFFONDREMENT_COURONNE);
+    this.events.push("TriggerSupernova");
+    return true;
   }
 
   kill(cause) {

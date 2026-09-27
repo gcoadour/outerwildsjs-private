@@ -26,6 +26,7 @@
 
 import { insideVolume } from "./gravity.js";
 import { restingPoint } from "./frames.js";
+import { DECALAGE_ASSISE } from "./start.js";
 
 export const GEAR_EVENTS = {
   suitUp: "SuitUp",
@@ -178,6 +179,7 @@ export function attachPoints(gameplay) {
       matchRotation: !!f._matchRotation,
       centerCamera: !!f._centerCamera,
       rotationRate: f._rotationRate ?? 100,
+      attachOffset: DECALAGE_ASSISE,
     };
   });
 }
@@ -205,16 +207,24 @@ export function interactZones(gameplay) {
 }
 
 /**
- * La zone est-elle regardee d'assez pres et d'assez face ?
+ * La zone est-elle regardee dans sa fenetre ? `InteractZone.UpdateFocus` :
  *
- * @param toward  direction du regard du joueur, normalisee
- * @param facing  direction de l'avant de la zone, normalisee
+ *     num = Vector3.Angle(_playerCam.transform.forward, transform.forward);
+ *     if (num > _viewingWindow) _hasFocus = false;
+ *
+ * L'angle est celui du REGARD contre l'avant de la zone, et il se compare a la
+ * fenetre ENTIERE. Ce commentaire disait « un demi-angle une fois compare », et
+ * le portage mesurait la direction zone -> joueur : deux lectures a cote de
+ * trois lignes d'IL (docs/132).
+ *
+ * @param regard  avant de la camera, normalise
+ * @param facing  avant de la zone, normalise
  */
-export function zoneFaced(zone, toward, facing) {
+export function zoneFaced(zone, regard, facing) {
   if ((zone.viewingWindow ?? 360) >= 360) return true;
-  const d = toward[0] * facing[0] + toward[1] * facing[1] + toward[2] * facing[2];
+  const d = regard[0] * facing[0] + regard[1] * facing[1] + regard[2] * facing[2];
   const angle = Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
-  return angle <= zone.viewingWindow / 2;
+  return angle <= zone.viewingWindow;
 }
 
 /**
@@ -306,6 +316,30 @@ export function lockYawError(versLaCible, avant, haut, droite) {
   // `Mathf.Sign(0)` vaut 1 : une cible pile devant ou pile derriere tourne a
   // droite, et le derriere est le seul cas ou cela se voit.
   return angle * (cote < 0 ? -1 : 1);
+}
+
+/**
+ * `FirstPersonCameraController.UpdateLockOnTargeting` : le TANGAGE aussi suit
+ * la cible. La direction de l'oeil a la cible, privee de sa part laterale
+ * (le lacet est l'affaire du corps, ci-dessus), et l'angle signe entre elle et
+ * l'avant de la camera — positif quand la cible est plus haut.
+ *
+ *     _degreesY += ecart x _followRate x deltaTime
+ *
+ * Le portage ne tournait que le corps : assis a l'ordinateur, on regardait au
+ * niveau de l'ecran plutot que dedans, la ou l'alpha le centre.
+ */
+export function lockPitchError(versLaCible, avantCam, hautCam, droiteCam) {
+  const lat = versLaCible[0] * droiteCam[0] + versLaCible[1] * droiteCam[1] + versLaCible[2] * droiteCam[2];
+  const d = [versLaCible[0] - droiteCam[0] * lat, versLaCible[1] - droiteCam[1] * lat,
+             versLaCible[2] - droiteCam[2] * lat];
+  const l = Math.hypot(d[0], d[1], d[2]);
+  if (!l) return 0;
+  const la = Math.hypot(avantCam[0], avantCam[1], avantCam[2]) || 1;
+  const cos = (d[0] * avantCam[0] + d[1] * avantCam[1] + d[2] * avantCam[2]) / (l * la);
+  const angle = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+  const haut = d[0] * hautCam[0] + d[1] * hautCam[1] + d[2] * hautCam[2];
+  return angle * (haut < 0 ? -1 : 1);
 }
 
 /** `max(500 / d, 20)` au-dela de dix unites, sinon le champ initial. */

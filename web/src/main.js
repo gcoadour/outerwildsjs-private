@@ -23,22 +23,22 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
 import { Settings, SettingsUI, MenuInput } from "./settings.js";
 import { loadTitre, TitleScreen, SKIP_INTRO_FLAGS } from "./titre.js";
-import { shipRecords, ShipComputer, Flashlight, Marshmallow,
+import { shipRecords, ShipComputer, suivreEcran, Flashlight, Marshmallow,
          heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
-         jetpackPrompts } from "./consoles.js";
+         jetpackPrompts, shipPrompts, autopilotAvailable } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust, detachVelocity } from "./crust.js";
 import { Interactables, OBSERVATORY_EVENTS } from "./interact.js";
-import { Ship, shipSpawn, quatMul, quatRotate } from "./ship.js";
-import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT,
+import { Ship, shipSpawn } from "./ship.js";
+import { startPose, walkToShip, horizonBasis, yawFor, EYE_HEIGHT, AVANT_CAMERA,
          REVEIL, Reveil } from "./start.js";
 import { loadAudioMap, AudioField, AudioMixer, signalStrength,
          audioShells, AudioShells } from "./audio.js";
@@ -67,8 +67,8 @@ import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
 import { elevators, Elevator, LaunchTerminal, launchTerminals,
          elevatorControllers, RETURN_ABOVE, landingPadSensors,
-         museumEntryways } from "./tower.js";
-import { Helmet, MasterAlarm, DamageDisplay, Notifications, helmetSettings,
+         museumEntryways, LANDED_SPEED } from "./tower.js";
+import { Helmet, MasterAlarm, DamageDisplay, Notifications, notificationsDuBuild, helmetSettings,
          roastPrompts, roastBroken, shipProximity,
          RoastPrompt } from "./helmet.js";
 import { playerNoise, NOISE, CompressionSensor, INTERACT_RANGE,
@@ -93,7 +93,7 @@ import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 import { loadCommandes, decoupeImage } from "./input.js";
 import { regardDuBuild, pasDeRegard, borneTangage } from "./regard.js";
 import { Modes, annonceDe } from "./modes.js";
-import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
+import { LandingView, rollMode, ATTERRISSAGE, allowLandingMode } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
          modelLandingSpots, modelShipBody, rocketKids, estEnfant,
          poussesModele, voleModele, invitesConsoleModele,
@@ -122,6 +122,9 @@ import { CameraEffects, loadCameras, reglagesDuJoueur,
          reglagesDe } from "./cameraeffects.js";
 import { PostFX, effetsSecondaires } from "./postfx.js";
 import { planetImposters, Imposter, IMPOSTER_SIZE } from "./imposters.js";
+import { EcranOrdinateur } from "./ecranordinateur.js";
+import { toucheDebug, TOUCHES_DEBUG, ACCELERATION, SECONDES_FIN, LIEU_DU_SAUT,
+         pointDeSaut, transfertSable } from "./debug.js";
 import { LockOn, aimedFrame, canFlyTo,
          ancientProbeAcceleration } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
@@ -150,7 +153,7 @@ import { destructionVolumes, repairVolumes, destroyedBy, deathCause,
          deathTypeOf, Repair } from "./volumes.js";
 import { loadAmbience, ambienceZones, AmbienceMixer, isDay } from "./ambience.js";
 // Les six lots de docs/44-reste-a-migrer.md, dans l'ordre conseille par la page.
-import { referenceFrames, DeclaredFrames, restingPoint,
+import { referenceFrames, DeclaredFrames, restingPoint, poseMobile, pointVivant,
          autopilotDistances, attachTarget,
          matchInitialVelocity } from "./frames.js";
 import { billboards, talkingFaces, DecorField, teleporters, Teleporters,
@@ -165,7 +168,7 @@ import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
          promptFaced } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
-         LOCK_ON } from "./gear.js";
+         LOCK_ON, lockPitchError } from "./gear.js";
 import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          FieldAlignment, FIELD_ALIGN,
          UpAligner, steadyPitch, steadyLook } from "./attach.js";
@@ -364,9 +367,11 @@ async function boot() {
   const camera = new BABYLON.FreeCamera("cam", BABYLON.Vector3.Zero(), scene);
   // `PlayerCamera` : plan proche a 0,05, plan lointain a 50 000. On garde le
   // proche du build et NON son lointain : le build n'affiche au-dela que des
-  // impostures rafraichies par `LODCameraSnapshot`, que ce portage ne fait pas
-  // — couper a 50 000 effacerait donc les planetes lointaines au lieu de les
-  // remplacer. Le lointain est le seul des deux qui soit un choix.
+  // impostures rafraichies par `LODCameraSnapshot`. Le portage les refait
+  // (imposters.js), mais trois cameras sur cinq seulement sont cablees dans
+  // l'alpha (docs/56) — couper a 50 000 effacerait donc Giant's Deep et le
+  // Hourglass au lieu de les remplacer. Le lointain est le seul des deux qui
+  // soit un choix.
   camera.minZ = 0.05;
   camera.maxZ = 200000;
   // Le champ de vision du build, et non celui de Babylon. `PlayerCamera` voit a
@@ -416,6 +421,17 @@ async function boot() {
 
   const entries = buildBodies(BABYLON, scene, bodies);
   const origin = new FloatingOrigin(500);
+  window.__origin = origin;   // controles : le corps ancre du moment
+  // Ce qui arrive au vaisseau quand personne ne le regarde : les controles
+  // l'impriment quand il n'est plus la ou on l'attend.
+  const journalV = [];
+  window.__journalVaisseau = journalV;
+  function journalVaisseau(quoi) {
+    if (!ship) return;
+    journalV.push(`${loop.elapsed.toFixed(1)} ${quoi} : ${ship.parked ? "stationne" : "libre"}`
+      + `${ship.boarded ? ", a bord" : ""}, ${Math.hypot(ship.vel.x, ship.vel.y, ship.vel.z).toFixed(1)} u/s`);
+    if (journalV.length > 40) journalV.shift();
+  }
 
   // Orbites : positions d'origine conservees, l'etat orbital vit dans `orbits`.
   for (const b of bodies) b.position0 = (b.bodyPosition || b.position).slice();
@@ -492,11 +508,16 @@ async function boot() {
     // dans `bodies`, et il se deplace bien plus que les planetes. Ce qu'il
     // porte — le paquetage de la cabine, les commandes, la trappe — se ramene
     // donc a SA position du moment, lue sur le corps simule.
+    //
+    // Et il TOURNE : le decalage porte le passage complet de sa pose de repos
+    // a celle du moment (`poseMobile`). Sa translation seule laissait la
+    // cabine a l'orientation de la tour une fois le vaisseau pose ailleurs —
+    // la trappe, le paquetage et le poste de pilotage a cote de leur place.
     if (bodyName === "Ship_Body") {
       if (!ship || !shipRest) return null;
-      return [ship.pos.x + framePos[0] - shipRest[0],
-              ship.pos.y + framePos[1] - shipRest[1],
-              ship.pos.z + framePos[2] - shipRest[2]];
+      return poseMobile(shipRest, shipRestRot,
+                        [ship.pos.x + framePos[0], ship.pos.y + framePos[1],
+                         ship.pos.z + framePos[2]], ship.quat);
     }
     if (!corpsParNom.size) {
       for (const b of bodies) if (b.bodyName) corpsParNom.set(b.bodyName, b);
@@ -530,6 +551,7 @@ async function boot() {
   // Position du vaisseau dans la scene AU REPOS, pour ramener ce qu'il porte.
   const shipRest = ((gameplay.singletons || {}).ShipBody || {}).position || null;
   const shipRestRot = ((gameplay.singletons || {}).ShipBody || {}).rotation || null;
+  window.__shipRest = shipRest; window.__shipRestRot = shipRestRot;
 
   // Depart : au point d'apparition du joueur, celui que le build pose.
   //
@@ -962,6 +984,9 @@ async function boot() {
                                        ["EnterDarkZone", "ExitDarkZone"]);
   // Le secteur majeur actif de l'image courante, pour les controles navigateur.
   let secteurMajeur = null;
+  // Les secteurs ou le detecteur du joueur se trouve, pour n'annoncer que les
+  // entrees (`OnTriggerEnter`).
+  let secteursJoueur = new Set();
   // §7 l'equipement se RAMASSE : le portage le donnait d'emblee.
   const pickups = gearPickups(gameplay);
   const suits = suitVolumes(gameplay);
@@ -1138,6 +1163,9 @@ async function boot() {
   // Giant's Deep a enfin un ocean qui porte, des tornades qui poussent, et une
   // trainee lue sur les detecteurs plutot qu'une constante uniforme.
   const fluids = new FluidField(fluidVolumes(gameplay, data), fluidDetectors(gameplay));
+  // Chaque milieu suit le corps qui le porte (`decalageDuCorps`, du repere
+  // du moment).
+  fluids.shiftOf = (v) => (v.body ? decalageDuCorps(v.body, framePos) : null);
   // Seul le vaisseau rechargeait l'oxygene ; on regarde maintenant ce que la
   // scene propose. Liste vide = l'alpha n'en pose aucune, ce qui est une
   // reponse et non un oubli.
@@ -1395,6 +1423,9 @@ async function boot() {
   // --- vaisseau ---
   let ship = null;
   let shipStart = [0, 0, 0];
+  // Les colliders du vaisseau, et celui de la trappe parmi eux.
+  let collidersVaisseau = null, colliderTrappe = [];
+  const MASQUE_VAISSEAU = 2;
   const fissuresPieces = [];
   {
     const entry = entryForBody(geo, home.name);
@@ -1402,6 +1433,17 @@ async function boot() {
     if (node) {
       // Detacher le vaisseau de sa hierarchie parente pour eliminer les rotations heritees
       node.parent = null;
+      // ... mais PAS le retournement qui va avec. L'exportateur ecrit le glTF
+      // en z miroir (`[x, y, -z]`), et c'est la racine du chargeur, puis le
+      // conteneur tourne d'un demi-tour, qui le remettent a l'endroit : la
+      // scene statique retombe exactement sur les coordonnees d'Unity. Le
+      // vaisseau detache perdait les deux et gardait le miroir. Son
+      // orientation etait bien celle du build, mais sa CABINE etait retournee
+      // bout pour bout : le cockpit a l'arriere, l'ordinateur de bord (z -2,24
+      // dans `Ship_Body`) a l'avant, face au hublot, et le joueur qu'on y
+      // assied — a la position du build — regardait le mur du fond. Le miroir
+      // se rend ici, sur le noeud, et tout ce qui y pend le suit.
+      node.scaling.set(1, 1, -1);
       if (node.getChildMeshes) {
         for (const m of node.getChildMeshes(false)) {
           // Rallumer la coque, pas ce que le build tient eteint.
@@ -1437,6 +1479,32 @@ async function boot() {
     // (docs/132). La pose de repos n'est pas « sous la surface », comme
     // docs/07 le concluait : le sol du village est a 130 unites du centre, le
     // haut de la tour a 166.
+    // ON ENTRE DANS LE VAISSEAU. Ses colliders etaient exclus de la physique
+    // — « il se deplace » — et le joueur le traversait : on ne pouvait ni
+    // passer la trappe ni se tenir dans la cabine, et l'on embarquait de loin.
+    // Ils sont desormais ANIMES : Havok lit la pose du noeud avant chaque pas,
+    // le vaisseau pousse le joueur sans que le decor le retienne. La trappe est
+    // un collider parmi eux (`_hatchObject`, `Hatch_Collider`) : l'ouvrir le
+    // desactive, comme `SetActive(false)` (docs/132).
+    if (plugin && node && node.getChildMeshes) {
+      collidersVaisseau = buildColliders(BABYLON, scene,
+        node.getChildMeshes(false).filter((m) => m.getTotalVertices() > 0), {});
+      const nomTrappe = (trappeData[0] || {}).hatchObject || "Hatch_Collider";
+      for (const a of collidersVaisseau.aggregates) {
+        a.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
+        a.body.disablePreStep = false;
+        // Un bit a lui : les sondes du vaisseau cherchent le SOL, et sans ce
+        // filtre elles trouvaient sa propre coque (docs/132).
+        try { a.shape.filterMembershipMask = MASQUE_VAISSEAU; } catch (e) { /* sans filtre */ }
+        for (let n = a.transformNode; n; n = n.parent) {
+          if (n.name === nomTrappe) { colliderTrappe.push(a); break; }
+        }
+      }
+      window.__collidersVaisseau = { poses: collidersVaisseau.aggregates.length,
+                                     trappe: colliderTrappe.length };
+      console.log(`vaisseau : ${collidersVaisseau.aggregates.length} colliders anime(s), `
+        + `trappe ${colliderTrappe.length}`);
+    }
     const spawnWorld = shipRest || shipSpawn(gameplay, home.position0);
     if (spawnWorld) {
       const local = [spawnWorld[0] - home.position0[0],
@@ -1481,7 +1549,7 @@ async function boot() {
                                          pos.y - up[1] * reach,
                                          pos.z - up[2] * reach);
           try {
-            const hit = eng.raycast(from, to);
+            const hit = eng.raycast(from, to, { collideWith: ~MASQUE_VAISSEAU });
             if (!hit || !hit.hasHit) return null;
             const q = hit.hitPointWorld || hit.hitPoint;
             if (!q) return null;
@@ -1667,6 +1735,8 @@ async function boot() {
 
   // --- interface de jeu : jauges et invites ---
   const iface = await loadInterface();
+  // Le texte des notifications, celui de leurs `TextMesh`.
+  notifications.table = notificationsDuBuild((iface && iface.textes) || []);
   const uiRoot = document.getElementById("ui");
   const resHUD = iface && uiRoot ? new ResourceHUD(uiRoot, iface) : null;
   const prompts = iface && uiRoot ? new Prompts(uiRoot, iface) : null;
@@ -1702,6 +1772,21 @@ async function boot() {
   })();
   const readout = uiRoot ? new AutopilotReadout(uiRoot) : null;
   const minimap = new Minimap(document.getElementById("minimap"));
+  // `MinimapHUD` est un quad de la visiere, sous les jauges : on le pose ou
+  // la camera du HUD le voit (rectPanneau, hud.js), par des variables CSS
+  // que la mise en page tactile ignore.
+  {
+    const c = document.getElementById("minimap");
+    const placer = () => {
+      const R = rectPanneau((iface && iface.minimapPanel) || MINIMAP_REPLI,
+                            (innerWidth || 16) / (innerHeight || 9));
+      c.style.setProperty("--mm-left", `${R.left * 100}%`);
+      c.style.setProperty("--mm-top", `${R.top * 100}%`);
+      c.style.setProperty("--mm-width", `${R.width * 100}%`);
+      c.style.setProperty("--mm-height", `${R.height * 100}%`);
+    };
+    if (c) { placer(); addEventListener("resize", placer); }
+  }
   let lastPhase = "repos";
   // La cible de l'egalisation du sac dorsal, tant qu'elle dure.
   let egalisationJoueur = null;
@@ -1721,6 +1806,12 @@ async function boot() {
     : null;
   // --- consoles et objets de bord ---
   const computer = new ShipComputer(shipRecords(gameplay), SECTORS, pdata);
+  // L'ecran que le regard vise, assis a l'ordinateur.
+  const cibleOrdinateur = ((((gameplay.placed || {}).ShipComputer || [])[0] || {}).targets || {})._targetPoint || null;
+  // Et l'ecran lui-meme, dans la cabine (ecranordinateur.js).
+  const ecranOrdi = new EcranOrdinateur(BABYLON, scene,
+    { cameras: camerasDuBuild, textes: (iface && iface.textes) || [] });
+  window.__ecranOrdi = ecranOrdi;
   const flashlight = new Flashlight(BABYLON, scene,
     (lighting.lights || []).find((l) => l.name === "Flashlight" && l.body === "Player_Body") || null);
   const marshmallow = new Marshmallow();
@@ -1850,7 +1941,6 @@ async function boot() {
       }
     } else if (therm && therm.isPlaying) { therm.stop(); objet.thermFrame = undefined; }
   }
-  const computerEl = document.getElementById("computer");
   // --- mixage par piste et emetteurs de signal ---
   const mixer = new AudioMixer();
   const transmitters = ((gameplay.placed || {}).AudioTransmitter || []).map((t) => ({
@@ -2098,6 +2188,8 @@ async function boot() {
   }
 
   // --- croute de Brittle Hollow : les fragments tombent pour de bon ---
+  // F10 (`DebugBreakAllChildren`) : pris par le bloc de la croute.
+  let casserCroute = false;
   const crust = bhBody
     ? new Crust(crustCarriers(gameplay),
                 bhBody.gravity.surfaceAcceleration || 12,
@@ -2331,6 +2423,10 @@ async function boot() {
     // pas les codes de lancement, l'etoile n'explose pas.
     loop.restart(pdata.knows("knowsLaunchCodes"));
     pdata.setLoopCount(loop.loopCount);
+    // La scene rechargee : la sphere de l'observatoire se reveille eteinte,
+    // puis `OnStartOfTimeLoop` ne l'arme qu'au premier tour sans les codes.
+    remiseAZero.awake();
+    remiseAZero.startOfTimeLoop(loop.loopCount + 1, pdata.knows("knowsLaunchCodes"));
     // Le ciel se remplit de nouveau : la boucle recommence pour lui aussi.
     starField.reset();
     if (starPCS) {
@@ -2389,6 +2485,7 @@ async function boot() {
       if (shipRest && shipRestRot) ship.quat = shipRestRot.slice();
       if (ship.omega) ship.omega = [0, 0, 0];
       ship.parked = true;
+      ship.parkRest = null; ship.parkBody = null; ship.parkGround = null;
       ship.landed = true;
       ship.groundBody = "TimberHearth";
       ship.onPad = false;
@@ -2466,7 +2563,21 @@ async function boot() {
   // s'etend sur une dizaine d'unites. Le sas n'a pas d'interactif extrait : ce
   // rayon large est un repli assume, pas une valeur du build. Il ne raccourcit
   // plus le depart, qui se fait desormais au village, 471 u plus loin.
-  const SHIP_REACH = 40;
+  // LE POSTE DE PILOTAGE, ET LUI SEUL. `FlightConsole` est une `InteractZone`
+  // (capsule autour du siege) : on y entre, on regarde devant soi, et l'on
+  // s'attache — combinaison sur le dos. `Awake` l'annonce « Suit Required »,
+  // `OnSuitUp` « Buckle Up ». Le portage embarquait a quarante unites de la
+  // coque, codes de lancement en poche : depuis que le vaisseau attend au
+  // sommet de la tour, la touche de la borne, en bas, vous asseyait aux
+  // commandes (docs/132).
+  const estPoste = (f) => !!f && f.kind === "zone" && f.name === "FlightConsole"
+    && f.body === "Ship_Body";
+  const invitePoste = () => (equipment.suit ? "Buckle Up" : "Suit Required");
+  // Les volumes dont l'etat `_hasInteracted` est tenu : zones et borne.
+  const volumeGere = (f) => !!f && (f.kind === "zone" || !!f.terminal);
+  const zoneEn = (w) => interactables.items.find((i) => i.kind === "zone" && w
+    && Math.hypot(i.world[0] - w[0], i.world[1] - w[1], i.world[2] - w[2]) < 0.05) || null;
+  let focusPrecedent = null;
 
   // §O LES PHARES DU VAISSEAU. Le portage n'en avait aucun : `shiplightRange`
   // etait ecrite, eprouvee, et appelee par personne.
@@ -2486,7 +2597,6 @@ async function boot() {
   // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
   // enfants de la zone. Trois unites est donc la hauteur de cette capsule, pas
   // un nombre choisi.
-  const GEAR_REACH = 3;
 
   // §J S'ASSEOIR (docs/69-assise.md).
   //
@@ -2512,7 +2622,7 @@ async function boot() {
                       cibles: ciblesVerrou };
   const zoneAscenseur = interactables.items.find((it) => it.prompt === "Activate Lift"
     || (it.kind === "zone" && it.name === "AttachPoint" && it.body === "TimberHearth_Body")) || null;
-  const terminalItem = interactables.items.find((it) => it.kind === "terminal" || it.name === "LaunchTerminal") || null;
+  const terminalItem = interactables.items.find((it) => it.terminal || it.kind === "terminal") || null;
   const elAttach = pointsAttache.points.find((p) => p.name === "AttachPoint" && p.body === "TimberHearth_Body") || null;
   const zoneAscRestPos = zoneAscenseur ? [...zoneAscenseur.world] : [1.6731, -38.8395, -8720.9674];
   const elAttachRestPos = elAttach ? [...elAttach.position] : [1.6731, -38.8395, -8720.9674];
@@ -2530,18 +2640,16 @@ async function boot() {
    * `boot()`, ou il n'existe pas — une faute qui ne se declenchait qu'en
    * MONTANT dans le vaisseau, ce qu'aucun controle ne fait (docs/71).
    */
+  // Le siege suit la coque par le meme passage que la cabine. Il appliquait
+  // l'orientation ABSOLUE du vaisseau a un decalage deja exprime dans la
+  // scene, donc deja tourne une fois : depuis que le vaisseau part de sa pose
+  // de repos (couche a -90 degres), le pilote s'asseyait cinq unites au-dessus
+  // du poste, dans le toit.
   function siegeVivant(anchorPos) {
     if (!ship || !shipRest || !siegePilotage) return null;
-    const d = [siegePilotage.position[0] - shipRest[0],
-               siegePilotage.position[1] - shipRest[1],
-               siegePilotage.position[2] - shipRest[2]];
-    const r = quatRotate(ship.quat, d);
-    return {
-      position: [ship.pos.x + anchorPos[0] + r[0],
-                 ship.pos.y + anchorPos[1] + r[1],
-                 ship.pos.z + anchorPos[2] + r[2]],
-      rotation: quatMul(ship.quat, siegePilotage.rotation),
-    };
+    const pose = decalageDuCorps("Ship_Body", anchorPos);
+    return { position: pose.point(siegePilotage.position),
+             rotation: pose.rot(siegePilotage.rotation) };
   }
   // outils portes par le joueur (dans la scene, ils sont sur la camera)
   // Le champ de repos du telescope n'est pas un champ du telescope : c'est
@@ -2653,6 +2761,121 @@ async function boot() {
       console.warn("FadeLight : aucune lumiere a sa position");
     }
   }
+  // --- LE SATELLITE PHOTOGRAPHIE, L'ECRAN MONTRE (docs/132) ---
+  //
+  // `SatelliteSnapshotController` ne transmet pas une vue : il prend des
+  // INSTANTANES. La console prise, l'ecran de l'observatoire passe de sa carte
+  // postale (`_splashTexture`) au schema du satellite (`_diagramTexture`) ;
+  // `Probe` rend la camera du satellite une fois, lumiere allumee le temps du
+  // rendu, dans la texture de l'ecran — `Alt Probe` la meme, tournee d'un
+  // demi-tour. Et en gris : la camera porte un `GrayscaleEffect` a fond. Le
+  // portage montrait a la place, dans un coin, une camera posee sur la console
+  // qui visait le centre de la planete.
+  const satData = (iface && iface.satellite) || {};
+  const satCamData = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => c.name === "SatelliteCamera") || null;
+  const satReglages = reglagesDe(camerasDuBuild, "SatelliteCamera");
+  const satLumiere = (lighting.lights || []).find((l) => l.name === "SatelliteCamera") || null;
+  // `Awake` : `_satelliteCamera.light.enabled = false`.
+  placedLights.allumeScript("SatelliteCamera", false);
+  const texSat = {};
+  const texteSat = (cle) => {
+    if (!satData[cle]) return null;
+    if (!texSat[cle]) texSat[cle] = new BABYLON.Texture(`data/interface/${satData[cle]}`, scene);
+    return texSat[cle];
+  };
+  let rttSat = null, camSat = null, lumSat = null;
+  function ecranSatellite(tex) {
+    const m = scene.getMeshByName("Projection");
+    if (!m || !m.material || !tex) return false;
+    const mat = m.material;
+    if (mat.diffuseTexture !== undefined) mat.diffuseTexture = tex;
+    if (mat.albedoTexture !== undefined) mat.albedoTexture = tex;
+    if (mat.emissiveTexture !== undefined) mat.emissiveTexture = tex;
+    return true;
+  }
+  function instantaneSatellite(arriere) {
+    const n = scene.getTransformNodeByName("SatelliteCamera");
+    if (!n) return false;
+    if (!camSat) {
+      camSat = new BABYLON.FreeCamera("satelliteCamera", BABYLON.Vector3.Zero(), scene);
+      camSat.fov = ((satCamData && satCamData.fov) || 70) * Math.PI / 180;
+      camSat.minZ = (satCamData && satCamData.near) || 0.8;
+      camSat.maxZ = (satCamData && satCamData.far) || 20000;
+      camSat.fovMode = BABYLON.Camera.FOVMODE_VERTICAL_FIXED;
+      // `CustomAspectRatio` : la camera a ses proportions forcees.
+      const ratio = (satReglages && satReglages.aspectRatio) || 1;
+      rttSat = new BABYLON.RenderTargetTexture("satelliteSnapshot",
+        { width: 512, height: Math.round(512 / ratio) }, scene, false);
+      rttSat.activeCamera = camSat;
+      rttSat.renderList = null;
+      // `GrayscaleEffect`, amount 1 : l'image est en niveaux de gris ; puis le
+      // `NoiseEffect` monochrome — grain et rayures de pellicule.
+      rttSat.useCameraPostProcesses = true;
+      new BABYLON.BlackAndWhitePostProcess("satelliteGris", 1, camSat, null, scene.getEngine());
+      effetsSecondaires(BABYLON, camSat, scene.getEngine(), "film",
+                        { noise: satReglages && satReglages.noise });
+      // Rendue par la scene, UNE fois par instantane : un `render()` a la main
+      // passait avant que les effets soient compiles, et sortait noir.
+      rttSat.refreshRate = BABYLON.RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+      scene.customRenderTargets.push(rttSat);
+      // La lumiere de la camera : allumee le temps du rendu, et lui seul.
+      rttSat.onBeforeRenderObservable.add(() => { if (lumSat) lumSat.setEnabled(true); });
+      rttSat.onAfterRenderObservable.add(() => { if (lumSat) lumSat.setEnabled(false); });
+    }
+    n.computeWorldMatrix(true);
+    const p = n.getAbsolutePosition();
+    // L'avant d'Unity, rendu par le noeud du glTF (docs/132).
+    let d = n.getDirection(BABYLON.Axis.Z).scale(SENS_SATELLITE);
+    // `_initCamLocalRot + (0, 180, 0)` : un demi-tour autour du haut local.
+    if (arriere) d = d.scale(-1);
+    camSat.position.copyFrom(p);
+    camSat.upVector = n.getDirection(BABYLON.Axis.Y);
+    camSat.setTarget(p.add(d));
+    if (satLumiere && !lumSat) {
+      // `_satelliteCamera.light` : eteinte hors du rendu.
+      lumSat = new BABYLON.SpotLight("satelliteFlash", p.clone(), d.clone(),
+                                     (satLumiere.spotAngle || 59) * Math.PI / 180, 1, scene);
+      lumSat.intensity = satLumiere.intensity ?? 2;
+      lumSat.range = satLumiere.range ?? 400;
+      lumSat.setEnabled(false);
+    }
+    if (lumSat) { lumSat.position.copyFrom(p); lumSat.direction.copyFrom(d); }
+    rttSat.resetRefreshCounter();
+    ecranSatellite(rttSat);
+    const son = (events.of("SatelliteSnapshotController") || { clips: {} }).clips._snapshotSound;
+    if (son) audio.playOneShot(son);
+    console.log(`annonce : RenderSnapshot${arriere ? " (arriere)" : ""}`);
+    return true;
+  }
+  // `SatelliteSnapshotController.Update`, sortie par `Cancel`.
+  function quitterSatellite() {
+    const c = consoles.active;
+    consoles.active = null;
+    // `_interactVolume.ResetInteraction()`.
+    if (c) interactables.reinitialiser(zoneEn(c.position));
+    if (fadeLight && fadeCible) {
+      fadeLight.fadeIntensity(fadeCible.intensity ?? 1, SATELLITE_FADE, performance.now() / 1000);
+    }
+    ecranSatellite(texteSat("splash"));
+    console.log("console lachee");
+  }
+  const SENS_SATELLITE = -1;
+  // `Awake` pose la carte postale sur l'ecran ; la geometrie arrive apres le
+  // demarrage, on la pose donc des qu'elle est la.
+  let ecranPret = false, essaisEcran = 0;
+  // La console posee sur une zone : meme position, au centieme pres.
+  const consoleDeZone = (f) => (f && f.kind === "zone" && f.world)
+    ? consoles.consoles.find((c) => c.position && Math.hypot(c.position[0] - f.world[0],
+        c.position[1] - f.world[1], c.position[2] - f.world[2]) < 0.05) || null
+    : null;
+  window.__satellite = { instantane: instantaneSatellite, ecran: ecranSatellite, texte: texteSat,
+                         quitter: quitterSatellite };
+  // Sonde : une position de repos, ramenee dans le repere de travail.
+  window.__versCadre = (w, body) => {
+    const dec = decalageDuCorps(body, framePos) || [0, 0, 0];
+    return [0, 1, 2].map((k) => w[k] + dec[k] - framePos[k]);
+  };
   window.__tools = { telescope, probes, probeCam, consoles, fadeLight };
   // Les options de dialogue sont touchables : au clavier on les choisit au
   // chiffre ou au curseur, au doigt on les vise directement.
@@ -2870,6 +3093,8 @@ async function boot() {
   // la lunette a le dernier mot sur `camera.fov`, et les deux ne se melangent
   // pas plus dans le build que dans le portage.
   let verrouFOV = null;
+  // Le champ du joueur et sa cible (`_targetFOV`, `_zoomRate`).
+  let cibleFov = null, tauxFov = 2, fovCourant = null;
   // Le roulis vient du MEME mouvement de souris que le lacet, aiguille par la
   // touche alt (`Swap Roll/Yaw`). Il s'accumule ici et se consomme a l'image.
   let rollInput = 0;
@@ -2963,6 +3188,24 @@ async function boot() {
   // La vue d'atterrissage : une camera, un regard, et des commandes qui
   // changent de main (docs/87-atterrissage.md).
   const atterrissage = new LandingView();
+  // LA VUE D'ATTERRISSAGE EST UNE CAMERA. `UpdateLandingMode`, 0,45 s apres
+  // l'appui : `_landingCam.enabled = true; _playerCam.enabled = false`, et
+  // `SwitchActiveCamera`. `LandingCam` est posee sous le cockpit et regarde
+  // sous le vaisseau, champ de 100 degres. Le portage gardait la camera du
+  // joueur, basculee de 70 degres — on voyait le tableau de bord, pas le sol
+  // (docs/132). Comme la carte, on mene la camera du joueur a sa place.
+  const donneesCamAtterrissage = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => c.name === "LandingCam") || { fov: 100, near: 0.5, far: 50000 };
+  let noeudCamAtterrissage;
+  let maxZAvantAtterrissage = null;
+  let grainAtterrissage = null, grainPose = false;
+  const enVueAtterrissage = () => {
+    if (!(atterrissage.on && ship && ship.boarded)) return false;
+    if (noeudCamAtterrissage === undefined) {
+      noeudCamAtterrissage = scene.getTransformNodeByName("LandingCam") || null;
+    }
+    return !!noeudCamAtterrissage;
+  };
   window.__atterrissage = atterrissage;
   // Le regard vise par la bascule, en radians, ou null. Le build appelle
   // `SnapToDegrees(0, -70, 140)` : lacet ZERO, tangage -70, a 140 degres par
@@ -3005,6 +3248,67 @@ async function boot() {
    * plutot que `code === "KeyT"`. Les touches viennent alors de
    * `data/input.json`, et les changer ne demande pas de toucher a ce fichier.
    */
+  // `ExitComputerConsole` : l'ecran s'eteint, le regard se libere, et l'on se
+  // leve du point d'accrochage de l'ordinateur.
+  function quitterOrdinateur() {
+    computer.open = false;
+    interactables.reinitialiser(interactables.items.find((i) => i.kind === "zone"
+      && i.name === "ShipComputer" && i.body === "Ship_Body"));
+    if (pointsAttache.current && pointsAttache.current.name === "ShipComputer") {
+      pointsAttache.detach([0, 0, 0]);
+    }
+    console.log("annonce : ExitShipComputer");
+  }
+
+  /**
+   * `DebugInputManager.Update`, `GUIMode.Update`, `DebugBreakAllChildren` et
+   * les sauts de `PlayerSpawner` : les touches de mise au point du build,
+   * actives dans l'alpha (debug.js).
+   */
+  // `DebugInputManager` est eteint dans la scene (debug.js) : ses touches ne
+  // s'allument que pour l'outillage, par `?miseaupoint` ou a chaud.
+  if (window.__miseAuPoint === undefined) {
+    window.__miseAuPoint = new URLSearchParams(location.search).has("miseaupoint");
+  }
+  function toucheDeMiseAuPoint(nom) {
+    console.log(`mise au point : ${nom}`);
+    if (nom === "cycleGUIMode") { console.log("mode d'affichage :", guiMode.cycle()); return; }
+    if (nom === "suitUp") {
+      // "SuitUp", "AquireProbe", "AquireMinimap" : la combinaison et ce
+      // qu'elle porte, sans passer par le paquetage.
+      equipment.suit = true; equipment.probe = true; equipment.minimap = true;
+      return;
+    }
+    if (nom === "learnLaunchCodes") { pdata.learn("knowsLaunchCodes"); return; }
+    if (nom === "fireAllTeleporters") { passages.fireAll(); return; }
+    if (nom === "rapidSandTransfer") {
+      for (const c of sand.columns) transfertSable(c, loop.elapsed / 60);
+      return;
+    }
+    if (nom === "triggerEndTimes") { loop.setSecondsRemaining(SECONDES_FIN); return; }
+    if (nom === "triggerSupernova") { loop.triggerSupernova(); return; }
+    // Les fragments se detachent dans le repere de leur conteneur : c'est le
+    // bloc de la croute qui l'a, et qui prend la commande a l'image suivante.
+    if (nom === "destroyAllBreakable") { casserCroute = true; return; }
+    if (nom in LIEU_DU_SAUT) {
+      // `Warp` puis `FixedUpdate` : le VAISSEAU seul, et seulement joueur dedans.
+      const dedans = !!(trappe && trappe.inside) || !!(ship && ship.boarded);
+      const pt = pointDeSaut((gameplay.placed || {}).SpawnPoint, LIEU_DU_SAUT[nom], dedans);
+      if (!pt || !dedans || !ship) return;
+      const dec = decalageDuCorps(pt.body, framePos) || [0, 0, 0];
+      ship.pos.x = pt.position[0] + dec[0] - framePos[0];
+      ship.pos.y = pt.position[1] + dec[1] - framePos[1];
+      ship.pos.z = pt.position[2] + dec[2] - framePos[2];
+      if (pt.rotation) ship.quat = pt.rotation.slice();
+      // `GetPointVelocity` : le vaisseau part a l'arret sur le corps du point.
+      const corps = bodies.find((b) => b.bodyName === pt.body);
+      const dv = corps ? sub3(frameVelocity(orbits, corps), frameVelocity(orbits, anchorBody)) : [0, 0, 0];
+      ship.vel.x = dv[0]; ship.vel.y = dv[1]; ship.vel.z = dv[2];
+      ship.landed = false; ship.parked = false;
+      console.log(`saut : ${pt.name} (${pt.body})`);
+    }
+  }
+
   function command(code) {
     const est = (canal) => {
       const c = cmds.get(canal);
@@ -3050,27 +3354,32 @@ async function boot() {
       // bruit a l'aller et au retour.
       bipUI(flashlight.toggle() ? "TurnOnFlashlight" : "TurnOffFlashlight");
     }
-    // L'ordinateur de bord ne se consulte qu'a l'interieur du vaisseau ; ce
-    // portage n'a pas d'interieur, on l'ouvre donc depuis le poste de pilotage.
-    // Le build n'a pas de canal pour lui : c'est un ajout, et `AJOUTS` le dit.
-    if (est("Ship Computer") && ship && ship.boarded) {
-      const openAvant = computer.open;
-      computer.open = !computer.open;
-      if (!openAvant && computer.open) {
-        const s = sonsUI.shipComputerBoot();
-        if (s) audio.playOneShot(s.file, { volume: s.volume });
-      }
-    }
+    // L'ORDINATEUR DE BORD, `ShipComputer.Update`. Ses touches sont celles de
+    // `ComputerInput` : Interact choisit, Cancel revient d'un niveau ou fait
+    // se lever, Move X parcourt — au premier niveau seulement, le second
+    // n'ecoute que Cancel. Le portage l'ouvrait d'une touche a lui depuis le
+    // poste de pilotage, « faute d'interieur », et le parcourait aux fleches,
+    // Entree et Retour arriere ; il s'ouvre desormais a sa zone « Boot Up »,
+    // dans la cabine (docs/132).
     if (computer.open) {
-      if (code === "ArrowLeft") { computer.move(-1); bipUI("AdvanceText"); }
-      if (code === "ArrowRight") { computer.move(1); bipUI("AdvanceText"); }
-      if (code === "Enter" || code === "Space") {
-        const cur = computer.current;
-        computer.select();
-        if (cur && cur.revealed) bipUI("PlayAffirmativeUISound");
-        else bipUI("PlayNegativeUISound");
+      const mx = cmds.get("Move X");
+      if (computer.zoom === 1 && mx && mx.neg.codes.includes(code)) computer.move(-1);
+      else if (computer.zoom === 1 && mx && mx.pos.codes.includes(code)) computer.move(1);
+      if (est("Interact")) {
+        // La touche est a l'ordinateur : ni se lever, ni rien d'autre.
+        interactPressed = false;
+        const r = computer.select();
+        if (r === "ouvre") bipUI("PlayAffirmativeUISound");
+        else if (r === "refus") bipUI("PlayNegativeUISound");
       }
-      if (code === "Backspace" || est("Cancel")) computer.cancel();
+      if (est("Cancel") && computer.cancel() === "ferme") quitterOrdinateur();
+    }
+    // La console du satellite : `Probe` photographie, `Alt Probe` photographie
+    // en arriere, `Cancel` lache (`SatelliteSnapshotController.Update`).
+    if (consoles.active && !consoles.active.flight) {
+      if (est("Probe")) instantaneSatellite(false);
+      else if (est("Alt Probe")) instantaneSatellite(true);
+      if (est("Cancel")) quitterSatellite();
     }
     if (consoles.active && consoles.active.flight && est("Cancel")) {
       const socle = reposModeleCadre(framePos);
@@ -3089,9 +3398,12 @@ async function boot() {
         if (s) audio.playOneShot(s.file, { volume: s.volume });
         console.log("annonce : RespawnModelShip");
       } else {
+        const c = consoles.active;
         consoles.toggle([player.pos.x + framePos[0],
                          player.pos.y + framePos[1],
                          player.pos.z + framePos[2]]);
+        // `ExitRemoteFlightConsole` : `_interactVolume.ResetInteraction()`.
+        if (c) interactables.reinitialiser(zoneEn(c.position));
       }
     }
     // §Q LA LUNETTE FAIT TAIRE LE MONDE, et l'assise la laisse regarder.
@@ -3139,18 +3451,6 @@ async function boot() {
         autopilot.matchVelocity(lockOn.current.body);
         console.log("vue d'atterrissage : egalisation automatique");
       }
-    } else if (est("Landing Camera") && consoles.count) {
-      const c = consoles.toggle([player.pos.x + framePos[0],
-                                 player.pos.y + framePos[1],
-                                 player.pos.z + framePos[2]]);
-      // §S La salle s'eteint pendant qu'on regarde la projection, et se
-      // rallume quand on lache. Deux secondes dans les deux sens.
-      if (fadeLight && fadeCible) {
-        const t = performance.now() / 1000;
-        const vise = (c && !c.flight) ? 0 : (fadeCible.intensity ?? 1);
-        fadeLight.fadeIntensity(vise, SATELLITE_FADE, t);
-      }
-      console.log(c ? `console prise : ${c.name}` : "console lachee");
     }
     // La guimauve se mange quand elle est assez grillee (0,6).
     // Dans le build, c'est OWInput.interact (E) qui la mange ; le portage avait
@@ -3173,8 +3473,11 @@ async function boot() {
     if (est("Stick")) {
       console.log(baton.toggle() ? "baton sorti" : "baton range");
     }
-    // GUIMode fait tourner ses quatre modes sur une touche de debogage
-    if (est("Display Mode")) console.log("mode d'affichage :", guiMode.cycle());
+    // Les touches de mise au point du build (`DebugKeyCode`, debug.js). Celles
+    // de `DebugInputManager` sont mortes dans l'alpha, et ne repondent ici que
+    // si l'outillage les allume.
+    const dbg = toucheDebug(code, !!window.__miseAuPoint);
+    if (dbg) toucheDeMiseAuPoint(dbg);
     // Le menu des reglages, comme dans le jeu, met le temps en pause.
     // `Menu.Update` : `cancel` FERME, et c'est la meme sortie que l'option
     // « Back ». Ouvrir releve `EnterMenuMode`, fermer `ExitMenuMode`, et
@@ -3482,7 +3785,10 @@ async function boot() {
   scene.registerBeforeRender(() => {
     // SettingsMenu.Open met Time.timeScale a 0 : le menu fige la partie
     const { n, h } = decoupeImage(
-      (settings && settings.open) ? 0 : engine.getDeltaTime() / 1000,
+      // Et `timeLapse` (=) le triple tant qu'on le tient (`DebugInputManager`).
+      (settings && settings.open) ? 0
+        : engine.getDeltaTime() / 1000
+          * (window.__miseAuPoint && keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1),
       cmds.maxTimestep);
     const now = performance.now() / 1000;
     // Le regard de l'image, avant les pas : `UpdateInput` est dans `Update`.
@@ -3661,10 +3967,8 @@ async function boot() {
         // (huit canaux, pas de sonde ni de carte), la console du satellite en
         // pose trois — annuler, photographier, photographier en arriere.
         //
-        // `EnterLandingView`, la caméra d'atterrissage du vaisseau, n'a pas
-        // d'equivalent ici : ce portage n'a pas de vue d'atterrissage separee,
-        // et son canal « Landing Camera » bascule les consoles deportees. Son
-        // ensemble est donc lu, garde, et sans appelant — dit plutot qu'omis.
+        // `EnterLandingView` passe par son annonce, plus haut : la vue
+        // d'atterrissage est desormais une camera (docs/132).
         ["satellite", !!(consoles.active && !consoles.active.flight)],
         ["modele", !!(consoles.active && consoles.active.flight)],
         ["ordinateur", !!computer.open],
@@ -3873,9 +4177,17 @@ async function boot() {
       // on volait vers une planete et il se retrouvait a des milliers d'unites,
       // le temps que le pilote automatique le ramene. Les sondes en vol ont le
       // meme probleme, en plus court.
+      //
+      // SAUF le vaisseau STATIONNE : il est pose sur Timber Hearth, et c'est
+      // la planete qui le porte (plus bas, `parkPos`). Lui ajouter l'ecart de
+      // vitesse le decrochait de son stationnement ; le sol du nouveau repere
+      // lui retirait cette vitesse, et le retour lui en ajoutait l'oppose — il
+      // repartait a six cents unites par seconde. Un joueur qui passait par un
+      // teleporteur le perdait en revenant.
       if (ship) {
         ship.pos.x += shift[0]; ship.pos.y += shift[1]; ship.pos.z += shift[2];
-        ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2];
+        if (!ship.parked) { ship.vel.x += dv[0]; ship.vel.y += dv[1]; ship.vel.z += dv[2]; }
+        journalVaisseau("repere " + fb.name);
       }
       if (probes.last) {
         const p = probes.last;
@@ -3971,10 +4283,39 @@ async function boot() {
       camera.maxZ = reglagesCarte.far;
       camera.fov = reglagesCarte.fov;
       camera.layerMask = reglagesCarte.masque;
+    } else if (enVueAtterrissage()) {
+      // `NoiseAndGrain`, force 4 : le grain de la camera d'atterrissage, pose
+      // sur la camera du joueur le temps de la vue.
+      if (!grainAtterrissage) {
+        grainAtterrissage = effetsSecondaires(BABYLON, camera, scene.getEngine(), "grain",
+                                              reglagesDe(camerasDuBuild, "LandingCam") || {});
+      } else if (!grainPose && grainAtterrissage) camera.attachPostProcess(grainAtterrissage);
+      grainPose = true;
+      const n = noeudCamAtterrissage;
+      n.computeWorldMatrix(true);
+      const p = n.getAbsolutePosition();
+      // L'avant d'Unity est l'oppose du +Z du noeud glTF (comme la camera du
+      // satellite).
+      const avant = n.getDirection(BABYLON.Axis.Z).scale(-1);
+      camera.rotationQuaternion = null;
+      camera.position.copyFrom(p);
+      camera.upVector = n.getDirection(BABYLON.Axis.Y);
+      camera.setTarget(p.add(avant));
+      camera.fov = (donneesCamAtterrissage.fov || 100) * Math.PI / 180;
+      camera.minZ = donneesCamAtterrissage.near || 0.5;
+      if (maxZAvantAtterrissage === null) maxZAvantAtterrissage = camera.maxZ;
+      camera.maxZ = donneesCamAtterrissage.far || 50000;
     } else {
-      camera.position.set(player.pos.x + up.x * EYE_HEIGHT,
-                          player.pos.y + up.y * EYE_HEIGHT,
-                          player.pos.z + up.z * EYE_HEIGHT);
+      if (maxZAvantAtterrissage !== null) {
+        camera.maxZ = maxZAvantAtterrissage;
+        maxZAvantAtterrissage = null;
+      }
+      if (grainPose && grainAtterrissage) { camera.detachPostProcess(grainAtterrissage); grainPose = false; }
+      // L'avant du CORPS, horizontal : `PlayerCamera` est a 0,15 devant.
+      const avCorps = north.scale(cy).add(east.scale(sy));
+      camera.position.set(player.pos.x + up.x * EYE_HEIGHT + avCorps.x * AVANT_CAMERA,
+                          player.pos.y + up.y * EYE_HEIGHT + avCorps.y * AVANT_CAMERA,
+                          player.pos.z + up.z * EYE_HEIGHT + avCorps.z * AVANT_CAMERA);
       camera.upVector = up;
       camera.setTarget(camera.position.add(fwd));
     }
@@ -4014,7 +4355,36 @@ async function boot() {
           vitesseCible: (autopilot.target && autopilot.target.velocity) || [0, 0, 0],
         });
       }
+      // Pose, a l'arret et sans personne a bord, le vaisseau est PORTE par le
+      // corps sur lequel il repose — celui de son depart, ou celui ou on l'a
+      // laisse. On retient sa place dans la scene au repos de ce corps, et on
+      // l'y remet a chaque image, dans le repere du moment : quel que soit le
+      // corps ancre, il reste ou on l'a pose. (Le seul depart ne suffisait
+      // pas : un vaisseau pose ailleurs, puis un teleporteur, et il repartait
+      // a l'ecart de vitesse des deux reperes.)
+      if (!ship.boarded && !ship.parked && ship.landed && ship.speed < LANDED_SPEED) {
+        const sol = bodies.find((b) => b.name === ship.groundBody);
+        if (sol && sol.bodyName) {
+          ship.parked = true;
+          ship.parkBody = sol.bodyName;
+          ship.parkGround = sol.name;
+          ship.parkRest = restingPoint([ship.pos.x + anchorPos[0], ship.pos.y + anchorPos[1],
+                                        ship.pos.z + anchorPos[2]],
+                                       decalageDuCorps(sol.bodyName, anchorPos));
+        }
+      }
+      if (ship.parked && (ship.parkRest || shipRest)) {
+        const p = pointVivant(ship.parkRest || shipRest,
+                              decalageDuCorps(ship.parkBody || "TimberHearth_Body", anchorPos));
+        ship.parkPos = { x: p[0] - anchorPos[0], y: p[1] - anchorPos[1], z: p[2] - anchorPos[2] };
+      }
+      const etaitStationne = ship.parked;
       ship.update(dt, bodies, input, { fwd, right, up }, world);
+      if (etaitStationne && !ship.parked) {
+        const f = ship.field;
+        journalVaisseau(`stationnement leve (pas ${dt.toFixed(3)} s, champ ${f ? f.body.name : "-"}`
+          + ` ${f ? f.magnitude.toFixed(1) : 0} u/s2, r ${Math.round(Math.hypot(ship.pos.x, ship.pos.y, ship.pos.z))})`);
+      }
       // L'allumage : un vaisseau pose ne decolle pas a l'appui, il s'allume une
       // seconde durant, et relacher annule (docs/66-allumage.md). Les trois
       // evenements du build sont ecoutes par `ShipThrusterAudio` ; ici ils
@@ -4201,6 +4571,8 @@ async function boot() {
       if (interactPressed && !dialogue.active) {
         if (ship.boarded) {
           ship.boarded = false;
+          // `ExitFlightConsole` : `_interactVolume.ResetInteraction()`.
+          interactables.reinitialiser(interactables.items.find(estPoste));
           const sonDeboucle = sonsUI.unbuckle();
           if (sonDeboucle) audio.playOneShot(sonDeboucle.file, { volume: sonDeboucle.volume });
           // `ExitFlightConsole` : la vue d'atterrissage tombe en se levant, et
@@ -4228,8 +4600,8 @@ async function boot() {
           const a = ship.axes;
           player.pos.x += a.up[0] * 4; player.pos.y += a.up[1] * 4;
           player.pos.z += a.up[2] * 4;
-        } else if (ship.distanceTo(player.pos) < SHIP_REACH &&
-                   pdata.knowsLaunchCodes) {
+        } else if (estPoste(focusPrecedent) && equipment.suit
+                   && interactables.appui(focusPrecedent)) {
           ship.boarded = true;
           const sonBoucle = sonsUI.buckleUp();
           if (sonBoucle) audio.playOneShot(sonBoucle.file, { volume: sonBoucle.volume });
@@ -4238,15 +4610,6 @@ async function boot() {
           // qu'il y en ait un — se lever en vue d'atterrissage laisse le
           // manche inverse.
           atterrissage.resetRoll();
-          // `OnEnterShip` : la protection du premier tour s'arrete la. Le jeu
-          // decide qu'une fois aux commandes, on joue pour de bon.
-          if (pdata.enterShip()) {
-            resources.invulnerable = false;
-            console.log("annonce : EnterShip — les degats portent desormais");
-          }
-          // PlayerResources.OnEnterShip : la sante est integralement restauree
-          resources.health = resources.maxHealth;
-          resources.dead = false;
           // S'asseoir prend du TEMPS : la duree du demi-tour est l'angle entre
           // l'avant du joueur et celui du siege, divise par cent degres par
           // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
@@ -4276,9 +4639,8 @@ async function boot() {
     const playerW = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
     sondeInteraction.repere = (it) => {
-      const sh = decalageDuCorps(it.body, anchorPos) || [0, 0, 0];
-      return [it.world[0] + sh[0] - anchorPos[0], it.world[1] + sh[1] - anchorPos[1],
-              it.world[2] + sh[2] - anchorPos[2]];
+      const w = pointVivant(it.world, decalageDuCorps(it.body, anchorPos));
+      return [w[0] - anchorPos[0], w[1] - anchorPos[1], w[2] - anchorPos[2]];
     };
     // --- dialogue ---
     //
@@ -4354,8 +4716,11 @@ async function boot() {
       // avec le vaisseau, et une zone du village tourne avec sa planete.
       focus = interactables.focus(player.pos, anchorPos, fwd,
                                   (it) => decalageDuCorps(it.body, anchorPos),
-                                  visesParRayon ? camera.position : null);
+                                  visesParRayon ? camera.position : null,
+                                  [up.x, up.y, up.z]);
     }
+    interactables.suivreFocus(focus);
+    focusPrecedent = focus;
     // L'oxygene ne se recharge plus seulement dans le vaisseau : les zones que
     // la scene pose comptent aussi. Sans aucune zone, on retrouve exactement le
     // comportement d'avant.
@@ -4454,17 +4819,34 @@ async function boot() {
         }
       } else if (interactPressed && !dialogue.active && focus
                  && (focus.kind === "zone" || focus.kind === "interact" || focus.kind === "terminal" || focus.kind === "observatoryMap")) {
+        // Un volume DEJA SERVI ne repond plus, jusqu'a `ResetInteraction`.
+        let appuiPris = true;
+        if (volumeGere(focus) && !estPoste(focus) && !interactables.appui(focus)) {
+          appuiPris = false;
+          interactPressed = false;
+        } else
+        // Le poste de pilotage sans combinaison : `ResetInteraction`, et rien
+        // d'autre — ni siege ni accroche. Avec, l'embarquement l'a deja pris.
+        if (estPoste(focus)) {
+          interactables.reinitialiser(focus);
+          interactPressed = false;
+        } else
         // La borne de lancement : actionne la tour ou refuse selon les codes
-        if (focus.kind === "terminal") {
+        if (focus.kind === "terminal" || focus.terminal) {
           const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
           if (r === "activate") {
             for (const a of ascenseurs) a.activateControls();
+            // `GetComponentInChildren<Light>().enabled = true` : la lumiere
+            // verte de la tour, eteinte dans la scene, s'allume.
+            placedLights.allumeScript("ElevatorLight", true);
             bipUI("PlayAffirmativeUISound");
             console.log("tour de lancement actionnee");
             interactPressed = false;
           } else if (r === "refuse") {
             bipUI("PlayNegativeUISound");
             console.log("tour de lancement : codes inconnus");
+            // `ResetInteraction` : sans les codes, la borne se laisse reessayer.
+            interactables.reinitialiser(focus);
             interactPressed = false;
           }
         } else if (focus.kind === "observatoryMap") {
@@ -4476,18 +4858,34 @@ async function boot() {
           accesCarte.depuisObservatoire();
           if (!solarMap.open) ouvrirCarte({ observatoire: true });
           interactPressed = false;
-        } else if (/satellite/i.test(focus.prompt || "") || focus.name === "ProjectorControls") {
-          // La console de projection du satellite
-          const c = consoles.toggle([player.pos.x + framePos[0],
-                                     player.pos.y + framePos[1],
-                                     player.pos.z + framePos[2]]);
-          if (fadeLight && fadeCible) {
-            const t = performance.now() / 1000;
-            const vise = (c && !c.flight) ? 0 : (fadeCible.intensity ?? 1);
-            fadeLight.fadeIntensity(vise, SATELLITE_FADE, t);
+        } else if (focus.kind === "zone" && focus.name === "ShipComputer"
+                   && focus.body === "Ship_Body") {
+          // `ShipComputer.OnPressInteract` -> `EnterShipComputer` : on s'assied
+          // (le point d'accrochage ci-dessous), l'ecran s'allume.
+          if (!computer.open) {
+            computer.enter();
+            const sb = sonsUI.shipComputerBoot();
+            if (sb) audio.playOneShot(sb.file, { volume: sb.volume });
+            console.log("annonce : EnterShipComputer");
           }
-          console.log(c ? `console prise : ${c.name}` : "console lachee");
-          interactPressed = false;
+        } else if (consoleDeZone(focus)) {
+          // LES DEUX CONSOLES DEPORTEES se prennent a leur zone — « Fly Model
+          // Ship », « Establish Satellite Link » — et se lachent par `Cancel`.
+          // Un second appui ne les lache pas : `OnPressInteract` n'a qu'un
+          // sens. Le portage les prenait et les lachait aussi par la touche
+          // `Landing Camera`, qui a pied est `Alt Probe` (docs/132).
+          const c = consoleDeZone(focus);
+          if (!consoles.active) {
+            consoles.active = c;
+            if (!c.flight) {
+              // `OnPressInteract` : la salle s'eteint en deux secondes, l'ecran
+              // passe au schema du satellite.
+              if (fadeLight && fadeCible) fadeLight.fadeIntensity(0, SATELLITE_FADE, performance.now() / 1000);
+              ecranSatellite(texteSat("diagram"));
+            }
+            console.log(`console prise : ${c.name}`);
+          }
+          if (!c.flight) interactPressed = false;
         } else if (/hatch/i.test(focus.prompt || "") && trappe.pressInteract()) {
           // `HatchController.OnPressInteract` : la zone « Open Hatch » ne pose
           // pas de point d'accrochage, elle RETIRE un collider. C'est la seule
@@ -4500,7 +4898,7 @@ async function boot() {
           }
           interactPressed = false;
         }
-        const point = pointsAttache.at(focus.world, 2);
+        const point = (!appuiPris || estPoste(focus)) ? null : pointsAttache.at(focus.world, 2);
         if (point && point !== siegePilotage) {
           lacetSiege = yaw;
           const demande = pointsAttache.attach(point, {
@@ -4581,6 +4979,10 @@ async function boot() {
         // pas non plus.
         surCible = { position: parle.position, body: parle.body };
         reglage = { offset: [0, 0.5, 0], followRate: 3, useZoom: true, zoomSpeed: 1 };
+      } else if (computer.open && cibleOrdinateur) {
+        // `ShipComputer.EnterShipComputer` : `LockOn(_targetPoint, 1, zoom, 8)`.
+        surCible = { position: cibleOrdinateur.position, body: cibleOrdinateur.body };
+        reglage = { offset: [0, 0, 0], followRate: 1, useZoom: true, zoomSpeed: 8 };
       } else if (consoles.active) {
         const c = consoles.active;
         // La console de vol regarde le VAISSEAU MODELE, le satellite son ECRAN.
@@ -4605,6 +5007,10 @@ async function boot() {
       // image — un interlocuteur pose sur une planete tourne avec elle.
       const cle = lu ? `lu:${lu.name}:${lu.world.join()}`
         : parle ? `parle:${parle.index}`
+        // L'ordinateur de bord avait sa cible et son reglage, mais pas de
+        // cle : le verrou ne se posait jamais, et l'on restait assis face au
+        // hublot, l'ecran hors du champ.
+        : computer.open && cibleOrdinateur ? "ordinateur"
         : consoles.active ? `console:${consoles.active.name}` : null;
       if (cle && verrouCible !== cle) {
         verrouCamera.lockOn(surCible, reglage);
@@ -4614,16 +5020,27 @@ async function boot() {
         verrouCible = null;
       }
       if (verrouCamera.locked) {
-        const dec = decalageDuCorps(surCible.body, anchorPos) || [0, 0, 0];
-        const versLa = [surCible.position[0] + dec[0] - playerW[0],
-                        surCible.position[1] + dec[1] - playerW[1],
-                        surCible.position[2] + dec[2] - playerW[2]];
+        // La cible portee par son corps, rotation comprise (`poseMobile`) :
+        // l'ecran de l'ordinateur tourne avec le vaisseau.
+        const cibleW = pointVivant(surCible.position, decalageDuCorps(surCible.body, anchorPos));
+        const versLa = [cibleW[0] - playerW[0], cibleW[1] - playerW[1], cibleW[2] - playerW[2]];
         const r = verrouCamera.update(dt, versLa, [fwd.x, fwd.y, fwd.z],
                                       [up.x, up.y, up.z],
                                       [right.x, right.y, right.z],
                                       Math.hypot(versLa[0], versLa[1], versLa[2]),
                                       reglagesCam.fov || 70);
         if (r) { yaw += r.yaw * Math.PI / 180; verrouFOV = r.fov; }
+        // Et le tangage, depuis l'OEIL (`UpdateLockOnTargeting`).
+        const oeilW = [camera.position.x + anchorPos[0], camera.position.y + anchorPos[1],
+                       camera.position.z + anchorPos[2]];
+        const vc = cibleW.map((x, i) => x - oeilW[i]);
+        const cf = camera.getDirection(BABYLON.Axis.Z), cu = camera.getDirection(BABYLON.Axis.Y),
+              cr = camera.getDirection(BABYLON.Axis.X);
+        const ecartY = lockPitchError(vc, [cf.x, cf.y, cf.z], [cu.x, cu.y, cu.z], [cr.x, cr.y, cr.z]);
+        // Le tangage du portage BAISSE le regard quand il croit.
+        pitch = borneTangage(pitch - ecartY * Math.PI / 180
+          * Math.min(1, verrouCamera.followRate * dt), cfgRegard);
+        window.__verrouTangage = { ecart: ecartY, pitch };
       } else verrouFOV = null;
     }
 
@@ -4658,12 +5075,18 @@ async function boot() {
     }
     // §7 L'EQUIPEMENT SE RAMASSE. Le paquetage du vaisseau donne les trois,
     // la combinaison de la grotte ne donne qu'elle. On appuie dessus, une fois.
-    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
+    //
+    // PAR SON VOLUME D'INTERACTION, et non a trois unites : `GearPickup` prend
+    // l'`InteractVolume` de ses enfants — la zone « Gear Up » du paquetage, ou
+    // l'on entre regard dans sa fenetre ; le recepteur « Suit Up » de la
+    // combinaison, qu'on vise a deux unites. Tous deux sont poses au point
+    // meme du ramassage (docs/132).
+    if (interactPressed && !dialogue.active && !(ship && ship.boarded) && focus) {
       for (const p of pickups) {
-        const q = restingPoint(playerW, decalageDuCorps(p.body, anchorPos));
-        const d = Math.hypot(q[0] - p.position[0], q[1] - p.position[1],
-                             q[2] - p.position[2]);
-        if (d > GEAR_REACH) continue;
+        if (focus.body !== p.body) continue;
+        const d = Math.hypot(focus.world[0] - p.position[0], focus.world[1] - p.position[1],
+                             focus.world[2] - p.position[2]);
+        if (d > 0.05) continue;
         const gagne = equipment.pickUp(p);
         if (gagne.length) {
           console.log(`equipement : ${gagne.join(", ")}`);
@@ -4783,13 +5206,14 @@ async function boot() {
       // distance n'aurait donne : la minicarte s'eteint sur la lune quantique,
       // dont le secteur est un `MajorSector` nu (docs/82-minicarte.md).
       if (secMaj !== minimap.sector) minimap.switchMajorSector(secMaj);
-      const enCabine = !!(ship && ship.boarded);
+      // `Minimap.OnEnterShip` : la trappe franchie, pas le siege.
+      const enCabine = !!(trappe && trappe.inside) || !!(ship && ship.boarded);
       if (enCabine !== minimap.insideShip) {
         if (enCabine) minimap.enterShip(); else minimap.exitShip();
       }
       // `Minimap` dit si la carte existe, `MinimapHUD` si on la voit : deux
       // composants dans le build, deux appels ici.
-      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden && !vueCarte.open,
+      minimap.showHUD(minimap.allowVisibility({ helmetHUD: !guiMode.hidden && !vueCarte.open && !enVueAtterrissage(),
                                                 hasMinimap: equipment.minimap }));
       if (minimap.on && secMaj) {
         // Tout se compare AU REPOS du secteur : c'est le seul repere ou sa
@@ -4836,8 +5260,6 @@ async function boot() {
       //
       // Une console a camera deportee se prend en main de la meme facon qu'un
       // interactif : elle emprunte donc la meme invite, avec son nom.
-      const nearConsole = (!focus && !consoles.active && consoles.count)
-        ? consoles.nearest(playerW) : null;
       // §PNJ UN PERSONNAGE A PORTEE S'ANNONCE AU CENTRE, comme un objet vise.
       // Il ne se disait qu'en fin du bandeau d'etat — lequel, au doigt, tient
       // sur une ligne coupee aux 60 % de l'ecran : l'invite « parler a » y
@@ -4853,12 +5275,13 @@ async function boot() {
       const centre = (focus && dialogue.active) ? null
         // `InteractReceiver.Init("Repair", ...)` : l'invite du volume vise.
         : reparationVisee_ ? P("InteractVolume._screenPrompt", "Repair")
+        // `UpdatePromptDisplay` : plus d'invite une fois le volume servi.
+        : (focus && volumeGere(focus) && !interactables.inviteVisible(focus)) ? null
         : focus ? P("InteractVolume._screenPrompt",
-                    focus.prompt || focus.name)
+                    estPoste(focus) ? invitePoste() : (focus.prompt || focus.name))
         : (convo && !dialogue.active)
           ? P("InteractVolume._screenPrompt",
               `Parler a ${convo.character || convo.name}`)
-        : nearConsole ? P("InteractVolume._screenPrompt", `${nearConsole.name} (R)`)
         : null;
       prompts.set("center", (centre && !guiMode.hidden) ? [centre] : [], now);
 
@@ -4879,13 +5302,47 @@ async function boot() {
         const d = Math.hypot(modele.pos[0] - socle[0], modele.pos[1] - socle[1],
                              modele.pos[2] - socle[2]);
         for (const k of invitesConsoleModele(d)) left.push(P(`RemoteFlightConsole.${k}`));
+      } else if (consoles.active && !consoles.active.flight) {
+        // `SatelliteSnapshotController.OnPressInteract` : Leave, Take Rearview
+        // Snapshots, Take Snapshots, a gauche.
+        for (const k of ["_exitPrompt", "_rearviewPrompt", "_forwardPrompt"]) {
+          const q = P(`SatelliteSnapshotController.${k}`);
+          if (q) left.push(q);
+        }
+      } else if (computer.open) {
+        // `EnterShipComputer` : Cancel, Select, Navigate, a gauche.
+        for (const k of ["_cancelPrompt", "_selectPrompt", "_navigatePrompt"]) {
+          const q = P(`ShipComputer.${k}`);
+          if (q) left.push(q);
+        }
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
       } else if (ship && ship.boarded) {
-        left.push(P("ShipPromptController._exitPrompt"),
-                  P("ShipPromptController._ignitionPrompt"),
-                  P("ShipPromptController._mapPrompt"),
-                  P("ShipPromptController._autopilotPrompt"));
+        // `ShipPromptController.Update` (consoles.js) : ce que la situation
+        // permet, dans l'ordre ou `OnEnterFlightConsole` les a poses.
+        const cible = lockOn.current ? lockOn.current.body : null;
+        const dCible = cible
+          ? Math.hypot(cible.position[0] - ship.pos.x, cible.position[1] - ship.pos.y,
+                       cible.position[2] - ship.pos.z)
+          : Infinity;
+        const cadre = cible
+          ? autopilotDistances(declared.frames, cible.name,
+                               (cible.gravity && cible.gravity.upperSurfaceRadius) || 0)
+          : null;
+        const vc = (cible && cible.velocity) || [0, 0, 0];
+        const pose = !!ship.onPad;
+        for (const k of shipPrompts({
+          mapView: !!(solarMap && solarMap.open),
+          landingMode: !!atterrissage.mode,
+          allowLandingMode: allowLandingMode({ frame: cadre, landed: pose, distance: dCible }),
+          landed: pose, landingCam: !!atterrissage.on, playerCam: !atterrissage.on,
+          autopilotAvailable: autopilotAvailable({
+            arrival: cadre && cadre.declared ? cadre.arrival : 0, landed: pose, distance: dCible }),
+          flyingToDestination: !!(autopilot && autopilot.flying),
+          matchAvailable: !!cible && !pose,
+          matching: !!(autopilot && autopilot.matching),
+          localSpeed: Math.hypot(ship.vel.x - vc[0], ship.vel.y - vc[1], ship.vel.z - vc[2]),
+        })) left.push(P(`ShipPromptController.${k}`));
       } else {
         // §U LES INVITES DU SAC DORSAL N'EXISTENT QU'EN APESANTEUR, et les
         // trois poussees qu'a l'ENTRAINEMENT. Le portage les affichait des
@@ -4927,7 +5384,9 @@ async function boot() {
         // (docs/67-annonces.md).
         if (flashlightPromptVisible({
           on: flashlight.on, suit: equipment.suit,
-          inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
+          // `_inShip` : `OnEnterShip`, la trappe franchie — debout dans la
+          // cabine aussi, pas seulement assis (docs/132).
+          inShip: !!(trappe && trappe.inside) || !!(ship && ship.boarded), inMapView: solarMap.open,
           // `_satelliteCamMode` n'etait pas une valeur inconnue, elle etait a
           // deux lignes de la : la console du satellite EST l'une des deux
           // consoles deportees, et c'est celle qui n'est pas la console de vol.
@@ -4974,12 +5433,11 @@ async function boot() {
       if (autopilot && autopilot.engaged) bits.push(`pilote auto : ${autopilot.phase}`);
       if (ship) bits.push(ship.boarded
         ? `vaisseau : ${ship.speed.toFixed(0)} u/s — E pour sortir`
-        : (ship.distanceTo(player.pos) < SHIP_REACH ? "E pour embarquer"
+        : (estPoste(focus) && equipment.suit ? "E pour embarquer"
            : `vaisseau a ${ship.distanceTo(player.pos).toFixed(0)} u`));
       bits.push(`memoire ${dialogue.known}/${dialogue.total} · ${pdata.summary}`);
-      if (ship && !ship.boarded && !pdata.knowsLaunchCodes &&
-          ship.distanceTo(player.pos) < SHIP_REACH) {
-        bits.push("vaisseau verrouillé — parler au conservateur");
+      if (ship && !ship.boarded && estPoste(focus) && !equipment.suit) {
+        bits.push("combinaison requise pour s'asseoir aux commandes");
       }
       // La reparation : ce qui est en cours, et l'invite quand il y a a faire.
       if (ship && ship.boarded && ship.damage &&
@@ -5007,7 +5465,7 @@ async function boot() {
       if (player.fluid) bits.push(
         `dans ${player.fluid.volume.name} (${player.fluid.depth.toFixed(0)} u)`);
       if (zone) bits.push(`oxygene : ${zone.name}`);
-      if (consoles.active) bits.push(`console : ${consoles.active.name} — R pour lacher`);
+      if (consoles.active) bits.push(`console : ${consoles.active.name} — Q pour lacher`);
       if (marshmallow.gone) bits.push("guimauve perdue");
       else if (marshmallow.toast > 0) bits.push(
         `guimauve ${(marshmallow.toast * 100).toFixed(0)} %` +
@@ -5389,7 +5847,7 @@ async function boot() {
           body.computeWorldMatrix(true);
           const c = BABYLON.Vector3.TransformCoordinates(
             body.getWorldMatrix().getTranslation(), inv);
-          crust.update(dt, loop.fraction, [c.x, c.y, c.z], (f) => {
+          const detacheur = (f) => {
             f.node.computeWorldMatrix(true);
             const local = BABYLON.Vector3.TransformCoordinates(
               f.node.getWorldMatrix().getTranslation(), inv);
@@ -5412,7 +5870,17 @@ async function boot() {
                 if (debris) debris.swallow(f.node.name);
               },
             };
-          });
+          };
+          crust.update(dt, loop.fraction, [c.x, c.y, c.z], detacheur);
+          // `DebugBreakAllChildren.Update` (F10) : `AddDamage(_damageToAdd)`
+          // a chaque fragment sous les deux objets qui le portent.
+          if (casserCroute) {
+            casserCroute = false;
+            for (const d of (gameplay.placed || {}).DebugBreakAllChildren || []) {
+              const r = crust.endommager(d.name, (d.fields || {})._damageToAdd ?? 50, detacheur);
+              console.log(`mise au point : ${d.name} ${r || "tient"}`);
+            }
+          }
         }
       }
       blackHole.fragmentsDetached = crust.detached;
@@ -5432,18 +5900,33 @@ async function boot() {
          - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
     // Carte ouverte, c'est `MapCamera` qui fixe champ et plan proche.
     const fovLunette = telescope.update(dt, zoomAxe);
-    if (!vueCarte.open) camera.fov = fovLunette;
-    // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
-    // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
-    // image que l'assise, et la meme dependance a la cadence.
-    if (verrouFOV !== null && !telescope.active && !vueCarte.open) {
-      const vise = verrouFOV * Math.PI / 180;
-      camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
+    // `FirstPersonCameraController.UpdateFieldOfView` : UN champ, qui glisse
+    // vers sa cible, `Lerp(fov, _targetFOV, _zoomRate x deltaTime)`. Le
+    // verrouillage pose la cible — `max(500 / d, 20)` — a SA vitesse (8 a
+    // l'ordinateur de bord), et le relacher la ramene au champ initial a 2
+    // (`ResetTargetFieldOfView(2)`). Le portage repartait chaque image du
+    // champ de la lunette et n'en faisait qu'un pas vers la cible, a une
+    // vitesse commune : a soixante images par seconde, le zoom de l'ordinateur
+    // ne depassait pas un degre et demi, la ou l'alpha remplit le champ de
+    // l'ecran.
+    if (!vueCarte.open && !enVueAtterrissage()) {
+      if (telescope.active) {
+        camera.fov = fovLunette;
+        fovCourant = null;
+      } else {
+        const initFov = (reglagesCam.fov || 70);
+        if (verrouFOV !== null) { cibleFov = verrouFOV; tauxFov = verrouCamera.zoomSpeed || LOCK_ON.zoomSpeed; }
+        else if (cibleFov !== null) { cibleFov = null; tauxFov = 2; }
+        if (fovCourant === null) fovCourant = fovLunette;
+        const vise = (cibleFov ?? initFov) * Math.PI / 180;
+        fovCourant += (vise - fovCourant) * Math.min(1, tauxFov * dt);
+        camera.fov = fovCourant;
+      }
     }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la
     // precision de profondeur sur tout le lointain.
-    if (!vueCarte.open) camera.minZ = telescope.nearClip;
+    if (!vueCarte.open && !enVueAtterrissage()) camera.minZ = telescope.nearClip;
     // La lunette a un corps et un verre dans le build : on les montre quand
     // elle sert, et le portage ne montrait rien. `TelescopeGUI.LateUpdate` la
     // fait GROSSIR avec le champ — quatre fois plus grande a soixante degres
@@ -5511,8 +5994,9 @@ async function boot() {
     // est ouverte, la touche porte le zoom : les deux ne peuvent pas servir
     // ensemble, et le build non plus ne les melange pas (`_telescopeInputs`
     // n'a pas la sonde).
+    // Aux consoles, la touche est a elles : `Probe` y photographie.
     const probeHeld = (cmds.held("Probe", etatCmd) || !!ax.probe)
-      && !telescope.active;
+      && !telescope.active && !consoles.active;
     // La sonde se RAMASSE (docs/46, lot 7) : `ExpeditionGear` la debloque, dans
     // la cabine du vaisseau. Sans elle, la touche ne lance rien — c'est la
     // progression du build, et le portage donnait tout au premier instant.
@@ -5522,12 +6006,12 @@ async function boot() {
     } else if (!probeHeld) {
       probeRefusee = false;
     }
-    // Le poste de pilotage est le seul « dedans » que ce portage ait : il n'a
-    // pas d'interieur de vaisseau. `IsInsideShip() && !AtFlightConsole()`
-    // refuse le tir ; ici les deux vont donc ensemble, et le refus ne se
-    // declenche jamais. On le cable quand meme, plutot que de le supprimer :
-    // c'est la ligne du build, et l'interieur viendra.
-    etatJoueur.insideShip = etatJoueur.atFlightConsole = !!(ship && ship.boarded);
+    // `IsInsideShip() && !AtFlightConsole()` refuse le tir de la sonde. Le
+    // portage n'avait longtemps que le poste pour « dedans », et le refus ne
+    // se declenchait jamais ; la cabine existe depuis (la trappe, `EnterShip`),
+    // et debout dans la cabine on ne tire plus.
+    etatJoueur.atFlightConsole = !!(ship && ship.boarded);
+    etatJoueur.insideShip = !!(trappe && trappe.inside) || etatJoueur.atFlightConsole;
     // Le lancer de rayon de la sonde : la fenetre de tir, puis l'ancrage.
     // Havok travaille dans le repere ancre, comme `player.pos` — les deux
     // parlent le meme espace, et rien n'a besoin d'etre reporte.
@@ -5555,7 +6039,9 @@ async function boot() {
     const champ = player.field;
     probes.update(dt,
       { launch: probeHeld && !!equipment.probe, retrieve: probeHeld,
-        alt: cmds.held("Alt Probe", etatCmd) && !consoles.count },
+        // `!consoles.count` : le NOMBRE de consoles, donc toujours vrai des
+        // qu'il y en a une dans le monde — le tir en arriere ne partait jamais.
+        alt: cmds.held("Alt Probe", etatCmd) && !consoles.active },
       { pos: [player.pos.x, player.pos.y, player.pos.z],
         forward: [fwd.x, fwd.y, fwd.z],
         playerForward: [fwd.x, fwd.y, fwd.z],
@@ -5632,24 +6118,36 @@ async function boot() {
       }
     }
     syncProbes();
-    // La vue deportee est la meme, avec une autre cible : une console prise en
-    // main passe devant la sonde, qui n'est pas ce qu'on regarde a ce
-    // moment-la.
-    const remoteView = consoles.view(anchorPos,
-      { ship, body: player.field && player.field.body });
+    // La vue de la sonde, et elle seule : les consoles deportees n'ont pas de
+    // camera a l'ecran dans le build — le modele se regarde par le verrou du
+    // regard, le satellite par ses instantanes sur l'ecran (docs/132).
     // La touche `altProbe` (R dans le build) montre l'arriere : c'est la seule
     // vue utile une fois la sonde plantee.
-    probeCam.update(guiMode.hidden ? null : (remoteView || probes.last),
-                    !remoteView && cmds.held("Alt Probe", etatCmd) && !consoles.count);
+    probeCam.update(guiMode.hidden ? null : probes.last,
+                    cmds.held("Alt Probe", etatCmd) && !consoles.active);
 
-    // --- connaissances : l'exploration s'enregistre en approchant d'un corps ---
-    if (player.field) {
-      const sec = SECTOR_OF[player.field.body.name];
-      const near = player.field.distance <
-        (player.field.body.gravity.upperSurfaceRadius || 200) * 3;
-      if (sec && near && pdata.saveExploredPlanet(sec)) {
-        console.log("secteur explore :", sec);
+    // --- connaissances : l'exploration s'enregistre en ENTRANT dans un secteur ---
+    //
+    // `ShipComputer.OnEnterSector`, abonne au `SectorDetector` du joueur :
+    // c'est l'ordinateur de bord qui tient le registre, et il le tient a
+    // l'entree des declencheurs de secteur. Le portage enregistrait un corps a
+    // trois rayons de sa surface, par une regle a lui.
+    {
+      const dedans = new Set();
+      for (const sct of majSecteurs) {
+        if (sct.secteur == null || !sct.volume) continue;
+        const pt = restingPoint(playerW, decalageDuCorps(sct.body, anchorPos));
+        if (insideVolume(sct, pt)) dedans.add(sct);
       }
+      for (const sct of dedans) {
+        if (secteursJoueur.has(sct)) continue;
+        const r = computer.entreSecteur(sct.secteur);
+        if (r) {
+          events.fire(r);
+          console.log(`annonce : ${r} — ${SECTORS[sct.secteur]}`);
+        }
+      }
+      secteursJoueur = dedans;
     }
     if (loop.loopCount > pdata.loopCount) pdata.setLoopCount(loop.loopCount);
 
@@ -5800,22 +6298,14 @@ async function boot() {
       mangeCetteImage = false;
       if (objet) syncBaton(objet, baton, chaleurBaton);
     }
-    if (!(ship && ship.boarded)) computer.open = false;
-    if (computerEl) {
-      computerEl.hidden = !computer.open || guiMode.hidden;
-      if (computer.open) {
-        const d = computer.display();
-        computerEl.textContent = "";
-        const nm = document.createElement("div");
-        nm.className = "ow-computer-name";
-        nm.textContent = d.name;
-        const ds = document.createElement("div");
-        ds.className = "ow-computer-desc";
-        ds.textContent = d.description;
-        computerEl.appendChild(nm);
-        computerEl.appendChild(ds);
-      }
+    if (!ecranPret && (++essaisEcran % 30 === 0)) ecranPret = ecranSatellite(texteSat("splash"));
+    // Assis a l'ordinateur, ou pas d'ordinateur : se lever autrement (la mort,
+    // la boucle) l'eteint aussi.
+    if (computer.open && !(pointsAttache.current && pointsAttache.current.name === "ShipComputer")) {
+      computer.open = false;
     }
+    // L'ecran de la cabine : la boite HTML qui le remplacait est partie.
+    ecranOrdi.update(dt, computer, suivreEcran);
 
     // Etat de l'interface tactile : un menu ouvert sort la croix et suspend le
     // pilotage, la carte laisse ses gestes au canvas, la combinaison affiche le jetpack.
@@ -6433,7 +6923,9 @@ async function boot() {
     // `HUDCameraScript.OnSwitchActiveCamera` : si la camera active n'est pas
     // `MainCamera` — la carte —, la camera du casque s'eteint, et avec elle
     // jauges, silhouette de la combinaison et minicarte.
-    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden && !vueCarte.open);
+    // `HUDCameraScript.OnSwitchActiveCamera` : hors de `MainCamera` — la carte,
+    // la camera d'atterrissage —, le casque s'eteint.
+    if (resHUD) resHUD.setHelmetOn(casque.worn && !guiMode.hidden && !vueCarte.open && !enVueAtterrissage());
     {
       const euler = ((-pitch * 180 / Math.PI) % 360 + 360) % 360;
       casque.update(dt, input.right || 0, 0, euler);
@@ -6479,11 +6971,8 @@ async function boot() {
       // annonce `EnterShip` ; sortir n'annonce que `ExitShip`, et la laisse
       // ouverte (docs/116-trappe.md).
       if (trappe.data.volume) {
-        const dec = decalageDuCorps(trappe.data.body, anchorPos) || [0, 0, 0];
-        const d = Math.hypot(
-          playerWorld.x - trappe.data.position[0] - dec[0],
-          playerWorld.y - trappe.data.position[1] - dec[1],
-          playerWorld.z - trappe.data.position[2] - dec[2]);
+        const c = pointVivant(trappe.data.position, decalageDuCorps(trappe.data.body, anchorPos));
+        const d = Math.hypot(playerWorld.x - c[0], playerWorld.y - c[1], playerWorld.z - c[2]);
         const franchi = trappe.setInside(d <= trappe.data.volume.radius);
         // `_hatchObject.SetActive` : ouvrir RETIRE le collider, il n'y a pas
         // d'animation. On le cherche dans le modele du vaisseau sous le nom
@@ -6494,6 +6983,10 @@ async function boot() {
             ? ship.node.getChildren((m) => m.name === trappe.data.hatchObject, false)[0]
             : null;
           if (n && n.setEnabled) n.setEnabled(trappe.collider);
+          // Et le collider anime qu'il porte : plus de collision, trappe ouverte.
+          for (const c of colliderTrappe) {
+            try { c.shape.filterCollideMask = trappe.collider ? 0xffffffff : 0; } catch (e) { /* sans filtre */ }
+          }
           noeudTrappeOn = trappe.collider;
           if (!n && !trappeSansNoeud) {
             trappeSansNoeud = true;
@@ -6505,6 +6998,22 @@ async function boot() {
           const clip = (events.of("HatchController") || { clips: {} })
             .clips._closeHatchClip;
           if (franchi === "entre" && clip) audio.playOneShot(clip);
+          // `CloseHatch` : `_interactVolume.ResetInteraction()`.
+          if (franchi === "entre") {
+            interactables.reinitialiser(interactables.items.find((i) => i.kind === "zone"
+              && i.name === "HatchControls"));
+            // `EnterShip` part de la TRAPPE (`HatchController.OnEntry`), pas du
+            // siege, et deux ecouteurs y repondent. `PlayerData.OnEnterShip` :
+            // la protection du premier tour s'arrete la. Le portage les
+            // declenchait en s'asseyant (docs/132).
+            if (pdata.enterShip()) {
+              resources.invulnerable = false;
+              console.log("annonce : EnterShip — les degats portent desormais");
+            }
+            // `PlayerResources.OnEnterShip` : `_currentHealth = _maxHealth`.
+            resources.health = resources.maxHealth;
+            resources.dead = false;
+          }
           trappe.drain();
           for (const e of trappe.events.splice(0)) {
             console.log(`annonce : ${e}`);
@@ -6663,7 +7172,8 @@ async function boot() {
         terminalItem.prompt = " Enter Launch Codes";
         terminalItem.disabled = false;
       } else {
-        terminalItem.prompt = null;
+        // `LaunchTerminal.Start` : `Init(" Requires Launch Codes")`.
+        terminalItem.prompt = " Requires Launch Codes";
         terminalItem.disabled = false;
       }
     }
@@ -6671,31 +7181,9 @@ async function boot() {
       zoneGearUp.disabled = equipment.suit;
     }
 
-    // `LaunchTerminal.OnPressInteract` : avec les codes, un son affirmatif et
-    // `ActivateLaunchTower` ; sans, un son negatif et la borne se remet a
-    // disposition. Elle ne sert qu'UNE fois — le build desactive son volume
-    // d'interaction.
-    if (interactPressed && !dialogue.active && !(ship && ship.boarded)) {
-      for (const b of bornesTour) {
-        const q = restingPoint(playerW, decalageDuCorps(b.body, anchorPos));
-        const d = Math.hypot(q[0] - b.position[0], q[1] - b.position[1],
-                             q[2] - b.position[2]);
-        if (d > GEAR_REACH) continue;
-        const r = terminal.pressInteract(pdata.knows("knowsLaunchCodes"));
-        if (r === "activate") {
-          // `LaunchElevatorController.OnActivateLaunchTower`.
-          for (const a of ascenseurs) a.activateControls();
-          bipUI("PlayAffirmativeUISound");
-          console.log("tour de lancement actionnee");
-          interactPressed = false;
-        } else if (r === "refuse") {
-          bipUI("PlayNegativeUISound");
-          console.log("tour de lancement : codes inconnus");
-          interactPressed = false;
-        }
-        break;
-      }
-    }
+    // `LaunchTerminal.OnPressInteract` se traite avec l'objet VISE, plus haut.
+    // Une seconde voie l'actionnait ici a la seule proximite, sans regarder la
+    // borne : dans l'alpha, il faut la viser a deux unites (docs/132).
     // `LaunchElevatorController.OnTriggerEnter` : entrer dans la sphere de dix
     // unites alors que la cabine est en haut la renvoie en bas. Le seuil de 0,9
     // est ce qui empeche qu'elle reparte des qu'on approche du pied de la tour.
@@ -6740,6 +7228,8 @@ async function boot() {
         if (pointsAttache.current === elAttach) {
           pointsAttache.detach([0, 0, 0]);
         }
+        // `Elevator` a l'arrivee : `_interactVolume.ResetInteraction()`.
+        interactables.reinitialiser(zoneAscenseur);
         if (a.data.stopClip) audio.playOneShot(a.data.stopClip);
       }
     }
@@ -6751,9 +7241,9 @@ async function boot() {
     // poussee, la montee, la descente, le tangage, le lacet — et rien d'autre,
     // ni sonde ni carte.
     //
-    // La poussee est celle du VRAI vaisseau, faute d'un modele a lui : le
-    // build n'en pose aucun sur `ModelShip_Body`, et c'est dit ici plutot que
-    // presente comme mesure.
+    // La poussee est celle de SON `ThrusterModel` (`poussesModele`) : ce
+    // commentaire disait « celle du vrai vaisseau, faute d'un modele a lui »,
+    // longtemps apres que le modele eut recu le sien.
     let pousseeModele = [0, 0, 0];
     if (modele) {
       const auxCommandes = !!(consoles.active && consoles.active.flight);

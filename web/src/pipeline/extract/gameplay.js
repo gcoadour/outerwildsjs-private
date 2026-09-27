@@ -96,6 +96,9 @@ const PLACED = [
                 // `_components` les prend toutes (GetComponentsInChildren), et
                 // la plus proche du choc peut etre l'une d'elles.
                 "ShipComponent",
+                // L'ordinateur de bord : son `_targetPoint`, l'ecran que le
+                // regard vise quand on s'y assied (`LockOn(..., 1, zoom, 8)`).
+                "ShipComputer",
                 // Le pivot des tornades : une lente culbute dont la vitesse est
                 // TIREE au reveil, pas serialisee.
                 "TornadoPivotController",
@@ -356,6 +359,25 @@ export function extractGameplay(ctx) {
       }
     }
 
+    // LA TRAPPE EST UN COLLIDER. `_hatchObject` designe `Hatch_Collider`, un
+    // GameObject sans maillage dont le seul role est de barrer l'entree :
+    // `OpenHatch` le desactive. Le glTF n'emporte que de la geometrie, donc
+    // pas lui ; on en donne ici la forme et la pose (docs/132).
+    if (cls === "HatchController" && fields._hatchObject && fields._hatchObject.pathId) {
+      const hgid = fields._hatchObject.pathId;
+      if (ctx.transformOf.has(hgid)) {
+        const vol = ctx.volumeOf(hgid);
+        const [hpos, hrot] = ctx.world(hgid);
+        if (vol) {
+          entry.hatchCollider = {
+            name: ctx.name(hgid), volume: vol,
+            position: hpos.map((v) => Math.round(v * 1e4) / 1e4),
+            rotation: hrot.map((v) => Math.round(v * 1e6) / 1e6),
+          };
+        }
+      }
+    }
+
     // A QUI ce seuil appartient. `OWEffectVolume.Awake` prend ses
     // `EntrywayTrigger` par `GetComponentsInChildren` : le lien est dans la
     // HIERARCHIE, pas dans un champ, et le nom du corps porteur ne suffit pas
@@ -380,6 +402,15 @@ export function extractGameplay(ctx) {
       if (!v || typeof v !== "object" || !("pathId" in v) || !v.pathId) continue;
       const info = ctx.ownerInfo(v);
       if (info && info.name) (entry.targets ||= {})[k] = info;
+    }
+    // Et un TABLEAU de composants : l'ordre y est une donnee. `_locationData`
+    // de l'ordinateur de bord range les sept lieux du Soleil au Nomade, et
+    // `_locationIndex` (2 au depart) se lit dans cet ordre-la — pas dans celui
+    // de l'enumeration des secteurs, que le portage suivait.
+    for (const [k, v] of Object.entries(fields)) {
+      if (!Array.isArray(v) || !v.length || !v.every((x) => x && typeof x === "object" && "pathId" in x)) continue;
+      const noms = v.map((x) => (x.pathId ? (ctx.ownerInfo(x) || {}).name || null : null));
+      if (noms.some(Boolean)) (entry.listes ||= {})[k] = noms;
     }
     // Texte des objets lisibles, resolu depuis le TextAsset.
     if (cls === "ReadableObject") {

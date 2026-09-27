@@ -234,6 +234,8 @@ export function hatchControllers(gameplay) {
       // Le rayon du declencheur d'entree, lu dans le collider et non devine.
       volume: c.volume || null,
       hatchObject: (f._hatchObject || {}).name || null,
+      // Sa forme et sa pose, que le glTF n'emporte pas (docs/132).
+      hatchCollider: c.hatchCollider || null,
       openClip: (f._openHatchClip || {}).name || null,
       closeClip: (f._closeHatchClip || {}).name || null,
     };

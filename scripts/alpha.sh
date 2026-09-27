@@ -5,6 +5,8 @@
 #   scripts/alpha.sh start            lance l'alpha sur :99 (1280x720)
 #   ALPHA_CLAVIER=1 ... start         ... le regard aux fleches, la lunette a t,
 #                                     le verrou a g (scripts/alpha-clavier.mjs)
+#   ALPHA_CABINE=1 ... start          ... le joueur nait dans la cabine du vaisseau
+#                                     (scripts/alpha-cabine.mjs)
 #   scripts/alpha.sh shot <fichier>   capture l'ecran
 #   scripts/alpha.sh key <touche...>  envoie des touches (noms xdotool)
 #   scripts/alpha.sh clic <x> <y>     clic gauche tenu
@@ -30,6 +32,16 @@ case "${1:-}" in
       [ -f work/mainData.origine ] || cp "$DATA" work/mainData.origine
       node scripts/alpha-clavier.mjs work/mainData.origine work/mainData.clavier
       cp work/mainData.clavier "$DATA"
+    fi
+    LEVEL="${GAME}_Data/level0"
+    if [ -n "${ALPHA_CABINE:-}" ]; then
+      # Le joueur nait dans la cabine du vaisseau (scripts/alpha-cabine.mjs).
+      # `level0` n'est lu qu'au lancement d'une partie : l'original ne revient
+      # qu'a l'arret.
+      [ -f work/level0.origine ] || cp "$LEVEL" work/level0.origine
+      OW_BUILD="${GAME}_Data" node --max-old-space-size=6000 scripts/alpha-cabine.mjs \
+        work/level0.origine work/level0.cabine
+      cp work/level0.cabine "$LEVEL"
     fi
     LIBGL_ALWAYS_SOFTWARE=1 "$GAME" -screen-width "${ALPHA_W:-1280}" -screen-height "${ALPHA_H:-720}" \
       -screen-fullscreen 0 -logFile "$PWD/work/alpha.log" >/dev/null 2>&1 &
@@ -58,6 +70,8 @@ case "${1:-}" in
     xdotool mousemove "$2" "$3"; sleep 1
     xdotool mousedown 1; sleep "${ALPHA_TENUE:-0.4}"; xdotool mouseup 1
     ;;
-  stop) [ -f work/alpha.pid ] && kill "$(cat work/alpha.pid)" 2>/dev/null; rm -f work/alpha.pid ;;
+  stop)
+    [ -f work/alpha.pid ] && kill "$(cat work/alpha.pid)" 2>/dev/null; rm -f work/alpha.pid
+    [ -f work/level0.origine ] && cp work/level0.origine "${GAME}_Data/level0" || true ;;
   *) sed -n 2,15p "$0"; exit 1 ;;
 esac

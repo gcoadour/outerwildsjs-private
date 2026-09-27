@@ -210,6 +210,12 @@ export class AttachPoint {
   frame(shift = null) {
     if (this.live) return this.live;
     if (!shift) return { position: this.position, rotation: this.rotation };
+    // Un porteur qui tourne donne son passage complet (`frames.js`,
+    // `poseMobile`) : le siege de l'ordinateur suit alors l'assiette du
+    // vaisseau, et pas seulement sa position.
+    if (typeof shift.point === "function") {
+      return { position: shift.point(this.position), rotation: shift.rot(this.rotation) };
+    }
     return { position: [this.position[0] + shift[0], this.position[1] + shift[1],
                         this.position[2] + shift[2]], rotation: this.rotation };
   }

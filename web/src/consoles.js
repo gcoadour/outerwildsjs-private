@@ -5,7 +5,6 @@
 // chacun dans la scene.
 
 // @lit MarshmallowStick, ShipComputer, ShipComputerCamera, RemoteFlightConsole
-// @autrement ShipComputer : consultation des secteurs portee par current, move et zoom
 // L'ordinateur de bord, la lampe et la guimauve.
 
 import { radiationAt } from "./volumes.js";
@@ -35,18 +34,89 @@ export const MALLOW_EVENTS = {
  *
  * `_locationIndex` part a 2 et `_zoomLevel` a 1 dans le build ; le niveau 2 est
  * la fiche ouverte.
+ *
+ * L'ORDRE EST CELUI DE LA SCENE. `_locationData` range les sept lieux du
+ * Soleil au Nomade — Soleil, Hourglass Twins, Timber Hearth, Brittle Hollow,
+ * Giant's Deep, Dark Bramble, The Nomad — et `NameToIndex` le recopie en dur.
+ * Le portage les triait par numero de secteur : Timber Hearth restait bien le
+ * troisieme, mais les deux bouts etaient permutes, le Nomade a gauche et le
+ * Soleil a droite.
+ *
+ * LES NOMS AUSSI. `SectorData.Awake` en donne un a chaque lieu, avec ses
+ * espaces et son article — « Timber Hearth », « The Nomad », « Giant's Deep »
+ * —, et c'est lui que l'ecran affiche (`GetName`). Le nom d'enumeration
+ * (`GetLocationName`) ne sert qu'a interroger `PlayerData`. Le portage
+ * affichait le second : « TimberHearth ».
  */
 export const UNEXPLORED_NAME = "UNEXPLORED";
 export const UNEXPLORED_DESC = "---------";
 
+/** `SectorData.Awake`, par numero de secteur. */
+export const NOMS_LIEUX = {
+  1: "The Nomad", 2: "Hourglass Twins", 3: "Timber Hearth", 4: "Brittle Hollow",
+  5: "Giant's Deep", 6: "Dark Bramble", 8: "Sun",
+};
+
+/**
+ * `NameToIndex`, le repli quand la scene ne donne pas son ordre ; lu a
+ * l'envers, c'est `IndexToName` (0 -> Soleil, 6 -> Nomade), que rien
+ * n'appelle dans le build.
+ */
+const ORDRE_LIEUX = [8, 2, 3, 4, 5, 6, 1];
+
 export function shipRecords(gameplay) {
-  return ((gameplay.placed || {}).SectorData || [])
-    .map((r) => ({
-      sector: (r.fields || {})._sectorName ?? 0,
+  const placed = gameplay.placed || {};
+  const tous = (placed.SectorData || []).map((r) => {
+    const sector = (r.fields || {})._sectorName ?? 0;
+    return {
+      node: r.name || null,
+      sector,
+      name: NOMS_LIEUX[sector] ?? "",
       orthoSize: (r.fields || {})._orthoSize ?? 2,
       text: r.text || "",
-    }))
-    .sort((a, b) => a.sector - b.sector);
+    };
+  });
+  const ordre = ((((placed.ShipComputer || [])[0] || {}).listes) || {})._locationData;
+  if (ordre && ordre.length) {
+    const ranges = ordre.map((n) => tous.find((r) => r.node === n)).filter(Boolean);
+    if (ranges.length === tous.length) return ranges;
+  }
+  const rang = (r) => { const i = ORDRE_LIEUX.indexOf(r.sector); return i < 0 ? 99 : i; };
+  return tous.sort((a, b) => rang(a) - rang(b));
+}
+
+/**
+ * `ShipComputerCamera` : la camera de l'ecran.
+ *
+ * L'ecran n'est pas un texte pose sur une image : c'est une camera
+ * orthographique qui SE DEPLACE sur une carte du systeme en sprites
+ * (`MapSpace`), et une seconde, fixe, qui y ajoute les deux lignes de texte
+ * (`StaticCamera`, profondeur 1, sans effacer). `ShipComputer.Update` lui
+ * donne une cible a chaque image — le lieu courant, et une taille de 5 au
+ * premier niveau, celle du lieu (`_orthoSize`, 0,85 a 4) dans sa fiche —, et
+ * `Update` s'en rapproche :
+ *
+ *     d = cible - position ;  d -= Project(d, avant)
+ *     position += d x dt x 5
+ *     taille   += (tailleCible - taille) x dt x 5
+ *
+ * Une approche exponentielle, a cinq par seconde, dans le plan de la carte.
+ * La camera part de sa pose de scene — centree, taille 11,38, tout le systeme
+ * — et ne tourne que tant que l'ordinateur est allume : la premiere mise en
+ * route glisse du systeme entier vers Timber Hearth, les suivantes repartent
+ * de la ou l'on s'etait arrete.
+ */
+export const SUIVI_ECRAN = 5;
+export const TAILLE_SURVOL = 5;
+
+export function suivreEcran(etat, cible, dt, taux = SUIVI_ECRAN) {
+  if (!cible) return etat;
+  const k = dt * taux;
+  return {
+    x: etat.x + (cible.x - etat.x) * k,
+    y: etat.y + (cible.y - etat.y) * k,
+    taille: etat.taille + (cible.taille - etat.taille) * k,
+  };
 }
 
 export class ShipComputer {
@@ -58,15 +128,22 @@ export class ShipComputer {
     this.index = Math.min(2, Math.max(0, records.length - 1));
     this.zoom = 1;
     this.open = false;
+    // `_updateElementsRoot` : « database updated », allume quand un lieu se
+    // decouvre ordinateur eteint, eteint a la mise en route suivante.
+    this.misAJour = false;
   }
 
   get current() { return this.records[this.index] || null; }
 
-  name(rec) { return (this.names[rec.sector] || "?"); }
+  /** Le nom de l'ecran (`GetName`), le nom d'enumeration a defaut. */
+  name(rec) { return rec.name || this.names[rec.sector] || "?"; }
 
   revealed(rec) {
-    return !this.pdata || this.pdata.hasExplored(this.name(rec));
+    return !this.pdata || this.pdata.hasExplored(this.names[rec.sector] || "?");
   }
+
+  /** `EnterShipComputer` : l'avis de mise a jour s'eteint. */
+  enter() { this.open = true; this.misAJour = false; }
 
   move(dir) {
     // le jeu borne l'index, il ne boucle pas
@@ -86,20 +163,60 @@ export class ShipComputer {
     return null;
   }
 
+  /** `Cancel` : la fiche se referme, ou `ExitComputerConsole` au premier niveau. */
   cancel() {
     if (this.zoom === 2) { this.zoom = 1; return "retour"; }
     this.open = false;
     return "ferme";
   }
 
-  /** Deux lignes affichees, comme les deux TextMesh du terminal. */
+  /**
+   * `OnEnterSector` : le detecteur du joueur entre dans un secteur.
+   *
+   *     if (!HasExploredPlanet(nom)) {
+   *         SaveExploredPlanet(nom);
+   *         if (!enabled) { _updateElementsRoot actif ; logo eteint }
+   *         i = NameToIndex(nom);
+   *         if (i != -1) { Reveal ; _locationIndex = i ; "ComputerUpdated" }
+   *     }
+   *
+   * C'est l'ORDINATEUR qui enregistre l'exploration, et il le fait a l'entree
+   * d'un secteur — pas a trois rayons d'une surface, comme le portage le
+   * faisait de son cote. La Lune et l'epave (secteur 0) et la Lune quantique
+   * (7) n'ont pas d'indice : elles s'enregistrent sans rien changer a l'ecran.
+   *
+   * @returns "ComputerUpdated", ou null
+   */
+  entreSecteur(secteur) {
+    const nom = this.names[secteur];
+    if (!this.pdata || !nom || this.pdata.hasExplored(nom)) return null;
+    this.pdata.saveExploredPlanet(nom);
+    if (!this.open) this.misAJour = true;
+    const i = this.records.findIndex((r) => r.sector === secteur);
+    if (i < 0) return null;
+    this.index = i;
+    return COMPUTER_EVENTS.updated;
+  }
+
+  /** La cible de `ShipComputerCamera.SetTarget` pour cette image. */
+  cibleEcran() {
+    const r = this.current;
+    if (!r) return null;
+    return { node: r.node, taille: this.zoom === 2 ? r.orthoSize : TAILLE_SURVOL };
+  }
+
+  /**
+   * Les deux `TextMesh` de l'ecran. Au premier niveau, `Update` les recrit a
+   * chaque image ; la fiche, elle, n'est ecrite qu'a son ouverture — mais
+   * rien ne la change ensuite, et le resultat est le meme.
+   */
   display() {
     const r = this.current;
     if (!r) return { name: "", description: "" };
-    if (!this.revealed(r)) {
-      return { name: `<   ${UNEXPLORED_NAME}   >`, description: UNEXPLORED_DESC };
-    }
     if (this.zoom === 1) {
+      if (!this.revealed(r)) {
+        return { name: `<   ${UNEXPLORED_NAME}   >`, description: UNEXPLORED_DESC };
+      }
       return { name: `<   ${this.name(r)}   >`, description: "[records available]" };
     }
     return { name: this.name(r), description: r.text };
@@ -251,6 +368,66 @@ export function jetpackPrompts({
   }
   if (training && !targeted) return { matchVelocity: false, thrust: true };
   return rien;
+}
+
+/**
+ * Les invites du poste de pilotage : lesquelles, et dans quel ordre.
+ *
+ * @lit ShipPromptController
+ *
+ * `OnEnterFlightConsole` les pose TOUTES a gauche, dans cet ordre — sortie,
+ * decollage, carte, vue, pilote, accord de vitesse, atterrissage — et
+ * `Update` les rend toutes invisibles puis rallume ce que la situation
+ * permet. La colonne se remplit de bas en haut (`PromptManager.Update` :
+ * `hauteur - 100 - n x (h + 5)`), et l'ordre d'ajout est donc celui de bas
+ * en haut a l'ecran. Mesure dans l'alpha native, assis au sommet de la tour :
+ * « Toggle View », « View Map », « Liftoff », « Exit », de haut en bas
+ * (docs/132).
+ *
+ * Le portage posait sortie, decollage, carte et pilote, toujours les quatre :
+ * « Engage Autopilot » pose sur la tour, sans cible, et ni la vue ni
+ * l'atterrissage.
+ *
+ *   carte ouverte                       rien
+ *   pas en vue d'atterrissage, mais
+ *   `GetAllowLandingMode`               « Landing Mode »
+ *   pose                                carte (hors vue d'atterrissage),
+ *                                       sortie, vue, decollage
+ *   en vol, camera du joueur            pilote si `IsAutopilotAvailable` et
+ *                                       qu'il ne vole pas deja ; accord si
+ *                                       disponible, pas deja en cours, et
+ *                                       plus de 10 u/s relatives
+ *
+ * @returns les champs de `ShipPromptController`, dans l'ordre d'ajout
+ */
+export function shipPrompts({
+  mapView = false, landingMode = false, allowLandingMode = false,
+  landed = false, landingCam = false, playerCam = true,
+  autopilotAvailable = false, flyingToDestination = false,
+  matchAvailable = false, matching = false, localSpeed = 0,
+} = {}) {
+  if (mapView) return [];
+  const vis = new Set();
+  if (!landingMode && allowLandingMode) vis.add("_landingPrompt");
+  if (landed) {
+    if (!landingCam) vis.add("_mapPrompt");
+    vis.add("_exitPrompt"); vis.add("_toggleViewPrompt"); vis.add("_ignitionPrompt");
+  } else if (playerCam) {
+    if (!flyingToDestination && autopilotAvailable) vis.add("_autopilotPrompt");
+    if (!matching && matchAvailable && localSpeed > 10) vis.add("_matchVelocityPrompt");
+  }
+  return ["_exitPrompt", "_ignitionPrompt", "_mapPrompt", "_toggleViewPrompt",
+          "_autopilotPrompt", "_matchVelocityPrompt", "_landingPrompt"].filter((k) => vis.has(k));
+}
+
+/**
+ * `FlightConsole.IsAutopilotAvailable` : au poste, un referentiel vise qui
+ * permet le pilote (`_autopilotArrivalDistance > 0`), le vaisseau pas pose, et
+ * plus loin que la distance d'arrivee.
+ */
+export function autopilotAvailable({ auPoste = true, arrival = 0, landed = false,
+                                     distance = 0 } = {}) {
+  return !!auPoste && arrival > 0 && !landed && distance > arrival;
 }
 
 export function heatAt(emitters, world, shiftOf = null) {
@@ -440,32 +617,6 @@ export class RemoteConsoles {
     if (this.active) { this.active = null; return null; }
     this.active = this.nearest(world) || null;
     return this.active;
-  }
-
-  /**
-   * Ce que la camera deportee regarde, dans le repere courant.
-   *
-   * La console de vol suit le vaisseau et regarde devant lui ; le satellite
-   * reste ou il est et vise le corps le plus proche. Le format est celui d'une
-   * sonde, pour que `ProbeCamera` les affiche sans rien savoir d'elles.
-   *
-   * @param frame decalage monde -> repere courant
-   */
-  view(frame = [0, 0, 0], { ship = null, body = null } = {}) {
-    const c = this.active;
-    if (!c) return null;
-    if (c.flight) {
-      if (!ship) return null;
-      const v = [ship.vel.x, ship.vel.y, ship.vel.z];
-      const L = Math.hypot(...v);
-      return { pos: [ship.pos.x, ship.pos.y, ship.pos.z],
-               vel: L > 0.1 ? v : [0, 0, 1] };
-    }
-    const p = [c.position[0] - frame[0], c.position[1] - frame[1],
-               c.position[2] - frame[2]];
-    const t = body ? body.position : [0, 0, 0];
-    const d = [t[0] - p[0], t[1] - p[1], t[2] - p[2]];
-    return { pos: p, vel: Math.hypot(...d) > 1e-3 ? d : [0, 0, 1] };
   }
 }
 

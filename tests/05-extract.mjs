@@ -127,6 +127,28 @@ const gp = extractGameplay(ctx);
 console.timeEnd("gameplay");
 const n = (k) => (gp.placed[k] || []).length;
 check("objets interactifs", n("InteractReceiver"), 39);
+// L'ordinateur de bord range ses lieux du Soleil au Nomade (`_locationData`),
+// et c'est cet ordre que `_locationIndex` parcourt (docs/132).
+check("l'ordre des lieux de l'ordinateur de bord",
+      ((gp.placed.ShipComputer || [])[0] || {}).listes
+        ? gp.placed.ShipComputer[0].listes._locationData.join() : null,
+      "Sun_Data,HourglassTwins_Data,TimberHearth_Data,BrittleHollow_Data,"
+      + "GiantsDeep_Data,DarkBramble_Data,Nomad_Data");
+{
+  // Les `TextMesh` : neuf dans la scene, lus a la main et bornes par
+  // l'oracle de `byteSize`.
+  const { textesDeScene } = await import("../web/src/pipeline/extract/interface.js");
+  const textes = textesDeScene(ctx);
+  check("les TextMesh de la scene", textes.length, 9);
+  const t = (nom, parent) => textes.find((x) => x.name === nom && (!parent || x.parent === parent)) || {};
+  check("le nom de l'ecran : taille de caractere 1,92, ancre au centre",
+        [t("NameText").characterSize.toFixed(2), t("NameText").anchor, t("NameText").font].join(),
+        "1.92,4,Gill Sans MT");
+  check("la fiche : ancree en haut a gauche", [t("DescriptionText").anchor, t("DescriptionText").alignment].join(), "0,0");
+  check("l'avis de l'ecran eteint", t("UpdateText").text, "database updated");
+  check("la notification du tir refuse, en casse mixte",
+        t("Text", "ProbeLaunchWindowObstructed").text, "Launch Window Obstructed");
+}
 // Ce que vise le rayon de `FirstPersonManipulator` : le collider du recepteur,
 // et ce que vise `ReferenceFrameTracker` : les spheres du calque 19 (docs/132).
 check("chaque recepteur porte son collider",
@@ -543,6 +565,18 @@ console.log("     champs avec volume mesure:", volumes,
     check("le point d'apparition du vaisseau est 160 plus haut", Math.round(dist(envol.position) - dist(sb.position)) > 150, true);
   }
 
+  // LA TRAPPE EST UN COLLIDER sans maillage : l'extraction en donne la forme,
+  // que le glTF n'emporte pas (docs/132).
+  {
+    const tr = (gp.placed.HatchController || [])[0];
+    const hc = tr && tr.hatchCollider;
+    console.log("  trappe :", JSON.stringify(hc));
+    check("la trappe barre l'entree : un collider nomme Hatch_Collider", hc && hc.name, "Hatch_Collider");
+    check("de forme connue", !!(hc && hc.volume && ["box", "sphere", "capsule", "mesh"].includes(hc.volume.shape)), true);
+    check("a moins de trois unites des commandes de la trappe",
+          Math.hypot(...hc.position.map((v, i) => v - tr.position[i])) < 3, true);
+  }
+
   // LES FISSURES. Chaque piece porte un `DS_Decals` que `Awake` eteint et que
   // le premier coup rallume ; le moteur doit trouver la piece dans le glTF, et
   // c'est l'identifiant pose par l'exportateur qui la lui designe.
@@ -557,6 +591,11 @@ console.log("     champs avec volume mesure:", volumes,
     return c.name === "Decals" || fissureSous(c);
   });
   check("et une fissure sous chacun", noeudsPiece.every(fissureSous), true);
+  // Et la trappe, collider sans maillage a voir : emise, cachee, solide.
+  const trappeNoeud = vg.gltf.nodes.find((n) => n.name === "Hatch_Collider");
+  check("le glTF du vaisseau porte Hatch_Collider, un maillage cache mais solide",
+        !!trappeNoeud && trappeNoeud.mesh !== undefined && !!(trappeNoeud.extras && trappeNoeud.extras.hidden)
+          && !(trappeNoeud.extras && trappeNoeud.extras.noCollide), true);
 }
 
 // --- ce que l'audit a mesure, garde en invariant ---
@@ -1830,6 +1869,39 @@ check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");
+// Les touches de mise au point (web/src/debug.js) : `DebugInputManager` est
+// pose mais ETEINT, et son `Update` ne tourne jamais — F2 ou F12 ne font rien
+// dans l'alpha, mesure dans l'alpha native (docs/132). `GUIMode` (F1) et les
+// deux `DebugBreakAllChildren` (F10), eux, sont allumes.
+{
+  const actifs = (cls) => [...ctx.behaviours([cls])].map(({ obj }) => {
+    const h = ctx.env.read(obj) || ctx.env.monoHeader(obj);
+    return h.m_Enabled ? 1 : 0;
+  }).join();
+  check("DebugInputManager pose et eteint", actifs("DebugInputManager"), "0");
+  check("GUIMode allume (F1)", actifs("GUIMode"), "1");
+  check("DebugBreakAllChildren allumes (F10)", actifs("DebugBreakAllChildren"), "1,1");
+  const { DEBUG_INPUT_MANAGER_ACTIF } = await import("../web/src/debug.js");
+  check("le portage suit le drapeau de la scene", DEBUG_INPUT_MANAGER_ACTIF, false);
+}
+
+// Les panneaux de la visiere (docs/132) : les jauges en haut a droite, la
+// minicarte dessous, tous deux tournes d'un demi-tour — l'oxygene a gauche.
+{
+  const { panneauRessources } = await import("../web/src/pipeline/extract/interface.js");
+  const { PANNEAU_REPLI, MINIMAP_REPLI } = await import("../web/src/hud.js");
+  const r = panneauRessources(ctx), m = panneauRessources(ctx, "MinimapHUD");
+  const arr = (v) => v.map((x) => +x.toFixed(3)).join();
+  check("ResourcesHUD : devant la camera du HUD, au-dessus et a droite",
+        arr(r.position), "0.16,0.084,0.136");
+  check("... tourne d'un demi-tour, champ de 80 degres", [r.mirrorX, r.fov].join(), "true,80");
+  check("MinimapHUD : sous les jauges", arr(m.position), "0.162,-0.075,0.136");
+  check("les replis du moteur sont ces mesures",
+        [arr(PANNEAU_REPLI.position), arr(PANNEAU_REPLI.scale), arr(MINIMAP_REPLI.position),
+         arr(MINIMAP_REPLI.scale)].join("|"),
+        [arr(r.position), arr(r.scale), arr(m.position), arr(m.scale)].join("|"));
+}
+
 const mctx = new ExtractContext(env, u, "mainData", engineTypes);
 const mscene = extractScene(mctx);
 console.timeEnd("mainData");

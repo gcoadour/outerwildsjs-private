@@ -92,21 +92,19 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   font: 30px/1.2 "OW Dialogue", ui-monospace, Menlo, monospace;
 }
 .ow-res {
-  /* a droite : les invites du jeu occupent deja le bas a gauche */
-  position: absolute; right: 28px; bottom: 96px;
-  width: 300px; height: 170px;
+  /* la ou la camera du HUD voit `ResourcesHUD` : en haut a droite
+     (rectPanneau, hud.js) ; les valeurs par defaut sont celles du 16:9 */
+  position: absolute;
+  left: var(--res-left, 79.6%); top: var(--res-top, 0%);
+  width: var(--res-width, 19.75%); height: var(--res-height, 26.3%);
 }
 .ow-res > * { position: absolute; }
-.ow-health { object-fit: contain; object-position: bottom; opacity: .95; }
+.ow-health { object-fit: fill; }
+/* les quads du panneau entier : le fond noir et les deux cadres */
+.ow-res-plein { inset: 0; width: 100%; height: 100%; object-fit: fill; }
 .ow-bar { overflow: visible; }
-/* le degrade s'etire avec la jauge, comme le quad 3D du jeu */
-.ow-bar-fill {
-  position: absolute; left: 6%; bottom: 0; width: 88%; height: 100%;
-  object-fit: fill;
-}
-.ow-bar-frame {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill;
-}
+/* un aplat, mis a l'echelle depuis son bas comme le quad 3D du jeu */
+.ow-bar-fill { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; }
 .ow-vignette {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: fill; transition: opacity .12s linear;
@@ -207,8 +205,10 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 }
 /* Minimap : un globe vu depuis la direction du joueur */
 #minimap {
-  position: fixed; right: 28px; top: 24px; z-index: 7;
-  width: 168px; height: 168px; pointer-events: none;
+  /* `MinimapHUD`, sous les jauges (rectPanneau, hud.js) : 16:9 par defaut */
+  position: fixed; z-index: 7; pointer-events: none;
+  left: var(--mm-left, 80.1%); top: var(--mm-top, 65.4%);
+  width: var(--mm-width, 19.75%); height: var(--mm-height, 35.1%);
 }
 /* Icone de manette d'une invite, posee avant le texte comme dans le jeu */
 .ow-prompt-btn {
@@ -233,21 +233,6 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 }
 .ow-settings-title { font-size: 42px; }
 
-/* Ordinateur de bord : deux zones de texte, comme les deux TextMesh du terminal */
-#computer {
-  position: fixed; left: 50%; top: 22%; transform: translateX(-50%);
-  z-index: 7; pointer-events: none; width: min(620px, 74vw);
-  padding: 22px 28px; box-sizing: border-box;
-  background: rgba(4, 12, 10, .93);
-  border: 1px solid rgba(120, 230, 190, .3);
-  font-family: "OW Dialogue", ui-monospace, monospace; color: #9fe8c8;
-}
-.ow-computer-name {
-  font-size: 26px; letter-spacing: .06em; text-align: center;
-  padding-bottom: 10px; margin-bottom: 12px;
-  border-bottom: 1px solid rgba(120, 230, 190, .22);
-}
-.ow-computer-desc { font-size: 17px; line-height: 1.6; white-space: pre-wrap; }
 
 /* --- Ecran d'accueil ------------------------------------------------------
    Il occupe la page tant que l'extraction n'a pas eu lieu ; le canvas du
@@ -563,7 +548,7 @@ body.touch .ow-res {
   width: 148px; height: 84px;
 }
 body.touch #minimap {
-  right: calc(8px + env(safe-area-inset-right)); top: 46px;
+  left: auto; right: calc(8px + env(safe-area-inset-right)); top: 46px;
   width: 92px; height: 92px;
 }
 body.touch .ow-warn { font-size: 13px; line-height: 16px; margin-left: 24px; }
@@ -581,11 +566,6 @@ body.touch .ow-prompts-left {
 /* Au doigt, la mise en page reste celle du jeu : `dispositionDialogue` borne
    l'échelle avant le losange d'action et grandit lignes et bouton jusqu'à la
    taille d'un doigt (docs/95-pnj-au-doigt.md). */
-body.touch #computer {
-  top: 12%; width: min(560px, 68vw); padding: 12px 16px;
-}
-body.touch .ow-computer-name { font-size: 18px; padding-bottom: 6px; margin-bottom: 8px; }
-body.touch .ow-computer-desc { font-size: 13px; line-height: 1.45; }
 
 /* Menu ou carte ouverte : les commandes de vol sont rangees par la couche
    elle-meme (voir setContext), et les lignes d'etat laissent la place a la

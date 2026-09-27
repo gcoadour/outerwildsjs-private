@@ -130,11 +130,44 @@ export class Reveil {
   reset() { this.arme = false; }
 }
 
-/** Hauteur des yeux au-dessus du centre du corps du joueur. */
-export const EYE_HEIGHT = 1.2;
-
 /** Rayon du corps du joueur, tel que `createPlayerBody` le construit. */
 export const PLAYER_RADIUS = 0.6;
+
+/**
+ * Le corps du build : une capsule de rayon 0,5 et de hauteur 2 sur
+ * `Player_Body`, centree sur l'origine du corps — le centre est donc a UNE
+ * unite du sol. `PlayerCamera` est a (0 ; 0,9 ; 0,15) dans ce corps : les
+ * yeux a 1,9 du sol.
+ */
+export const CENTRE_CAPSULE = 1;
+export const YEUX_CAPSULE = 0.9;
+
+/**
+ * Hauteur des yeux au-dessus du centre du corps du joueur.
+ *
+ * Le portage a une sphere de 0,6 et non la capsule : son centre est a 0,6 du
+ * sol, et les yeux doivent en etre a 1,3 pour tomber a 1,9 comme dans le
+ * build. Ils etaient a 1,2 — un dixieme trop bas debout, et trois dixiemes
+ * trop HAUT une fois assis, parce qu'un point d'accrochage pose le CENTRE du
+ * corps (voir `DECALAGE_ASSISE`).
+ */
+export const EYE_HEIGHT = CENTRE_CAPSULE - PLAYER_RADIUS + YEUX_CAPSULE;
+
+/**
+ * Et `PlayerCamera` est 0,15 DEVANT le centre du corps, dans son avant
+ * horizontal. Le portage mettait l'oeil a l'aplomb : assis a l'ordinateur, il
+ * etait 15 centimetres plus loin de l'ecran que dans l'alpha, et l'ecran
+ * paraissait un dixieme plus petit a zoom egal (docs/132).
+ */
+export const AVANT_CAMERA = 0.15;
+
+/**
+ * `PlayerAttachPoint.AttachPlayer` pose le transform du joueur — le centre de
+ * la capsule — sur le point. Le centre de la sphere du portage est 0,4 plus
+ * bas, dans le repere du point : c'est ce qui met les yeux a 0,9 au-dessus du
+ * point, et non a 1,2. Assis a l'ordinateur, l'ecran passait sous le regard.
+ */
+export const DECALAGE_ASSISE = [0, PLAYER_RADIUS - CENTRE_CAPSULE, 0];
 
 /**
  * Garde entre le sol et le bas du corps du joueur.

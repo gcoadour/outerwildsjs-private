@@ -135,6 +135,27 @@ function applySelfIllum(BABYLON, mat) {
   if ("transparencyMode" in mat) {
     mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATESTANDBLEND;
   }
+  // L'EMISSION EST TEINTEE. Le programme de `Self-Illumin/Transparent` rend
+  //
+  //     c = tex x _Color ; sortie = c x (ambiant + 2 N.L) + c x lightStrength
+  //
+  // et l'emissif du portage valait un blanc pur : `_Color` et le facteur 2
+  // se perdaient. L'entrelacement de l'ecran de l'ordinateur (0 ; 1 ; 0,75,
+  // alpha 0,11) sortait noir au lieu de sarcelle, le logo de Ventures (0,515)
+  // plein blanc (docs/132). Le diffus passe au noir : il ne resterait qu'a
+  // ajouter l'eclairage, que ces surfaces n'ont pas ici.
+  // `AlphaTest Greater 0`, comme `applyLitAlpha` : le seuil par defaut de
+  // Babylon (0,4) jetait tout ce qui etait moins opaque — l'entrelacement de
+  // l'ecran, a 0,11, ne se dessinait pas du tout.
+  if ("alphaCutOff" in mat) mat.alphaCutOff = 1 / 255;
+  const ex = (mat.metadata && mat.metadata.gltf && mat.metadata.gltf.extras) || {};
+  const force = typeof ex.lightStrength === "number" ? ex.lightStrength : 2;
+  const c = mat.diffuseColor || mat.albedoColor || null;
+  if (c && "emissiveColor" in mat) {
+    mat.emissiveColor = new BABYLON.Color3(Math.min(1, c.r * force), Math.min(1, c.g * force),
+                                           Math.min(1, c.b * force));
+    if (mat.diffuseColor) mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+  }
   return mat;
 }
 

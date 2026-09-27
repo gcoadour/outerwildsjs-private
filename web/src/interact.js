@@ -12,6 +12,7 @@
 // de ce lot-la.
 
 import { zoneFaced, interactZones } from "./gear.js";
+import { pointVivant, rotationVivante } from "./frames.js";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
@@ -22,6 +23,76 @@ function qrot(q, v) {
   return [vx + w * tx + y * tz - z * ty,
           vy + w * ty + z * tx - x * tz,
           vz + w * tz + x * ty - y * tx];
+}
+
+/**
+ * Le `PlayerDetector` : la capsule posee sur `Player_Body`, rayon 0,5, hauteur
+ * 2, centree. C'est ELLE qui entre dans une `InteractZone` (`OnTriggerEnter`,
+ * `collider.tag == "PlayerDetector"`) — pas l'oeil, pas les pieds.
+ */
+export const DETECTEUR = { rayon: 0.5, hauteur: 2 };
+
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+/** Les points les plus proches de deux segments, et leur distance. */
+function distSegments(p1, q1, p2, q2) {
+  const d1 = sub(q1, p1), d2 = sub(q2, p2), r = sub(p1, p2);
+  const a = dot3(d1, d1), e = dot3(d2, d2), f = dot3(d2, r);
+  let s = 0, t = 0;
+  if (a <= 1e-9 && e <= 1e-9) return Math.hypot(...r);
+  if (a <= 1e-9) { t = Math.max(0, Math.min(1, f / e)); }
+  else {
+    const c = dot3(d1, r);
+    if (e <= 1e-9) { s = Math.max(0, Math.min(1, -c / a)); }
+    else {
+      const b = dot3(d1, d2), den = a * e - b * b;
+      s = den > 1e-9 ? Math.max(0, Math.min(1, (b * f - c * e) / den)) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
+      else if (t > 1) { t = 1; s = Math.max(0, Math.min(1, (b - c) / a)); }
+    }
+  }
+  return Math.hypot(...sub(add(p1, mul(d1, s)), add(p2, mul(d2, t))));
+}
+
+/**
+ * Le joueur est-il DANS le volume d'une zone ? C'est `_isPlayerInsideVolume`
+ * d'`InteractZone` : la capsule du `PlayerDetector` touche le declencheur.
+ *
+ * @param pos, rot, vol  la zone : position, rotation, collider extrait
+ * @param joueur         centre de `Player_Body`
+ * @param haut           verticale du joueur (axe de sa capsule)
+ */
+export function joueurDansVolume(pos, rot, vol, joueur, haut = null, det = DETECTEUR) {
+  if (!vol) return false;
+  const q = rot || [0, 0, 0, 1];
+  const c = vol.center ? add(pos, qrot(q, vol.center)) : pos;
+  const n = haut ? Math.hypot(...haut) || 1 : 1;
+  const u = haut ? mul(haut, 1 / n) : [0, 0, 0];
+  const demiDet = Math.max(0, det.hauteur / 2 - det.rayon);
+  const a0 = add(joueur, mul(u, -demiDet)), a1 = add(joueur, mul(u, demiDet));
+  if (vol.shape === "sphere") {
+    return distSegments(a0, a1, c, c) <= (vol.radius || 0) + det.rayon;
+  }
+  if (vol.shape === "capsule") {
+    const axe = [0, 0, 0]; axe[vol.axis ?? 1] = 1;
+    const ax = qrot(q, axe);
+    const demi = Math.max(0, (vol.height || 0) / 2 - (vol.radius || 0));
+    return distSegments(a0, a1, add(c, mul(ax, -demi)), add(c, mul(ax, demi)))
+      <= (vol.radius || 0) + det.rayon;
+  }
+  if (vol.shape === "box" && vol.size) {
+    const inv = [-q[0], -q[1], -q[2], q[3]];
+    for (let i = 0; i <= 8; i++) {
+      const l = qrot(inv, sub(add(a0, mul(sub(a1, a0), i / 8)), c));
+      const ex = l.map((v, k) => Math.max(0, Math.abs(v) - vol.size[k] / 2));
+      if (Math.hypot(...ex) <= det.rayon) return true;
+    }
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -118,7 +189,13 @@ export class Interactables {
         body: x.body || null,
       });
     }
+    // LA BORNE SE VISE. Son `InteractReceiver` (sphere de 0,42, portee 2) est
+    // celui que le build interroge ; le portage lui ajoutait un objet « borne »
+    // pris a 2,5 unites de proximite, et la touche l'actionnait sans qu'on la
+    // regarde. Il ne reste qu'en repli, faute de recepteur (docs/132).
+    const recepteurs = new Set((placed.InteractReceiver || []).map((x) => x.name));
     for (const x of placed.LaunchTerminal || []) {
+      if (recepteurs.has(x.name)) continue;
       this.items.push({
         kind: "terminal", name: x.name, world: x.position,
         range: 2.5, prompt: null,
@@ -127,9 +204,11 @@ export class Interactables {
         rotation: x.rotation || null,
       });
     }
+    const bornes = new Set((placed.LaunchTerminal || []).map((x) => x.name));
     for (const x of placed.InteractReceiver || []) {
       this.items.push({
         kind: "interact", name: x.name, world: x.position,
+        terminal: bornes.has(x.name),
         range: (x.fields && x.fields._interactRange) || 2,
         prompt: (x.fields && x.fields._prompt) || null,
         body: x.body || null,
@@ -175,9 +254,39 @@ export class Interactables {
         resetOnLoseFocus: z.resetOnLoseFocus,
         viewingWindow: z.viewingWindow,
         rotation: z.rotation,
+        // Le declencheur ou il faut ENTRER (`_isPlayerInsideVolume`).
+        volume: z.volume || null,
       });
     }
   }
+
+  /**
+   * `InteractVolume._hasInteracted`, pour les zones et la borne.
+   *
+   * Un appui ACCEPTE met le volume en « deja servi » : son invite se retire,
+   * et les appuis suivants ne font plus rien, jusqu'a `ResetInteraction` — que
+   * le script appelle a sa sortie (quitter la console, se lever), ou que la
+   * perte de focus declenche quand `_resetOnLoseFocus` le demande. Le portage
+   * laissait l'invite sous le reticule et reprenait chaque appui (docs/132).
+   */
+  suivreFocus(focus) {
+    const avant = this.focusPrecedent || null;
+    if (avant && avant !== focus && avant.resetOnLoseFocus !== false) avant.interagi = false;
+    this.focusPrecedent = focus || null;
+  }
+
+  /** L'appui est-il pris ? Il met le volume en « deja servi ». */
+  appui(item) {
+    if (!item || item.interagi) return false;
+    item.interagi = true;
+    return true;
+  }
+
+  /** `ResetInteraction`. */
+  reinitialiser(item) { if (item) item.interagi = false; }
+
+  /** `UpdatePromptDisplay` : l'invite tant qu'on n'a pas interagi. */
+  inviteVisible(item) { return !!item && !item.interagi; }
 
   /**
    * Cible visee : l'objet le plus proche dans sa portee, devant le joueur.
@@ -185,7 +294,7 @@ export class Interactables {
    * @param frameOffset decalage monde -> repere (positions des objets)
    * @param fwd direction du regard
    */
-  focus(origin, frameOffset, fwd, shiftOf = null, oeil = null) {
+  focus(origin, frameOffset, fwd, shiftOf = null, oeil = null, haut = null) {
     let best = null, bestD = Infinity;
     // LA VISEE D'ABORD. Un `InteractReceiver` dont on connait le collider se
     // vise comme dans le build : le premier touche par le rayon de l'oeil,
@@ -198,9 +307,9 @@ export class Interactables {
       for (const it of this.items) {
         if (it.disabled || it.kind !== "interact" || !it.volume) continue;
         const shift = shiftOf ? shiftOf(it) : null;
-        const w = shift ? [it.world[0] + shift[0], it.world[1] + shift[1],
-                           it.world[2] + shift[2]] : it.world;
-        const h = rayonVolume(o, dir, sub(w, frameOffset), it.rotation, it.volume);
+        const w = pointVivant(it.world, shift);
+        const h = rayonVolume(o, dir, sub(w, frameOffset), rotationVivante(it.rotation, shift),
+                              it.volume);
         if (h != null && h <= viseD) { vise = it; viseD = h; }
       }
       if (vise && viseD <= vise.range) return vise;
@@ -213,23 +322,36 @@ export class Interactables {
       // rend le deplacement du corps porteur depuis. Sans lui, une zone posee
       // dans le vaisseau reste sur l'aire de lancement quand le vaisseau part.
       const shift = shiftOf ? shiftOf(it) : null;
-      const w = shift ? [it.world[0] + shift[0], it.world[1] + shift[1],
-                         it.world[2] + shift[2]] : it.world;
+      const w = pointVivant(it.world, shift);
+      // Et l'orientation du porteur : une zone du vaisseau pose de travers
+      // regarde de travers (`frames.js`, `poseMobile`).
+      const rot = rotationVivante(it.rotation, shift);
       const p = sub(w, frameOffset);
       const d = [p[0] - origin.x, p[1] - origin.y, p[2] - origin.z];
       const dist = Math.hypot(...d);
+      // UNE ZONE NE SE VISE PAS, ON Y ENTRE. `InteractZone.UpdateFocus` :
+      // pas de focus hors du volume (`_isPlayerInsideVolume`), puis l'angle
+      // entre l'avant de la CAMERA et l'avant de la ZONE, compare a
+      // `_viewingWindow` tel quel. Le portage prenait la zone a portee, devant
+      // soi, et mesurait la direction zone -> joueur contre une demi-fenetre.
+      if (it.kind === "zone") {
+        const dedans = it.volume
+          ? joueurDansVolume(p, rot, it.volume, [origin.x, origin.y, origin.z], haut)
+          : dist <= it.range;
+        if (!dedans || dist > bestD) continue;
+        if (it.viewingWindow != null && rot) {
+          const n = Math.hypot(fwd.x, fwd.y, fwd.z) || 1;
+          if (!zoneFaced(it, [fwd.x / n, fwd.y / n, fwd.z / n],
+                         qrot(rot, [0, 0, 1]))) continue;
+        }
+        best = it; bestD = dist;
+        continue;
+      }
       if (dist > it.range + 1.5 || dist > bestD) continue;
       // devant le joueur : produit scalaire positif
       if (dist > 0.001) {
         const dot = (d[0] * fwd.x + d[1] * fwd.y + d[2] * fwd.z) / dist;
         if (dot < 0.3) continue;
-        // Une zone d'interaction ajoute sa propre fenetre, et ce n'est PAS
-        // l'angle du regard : le build mesure l'angle entre l'AVANT DE LA ZONE
-        // et la direction du joueur. Une trappe a 60 degres s'ouvre depuis le
-        // devant de la trappe, quel que soit l'endroit ou l'on regarde.
-        if (it.viewingWindow != null && it.rotation
-            && !zoneFaced(it, [-d[0] / dist, -d[1] / dist, -d[2] / dist],
-                          qrot(it.rotation, [0, 0, 1]))) continue;
       }
       best = it; bestD = dist;
     }
