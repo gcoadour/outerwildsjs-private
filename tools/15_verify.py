@@ -3577,6 +3577,12 @@ def _run(url, heavy, profil=None, zip_path=None):
         # d'arrivee, puis au Soleil — et revient. Le vaisseau stationne ne
         # doit pas bouger de ses pads : l'ecart de vitesse de chaque changement
         # le decrochait, et le retour le lancait a six cents unites par seconde.
+        # Le controle des pads vient de lancer le vaisseau a quarante unites :
+        # on attend qu'il se soit repose avant de relever sa place.
+        try:
+            page.wait_for_function("() => { const s = window.__shipRef; return s.parked && Math.hypot(s.vel.x, s.vel.y, s.vel.z) < 0.01; }", timeout=20000)
+        except Exception:
+            pass
         voyage = page.evaluate("""() => { const agg = window.__player.body; if (!window.__versCadre) return null;
           const p = agg.transformNode.position; window.__retourVoyage = [p.x, p.y, p.z];
           const s0 = window.__shipRef; window.__vaisseauAvant = Math.round(Math.hypot(s0.pos.x, s0.pos.y, s0.pos.z));
@@ -3610,6 +3616,10 @@ def _run(url, heavy, profil=None, zip_path=None):
                       Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
             rep.eq("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
                    revenu, [0, 0, True])
+            if revenu != [0, 0, True]:
+                print("       journal du vaisseau :")
+                for l in page.evaluate("() => window.__journalVaisseau || []"):
+                    print("         ", l)
 
         rep.eq("erreurs console en fin de parcours", errors[:3], [])
         browser.close()
