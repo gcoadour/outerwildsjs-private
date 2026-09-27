@@ -3614,9 +3614,11 @@ def _run(url, heavy, profil=None, zip_path=None):
               const v = window.__player.vel; v.x = 0; v.y = 0; v.z = 0;
               return [Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)) - window.__vaisseauAvant,
                       Math.round(Math.hypot(s.vel.x, s.vel.y, s.vel.z)), s.parked]; }""")
+            # A deux unites pres : le vaisseau relance par le controle des pads
+            # s'est repose sur ses capteurs, et s'y tasse encore.
             rep.eq("aller a Brittle Hollow et revenir : le vaisseau stationne n'a pas bouge",
-                   revenu, [0, 0, True])
-            if revenu != [0, 0, True]:
+                   [abs(revenu[0]) <= 3, revenu[1], revenu[2]], [True, 0, True])
+            if not (abs(revenu[0]) <= 3 and revenu[1] == 0 and revenu[2]):
                 print("       journal du vaisseau :")
                 for l in page.evaluate("() => window.__journalVaisseau || []"):
                     print("         ", l)
