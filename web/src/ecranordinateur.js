@@ -48,7 +48,11 @@
 
 /** `ShipComputerCamera.Awake` : `camera.aspect = 1.3333334`. */
 export const ASPECT_ECRAN = 4 / 3;
-const CALQUE_CARTE = 1 << 23;
+// Un calque que la camera du joueur ne voit pas (son masque exclut 23, 24 et
+// 30) et que la camera du HUD ne voit pas non plus : 23 est le SIEN — c'est
+// celui des objets tenus (main.js). Les sprites de l'ecran y etaient, et
+// l'une des deux cameras les aurait montres.
+const CALQUE_CARTE = 1 << 24;
 /** Pixels de la texture de texte par unite de la camera fixe (taille 5). */
 const PX = 76.8;
 

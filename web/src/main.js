@@ -1837,6 +1837,41 @@ async function boot() {
     lightsOn: STICK_LIGHTS.some((d) => d.enabled) });
   // Les deux objets tenus, une fois charges : { racine, groupes, lumieres }.
   const enMain = new Map();
+  // LA CAMERA DU HUD. Les objets tenus — le baton, la lunette — sont sur le
+  // calque 23, que `PlayerCamera` exclut (masque 0xBE7FFFFF). C'est
+  // `HUDCamera` qui les dessine : enfant de la camera du joueur, champ de 80
+  // degres, plan proche a 0,1, masque 0x800000, profondeur 1 et `clearFlags`
+  // 3 (profondeur seule) — PAR-DESSUS la scene, sans jamais entrer dans un
+  // mur. Depuis que les calques du build sont appliques, le portage ne
+  // dessinait plus ni le baton ni la lunette (docs/132). Elle ne rend que
+  // lorsqu'un objet tenu se voit : une seconde passe coute, sans GPU.
+  const CALQUE_TENU = 1 << 23;
+  const donneesHUD = ((camerasDuBuild && camerasDuBuild.cameras) || [])
+    .find((c) => c.name === "HUDCamera") || { fov: 80, near: 0.1 };
+  const cameraHUD = new BABYLON.FreeCamera("HUDCamera", BABYLON.Vector3.Zero(), scene);
+  cameraHUD.parent = camera;
+  cameraHUD.fov = (donneesHUD.fov || 80) * Math.PI / 180;
+  cameraHUD.minZ = donneesHUD.near || 0.1;
+  cameraHUD.maxZ = 100;
+  cameraHUD.layerMask = CALQUE_TENU;
+  cameraHUD.inputs.clear();
+  window.__cameraHUD = cameraHUD;
+  // Babylon laisse `scene.activeCamera` sur la DERNIERE camera rendue : sans
+  // ceci, tout ce qui lit la camera active entre deux images — le regard, la
+  // visee, les controles — lirait celle du HUD.
+  scene.onAfterRenderObservable.add(() => {
+    if (scene.activeCamera === cameraHUD) scene.activeCamera = camera;
+  });
+  /** Ajoute ou retire la camera du HUD des cameras actives, a chaque image. */
+  function syncCameraHUD(voulue) {
+    const liste = (scene.activeCameras && scene.activeCameras.length)
+      ? scene.activeCameras.filter((c) => c !== cameraHUD) : [camera];
+    if (voulue) liste.push(cameraHUD);
+    const avant = scene.activeCameras || [];
+    if (avant.length !== liste.length || liste.some((c, i) => c !== avant[i])) {
+      scene.activeCameras = liste;
+    }
+  }
 
   /**
    * Charge un objet tenu et l'accroche a la camera.
@@ -1856,6 +1891,10 @@ async function boot() {
       toLegacyMaterials(BABYLON, scene, res.meshes);
       falloffUnity(res.meshes);
       applyLayers(res.meshes);
+      // Maillages a os : leur sphere englobante est nulle, centree loin de
+      // l'axe, et le tri par le cone de vue les jetait tous. Un objet tenu est
+      // toujours devant l'oeil ; on ne le trie pas.
+      for (const m of res.meshes) m.alwaysSelectAsActiveMesh = true;
       const racine = new BABYLON.TransformNode(`main_${nom}`, scene);
       racine.parent = camera;
       racine.rotation.y = Math.PI;
@@ -2591,7 +2630,10 @@ async function boot() {
     && f.body === "Ship_Body";
   const invitePoste = () => (equipment.suit ? "Buckle Up" : "Suit Required");
   // Les volumes dont l'etat `_hasInteracted` est tenu : zones et borne.
-  const volumeGere = (f) => !!f && (f.kind === "zone" || !!f.terminal);
+  // Et le volume du feu de camp (`RoastPromptEvent._interactVolume`) : servi a
+  // l'appui, rendu par `StopRoasting` seulement (docs/132).
+  const estFeu = (f) => !!f && f.name === "RoastingDistanceEvent";
+  const volumeGere = (f) => !!f && (f.kind === "zone" || !!f.terminal || estFeu(f));
   const zoneEn = (w) => interactables.items.find((i) => i.kind === "zone" && w
     && Math.hypot(i.world[0] - w[0], i.world[1] - w[1], i.world[2] - w[2]) < 0.05) || null;
   let focusPrecedent = null;
@@ -6078,6 +6120,11 @@ async function boot() {
         lunette.racine.scaling.set(k, k, k);
       }
     }
+    // Un objet tenu se voit : la lunette ouverte, ou le baton sorti (et le
+    // temps qu'il se range). Hors carte et hors vue d'atterrissage, que la
+    // camera du joueur ne regarde pas.
+    syncCameraHUD(!vueCarte.open && !enVueAtterrissage() && !guiMode.hidden
+      && (telescope.active || baton.out || baton.clip === "PutBack"));
     if (ondeEl) ondeEl.hidden = !telescope.active || guiMode.hidden;
     // §P LA REGLETTE DE ZOOM. `TelescopeGUI` pose une fleche sur une reglette,
     // dont la hauteur dit le champ courant entre le minimum et le maximum. Le
@@ -6374,7 +6421,11 @@ async function boot() {
       const h = heatAt(heat, [playerWorld.x, playerWorld.y, playerWorld.z],
                        (x) => decalageDuCorps(x.body, anchorPos));
       chaleurBaton = h;
-      marshmallow.held = h > 0 || marshmallow.toast > 0;
+      // `Marshmallow.Update` ne grille que si `_mallowRenderer.enabled`, qui
+      // suit `_isOut` : le BATON SORTI. Le portage la faisait cuire des qu'on
+      // passait pres d'un feu, baton range ; arrive au feu, E la mangeait au
+      // lieu de sortir le baton, qui se rangeait aussitot (docs/132).
+      marshmallow.held = baton.out;
       marshmallow.update(dt, h);
     }
     // §M ON NE GRILLE PAS DE LOIN. `RoastPromptEvent` coupe le grillage des
@@ -6397,12 +6448,16 @@ async function boot() {
             baton.toggle();
             console.log("annonce : BeginRoasting");
           }
+          // L'`InteractVolume` est servi : son invite s'efface.
+          if (estFeu(focus)) interactables.appui(focus);
           interactPressed = false;
         }
         if (inv.etat.update(d)) {
           // `OnStopRoasting` ne range le baton QUE s'il est sorti.
           if (baton.out) baton.toggle();
           console.log("annonce : StopRoasting");
+          // `_interactVolume.ResetInteraction()` : l'invite revient.
+          for (const it of interactables.items) if (estFeu(it)) interactables.reinitialiser(it);
         }
       }
     }
