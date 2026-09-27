@@ -23,7 +23,7 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI, SuiviHUD } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
@@ -126,7 +126,7 @@ import { EcranOrdinateur } from "./ecranordinateur.js";
 import { toucheDebug, TOUCHES_DEBUG, ACCELERATION, SECONDES_FIN, LIEU_DU_SAUT,
          pointDeSaut, transfertSable } from "./debug.js";
 import { LockOn, aimedFrame, canFlyTo,
-         ancientProbeAcceleration } from "./tracker.js";
+         ancientProbeAcceleration, commandesSuivi } from "./tracker.js";
 // Six classes du build, ecrites et jamais appelees jusqu'ici : le module
 // existait, ses quarante verifications passaient, et aucun module du moteur ne
 // l'importait (docs/68-lois.md).
@@ -1739,6 +1739,7 @@ async function boot() {
   notifications.table = notificationsDuBuild((iface && iface.textes) || []);
   const uiRoot = document.getElementById("ui");
   const resHUD = iface && uiRoot ? new ResourceHUD(uiRoot, iface) : null;
+  const suiviHUD = iface && uiRoot ? new SuiviHUD(uiRoot, iface) : null;
   const prompts = iface && uiRoot ? new Prompts(uiRoot, iface) : null;
   window.__prompts = prompts;   // sonde : les trois zones et leur arbitrage
   let lastHealth = resources.health;
@@ -2586,12 +2587,42 @@ async function boot() {
   // majeur : la dimension abandonnee les bride a CENT. Piloter dedans se fait
   // donc a la lueur du tableau de bord, et c'est une des rares choses que le
   // build dit explicitement d'un lieu.
-  const phares = new BABYLON.SpotLight("shiplight", BABYLON.Vector3.Zero(),
-    new BABYLON.Vector3(0, 0, 1), Math.PI / 2.6, 2, scene);
-  phares.range = SHIPLIGHT_RANGE;
-  phares.intensity = 1.1;
-  phares.setEnabled(false);
+  //
+  // ET ILS SONT DEUX. `ExternalLightController` est pose sur `Headlights`
+  // (spot de 90 degres, vers l'avant) ET sur `LandingCam` (spot de 100
+  // degres, sous le cockpit, vers le sol) ; `OnEnterFlightConsole` allume les
+  // deux. C'est le second qui eclaire la piste en vue d'atterrissage — l'alpha
+  // montre un disque blanc sous le vaisseau, le portage un sol noir. Le portage
+  // n'avait qu'un phare, a 69 degres et 1,1 d'intensite choisis a l'oeil ; les
+  // deux prennent maintenant l'angle, l'intensite et la couleur de la scene
+  // (docs/132).
+  const lumiereVaisseau = (nom, repli) => {
+    const l = (lighting.lights || []).find((x) => x.name === nom && x.type === "spot") || repli;
+    const s = new BABYLON.SpotLight(`ow_${nom}`, BABYLON.Vector3.Zero(),
+      new BABYLON.Vector3(0, 0, 1), (l.spotAngle || 90) * Math.PI / 180, 2, scene);
+    s.range = SHIPLIGHT_RANGE;
+    s.intensity = l.intensity ?? 0.5;
+    if (l.color) s.diffuse = new BABYLON.Color3(l.color[0], l.color[1], l.color[2]);
+    s.setEnabled(false);
+    return s;
+  };
+  const phares = lumiereVaisseau("Headlights",
+    { spotAngle: 90, intensity: 0.5, color: [1, 1, 1] });
+  const phareAtterrissage = lumiereVaisseau("LandingCam",
+    { spotAngle: 100, intensity: 0.5, color: [1, 1, 1] });
   window.__phares = phares;
+  window.__phareAtterrissage = phareAtterrissage;
+  // Les deux suivent leur noeud du modele : l'avant d'Unity est l'oppose du
+  // +Z du noeud glTF (comme la camera d'atterrissage).
+  const noeudsPhares = new Map();
+  const poserPhare = (lum, nom, repli) => {
+    if (!noeudsPhares.has(nom)) noeudsPhares.set(nom, scene.getTransformNodeByName(nom) || null);
+    const n = noeudsPhares.get(nom);
+    if (!n) { repli(lum); return; }
+    n.computeWorldMatrix(true);
+    lum.position.copyFrom(n.getAbsolutePosition());
+    lum.direction.copyFrom(n.getDirection(BABYLON.Axis.Z).scale(-1));
+  };
   // Portee de ramassage. Le `GearPickup` du build n'a pas de forme a lui : sa
   // zone d'interaction est un objet ENFANT (`InteractVolume`, une capsule de
   // rayon 1 et de hauteur 3), comme la forme des zones d'ambiance vit sur les
@@ -5534,15 +5565,21 @@ async function boot() {
       if (ship) {
         const allumes = !!ship.boarded;
         phares.setEnabled(allumes);
+        phareAtterrissage.setEnabled(allumes);
         if (allumes) {
           const a = ship.axes;
-          phares.position.set(ship.pos.x + a.fwd[0] * 2,
-                              ship.pos.y + a.fwd[1] * 2,
-                              ship.pos.z + a.fwd[2] * 2);
-          phares.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          poserPhare(phares, "Headlights", (l) => {
+            l.position.set(ship.pos.x + a.fwd[0] * 2, ship.pos.y + a.fwd[1] * 2,
+                           ship.pos.z + a.fwd[2] * 2);
+            l.direction.set(a.fwd[0], a.fwd[1], a.fwd[2]);
+          });
+          poserPhare(phareAtterrissage, "LandingCam", (l) => {
+            l.position.set(ship.pos.x, ship.pos.y, ship.pos.z);
+            l.direction.set(-a.up[0], -a.up[1], -a.up[2]);
+          });
           // `SectorDetector.GetShiplightRangeLimit` : le secteur ACTIF, et lui
           // seul. Giant's Deep bride les phares a 200, l'epave a 100.
-          phares.range = shiplightRange(
+          phares.range = phareAtterrissage.range = shiplightRange(
             secMaj ? secMaj.shiplightLimit : null, !!secMaj);
         }
       }
@@ -7044,8 +7081,9 @@ async function boot() {
         const moi = [player.pos.x + anchorPos[0], player.pos.y + anchorPos[1],
                      player.pos.z + anchorPos[2]];
         const vRel = [player.vel.x, player.vel.y, player.vel.z];
-        const m = relativeMotion(vRel, moi, cible.position);
-        resHUD.setTracker(trackerReadout(m.distance, m.zSpeed));
+        // La lecture ne va plus a cote des jauges : `DrawReadout` la pose a
+        // droite du cercle de la cible (plus bas, `SuiviHUD`).
+        resHUD.setTracker(null);
         // §M LA POUSSIERE DE VITESSE. `MotionDust` ne seme RIEN sous trente
         // unites par seconde : en dessous, l'espace reste vide, et c'est ce qui
         // donne son prix a la vitesse. Au-dessus, le debit monte pendant que la
@@ -7055,7 +7093,6 @@ async function boot() {
         // La loi etait ecrite, eprouvee, et seulement IMPORTEE (docs/71).
         poussiere = motionDust(Math.hypot(vRel[0], vRel[1], vRel[2]),
                                { targeting: true, mapView: solarMap.open });
-        window.__suivi = m;
       } else { resHUD.setTracker(null); poussiere = motionDust(0, { targeting: false }); }
     }
 
@@ -7083,7 +7120,17 @@ async function boot() {
         v.position[1] = v.body.position[1] + anchorPos[1];
         v.position[2] = v.body.position[2] + anchorPos[2];
       }
-      const vise = solarMap.open ? null : aimedFrame(visables, moi, [fwd.x, fwd.y, fwd.z]);
+      // `UpdateTargeting` vise depuis la camera ACTIVE (`_activeCam`, que
+      // `SwitchActiveCamera` change) : en vue d'atterrissage, c'est la camera
+      // du dessous qui regarde, et Timber Hearth sous le vaisseau devient la
+      // cible possible — « LB Set Target », dans l'alpha comme ici (docs/132).
+      const camVise = enVueAtterrissage() ? camera : null;
+      const origineVise = camVise
+        ? [camVise.position.x + anchorPos[0], camVise.position.y + anchorPos[1], camVise.position.z + anchorPos[2]]
+        : moi;
+      const avantVise = camVise ? camVise.getDirection(BABYLON.Axis.Z) : fwd;
+      const vise = solarMap.open ? null
+        : aimedFrame(visables, origineVise, [avantVise.x, avantVise.y, avantVise.z]);
       const avant = lockOn.current;
       lockOn.update(dt, lockPressed, vise);
       lockPressed = false;
@@ -7160,6 +7207,39 @@ async function boot() {
       }
       autoPressed = false;
       window.__visee = lockOn;
+
+      // `ReferenceFrameTracker.OnGUI` : les crochets, la lecture, les fleches
+      // et « LB Set Target », peints a l'ecran autour de la cible (tracker.js).
+      if (suiviHUD) {
+        const W = innerWidth, H = innerHeight;
+        const vp = camera.viewport.toGlobal(W, H);
+        const tm = scene.getTransformMatrix();
+        const cf = camera.getDirection(BABYLON.Axis.Z);
+        const projeter = (p) => {
+          const v = new BABYLON.Vector3(p[0] - anchorPos[0], p[1] - anchorPos[1], p[2] - anchorPos[2]);
+          const z = BABYLON.Vector3.Dot(v.subtract(camera.globalPosition || camera.position), cf);
+          const e = BABYLON.Vector3.Project(v, BABYLON.Matrix.IdentityReadOnly, tm, vp);
+          // Le point d'ecran d'Unity : y vers le HAUT.
+          return { x: e.x, y: H - e.y, z };
+        };
+        const cible = lockOn.current ? lockOn.current.position : null;
+        let mouvement = null;
+        if (cible) {
+          const vc = lockOn.current.body.velocity || [0, 0, 0];
+          mouvement = relativeMotion([player.vel.x - vc[0], player.vel.y - vc[1], player.vel.z - vc[2]],
+                                     moi, cible);
+        }
+        const tailles = (iface && iface.suivi && iface.suivi.tailles) || {};
+        suiviHUD.draw(commandesSuivi({
+          cible, derniere: lockOn.last ? lockOn.last.position : null,
+          possible: lockOn.possible ? lockOn.possible.position : null,
+          montrerInvite: lockOn.showPrompt,
+          mode: guiMode.hidden ? "hidden" : guiMode.capture ? "capture" : "full",
+          carte: !!solarMap.open, brouillee: dansEpave, ouverture: lockOn.bracket,
+          mouvement, projeter, hauteur: H, cercle: tailles.cercle, fleche: tailles.fleche,
+        }), cible && mouvement && !solarMap.open ? trackerReadout(mouvement.distance, mouvement.zSpeed) : "");
+        window.__suivi = mouvement;
+      }
     }
 
     // --- LA TOUR DE LANCEMENT, de bout en bout (docs/92-tour.md) ---

@@ -1679,3 +1679,29 @@ trappe franchie, pas le siège. Le portage prenait « dans le vaisseau » pour
 écouteurs de `EnterShip` — `PlayerData.OnEnterShip`, qui lève la protection
 du premier tour, et `PlayerResources.OnEnterShip`, qui rend toute la santé.
 Tous suivent désormais la trappe.
+
+### La vue d'atterrissage : la lumière du dessous et « LB Set Target »
+
+Assis au sommet de la tour, vue d'atterrissage (R) : l'alpha montre la piste
+dans un **disque de lumière blanche**, et un petit « LB Set Target » au-dessus
+du centre ; le portage, un sol noir et rien.
+
+- **La lumière.** `ExternalLightController` est posé **deux fois** :
+  sur `Headlights` (spot de 90 degrés, vers l'avant) et sur `LandingCam`
+  (spot de 100 degrés, sous le cockpit, vers le sol), tous deux à 0,5
+  d'intensité et 600 de portée ; `OnEnterFlightConsole` allume les deux. Le
+  portage n'avait qu'un phare, à 69 degrés et 1,1 d'intensité choisis à
+  l'œil. Les deux spots prennent maintenant l'angle, l'intensité et la
+  couleur de la scène, et suivent leur nœud du modèle.
+- **« Set Target ».** C'est `ReferenceFrameTracker.OnGUI`, dont le portage
+  calculait tout — la vitesse d'approche, la couleur, les flèches — sans
+  rien en dessiner : la distance allait à côté des jauges, et ni crochets,
+  ni flèches, ni invite. Il y a maintenant un canevas (`SuiviHUD`) qui peint
+  les commandes de `commandesSuivi` (`tracker.js`) : l'invite 60 pixels à
+  gauche et 80 au-dessus d'une cible *possible*, blanche à 0,8, avec des
+  crochets doubles à 0,2 ; autour de la cible tenue, les crochets qui se
+  referment, la lecture à droite du cercle, et selon la trajectoire des
+  crochets ×1,2 ou six flèches de dérive, teintés rouge, blanc ou vert.
+  Et la visée part de la **caméra active** (`UpdateTargeting` lance son rayon
+  depuis `_activeCam`) : en vue d'atterrissage, la caméra du dessous regarde
+  Timber Hearth, qui devient la cible possible.

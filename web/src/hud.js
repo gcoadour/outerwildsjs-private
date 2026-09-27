@@ -417,6 +417,90 @@ export class Prompts {
  */
 export const GUI_MODES = ["complet", "debogage", "capture", "masque"];
 
+/**
+ * `ReferenceFrameTracker.OnGUI`, peint : un canevas plein ecran qui execute
+ * les commandes de `commandesSuivi` (tracker.js). `GUI.color` teinte les
+ * icones blanches : on les peint en `multiply` sur un calque, puis on les
+ * pose avec l'alpha de la couleur.
+ */
+export class SuiviHUD {
+  constructor(root, conf) {
+    this.c = (conf && conf.suivi) || null;
+    this.boutons = (conf && conf.prompts && conf.prompts.buttons) || {};
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "ow-suivi";
+    root.appendChild(this.canvas);
+    this.g = this.canvas.getContext("2d");
+    const img = (f) => { if (!f) return null; const i = new Image(); i.src = DIR + f; return i; };
+    this.cercle = img(this.c && this.c.cercle);
+    this.fleche = img(this.c && this.c.fleche);
+    this.lb = img(this.boutons.LeftBumper || this.boutons.LB);
+    this.teinte = document.createElement("canvas");
+    this.lecture = "";
+  }
+
+  /** Une icone blanche, teintee et posee. */
+  icone(img, x, y, l, h, couleur, rotation = 0) {
+    if (!img || !img.complete || !img.naturalWidth) return;
+    const t = this.teinte, tg = t.getContext("2d");
+    t.width = Math.max(1, Math.ceil(l)); t.height = Math.max(1, Math.ceil(h));
+    tg.clearRect(0, 0, t.width, t.height);
+    tg.drawImage(img, 0, 0, t.width, t.height);
+    tg.globalCompositeOperation = "source-atop";
+    tg.fillStyle = `rgb(${couleur.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
+    tg.fillRect(0, 0, t.width, t.height);
+    tg.globalCompositeOperation = "multiply";
+    tg.drawImage(img, 0, 0, t.width, t.height);
+    tg.globalCompositeOperation = "source-over";
+    const g = this.g;
+    g.save();
+    g.globalAlpha = couleur[3];
+    if (rotation) {
+      g.translate(x, y); g.rotate(rotation * Math.PI / 180);
+      g.drawImage(t, -l / 2, -h / 2, l, h);
+    } else g.drawImage(t, x, y, l, h);
+    g.restore();
+  }
+
+  /** @param commandes celles de `commandesSuivi` ; `lecture` le texte a deux lignes */
+  draw(commandes, lecture = "") {
+    const cv = this.canvas, W = cv.clientWidth | 0, H = cv.clientHeight | 0;
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const g = this.g;
+    g.clearRect(0, 0, W, H);
+    const rgba = (c) => `rgba(${c.slice(0, 3).map((v) => Math.round(v * 255)).join(",")},${c[3]})`;
+    for (const k of commandes || []) {
+      if (k.type === "crochets") this.icone(this.cercle, k.x, k.y, k.l, k.h, k.couleur);
+      else if (k.type === "fleche") this.icone(this.fleche, k.x, k.y, k.l, k.h, k.couleur, k.rotation);
+      else if (k.type === "invite") {
+        // `GUIContent(icone LB, " Set Target")`, style de 20 : l'icone a la
+        // hauteur de la ligne, puis le texte.
+        const taille = (this.c && this.c.policeInvite) || 20;
+        g.save();
+        g.globalAlpha = k.couleur[3];
+        if (this.lb && this.lb.complete && this.lb.naturalWidth) {
+          g.drawImage(this.lb, k.x, k.y, taille * 1.2, taille * 1.2);
+        }
+        g.fillStyle = rgba([...k.couleur.slice(0, 3), 1]);
+        g.font = `${taille}px "OW Dialogue", sans-serif`;
+        g.textBaseline = "top";
+        g.fillText((this.c && this.c.invite) || " Set Target", k.x + taille * 1.2, k.y + 2);
+        g.restore();
+      } else if (k.type === "lecture" && lecture) {
+        const taille = (this.c && this.c.policeLecture) || 18;
+        const lignes = lecture.split("\n");
+        g.save();
+        g.fillStyle = rgba(k.couleur);
+        g.font = `${taille}px "OW Dialogue", sans-serif`;
+        g.textBaseline = "top";
+        const hLigne = taille * 1.15;
+        lignes.forEach((l, i) => g.fillText(l, k.x, k.y - hLigne * lignes.length / 2 + i * hLigne));
+        g.restore();
+      }
+    }
+  }
+}
+
 export class GuiMode {
   constructor() { this.index = 0; }
   get mode() { return GUI_MODES[this.index]; }

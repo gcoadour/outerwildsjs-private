@@ -48,7 +48,7 @@ import { LockOn, aimedFrame, bracketScale, angleTo, canFlyTo,
 import { relativeMotion, trackerReadout, directThreshold, motionDust,
          ARROW_OFFSET, DUST, DEAD_THRESHOLD, shipNozzles, modelShipNozzles,
          ancientProbeAcceleration, ANCIENT_PROBE_THRUST,
-         SHIP_NOZZLES } from "../web/src/tracker.js";
+         SHIP_NOZZLES, commandesSuivi, hsvVersRgb } from "../web/src/tracker.js";
 import { alignmentDirection, alignedBodies, fieldInheritors, inheritedAcceleration,
          blinkingRenderers, Blinker, brokenNodes, waterEffects,
          hatchControllers, Hatch, BLINK } from "../web/src/attachments.js";
@@ -7759,6 +7759,52 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("une nouvelle boucle remet tout a plat",
           `${a.up}/${a.steady}`, "null/false");
   }
+}
+
+{
+  // --- `ReferenceFrameTracker.OnGUI`, en commandes (docs/132) ---
+  // Une projection simple : x, y tels quels, z = profondeur.
+  const projeter = (p) => ({ x: p[0], y: p[1], z: p[2] });
+  const H = 720;
+  const types = (l) => l.map((k) => k.type).join();
+  // L'alpha en vue d'atterrissage : Timber Hearth sous le vaisseau, visee et
+  // pas tenue — « LB Set Target », et ses crochets pales.
+  const pos = commandesSuivi({ possible: [640, 500, 10], montrerInvite: true, projeter, hauteur: H });
+  check("cible possible : l'invite puis les crochets", types(pos), "invite,crochets");
+  check("l'invite 60 a gauche et 80 au-dessus du point, blanche a 0,8",
+        [pos[0].x, pos[0].y, pos[0].couleur[3]].join(), "580,140,0.8");
+  check("crochets x 2, blancs a 0,2, centres sur le point",
+        [pos[1].l, pos[1].x + pos[1].l / 2, pos[1].y + pos[1].h / 2, pos[1].couleur[3]].join(), "200,640,220,0.2");
+  check("en mode capture, rien de la cible possible",
+        commandesSuivi({ possible: [640, 500, 10], montrerInvite: true, mode: "capture",
+                         projeter, hauteur: H }).length, 0);
+  check("en mode cache, rien du tout",
+        commandesSuivi({ cible: [1, 1, 1], ouverture: 0, mode: "hidden", projeter, hauteur: H }).length, 0);
+  check("derriere la camera, rien",
+        commandesSuivi({ possible: [640, 500, -5], montrerInvite: true, projeter, hauteur: H }).length, 0);
+  // La cible tenue, trajectoire directe : la lecture et les crochets x 1,2.
+  const direct = { direct: true, hue: 0, saturation: 0, xyOffset: [0, 0, 0] };
+  const tenue = commandesSuivi({ cible: [640, 360, 50], ouverture: 0, mouvement: direct,
+                                 projeter, hauteur: H });
+  // `_bracketScale < 1` : refermes (0), les crochets restent a x 1 tant
+  // qu'on tient la cible ; ils ne disparaissent qu'une fois rouverts a 1.
+  check("cible tenue, directe : crochets x 1, lecture, crochets x 1,2", types(tenue),
+        "crochets,lecture,crochets");
+  check("... x 1 puis x 1,2", [tenue[0].l, tenue[2].l].join(), "100,120");
+  check("la lecture a droite du cercle (x + 50)", tenue[1].x, 690);
+  check("sur la carte, pas de crochets de trajectoire",
+        types(commandesSuivi({ cible: [640, 360, 50], ouverture: 0, mouvement: direct, carte: true,
+                               projeter, hauteur: H })), "crochets,lecture");
+  check("cible relachee, crochets rouverts a 1 : plus rien",
+        commandesSuivi({ derniere: [640, 360, 50], ouverture: 1, projeter, hauteur: H }).length, 0);
+  const derive = { direct: false, hue: 140, saturation: 1, xyOffset: [60, 0, 0] };
+  const fl = commandesSuivi({ cible: [640, 360, 50], ouverture: 0, mouvement: derive, projeter, hauteur: H });
+  check("derive laterale : six fleches", fl.filter((k) => k.type === "fleche").length, 6);
+  // `RotateAroundPivot(-atan2(cible - fleche) - 90)` : la cible a +x de la
+  // fleche donne un angle nul, donc -90.
+  check("... tournees par -atan2 - 90", fl.find((k) => k.type === "fleche").rotation, -90);
+  check("s'eloigner est vert : ColorHSV(140, 1, 1)", hsvVersRgb(140, 1, 1).map((v) => +v.toFixed(3)).join(), "0,1,0.333");
+  check("se rapprocher est rouge : ColorHSV(0, 1, 1)", hsvVersRgb(0, 1, 1).join(), "1,0,0");
 }
 
 {

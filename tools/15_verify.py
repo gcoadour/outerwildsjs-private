@@ -1087,6 +1087,19 @@ def _run(url, heavy, profil=None, zip_path=None):
             # `ShipPromptController` : pose au sommet de la tour, l'alpha montre
             # Toggle View, View Map, Liftoff, Exit de haut en bas — l'ordre
             # d'ajout empile depuis le bas, et sans pilote automatique.
+            # `ResourcesHUD` et `MinimapHUD`, projetes par la camera du HUD :
+            # les jauges en haut a droite, oxygene a gauche de la silhouette,
+            # la minicarte dessous (docs/132). Fractions de la fenetre.
+            visiere = page.evaluate("""() => { const W = innerWidth, H = innerHeight;
+              const r = (e) => e ? e.getBoundingClientRect() : null;
+              const res = r(document.querySelector('.ow-res')), c = document.getElementById('minimap');
+              // Cachee au poste : on lit la place que le moteur lui donne.
+              const mm = { left: parseFloat(c.style.getPropertyValue('--mm-left')) / 100 * W,
+                           top: parseFloat(c.style.getPropertyValue('--mm-top')) / 100 * H };
+              const ox = r(document.querySelectorAll('.ow-res .ow-bar')[0]), sil = r(document.querySelector('.ow-res .ow-health'));
+              return { res: [res.left / W, res.top / H].map((v) => +v.toFixed(2)),
+                       mm: [mm.left / W, mm.top / H].map((v) => +v.toFixed(2)),
+                       ordre: ox.left < sil.left }; }""")
             invites_poste = page.evaluate("""() => [...document.querySelectorAll('.ow-prompts-left .ow-prompt')]
               .map((d) => d.textContent.trim())""")
             oeil_pilote = page.evaluate("""() => { const s = window.__shipRef, a = s.axes, c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
@@ -1151,6 +1164,9 @@ def _run(url, heavy, profil=None, zip_path=None):
                 # Le siege a 3,74 dans le vaisseau, plus les 0,15 que PlayerCamera
                 # porte devant Player_Body (AVANT_CAMERA) : l'oeil est a 3,9.
                 rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.9])
+                rep.eq("les jauges sur la visiere : en haut a droite", visiere["res"][1] < 0.02 and visiere["res"][0] > 0.75, True)
+                rep.eq("... oxygene a gauche de la silhouette", visiere["ordre"], True)
+                rep.eq("la minicarte dessous, en bas a droite", visiere["mm"][1] > 0.6 and visiere["mm"][0] > 0.75, True)
                 rep.eq("au poste, pose : les invites de ShipPromptController, de bas en haut",
                        invites_poste, ["Exit", "Liftoff", "View Map", "Toggle View"])
             if saut is not None:
@@ -2139,11 +2155,16 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (!p || !s) return null;
           const avant = s.boarded;
           s.boarded = false;
-          return { existe: true, portee: p.range, avant };
+          const q = window.__phareAtterrissage, deg = (x) => Math.round(x * 180 / Math.PI);
+          return { existe: true, portee: p.range, avant,
+                   deux: q ? [deg(p.angle), deg(q.angle), p.intensity, q.intensity] : null };
         }""")
         if ph:
             rep.eq("les phares du vaisseau existent", ph["existe"], True)
             rep.eq("a six cents unites de portee", ph["portee"], 600)
+            # `ExternalLightController` x2 : les phares ET la lumiere de la vue
+            # d'atterrissage, a l'angle et l'intensite de la scene (docs/132).
+            rep.eq("phares et lumiere d'atterrissage : 90 et 100 degres, 0,5", ph["deux"], [90, 100, 0.5, 0.5])
         # La carte suit `MapMarker.LateUpdate`, et non une moitie de la regle.
         carte = page.evaluate("""() => {
           const m = window.__map;
@@ -3141,6 +3162,16 @@ def _run(url, heavy, profil=None, zip_path=None):
             rep.eq("avec les deux annonces du build", att2["annonces"],
                    ["SwitchActiveCamera", "EnterLandingView"])
             rep.eq("et le jeu de commandes change", att2["mode"], "atterrissage")
+            # `UpdateTargeting` vise depuis la camera active : sous le vaisseau,
+            # Timber Hearth est la cible possible, et l'alpha dit « LB Set
+            # Target » (docs/132).
+            try:
+                page.wait_for_function("() => window.__visee && window.__visee.showPrompt", timeout=8000)
+            except Exception:
+                pass
+            possible = page.evaluate("() => window.__visee && window.__visee.showPrompt && window.__visee.possible ? (window.__visee.possible.body.bodyName || window.__visee.possible.name) : null")
+            rep.eq("en vue d'atterrissage, le sol est la cible possible (« Set Target »)",
+                   bool(possible) and ("Timber" in possible or "HomePlanet" in possible), True)
             # Et c'est une CAMERA : `LandingCam`, sous le vaisseau, champ de
             # 100 degres, qui regarde vers le bas (docs/132).
             vue_att = page.evaluate("""() => { const c = BABYLON.EngineStore.LastCreatedScene.activeCamera;

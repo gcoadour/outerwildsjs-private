@@ -36,6 +36,9 @@ const TEXTURES = [
   // console prise (`_diagramTexture`). Aucun materiau ne les porte : seul le
   // script les pose, et elles n'etaient donc jamais extraites (docs/132).
   "PostcardsFromSpacePSD", "SatelliteDiagramPSD",
+  // `ReferenceFrameTracker` : le cercle des crochets et la fleche de derive,
+  // chargees par `Resources.Load` et donc portees par aucun materiau.
+  "RFCircleIcon", "RFArrowIcon",
   "Short_Dialog_BG", "Dialog_Choice_BG", "NPC_Name_BG",
   "Short_Dialog_Btn", "White_Dialog_Btn", "LocationText_Bar",
 ];
@@ -381,6 +384,13 @@ export function extractInterface(ctx, emitImage, emitFile, assembly) {
       slideDuration: 0.5,
       buttons,
       catalogue: prompts,
+    },
+    // `ReferenceFrameTracker` : icones, et les deux tailles de police de
+    // `GetPromptGUIStyle` (20 pour « Set Target », 18 pour la lecture).
+    suivi: {
+      cercle: written.RFCircleIcon || null, fleche: written.RFArrowIcon || null,
+      tailles: { cercle: [100, 100], fleche: [128, 128] },
+      invite: " Set Target", policeInvite: 20, policeLecture: 18,
     },
     beacons: {
       AnglerfishLure: written.AnglerfishLure || null,
