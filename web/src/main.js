@@ -67,7 +67,7 @@ import { gazeSwitches, energyGates, GazeSwitch, EnergyGate,
          webSpeeds, webAlpha, webAnimators } from "./gaze.js";
 import { elevators, Elevator, LaunchTerminal, launchTerminals,
          elevatorControllers, RETURN_ABOVE, landingPadSensors,
-         museumEntryways } from "./tower.js";
+         museumEntryways, LANDED_SPEED } from "./tower.js";
 import { Helmet, MasterAlarm, DamageDisplay, Notifications, notificationsDuBuild, helmetSettings,
          roastPrompts, roastBroken, shipProximity,
          RoastPrompt } from "./helmet.js";
@@ -2453,6 +2453,7 @@ async function boot() {
       if (shipRest && shipRestRot) ship.quat = shipRestRot.slice();
       if (ship.omega) ship.omega = [0, 0, 0];
       ship.parked = true;
+      ship.parkRest = null; ship.parkBody = null; ship.parkGround = null;
       ship.landed = true;
       ship.groundBody = "TimberHearth";
       ship.onPad = false;
@@ -4309,10 +4310,27 @@ async function boot() {
           vitesseCible: (autopilot.target && autopilot.target.velocity) || [0, 0, 0],
         });
       }
-      // Stationne, le vaisseau est a sa pose de repos PORTEE par Timber
-      // Hearth, dans le repere du moment — quel que soit le corps ancre.
-      if (ship.parked && shipRest) {
-        const p = pointVivant(shipRest, decalageDuCorps("TimberHearth_Body", anchorPos));
+      // Pose, a l'arret et sans personne a bord, le vaisseau est PORTE par le
+      // corps sur lequel il repose — celui de son depart, ou celui ou on l'a
+      // laisse. On retient sa place dans la scene au repos de ce corps, et on
+      // l'y remet a chaque image, dans le repere du moment : quel que soit le
+      // corps ancre, il reste ou on l'a pose. (Le seul depart ne suffisait
+      // pas : un vaisseau pose ailleurs, puis un teleporteur, et il repartait
+      // a l'ecart de vitesse des deux reperes.)
+      if (!ship.boarded && !ship.parked && ship.landed && ship.speed < LANDED_SPEED) {
+        const sol = bodies.find((b) => b.name === ship.groundBody);
+        if (sol && sol.bodyName) {
+          ship.parked = true;
+          ship.parkBody = sol.bodyName;
+          ship.parkGround = sol.name;
+          ship.parkRest = restingPoint([ship.pos.x + anchorPos[0], ship.pos.y + anchorPos[1],
+                                        ship.pos.z + anchorPos[2]],
+                                       decalageDuCorps(sol.bodyName, anchorPos));
+        }
+      }
+      if (ship.parked && (ship.parkRest || shipRest)) {
+        const p = pointVivant(ship.parkRest || shipRest,
+                              decalageDuCorps(ship.parkBody || "TimberHearth_Body", anchorPos));
         ship.parkPos = { x: p[0] - anchorPos[0], y: p[1] - anchorPos[1], z: p[2] - anchorPos[2] };
       }
       ship.update(dt, bodies, input, { fwd, right, up }, world);

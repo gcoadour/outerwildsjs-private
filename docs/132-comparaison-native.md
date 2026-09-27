@@ -1475,8 +1475,10 @@ recale le repère sur le corps dominant, et ajoute à tout ce qui y vit l'écart
 de vitesse entre les deux corps. Le vaisseau stationné le recevait aussi : il
 dépassait le seuil de stationnement, le sol du nouveau repère lui retirait
 cette vitesse, et le retour lui ajoutait l'opposé. Un joueur passé par un
-téléporteur perdait donc son vaisseau en revenant. Stationné, il est
-désormais posé à sa pose de repos portée par Timber Hearth, dans le repère du
-moment, et le changement de repère ne lui ajoute rien. Mesuré dans Chromium :
+téléporteur perdait donc son vaisseau en revenant. Posé, à l'arrêt
+et sans personne à bord — au départ comme partout où on le laisse —, il est
+désormais tenu à sa place dans la scène au repos du corps qui le porte,
+remise chaque image dans le repère du moment, et le changement de repère ne
+lui ajoute rien. Mesuré dans Chromium :
 aller à Brittle Hollow (repère Brittle Hollow, puis Soleil) et revenir le
 laisse à 172 u du centre, immobile, sur ses pads.

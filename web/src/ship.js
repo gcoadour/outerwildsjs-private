@@ -562,7 +562,9 @@ export class Ship {
       this.parked = false;
     }
     if (this.parked && this.landed) {
-      this.groundBody = "TimberHearth";
+      // Le corps qui le porte : Timber Hearth au depart, celui ou il s'est
+      // pose sinon (`parkGround`, main.js).
+      this.groundBody = this.parkGround || "TimberHearth";
       if (this.parkPos) {
         this.pos.x = this.parkPos.x;
         this.pos.y = this.parkPos.y;
