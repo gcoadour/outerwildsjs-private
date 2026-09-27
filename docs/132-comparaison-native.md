@@ -1631,3 +1631,51 @@ colonne au poste.
 
 Décollé à Maj gauche (`Move Up`), sans cible : plus aucune invite à gauche,
 dans l'alpha comme dans le portage.
+
+### Les jauges et la minicarte sont sur la visière
+
+Côte à côte dans la cabine, les jauges ne sont pas au même endroit : l'alpha
+les montre **en haut à droite**, oxygène à gauche, carburant au milieu,
+silhouette à droite ; le portage les posait en bas à droite, à la main, dans
+l'ordre inverse, et la minicarte en haut à droite.
+
+Tout est dans la scène. `ResourcesHUD` est un quad du casque, à
+(0,16 ; 0,084 ; 0,544) sous `HUDHelmetHighPoly`, lui-même à z = −0,408 :
+0,136 devant la caméra du HUD, au-dessus et à droite de l'axe. Il est
+**tourné d'un demi-tour** autour de y — son x local part vers la gauche de
+l'écran, et l'oxygène (x = 0,577) passe à gauche de la silhouette
+(x = −0,5). La caméra du HUD voit à 80 degrés verticaux. Projeté en
+1280 × 720 : jauges de y 39 à 154, oxygène vers x 1 072, carburant 1 128,
+silhouette 1 208 — l'alpha mesure 35 à 158, 1 072, 1 128, 1 208.
+`MinimapHUD` est posé de même, sous les jauges : en bas à droite, un carré
+de 253 pixels. `panneauRessources` (pipeline) le lit, `rectPanneau`
+(`hud.js`) le projette pour le rapport de la fenêtre.
+
+Le panneau lui-même est **une pile de quads**, et le portage l'avait
+démonté : il découpait les deux cadres dans leur planche, les serrait à la
+largeur des remplissages, remplissait d'un « dégradé » qui n'en était pas un
+et posait la silhouette presque opaque. Dans la scène :
+
+| quad | texture | `_Color` |
+|---|---|---|
+| `ResourcesHUD` | `ResourceBar_Layer01` (lignes de balayage) | noir, opaque : le fond |
+| `HUDLayer2OxyBar`, `HUDLayer2FuelBar` | aucune | vert (0,23 ; 0,78 ; 0,34), ambre (0,91 ; 0,77 ; 0,34), à 0,18 |
+| `HUDLayer1OuterBars` | `ResourceBar_Layer1` | blanc : les deux cadres |
+| `HUDPlayerHealth` | `ResourceBar_Layer2_HP*` | blanc à 0,5 |
+
+Les deux planches couvrent le **même carré** : rien n'était à découper. Le
+vert mesuré dans l'alpha au milieu de la jauge d'oxygène, (9 ; 33 ; 20), est
+celui d'un aplat à 0,18 sur le fond noir, (10 ; 36 ; 16).
+
+### `EnterShip` part de la trappe
+
+L'alpha, debout dans la cabine la nuit, n'affiche pas l'invite de la lampe ;
+le portage affichait « Lampe (F) ». `Flashlight._inShip` est posé par
+`OnEnterShip`, et `EnterShip` est levé par `HatchController.OnEntry` — la
+trappe franchie, pas le siège. Le portage prenait « dans le vaisseau » pour
+« assis au poste », partout : l'invite de la lampe, la minicarte
+(`Minimap.OnEnterShip`), le refus de la sonde (`IsInsideShip() &&
+!AtFlightConsole()`, qui ne se déclenchait donc jamais), et les deux
+écouteurs de `EnterShip` — `PlayerData.OnEnterShip`, qui lève la protection
+du premier tour, et `PlayerResources.OnEnterShip`, qui rend toute la santé.
+Tous suivent désormais la trappe.

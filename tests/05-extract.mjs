@@ -1885,6 +1885,23 @@ console.time("mainData");
   check("le portage suit le drapeau de la scene", DEBUG_INPUT_MANAGER_ACTIF, false);
 }
 
+// Les panneaux de la visiere (docs/132) : les jauges en haut a droite, la
+// minicarte dessous, tous deux tournes d'un demi-tour — l'oxygene a gauche.
+{
+  const { panneauRessources } = await import("../web/src/pipeline/extract/interface.js");
+  const { PANNEAU_REPLI, MINIMAP_REPLI } = await import("../web/src/hud.js");
+  const r = panneauRessources(ctx), m = panneauRessources(ctx, "MinimapHUD");
+  const arr = (v) => v.map((x) => +x.toFixed(3)).join();
+  check("ResourcesHUD : devant la camera du HUD, au-dessus et a droite",
+        arr(r.position), "0.16,0.084,0.136");
+  check("... tourne d'un demi-tour, champ de 80 degres", [r.mirrorX, r.fov].join(), "true,80");
+  check("MinimapHUD : sous les jauges", arr(m.position), "0.162,-0.075,0.136");
+  check("les replis du moteur sont ces mesures",
+        [arr(PANNEAU_REPLI.position), arr(PANNEAU_REPLI.scale), arr(MINIMAP_REPLI.position),
+         arr(MINIMAP_REPLI.scale)].join("|"),
+        [arr(r.position), arr(r.scale), arr(m.position), arr(m.scale)].join("|"));
+}
+
 const mctx = new ExtractContext(env, u, "mainData", engineTypes);
 const mscene = extractScene(mctx);
 console.timeEnd("mainData");

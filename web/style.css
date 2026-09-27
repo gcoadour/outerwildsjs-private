@@ -92,21 +92,19 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
   font: 30px/1.2 "OW Dialogue", ui-monospace, Menlo, monospace;
 }
 .ow-res {
-  /* a droite : les invites du jeu occupent deja le bas a gauche */
-  position: absolute; right: 28px; bottom: 96px;
-  width: 300px; height: 170px;
+  /* la ou la camera du HUD voit `ResourcesHUD` : en haut a droite
+     (rectPanneau, hud.js) ; les valeurs par defaut sont celles du 16:9 */
+  position: absolute;
+  left: var(--res-left, 79.6%); top: var(--res-top, 0%);
+  width: var(--res-width, 19.75%); height: var(--res-height, 26.3%);
 }
 .ow-res > * { position: absolute; }
-.ow-health { object-fit: contain; object-position: bottom; opacity: .95; }
+.ow-health { object-fit: fill; }
+/* les quads du panneau entier : le fond noir et les deux cadres */
+.ow-res-plein { inset: 0; width: 100%; height: 100%; object-fit: fill; }
 .ow-bar { overflow: visible; }
-/* le degrade s'etire avec la jauge, comme le quad 3D du jeu */
-.ow-bar-fill {
-  position: absolute; left: 6%; bottom: 0; width: 88%; height: 100%;
-  object-fit: fill;
-}
-.ow-bar-frame {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill;
-}
+/* un aplat, mis a l'echelle depuis son bas comme le quad 3D du jeu */
+.ow-bar-fill { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; }
 .ow-vignette {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: fill; transition: opacity .12s linear;
@@ -207,8 +205,10 @@ html, body { height: 100%; background: #05060a; overflow: hidden; }
 }
 /* Minimap : un globe vu depuis la direction du joueur */
 #minimap {
-  position: fixed; right: 28px; top: 24px; z-index: 7;
-  width: 168px; height: 168px; pointer-events: none;
+  /* `MinimapHUD`, sous les jauges (rectPanneau, hud.js) : 16:9 par defaut */
+  position: fixed; z-index: 7; pointer-events: none;
+  left: var(--mm-left, 80.1%); top: var(--mm-top, 65.4%);
+  width: var(--mm-width, 19.75%); height: var(--mm-height, 35.1%);
 }
 /* Icone de manette d'une invite, posee avant le texte comme dans le jeu */
 .ow-prompt-btn {
@@ -548,7 +548,7 @@ body.touch .ow-res {
   width: 148px; height: 84px;
 }
 body.touch #minimap {
-  right: calc(8px + env(safe-area-inset-right)); top: 46px;
+  left: auto; right: calc(8px + env(safe-area-inset-right)); top: 46px;
   width: 92px; height: 92px;
 }
 body.touch .ow-warn { font-size: 13px; line-height: 16px; margin-left: 24px; }

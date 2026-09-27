@@ -88,7 +88,8 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
 import { eatMarshmallowHeals, flashlightPromptVisible,
          jetpackPrompts, shipPrompts, autopilotAvailable } from "../web/src/consoles.js";
 import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
-import { crosshairPixels, CROSSHAIR, InviteCodes } from "../web/src/hud.js";
+import { crosshairPixels, CROSSHAIR, InviteCodes, rectPanneau, PANNEAU_REPLI,
+         MINIMAP_REPLI } from "../web/src/hud.js";
 import { actifsSeulement } from "../web/src/config.js";
 import { TitleMenu, TITLE_ACTIONS, SKIP_INTRO_FLAGS, titleStep, repereDuTitre,
          placeGuiText, placeGuiTexture, guiTint } from "../web/src/titre.js";
@@ -7758,6 +7759,29 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("une nouvelle boucle remet tout a plat",
           `${a.up}/${a.steady}`, "null/false");
   }
+}
+
+{
+  // --- LE PANNEAU DES JAUGES ET LA MINICARTE, SUR LA VISIERE (docs/132) ---
+  // Mesure dans l'alpha en 1280 x 720 : jauges de y 35 a 158, oxygene vers
+  // x 1 072, carburant 1 128, silhouette 1 208 ; en haut a droite, oxygene a
+  // gauche. Le portage les posait en bas a droite, dans l'ordre inverse.
+  const R = rectPanneau(PANNEAU_REPLI, 1280 / 720);
+  const px = (xLocal) => Math.round(1280 * (R.left + (R.mirrorX ? (1 - xLocal) : (1 + xLocal)) / 2 * R.width));
+  const py = (yLocal) => Math.round(720 * (R.top + (1 - yLocal) / 2 * R.height));
+  check("oxygene, carburant, silhouette de gauche a droite (x 1 072, 1 128, 1 208)",
+        [px(0.577), px(0.135), px(-0.5)].map((v) => Math.round(v / 8) * 8).join(), "1072,1128,1208");
+  check("jauges pleines de y 39 a 154 (alpha : 35 a 158)",
+        // bas d'une jauge pleine : -0,6 - 0,03 (PlayerResourceGUI.Update)
+        [py(0.59), py(-0.63)].join(), "39,154");
+  const M = rectPanneau(MINIMAP_REPLI, 1280 / 720);
+  check("la minicarte en bas a droite, carree, un tiers de la hauteur",
+        [Math.round(M.left * 1280), Math.round(M.top * 720),
+         Math.round(M.width * 1280), Math.round(M.height * 720)].join(), "1025,471,253,253");
+  // Le champ est VERTICAL : la taille suit la hauteur, pas la largeur.
+  const R43 = rectPanneau(PANNEAU_REPLI, 4 / 3);
+  check("en 4:3, meme hauteur, plus large en fraction de largeur",
+        [R43.height.toFixed(4) === R.height.toFixed(4), R43.width > R.width].join(), "true,true");
 }
 
 {

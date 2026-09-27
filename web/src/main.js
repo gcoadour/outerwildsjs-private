@@ -23,7 +23,7 @@ import { loadGameplay, loadPrefabs } from "./config.js";
 import { Resources, oxygenZones, inOxygenZone,
          oxygenDetector } from "./resources.js";
 import { loadInterface, ResourceHUD, Prompts, GuiMode,
-         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes } from "./hud.js";
+         AutopilotReadout, CROSSHAIR, crosshairPixels, InviteCodes, rectPanneau, MINIMAP_REPLI } from "./hud.js";
 import { Minimap } from "./minimap.js";
 import { sunlessZones, darkZones, entrywayTriggers, attachEntryways,
          ZonePresence, zonesAround, EffectZones } from "./entryways.js";
@@ -1772,6 +1772,21 @@ async function boot() {
   })();
   const readout = uiRoot ? new AutopilotReadout(uiRoot) : null;
   const minimap = new Minimap(document.getElementById("minimap"));
+  // `MinimapHUD` est un quad de la visiere, sous les jauges : on le pose ou
+  // la camera du HUD le voit (rectPanneau, hud.js), par des variables CSS
+  // que la mise en page tactile ignore.
+  {
+    const c = document.getElementById("minimap");
+    const placer = () => {
+      const R = rectPanneau((iface && iface.minimapPanel) || MINIMAP_REPLI,
+                            (innerWidth || 16) / (innerHeight || 9));
+      c.style.setProperty("--mm-left", `${R.left * 100}%`);
+      c.style.setProperty("--mm-top", `${R.top * 100}%`);
+      c.style.setProperty("--mm-width", `${R.width * 100}%`);
+      c.style.setProperty("--mm-height", `${R.height * 100}%`);
+    };
+    if (c) { placer(); addEventListener("resize", placer); }
+  }
   let lastPhase = "repos";
   // La cible de l'egalisation du sac dorsal, tant qu'elle dure.
   let egalisationJoueur = null;
@@ -4595,15 +4610,6 @@ async function boot() {
           // qu'il y en ait un — se lever en vue d'atterrissage laisse le
           // manche inverse.
           atterrissage.resetRoll();
-          // `OnEnterShip` : la protection du premier tour s'arrete la. Le jeu
-          // decide qu'une fois aux commandes, on joue pour de bon.
-          if (pdata.enterShip()) {
-            resources.invulnerable = false;
-            console.log("annonce : EnterShip — les degats portent desormais");
-          }
-          // PlayerResources.OnEnterShip : la sante est integralement restauree
-          resources.health = resources.maxHealth;
-          resources.dead = false;
           // S'asseoir prend du TEMPS : la duree du demi-tour est l'angle entre
           // l'avant du joueur et celui du siege, divise par cent degres par
           // seconde. Arriver en tournant le dos au poste demande donc 1,8 s,
@@ -5200,7 +5206,8 @@ async function boot() {
       // distance n'aurait donne : la minicarte s'eteint sur la lune quantique,
       // dont le secteur est un `MajorSector` nu (docs/82-minicarte.md).
       if (secMaj !== minimap.sector) minimap.switchMajorSector(secMaj);
-      const enCabine = !!(ship && ship.boarded);
+      // `Minimap.OnEnterShip` : la trappe franchie, pas le siege.
+      const enCabine = !!(trappe && trappe.inside) || !!(ship && ship.boarded);
       if (enCabine !== minimap.insideShip) {
         if (enCabine) minimap.enterShip(); else minimap.exitShip();
       }
@@ -5377,7 +5384,9 @@ async function boot() {
         // (docs/67-annonces.md).
         if (flashlightPromptVisible({
           on: flashlight.on, suit: equipment.suit,
-          inShip: !!(ship && ship.boarded), inMapView: solarMap.open,
+          // `_inShip` : `OnEnterShip`, la trappe franchie — debout dans la
+          // cabine aussi, pas seulement assis (docs/132).
+          inShip: !!(trappe && trappe.inside) || !!(ship && ship.boarded), inMapView: solarMap.open,
           // `_satelliteCamMode` n'etait pas une valeur inconnue, elle etait a
           // deux lignes de la : la console du satellite EST l'une des deux
           // consoles deportees, et c'est celle qui n'est pas la console de vol.
@@ -5997,12 +6006,12 @@ async function boot() {
     } else if (!probeHeld) {
       probeRefusee = false;
     }
-    // Le poste de pilotage est le seul « dedans » que ce portage ait : il n'a
-    // pas d'interieur de vaisseau. `IsInsideShip() && !AtFlightConsole()`
-    // refuse le tir ; ici les deux vont donc ensemble, et le refus ne se
-    // declenche jamais. On le cable quand meme, plutot que de le supprimer :
-    // c'est la ligne du build, et l'interieur viendra.
-    etatJoueur.insideShip = etatJoueur.atFlightConsole = !!(ship && ship.boarded);
+    // `IsInsideShip() && !AtFlightConsole()` refuse le tir de la sonde. Le
+    // portage n'avait longtemps que le poste pour « dedans », et le refus ne
+    // se declenchait jamais ; la cabine existe depuis (la trappe, `EnterShip`),
+    // et debout dans la cabine on ne tire plus.
+    etatJoueur.atFlightConsole = !!(ship && ship.boarded);
+    etatJoueur.insideShip = !!(trappe && trappe.inside) || etatJoueur.atFlightConsole;
     // Le lancer de rayon de la sonde : la fenetre de tir, puis l'ancrage.
     // Havok travaille dans le repere ancre, comme `player.pos` — les deux
     // parlent le meme espace, et rien n'a besoin d'etre reporte.
@@ -6993,6 +7002,17 @@ async function boot() {
           if (franchi === "entre") {
             interactables.reinitialiser(interactables.items.find((i) => i.kind === "zone"
               && i.name === "HatchControls"));
+            // `EnterShip` part de la TRAPPE (`HatchController.OnEntry`), pas du
+            // siege, et deux ecouteurs y repondent. `PlayerData.OnEnterShip` :
+            // la protection du premier tour s'arrete la. Le portage les
+            // declenchait en s'asseyant (docs/132).
+            if (pdata.enterShip()) {
+              resources.invulnerable = false;
+              console.log("annonce : EnterShip — les degats portent desormais");
+            }
+            // `PlayerResources.OnEnterShip` : `_currentHealth = _maxHealth`.
+            resources.health = resources.maxHealth;
+            resources.dead = false;
           }
           trappe.drain();
           for (const e of trappe.events.splice(0)) {
