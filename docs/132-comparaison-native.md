@@ -1608,3 +1608,26 @@ F11 éteints, puis allumés par l'outillage.
 La leçon est celle de [`46`](46-migration-lots.md), une fois de plus : le code
 seul fait écrire une mécanique que la scène désactive.
 
+
+### Au poste, les invites de `ShipPromptController`
+
+La combinaison se prend au râtelier de la cabine (« Gear Up »), le poste
+passe alors à « Buckle Up », et l'on s'assoit. L'alpha montre à gauche, de
+haut en bas : **Toggle View**, **View Map**, **Liftoff**, **Exit**. Le
+portage montrait Exit, Liftoff, View Map et **Engage Autopilot** — toujours
+les quatre, posé sur la tour et sans cible.
+
+`OnEnterFlightConsole` pose les sept invites dans un ordre fixe (sortie,
+décollage, carte, vue, pilote, accord, atterrissage) ; `Update` les éteint
+toutes puis rallume ce que la situation permet : posé, la carte (hors vue
+d'atterrissage), la sortie, la vue et le décollage ; en vol, le pilote si
+`IsAutopilotAvailable` (une cible dont `_autopilotArrivalDistance > 0`, plus
+loin que cette distance) et l'accord de vitesse au-delà de 10 u/s relatives ;
+et « Landing Mode » dès que `GetAllowLandingMode` le permet. La colonne de
+gauche s'empile depuis le bas (`hauteur − 100 − n × (h + 5)`) : l'ordre
+d'ajout est celui de bas en haut. `shipPrompts` (`consoles.js`) le refait,
+`tests/09-jeu.mjs` en garde les cas, et `tools/15_verify.py` relit la
+colonne au poste.
+
+Décollé à Maj gauche (`Move Up`), sans cible : plus aucune invite à gauche,
+dans l'alpha comme dans le portage.

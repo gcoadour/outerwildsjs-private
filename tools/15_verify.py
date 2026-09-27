@@ -1084,6 +1084,11 @@ def _run(url, heavy, profil=None, zip_path=None):
             # repere du vaisseau, (0 ; 1,4 ; 3,74). Le siege appliquait deux
             # fois l'orientation de repos, et l'on s'asseyait dans le toit.
             page.wait_for_timeout(3000)
+            # `ShipPromptController` : pose au sommet de la tour, l'alpha montre
+            # Toggle View, View Map, Liftoff, Exit de haut en bas — l'ordre
+            # d'ajout empile depuis le bas, et sans pilote automatique.
+            invites_poste = page.evaluate("""() => [...document.querySelectorAll('.ow-prompts-left .ow-prompt')]
+              .map((d) => d.textContent.trim())""")
             oeil_pilote = page.evaluate("""() => { const s = window.__shipRef, a = s.axes, c = BABYLON.EngineStore.LastCreatedScene.activeCamera;
               const d = [c.position.x - s.pos.x, c.position.y - s.pos.y, c.position.z - s.pos.z];
               return [a.right, a.up, a.fwd].map((ax) => +(d[0]*ax[0] + d[1]*ax[1] + d[2]*ax[2]).toFixed(1)); }""")
@@ -1146,6 +1151,8 @@ def _run(url, heavy, profil=None, zip_path=None):
                 # Le siege a 3,74 dans le vaisseau, plus les 0,15 que PlayerCamera
                 # porte devant Player_Body (AVANT_CAMERA) : l'oeil est a 3,9.
                 rep.eq("les yeux du pilote, dans le repere du vaisseau", oeil_pilote, [0.0, 1.4, 3.9])
+                rep.eq("au poste, pose : les invites de ShipPromptController, de bas en haut",
+                       invites_poste, ["Exit", "Liftoff", "View Map", "Toggle View"])
             if saut is not None:
                 rep.near("3, dans le vaisseau : le point de vaisseau de Timber Hearth", saut, 332, 3)
 

@@ -32,7 +32,7 @@ import { loadTitre, TitleScreen, SKIP_INTRO_FLAGS } from "./titre.js";
 import { shipRecords, ShipComputer, suivreEcran, Flashlight, Marshmallow,
          heatAt, remoteConsoles, RemoteConsoles,
          eatMarshmallowHeals, flashlightPromptVisible,
-         jetpackPrompts } from "./consoles.js";
+         jetpackPrompts, shipPrompts, autopilotAvailable } from "./consoles.js";
 import { fogVolumes, FogField, QuantumFog, fogCloaks, FogCloaks,
          fogLights, FogLightIcons } from "./fog.js";
 import { crustCarriers, Crust, detachVelocity } from "./crust.js";
@@ -93,7 +93,7 @@ import { GamepadControls, padAvailable, padDisagreements } from "./gamepad.js";
 import { loadCommandes, decoupeImage } from "./input.js";
 import { regardDuBuild, pasDeRegard, borneTangage } from "./regard.js";
 import { Modes, annonceDe } from "./modes.js";
-import { LandingView, rollMode, ATTERRISSAGE } from "./landing.js";
+import { LandingView, rollMode, ATTERRISSAGE, allowLandingMode } from "./landing.js";
 import { MODELE, ModelLandingSpot, RocketKid, crashes,
          modelLandingSpots, modelShipBody, rocketKids, estEnfant,
          poussesModele, voleModele, invitesConsoleModele,
@@ -5311,10 +5311,31 @@ async function boot() {
       } else if (telescope.active) {
         left.push(P("TelescopeGUI._exitTelescopePrompt"), P("TelescopeGUI._zoomPrompt"));
       } else if (ship && ship.boarded) {
-        left.push(P("ShipPromptController._exitPrompt"),
-                  P("ShipPromptController._ignitionPrompt"),
-                  P("ShipPromptController._mapPrompt"),
-                  P("ShipPromptController._autopilotPrompt"));
+        // `ShipPromptController.Update` (consoles.js) : ce que la situation
+        // permet, dans l'ordre ou `OnEnterFlightConsole` les a poses.
+        const cible = lockOn.current ? lockOn.current.body : null;
+        const dCible = cible
+          ? Math.hypot(cible.position[0] - ship.pos.x, cible.position[1] - ship.pos.y,
+                       cible.position[2] - ship.pos.z)
+          : Infinity;
+        const cadre = cible
+          ? autopilotDistances(declared.frames, cible.name,
+                               (cible.gravity && cible.gravity.upperSurfaceRadius) || 0)
+          : null;
+        const vc = (cible && cible.velocity) || [0, 0, 0];
+        const pose = !!ship.onPad;
+        for (const k of shipPrompts({
+          mapView: !!(solarMap && solarMap.open),
+          landingMode: !!atterrissage.mode,
+          allowLandingMode: allowLandingMode({ frame: cadre, landed: pose, distance: dCible }),
+          landed: pose, landingCam: !!atterrissage.on, playerCam: !atterrissage.on,
+          autopilotAvailable: autopilotAvailable({
+            arrival: cadre && cadre.declared ? cadre.arrival : 0, landed: pose, distance: dCible }),
+          flyingToDestination: !!(autopilot && autopilot.flying),
+          matchAvailable: !!cible && !pose,
+          matching: !!(autopilot && autopilot.matching),
+          localSpeed: Math.hypot(ship.vel.x - vc[0], ship.vel.y - vc[1], ship.vel.z - vc[2]),
+        })) left.push(P(`ShipPromptController.${k}`));
       } else {
         // §U LES INVITES DU SAC DORSAL N'EXISTENT QU'EN APESANTEUR, et les
         // trois poussees qu'a l'ENTRAINEMENT. Le portage les affichait des

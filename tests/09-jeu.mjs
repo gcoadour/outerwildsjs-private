@@ -86,7 +86,7 @@ import { ATTACHE, AttachPoint, AttachPoints, turnDuration, turnFraction,
          slideFraction, snapDuration, snapDegrees, qslerp, toLocal,
          toWorld } from "../web/src/attach.js";
 import { eatMarshmallowHeals, flashlightPromptVisible,
-         jetpackPrompts } from "../web/src/consoles.js";
+         jetpackPrompts, shipPrompts, autopilotAvailable } from "../web/src/consoles.js";
 import { SuitAmbience, SUIT_AMBIENCE_FADE } from "../web/src/reactaudio.js";
 import { crosshairPixels, CROSSHAIR, InviteCodes } from "../web/src/hud.js";
 import { actifsSeulement } from "../web/src/config.js";
@@ -7758,6 +7758,38 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     check("une nouvelle boucle remet tout a plat",
           `${a.up}/${a.steady}`, "null/false");
   }
+}
+
+{
+  // --- LES INVITES DU POSTE DE PILOTAGE (`ShipPromptController`, docs/132) ---
+  // Assis au sommet de la tour, l'alpha montre, de haut en bas : Toggle View,
+  // View Map, Liftoff, Exit — l'ordre d'ajout, empile depuis le bas.
+  check("pose : sortie, decollage, carte, vue — pas de pilote",
+        shipPrompts({ landed: true }).join(),
+        "_exitPrompt,_ignitionPrompt,_mapPrompt,_toggleViewPrompt");
+  check("pose, en vue d'atterrissage : plus de carte",
+        shipPrompts({ landed: true, landingCam: true, playerCam: false }).join(),
+        "_exitPrompt,_ignitionPrompt,_toggleViewPrompt");
+  check("carte ouverte : rien", shipPrompts({ landed: true, mapView: true }).join(), "");
+  check("en vol sans cible : rien", shipPrompts({}).join(), "");
+  check("en vol, cible loin et rapide : pilote et accord",
+        shipPrompts({ autopilotAvailable: true, matchAvailable: true, localSpeed: 11 }).join(),
+        "_autopilotPrompt,_matchVelocityPrompt");
+  check("l'accord demande plus de 10 u/s",
+        shipPrompts({ matchAvailable: true, localSpeed: 10 }).join(), "");
+  check("ni pilote en vol vers la cible, ni accord pendant l'accord",
+        shipPrompts({ autopilotAvailable: true, flyingToDestination: true,
+                      matchAvailable: true, matching: true, localSpeed: 50 }).join(), "");
+  check("pres d'un corps, hors vue : Landing Mode",
+        shipPrompts({ allowLandingMode: true }).join(), "_landingPrompt");
+  check("deja en mode d'atterrissage : plus d'invite",
+        shipPrompts({ allowLandingMode: true, landingMode: true }).join(), "");
+  check("pilote : au-dela de l'arrivee seulement",
+        [autopilotAvailable({ arrival: 1000, distance: 1001 }),
+         autopilotAvailable({ arrival: 1000, distance: 999 }),
+         autopilotAvailable({ arrival: 0, distance: 5e4 }),
+         autopilotAvailable({ arrival: 1000, distance: 5e4, landed: true })].join(),
+        "true,false,false,false");
 }
 
 {

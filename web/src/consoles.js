@@ -370,6 +370,66 @@ export function jetpackPrompts({
   return rien;
 }
 
+/**
+ * Les invites du poste de pilotage : lesquelles, et dans quel ordre.
+ *
+ * @lit ShipPromptController
+ *
+ * `OnEnterFlightConsole` les pose TOUTES a gauche, dans cet ordre — sortie,
+ * decollage, carte, vue, pilote, accord de vitesse, atterrissage — et
+ * `Update` les rend toutes invisibles puis rallume ce que la situation
+ * permet. La colonne se remplit de bas en haut (`PromptManager.Update` :
+ * `hauteur - 100 - n x (h + 5)`), et l'ordre d'ajout est donc celui de bas
+ * en haut a l'ecran. Mesure dans l'alpha native, assis au sommet de la tour :
+ * « Toggle View », « View Map », « Liftoff », « Exit », de haut en bas
+ * (docs/132).
+ *
+ * Le portage posait sortie, decollage, carte et pilote, toujours les quatre :
+ * « Engage Autopilot » pose sur la tour, sans cible, et ni la vue ni
+ * l'atterrissage.
+ *
+ *   carte ouverte                       rien
+ *   pas en vue d'atterrissage, mais
+ *   `GetAllowLandingMode`               « Landing Mode »
+ *   pose                                carte (hors vue d'atterrissage),
+ *                                       sortie, vue, decollage
+ *   en vol, camera du joueur            pilote si `IsAutopilotAvailable` et
+ *                                       qu'il ne vole pas deja ; accord si
+ *                                       disponible, pas deja en cours, et
+ *                                       plus de 10 u/s relatives
+ *
+ * @returns les champs de `ShipPromptController`, dans l'ordre d'ajout
+ */
+export function shipPrompts({
+  mapView = false, landingMode = false, allowLandingMode = false,
+  landed = false, landingCam = false, playerCam = true,
+  autopilotAvailable = false, flyingToDestination = false,
+  matchAvailable = false, matching = false, localSpeed = 0,
+} = {}) {
+  if (mapView) return [];
+  const vis = new Set();
+  if (!landingMode && allowLandingMode) vis.add("_landingPrompt");
+  if (landed) {
+    if (!landingCam) vis.add("_mapPrompt");
+    vis.add("_exitPrompt"); vis.add("_toggleViewPrompt"); vis.add("_ignitionPrompt");
+  } else if (playerCam) {
+    if (!flyingToDestination && autopilotAvailable) vis.add("_autopilotPrompt");
+    if (!matching && matchAvailable && localSpeed > 10) vis.add("_matchVelocityPrompt");
+  }
+  return ["_exitPrompt", "_ignitionPrompt", "_mapPrompt", "_toggleViewPrompt",
+          "_autopilotPrompt", "_matchVelocityPrompt", "_landingPrompt"].filter((k) => vis.has(k));
+}
+
+/**
+ * `FlightConsole.IsAutopilotAvailable` : au poste, un referentiel vise qui
+ * permet le pilote (`_autopilotArrivalDistance > 0`), le vaisseau pas pose, et
+ * plus loin que la distance d'arrivee.
+ */
+export function autopilotAvailable({ auPoste = true, arrival = 0, landed = false,
+                                     distance = 0 } = {}) {
+  return !!auPoste && arrival > 0 && !landed && distance > arrival;
+}
+
 export function heatAt(emitters, world, shiftOf = null) {
   let best = 0;
   for (const s of emitters) {
