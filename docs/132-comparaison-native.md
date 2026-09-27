@@ -1433,8 +1433,12 @@ composé par-dessus.
 
 ### Les touches de mise au point du build
 
-`DebugInputManager` est **posé dans la scène** (sur `SolarSystemRoot`) et ses
-touches ne sont derrière aucun drapeau : l'alpha qu'on télécharge répond à F12
+> **Corrigé par la mesure** (§ « Les touches mortes », plus bas). Ce qui suit
+> a été écrit d'après l'IL seul : `DebugInputManager` est bien posé, mais
+> **éteint**, et F2, F3, F5, F6, =, F11 et F12 ne font rien dans l'alpha.
+
+`DebugInputManager` est **posé dans la scène** (sur `SolarSystemRoot`), et
+l'on a cru ses touches actives : l'alpha qu'on télécharge répondrait à F12
 en faisant exploser le soleil. `DebugKeyCode..cctor` les range toutes, en
 `KeyCode` d'Unity, et le portage n'en avait aucune — il donnait même au mode
 d'affichage (`GUIMode`) une touche à lui, `g`, là où le build le fait tourner
@@ -1511,6 +1515,13 @@ océans donne leur corps.
 
 ### La supernova, côte à côte (F12)
 
+> **Faux, remesuré** (§ « Les touches mortes », plus bas) : F12 ne fait rien
+> dans l'alpha. Le « plein jour » capturé côté natif était l'éclairage
+> ordinaire du réveil, qui passe du jour à la nuit en quelques dizaines de
+> secondes d'horloge murale (§ « Le plein jour », plus haut) ; l'absence de
+> mort dans les cent secondes le disait déjà. La comparaison de la supernova
+> reste à faire en laissant courir la boucle.
+
 Les touches de mise au point donnent enfin un moyen de comparer la fin de la
 boucle sans attendre dix-huit minutes à une image par seconde : F12 dans les
 deux versions, réveillé au feu de camp, la tour en face.
@@ -1570,3 +1581,30 @@ centre du corps, et le portage le mettait à l'aplomb — plus loin de l'écran,
 qui paraissait un dixième plus petit. Mesuré en 1280 × 720 : l'écran remplit
 le champ dans les deux versions, le titre, « [records available] » et les
 invites aux mêmes places.
+
+### Les touches mortes : `DebugInputManager` est éteint
+
+Dans la cabine, l'invite du poste dit « Suit Required ». F2 devait régler
+cela : `DebugInputManager.Update` lève `SuitUp`, que `FlightConsole.OnSuitUp`
+écoute pour passer à « Buckle Up ». F2 tenu une seconde et demie, deux fois,
+dans l'alpha native : l'invite ne bouge pas, et E ne fait pas asseoir. F1,
+tenu de même, fait apparaître le mode d'affichage de mise au point
+(« Time Scale », « Time Remaining », « Net Field Accel ») — la touche
+arrive donc bien.
+
+La scène tranche : le `MonoBehaviour` de `DebugInputManager` a
+**`m_Enabled` = 0**. Son `Update` ne tourne jamais, et avec lui F2, F3, F5,
+F6, =, F11 et F12. `GUIMode` (F1), les deux `DebugBreakAllChildren` (F10) et
+`PlayerSpawner` (les chiffres) sont allumés et répondent. Le portage suivait
+l'IL, qui ne dit rien du drapeau : il donnait la combinaison, les codes, la
+fin des temps et la supernova à qui appuyait.
+
+Désormais (`web/src/debug.js`) ces sept touches ne font rien par défaut ;
+l'outillage les allume par `?miseaupoint` ou `window.__miseAuPoint`.
+`tests/05-extract.mjs` relit les trois drapeaux dans la scène,
+`tests/09-jeu.mjs` garde le filtrage, et `tools/15_verify.py` mesure F2 et
+F11 éteints, puis allumés par l'outillage.
+
+La leçon est celle de [`46`](46-migration-lots.md), une fois de plus : le code
+seul fait écrire une mécanique que la scène désactive.
+

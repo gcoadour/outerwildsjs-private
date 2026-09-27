@@ -3250,6 +3250,11 @@ async function boot() {
    * les sauts de `PlayerSpawner` : les touches de mise au point du build,
    * actives dans l'alpha (debug.js).
    */
+  // `DebugInputManager` est eteint dans la scene (debug.js) : ses touches ne
+  // s'allument que pour l'outillage, par `?miseaupoint` ou a chaud.
+  if (window.__miseAuPoint === undefined) {
+    window.__miseAuPoint = new URLSearchParams(location.search).has("miseaupoint");
+  }
   function toucheDeMiseAuPoint(nom) {
     console.log(`mise au point : ${nom}`);
     if (nom === "cycleGUIMode") { console.log("mode d'affichage :", guiMode.cycle()); return; }
@@ -3453,8 +3458,10 @@ async function boot() {
     if (est("Stick")) {
       console.log(baton.toggle() ? "baton sorti" : "baton range");
     }
-    // Les touches de mise au point du build (`DebugKeyCode`, debug.js).
-    const dbg = toucheDebug(code);
+    // Les touches de mise au point du build (`DebugKeyCode`, debug.js). Celles
+    // de `DebugInputManager` sont mortes dans l'alpha, et ne repondent ici que
+    // si l'outillage les allume.
+    const dbg = toucheDebug(code, !!window.__miseAuPoint);
     if (dbg) toucheDeMiseAuPoint(dbg);
     // Le menu des reglages, comme dans le jeu, met le temps en pause.
     // `Menu.Update` : `cancel` FERME, et c'est la meme sortie que l'option
@@ -3765,7 +3772,8 @@ async function boot() {
     const { n, h } = decoupeImage(
       // Et `timeLapse` (=) le triple tant qu'on le tient (`DebugInputManager`).
       (settings && settings.open) ? 0
-        : engine.getDeltaTime() / 1000 * (keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1),
+        : engine.getDeltaTime() / 1000
+          * (window.__miseAuPoint && keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1),
       cmds.maxTimestep);
     const now = performance.now() / 1000;
     // Le regard de l'image, avant les pas : `UpdateInput` est dans `Update`.

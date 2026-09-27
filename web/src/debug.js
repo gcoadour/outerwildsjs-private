@@ -1,27 +1,37 @@
-// Les touches de mise au point du build : elles sont dans l'alpha, et actives.
+// Les touches de mise au point du build : F1, F10 et les chiffres sont actifs
+// dans l'alpha ; celles de `DebugInputManager` NE LE SONT PAS.
 //
 // @lit DebugInputManager, DebugKeyCode, DebugBreakAllChildren
 //
-// `DebugInputManager` est POSE dans la scene (sur `SolarSystemRoot`), et ses
-// touches ne sont pas derriere un drapeau de developpement : qui joue a l'alpha
-// peut appuyer sur F12 et voir le soleil exploser. Le portage n'en avait
-// aucune, et donnait au mode d'affichage (`GUIMode`) une touche a lui, `g`, la
-// ou le build le fait tourner sur F1.
+// `DebugInputManager` est pose dans la scene (sur `SolarSystemRoot`), mais
+// DESACTIVE : son `m_Enabled` vaut 0, et rien ne l'allume. Son `Update` ne
+// tourne donc jamais, et F2, F3, F5, F6, =, F11 et F12 ne font rien dans
+// l'alpha. Ecrit d'abord « actives » apres lecture de l'IL seul, puis
+// contredit dans l'alpha native : F2 tenu deux fois, cabine et poste en face,
+// et l'invite restait « Suit Required » (docs/132). F1 (`GUIMode`), F10
+// (`DebugBreakAllChildren`, deux instances) et les sauts (`PlayerSpawner`)
+// sont portes par des composants ACTIFS, et repondent.
+//
+// Le portage garde les touches mortes pour l'outillage, derriere un drapeau
+// explicite (`?miseaupoint` ou `window.__miseAuPoint`) : par defaut, elles
+// ne font rien, comme dans l'alpha.
 //
 // `DebugKeyCode..cctor` les range toutes, en `KeyCode` d'Unity :
 //
 //   F1   cycleGUIMode          GUIMode.Update : mode d'affichage suivant
-//   F2   suitUp                "SuitUp", "AquireProbe", "AquireMinimap"
-//   F3   learnLaunchCodes      PlayerData.LearnLaunchCodes
+//   F2   suitUp                "SuitUp", "AquireProbe", "AquireMinimap"    (*)
+//   F3   learnLaunchCodes      PlayerData.LearnLaunchCodes                  (*)
 //   F5   fireAllTeleporters    "FireAllTeleporters" : chaque AncientTeleporter
-//                              tire (`OnFireAllTeleporters` -> `FireTeleporter`)
-//   F6   rapidSandTransfer     "DebugSandTransfer" (0,01) : le sable coule
-//   =    timeLapse             Time.timeScale = 3 tant qu'on tient
+//                              tire (`OnFireAllTeleporters` -> `FireTeleporter`) (*)
+//   F6   rapidSandTransfer     "DebugSandTransfer" (0,01) : le sable coule  (*)
+//   =    timeLapse             Time.timeScale = 3 tant qu'on tient          (*)
 //   F9   resetSimulation       lue par PERSONNE dans ce build
 //   F10  destroyAllBreakable   DebugBreakAllChildren : AddDamage a chaque fragment
-//   F11  triggerEndTimes       TimeLoop.SetSecondsRemaining(92)
-//   F12  triggerSupernova      "TriggerSupernova"
+//   F11  triggerEndTimes       TimeLoop.SetSecondsRemaining(92)             (*)
+//   F12  triggerSupernova      "TriggerSupernova"                           (*)
 //   1-8, 0                     PlayerSpawner.Update : les sauts
+//
+//   (*) lue par `DebugInputManager.Update`, qui ne tourne pas.
 //
 // LES SAUTS NE PORTENT QUE LE VAISSEAU. `Warp` retient le point et
 // `FixedUpdate` ne l'applique que si `_isPlayerInShip` : il pose alors le
@@ -56,9 +66,28 @@ export const SECONDES_FIN = 92;
 /** `FireEvent<float>("DebugSandTransfer", 0.01f)`, en minutes. */
 export const TRANSFERT_SABLE = 0.01;
 
-/** Le nom de la touche de mise au point, ou null. */
-export function toucheDebug(code) {
-  for (const [nom, c] of Object.entries(TOUCHES_DEBUG)) if (c === code) return nom;
+/**
+ * `m_Enabled` de `DebugInputManager` dans `level0` : 0. Garde par
+ * tests/05-extract.mjs, qui relit le drapeau dans la scene.
+ */
+export const DEBUG_INPUT_MANAGER_ACTIF = false;
+
+/** Les touches que lit `DebugInputManager.Update`, et lui seul. */
+export const PAR_DEBUG_INPUT_MANAGER = new Set([
+  "suitUp", "learnLaunchCodes", "fireAllTeleporters", "rapidSandTransfer",
+  "timeLapse", "resetSimulation", "triggerEndTimes", "triggerSupernova",
+]);
+
+/**
+ * Le nom de la touche de mise au point, ou null. Une touche de
+ * `DebugInputManager` ne repond que si `miseAuPoint` l'allume : le composant
+ * est eteint dans l'alpha.
+ */
+export function toucheDebug(code, miseAuPoint = DEBUG_INPUT_MANAGER_ACTIF) {
+  for (const [nom, c] of Object.entries(TOUCHES_DEBUG)) {
+    if (c !== code) continue;
+    return PAR_DEBUG_INPUT_MANAGER.has(nom) && !miseAuPoint ? null : nom;
+  }
   return null;
 }
 

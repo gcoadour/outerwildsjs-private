@@ -8839,7 +8839,14 @@ check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
   const { Teleporters } = await import("../web/src/decor.js");
   const { Crust } = await import("../web/src/crust.js");
   check("F1 fait tourner le mode d'affichage, pas g", [toucheDebug("F1"), toucheDebug("KeyG")].join(), "cycleGUIMode,");
-  check("F12 declenche la supernova", toucheDebug("F12"), "triggerSupernova");
+  // `DebugInputManager` est eteint dans la scene : ses touches ne repondent
+  // qu'a l'outillage. F1 (`GUIMode`), F10 et les chiffres, oui.
+  check("F12 ne fait rien par defaut, comme dans l'alpha", toucheDebug("F12"), null);
+  check("F2, F3, F5, F6, =, F11 non plus",
+        ["F2", "F3", "F5", "F6", "Equal", "F11"].map((c) => toucheDebug(c)).join(), ",,,,,");
+  check("F10 et les sauts restent actifs", [toucheDebug("F10"), toucheDebug("Digit4")].join(),
+        "destroyAllBreakable,brittleHollowWarp");
+  check("F12 declenche la supernova, outillage allume", toucheDebug("F12", true), "triggerSupernova");
   check("0 vise le vaisseau, 3 Timber Hearth",
         [LIEU_DU_SAUT[toucheDebug("Digit0")], LIEU_DU_SAUT[toucheDebug("Digit3")]].join(), "8,2");
   const pts = [{ name: "a", fields: { _spawnLocation: 2, _isShipSpawn: false } },

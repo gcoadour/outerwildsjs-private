@@ -1869,6 +1869,22 @@ check("et monter est un AXE, la gachette", inp.channels["Move Up"].PC.axis, 9);
 // A9 : mainData n'etait jamais extrait — l'ExtractContext etait construit sur
 // level0 seul, et ses 989 objets ne sortaient pas.
 console.time("mainData");
+// Les touches de mise au point (web/src/debug.js) : `DebugInputManager` est
+// pose mais ETEINT, et son `Update` ne tourne jamais — F2 ou F12 ne font rien
+// dans l'alpha, mesure dans l'alpha native (docs/132). `GUIMode` (F1) et les
+// deux `DebugBreakAllChildren` (F10), eux, sont allumes.
+{
+  const actifs = (cls) => [...ctx.behaviours([cls])].map(({ obj }) => {
+    const h = ctx.env.read(obj) || ctx.env.monoHeader(obj);
+    return h.m_Enabled ? 1 : 0;
+  }).join();
+  check("DebugInputManager pose et eteint", actifs("DebugInputManager"), "0");
+  check("GUIMode allume (F1)", actifs("GUIMode"), "1");
+  check("DebugBreakAllChildren allumes (F10)", actifs("DebugBreakAllChildren"), "1,1");
+  const { DEBUG_INPUT_MANAGER_ACTIF } = await import("../web/src/debug.js");
+  check("le portage suit le drapeau de la scene", DEBUG_INPUT_MANAGER_ACTIF, false);
+}
+
 const mctx = new ExtractContext(env, u, "mainData", engineTypes);
 const mscene = extractScene(mctx);
 console.timeEnd("mainData");

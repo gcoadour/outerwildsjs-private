@@ -794,9 +794,14 @@ def _run(url, heavy, profil=None, zip_path=None):
 
         # --- les touches de mise au point du build (`DebugKeyCode`) ------------
         #
-        # `DebugInputManager` est pose dans la scene : F1 fait tourner le mode
-        # d'affichage (le portage l'avait mis sur g), F2 donne la combinaison
-        # et ce qu'elle porte, F11 laisse quatre-vingt-douze secondes.
+        # F1 (`GUIMode`) fait tourner le mode d'affichage (le portage l'avait mis
+        # sur g). `DebugInputManager`, lui, est pose ETEINT : F2 et F11 ne font
+        # rien dans l'alpha (mesure dans l'alpha native, docs/132), ni dans le
+        # portage — sauf outillage allume (`__miseAuPoint`), ou F2 donne la
+        # combinaison et ce qu'elle porte, F11 quatre-vingt-douze secondes.
+        etat_dbg = """() => ({ i: window.__gui.guiMode.index,
+          eq: [window.__lots.equipment.suit, window.__lots.equipment.probe, window.__lots.equipment.minimap],
+          reste: Math.round(window.__loop.secondsRemaining) })"""
         avant_dbg = page.evaluate("""() => ({ i: window.__gui.guiMode.index,
           eq: { suit: window.__lots.equipment.suit, probe: window.__lots.equipment.probe,
                 minimap: window.__lots.equipment.minimap }, t: window.__loop.elapsed })""")
@@ -804,14 +809,20 @@ def _run(url, heavy, profil=None, zip_path=None):
         page.keyboard.press("F2")
         page.keyboard.press("F11")
         page.wait_for_timeout(300)
-        apres_dbg = page.evaluate("""() => ({ i: window.__gui.guiMode.index,
-          eq: [window.__lots.equipment.suit, window.__lots.equipment.probe, window.__lots.equipment.minimap],
-          reste: Math.round(window.__loop.secondsRemaining) })""")
-        page.evaluate("""(a) => { window.__gui.guiMode.index = a.i; Object.assign(window.__lots.equipment, a.eq);
-          window.__loop.elapsed = a.t; }""", avant_dbg)
-        rep.eq("F1 : le mode d'affichage suivant", apres_dbg["i"] != avant_dbg["i"], True)
-        rep.eq("F2 : combinaison, sonde et minicarte", apres_dbg["eq"], [True, True, True])
-        rep.near("F11 : la fin des temps a 92 s", apres_dbg["reste"], 92, 3)
+        eteint_dbg = page.evaluate(etat_dbg)
+        page.evaluate("() => { window.__miseAuPoint = true; }")
+        page.keyboard.press("F2")
+        page.keyboard.press("F11")
+        page.wait_for_timeout(300)
+        apres_dbg = page.evaluate(etat_dbg)
+        page.evaluate("""(a) => { window.__miseAuPoint = false; window.__gui.guiMode.index = a.i;
+          Object.assign(window.__lots.equipment, a.eq); window.__loop.elapsed = a.t; }""", avant_dbg)
+        rep.eq("F1 : le mode d'affichage suivant", eteint_dbg["i"] != avant_dbg["i"], True)
+        rep.eq("F2 et F11 eteints, comme DebugInputManager dans l'alpha",
+               [eteint_dbg["eq"], eteint_dbg["reste"] > 200],
+               [[avant_dbg["eq"]["suit"], avant_dbg["eq"]["probe"], avant_dbg["eq"]["minimap"]], True])
+        rep.eq("outillage : F2 donne combinaison, sonde et minicarte", apres_dbg["eq"], [True, True, True])
+        rep.near("outillage : F11 met la fin des temps a 92 s", apres_dbg["reste"], 92, 3)
 
         # --- signaux et mixage -------------------------------------------------
         audio = page.evaluate("""() => {
