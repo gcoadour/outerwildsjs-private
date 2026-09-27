@@ -5282,7 +5282,10 @@ async function boot() {
           el.hidden = !guiMode.debug;
           if (guiMode.debug) {
             const r2 = (x) => Math.round(x * 100) / 100;
-            const s = loop.secondsRemaining;
+            // `GetSecondsRemaining` n'est PAS borne a zero : sans les codes,
+            // la boucle depasse sa duree et l'alpha affiche des minutes et des
+            // secondes negatives. `loop.secondsRemaining`, lui, l'est.
+            const s = loop.duration - loop.elapsed;
             const echelle = (settings && settings.open) ? 0
               : (window.__miseAuPoint && keys[TOUCHES_DEBUG.timeLapse] ? ACCELERATION : 1);
             const champ = player.field ? player.field.magnitude : 0;
