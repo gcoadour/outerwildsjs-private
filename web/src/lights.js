@@ -420,6 +420,17 @@ export class LightField {
     return n;
   }
 
+  /** L'intensite n'est-elle pas nulle en ce moment ? (Sans animation, oui.) */
+  allumee(l) {
+    if (this.eteintes.has(l.name)) return false;
+    for (const b of l.behaviours || []) {
+      if (b.kind === "NightLight" && this.t !== undefined) {
+        return nightIntensity(l.intensity ?? 1, b.fields, this.night, this.t - this.nightSince) > 0;
+      }
+    }
+    return true;
+  }
+
   /** Le jour se leve, ou tombe : `NightLight` s'en sert, et rien d'autre. */
   setNight(night, t) {
     if (night === this.night) return;
@@ -433,6 +444,7 @@ export class LightField {
    * @param t temps en secondes, la meme horloge que `setNight`
    */
   animate(t) {
+    this.t = t;
     let touchees = 0;
     for (const [light, node] of this.live) {
       // Eteinte par un `Disable` : ni animee, ni eclairante.
@@ -486,7 +498,12 @@ export class LightField {
         : l.position;
     } : null;
     const want = new Set();
-    for (const { light } of pickLights(this.lights, world, this.budget, LIGHT_REACH, posOf)) {
+    // Une lumiere ETEINTE en ce moment n'entre pas dans le budget : celle
+    // qu'un `Disable` a coupee, et une `NightLight` dont le jour a mene
+    // l'intensite a zero. Sinon elle prend la place d'une lumiere qui eclaire
+    // — la lampe du village, a zero, passait devant les lampes de la cabine.
+    const candidates = this.lights.filter((l) => this.allumee(l));
+    for (const { light } of pickLights(candidates, world, this.budget, LIGHT_REACH, posOf)) {
       want.add(light);
       let node = this.live.get(light);
       if (!node) {

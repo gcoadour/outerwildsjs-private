@@ -182,7 +182,7 @@ import { fluidVolumes, fluidDetectors, dragFactorFor, fluidAt, depthIn,
          trainee, vitesseLimite, densityAt, mediumVelocity, lawOf, curveAt,
          FluidField } from "../web/src/fluids.js";
 import { pickLights, LIGHT_BUDGET, pulse, flicker, nightIntensity,
-         NIGHT_FADE } from "../web/src/lights.js";
+         NIGHT_FADE, LightField } from "../web/src/lights.js";
 import { oxygenZones, inOxygenZone,
          Resources as Ressources } from "../web/src/resources.js";
 import { heatAt, remoteConsoles, RemoteConsoles,
@@ -2189,6 +2189,16 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
     { name: "B", type: "point", position: [0, 3, 0], range: 3, intensity: 1 },
     { name: "C", type: "point", position: [0, 0, 9], range: 2, intensity: 1 },
   ];
+  // Une lumiere a zero n'entre pas dans le budget : la `NightLight` de jour
+  // dont le multiplicateur est nul, ou celle qu'un `Disable` a coupee.
+  const etat = { eteintes: new Set(["Coupee"]), night: false, nightSince: 0, t: 30 };
+  const allumee = (l) => LightField.prototype.allumee.call(etat, l);
+  check("de jour, une NightLight a multiplicateur nul est eteinte, une autre non",
+        [allumee({ name: "Village", intensity: 1,
+                   behaviours: [{ kind: "NightLight", fields: { _dayIntensityMultiplier: 0 } }] }),
+         allumee({ name: "Lanterne", intensity: 1,
+                   behaviours: [{ kind: "NightLight", fields: { _dayIntensityMultiplier: 0.5 } }] }),
+         allumee({ name: "Coupee", intensity: 1 })].join(), "false,true,false");
   check("les lampes de la cabine comptent, meme joueur hors de leur sphere",
         pickLights(cabine, [0, 0, 0]).map((p) => p.light.name).join(), "B,A");
 }

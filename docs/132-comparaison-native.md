@@ -1815,3 +1815,8 @@ au plafond, et une cabine grise.
   regarde ; Unity, en rendu différé, les dessine toutes. Une lumière compte
   désormais si le bord de sa sphère est à moins de six unités, et le rang se
   prend au bord, pas au centre.
+
+Et une lumière à zéro ne prend plus de place dans le budget : la
+`NightLight` du village, que le jour mène à zéro, passait devant les lampes
+de la cabine. `LightField.allumee` écarte aussi celles qu'un `Disable` a
+coupées.
