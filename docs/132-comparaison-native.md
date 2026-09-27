@@ -1830,3 +1830,20 @@ son bandeau d'état. `DebugHUD.OnGUI` est désormais refait avec ses formules �
 y compris celle des secondes restantes, `Round(s % 60 × 100 / 100)`, qui
 arrondit à l'unité et n'écrit pas de zéro devant (« 17:5 ») ; le bandeau du
 portage ne revient qu'avec `?debug`.
+
+### Une nouvelle expédition passe zéro sans exploser
+
+Laissée courir depuis « New Expedition » (sans les codes), l'alpha atteint
+0:00 au feu de camp et **rien ne se passe** : `TimeLoop.Update` ne lève
+`TriggerSupernova` que si `_preventSupernova` est faux, et le compteur
+continue sous zéro — `DebugHUD` affiche « -1:-23 », « -2:-28 », « -4:-7 »
+(`GetSecondsRemaining` n'est pas borné). Le portage fait de même, et son
+`DebugHUD` lit maintenant le temps non borné.
+
+Reste un écart assumé : « Net Field Accel » oscille dans l'alpha entre 6,8
+(jour) et 17,1 (nuit) — `FieldDetector.GetFieldAcceleration` somme tous les
+champs, Soleil compris, qui tire vers le ciel le jour et vers le sol la
+nuit —, pendant que « G-Force » reste à 12. Le portage ne suit que le champ
+dominant ([`gravity.js`](../web/src/gravity.js)) et affiche 12 : la planète
+tombe vers le Soleil comme le joueur, le sol ne sent pas la différence, et
+la ligne de mise au point est la seule à la voir.
