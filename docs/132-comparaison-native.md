@@ -1430,3 +1430,39 @@ mobile, donc avant `StaticCamera` : les sprites laissent une traînée quand
 l'écran glisse d'un lieu à l'autre, et le texte reste net. Le portage refait
 les trois temps — sprites, fondu entre deux textures qui alternent, texte
 composé par-dessus.
+
+### Les touches de mise au point du build
+
+`DebugInputManager` est **posé dans la scène** (sur `SolarSystemRoot`) et ses
+touches ne sont derrière aucun drapeau : l'alpha qu'on télécharge répond à F12
+en faisant exploser le soleil. `DebugKeyCode..cctor` les range toutes, en
+`KeyCode` d'Unity, et le portage n'en avait aucune — il donnait même au mode
+d'affichage (`GUIMode`) une touche à lui, `g`, là où le build le fait tourner
+sur **F1**. `scripts/il.mjs --champ` dit qui les lit :
+
+| touche | champ | ce que fait le build |
+|---|---|---|
+| F1 | `cycleGUIMode` | `GUIMode.Update` : mode d'affichage suivant |
+| F2 | `suitUp` | `SuitUp`, `AquireProbe`, `AquireMinimap` |
+| F3 | `learnLaunchCodes` | `PlayerData.LearnLaunchCodes` |
+| F5 | `fireAllTeleporters` | chaque `AncientTeleporter` tire (`FireTeleporter`) |
+| F6 | `rapidSandTransfer` | `DebugSandTransfer` (0,01) : le sable coule en six dixièmes de seconde |
+| = | `timeLapse` | `Time.timeScale = 3` tant qu'on tient |
+| F9 | `resetSimulation` | lue par personne |
+| F10 | `destroyAllBreakable` | `DebugBreakAllChildren` : 50 de dégâts — un seul fragment les prend, `polySurface18` sous `TheNarrows`, d'intégrité 50 |
+| F11 | `triggerEndTimes` | `TimeLoop.SetSecondsRemaining(92)` |
+| F12 | `triggerSupernova` | `TriggerSupernova` |
+| 1–8, 0 | `…Warp` | `PlayerSpawner` : les sauts |
+
+**Les sauts ne portent que le vaisseau.** `Warp` retient le point et
+`FixedUpdate` ne l'applique que si `_isPlayerInShip` : il pose alors le
+vaisseau sur le point, avec sa rotation et la vitesse du corps. À pied, un
+chiffre ne fait rien — ce qui ferme aussi la voie qu'on espérait pour amener
+l'alpha native dans la cabine sans y marcher. Et `GetSpawnPoint` ne rend
+qu'un point dont `IsShipSpawn` vaut `_isPlayerInShip` : seuls les six points
+de vaisseau répondent (1 à 6) ; 0, 7 et 8 visent le vaisseau lui-même, la lune
+quantique et le belvédère, qui n'en ont pas.
+
+Deux choses se corrigeaient en passant : le bouton tactile « bord » ouvrait
+encore un ordinateur de bord qui s'allume désormais à sa zone, et celui du
+mode d'affichage envoie F1.

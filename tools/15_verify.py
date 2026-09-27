@@ -1072,14 +1072,20 @@ def _run(url, heavy, profil=None, zip_path=None):
               return [a.right, a.up, a.fwd].map((ax) => +(d[0]*ax[0] + d[1]*ax[1] + d[2]*ax[2]).toFixed(1)); }""")
             # `PlayerSpawner` : dans le vaisseau, 3 le pose sur le point de
             # vaisseau de Timber Hearth (`SpawnPoint_Ship`, 332 u du centre).
+            # Mesure et retour dans la meme instruction : sans GPU, une image
+            # dure une seconde, et le vaisseau pose en l'air tombait et
+            # s'ecrasait avant qu'on le relise.
             saut = None
             if assis:
-                page.keyboard.press("Digit3")
-                try:
-                    page.wait_for_function("() => { const p = window.__shipRef.pos; return Math.hypot(p.x, p.y, p.z) > 300; }", timeout=10000)
-                except Exception:
-                    pass
-                saut = page.evaluate("() => { const p = window.__shipRef.pos; return Math.round(Math.hypot(p.x, p.y, p.z)); }")
+                saut = page.evaluate("""() => { const s = window.__shipRef;
+                  const avant = { pos: { ...s.pos }, vel: { ...s.vel }, quat: s.quat.slice(),
+                                  landed: s.landed, parked: s.parked };
+                  dispatchEvent(new KeyboardEvent("keydown", { code: "Digit3" }));
+                  dispatchEvent(new KeyboardEvent("keyup", { code: "Digit3" }));
+                  const r = Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z));
+                  Object.assign(s.pos, avant.pos); Object.assign(s.vel, avant.vel);
+                  s.quat = avant.quat; s.landed = avant.landed; s.parked = avant.parked;
+                  return r; }""")
             # On se LEVE par la touche, comme un joueur : ecrire `boarded` a
             # faux laissait les commandes du vaisseau en place, et la marche
             # qu'on mesure plus loin se faisait a la poussee.
@@ -2872,12 +2878,13 @@ def _run(url, heavy, profil=None, zip_path=None):
         # et le saut a sa propre place — `Jump` et `Move Up` sont deux canaux.
         rep.eq("la manette en vol, en combinaison", tactile["enVol"],
                ["Telescope", "Sonde", "Carte du systeme", "Lampe",
-                "Ordinateur de bord", "Affichage", "Menu",
+                "Affichage", "Menu",
                 "Monter", "Descendre", "Sauter", "Interagir, parler"])
         rep.eq("un menu la remplace par la croix et les deux reponses",
                tactile["enMenu"],
                ["Haut", "Gauche", "Droite", "Bas", "Valider", "Retour"])
-        rep.eq("boutons tactiles en tout", tactile["boutons"], 19)
+        # L'ordinateur de bord n'a plus de bouton : il s'allume a sa zone.
+        rep.eq("boutons tactiles en tout", tactile["boutons"], 18)
 
         # Le dialogue au doigt. Sans conversation dans la scene il n'y a rien a
         # mesurer ; avec le build, il y en a quatorze.
