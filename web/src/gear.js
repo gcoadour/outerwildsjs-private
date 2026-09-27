@@ -318,6 +318,30 @@ export function lockYawError(versLaCible, avant, haut, droite) {
   return angle * (cote < 0 ? -1 : 1);
 }
 
+/**
+ * `FirstPersonCameraController.UpdateLockOnTargeting` : le TANGAGE aussi suit
+ * la cible. La direction de l'oeil a la cible, privee de sa part laterale
+ * (le lacet est l'affaire du corps, ci-dessus), et l'angle signe entre elle et
+ * l'avant de la camera — positif quand la cible est plus haut.
+ *
+ *     _degreesY += ecart x _followRate x deltaTime
+ *
+ * Le portage ne tournait que le corps : assis a l'ordinateur, on regardait au
+ * niveau de l'ecran plutot que dedans, la ou l'alpha le centre.
+ */
+export function lockPitchError(versLaCible, avantCam, hautCam, droiteCam) {
+  const lat = versLaCible[0] * droiteCam[0] + versLaCible[1] * droiteCam[1] + versLaCible[2] * droiteCam[2];
+  const d = [versLaCible[0] - droiteCam[0] * lat, versLaCible[1] - droiteCam[1] * lat,
+             versLaCible[2] - droiteCam[2] * lat];
+  const l = Math.hypot(d[0], d[1], d[2]);
+  if (!l) return 0;
+  const la = Math.hypot(avantCam[0], avantCam[1], avantCam[2]) || 1;
+  const cos = (d[0] * avantCam[0] + d[1] * avantCam[1] + d[2] * avantCam[2]) / (l * la);
+  const angle = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+  const haut = d[0] * hautCam[0] + d[1] * hautCam[1] + d[2] * hautCam[2];
+  return angle * (haut < 0 ? -1 : 1);
+}
+
 /** `max(500 / d, 20)` au-dela de dix unites, sinon le champ initial. */
 export function lockFOV(distance, initFOV = 70, cfg = LOCK_ON) {
   if (!(distance > cfg.nearDistance)) return initFOV;

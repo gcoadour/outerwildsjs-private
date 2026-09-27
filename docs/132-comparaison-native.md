@@ -1529,3 +1529,37 @@ Xvfb le rendu logiciel fait tomber l'alpha à quelques images par seconde, où
 Unity borne chaque `deltaTime` : son horloge de jeu retarde sur la montre. Le
 portage, lui, a été mesuré sur son horloge de jeu. Ce qui se compare est la
 suite des états et leur rendu, et ils concordent.
+
+### La cabine de l'alpha, enfin atteinte
+
+Le clavier seul, à une ou deux images par seconde, ne menait pas l'alpha
+jusqu'au vaisseau. La scène le permet : `PlayerSpawner.OnStartOfTimeLoop`
+pose le joueur sur `GetSpawnPoint(2)` — le 2 en dur, `_debugSpawnLocation`
+n'est lu par personne — et la scène a un point DANS le vaisseau, au lieu 8.
+`ALPHA_CABINE=1 scripts/alpha.sh start` échange localement les deux
+`_spawnLocation` (`scripts/alpha-cabine.mjs`, deux entiers à leur place) : le
+joueur de l'alpha naît sous la trappe, le rayon tracteur le monte dans la
+cabine, et l'ordinateur se compare enfin.
+
+Côte à côte, cinq écarts sont tombés :
+
+- **l'exploration de départ** : `PlayerSave..ctor` pose `exploredPlanets[1]`,
+  Timber Hearth, et `HasExploredPlanet` rend vrai hors des six planètes (le
+  Soleil, la Lune quantique). L'alpha montre son logo au réveil ; le portage,
+  parti de rien, annonçait « database updated » et gardait le Soleil
+  « UNEXPLORED » ;
+- **le tangage du verrou** : `FirstPersonCameraController.UpdateLockOnTargeting`
+  lève ou baisse aussi le regard vers la cible. Le portage ne tournait que le
+  corps, et regardait au-dessus de l'écran ;
+- **le zoom du verrou** : `SetTargetFieldOfView(max(500 / d, 20), _zoomSpeed)`,
+  à la vitesse du verrou (8 à l'ordinateur), vers un champ qui persiste
+  (`UpdateFieldOfView`). Le portage repartait chaque image du champ de la
+  lunette, à vitesse commune : l'écran restait petit ;
+- **l'émission teintée** : `Self-Illumin/Transparent` rend
+  `tex × _Color × lightStrength`, et le portage émettait un blanc pur — le
+  logo trop clair, l'entrelacement noir ;
+- **le seuil d'alpha** : `AlphaTest Greater 0`, et non les 0,4 de Babylon, qui
+  jetaient l'entrelacement (alpha 0,11) tout entier.
+
+Reste la taille des invites, que les deux captures ne tranchent pas : l'alpha a
+été prise en 640 × 360 et le portage en 960 × 540.

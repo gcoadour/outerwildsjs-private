@@ -168,7 +168,7 @@ import { hazardVolumes, Hazards, zeroGFields, strongestZeroG,
          promptFaced } from "./volumes.js";
 import { gearPickups, suitVolumes, suitVolumeStep, Equipment, suitBarrierPush,
          ZeroGTraining, attachPoints, lockOnTargets, CameraLock,
-         LOCK_ON } from "./gear.js";
+         LOCK_ON, lockPitchError } from "./gear.js";
 import { AttachPoints, snapDuration, snapDegrees, turnFraction,
          FieldAlignment, FIELD_ALIGN,
          UpAligner, steadyPitch, steadyLook } from "./attach.js";
@@ -3078,6 +3078,8 @@ async function boot() {
   // la lunette a le dernier mot sur `camera.fov`, et les deux ne se melangent
   // pas plus dans le build que dans le portage.
   let verrouFOV = null;
+  // Le champ du joueur et sa cible (`_targetFOV`, `_zoomRate`).
+  let cibleFov = null, tauxFov = 2, fovCourant = null;
   // Le roulis vient du MEME mouvement de souris que le lacet, aiguille par la
   // touche alt (`Swap Roll/Yaw`). Il s'accumule ici et se consomme a l'image.
   let rollInput = 0;
@@ -5002,16 +5004,26 @@ async function boot() {
         verrouCible = null;
       }
       if (verrouCamera.locked) {
-        const dec = decalageDuCorps(surCible.body, anchorPos) || [0, 0, 0];
-        const versLa = [surCible.position[0] + dec[0] - playerW[0],
-                        surCible.position[1] + dec[1] - playerW[1],
-                        surCible.position[2] + dec[2] - playerW[2]];
+        // La cible portee par son corps, rotation comprise (`poseMobile`) :
+        // l'ecran de l'ordinateur tourne avec le vaisseau.
+        const cibleW = pointVivant(surCible.position, decalageDuCorps(surCible.body, anchorPos));
+        const versLa = [cibleW[0] - playerW[0], cibleW[1] - playerW[1], cibleW[2] - playerW[2]];
         const r = verrouCamera.update(dt, versLa, [fwd.x, fwd.y, fwd.z],
                                       [up.x, up.y, up.z],
                                       [right.x, right.y, right.z],
                                       Math.hypot(versLa[0], versLa[1], versLa[2]),
                                       reglagesCam.fov || 70);
         if (r) { yaw += r.yaw * Math.PI / 180; verrouFOV = r.fov; }
+        // Et le tangage, depuis l'OEIL (`UpdateLockOnTargeting`).
+        const oeilW = [camera.position.x + anchorPos[0], camera.position.y + anchorPos[1],
+                       camera.position.z + anchorPos[2]];
+        const vc = cibleW.map((x, i) => x - oeilW[i]);
+        const cf = camera.getDirection(BABYLON.Axis.Z), cu = camera.getDirection(BABYLON.Axis.Y),
+              cr = camera.getDirection(BABYLON.Axis.X);
+        const ecartY = lockPitchError(vc, [cf.x, cf.y, cf.z], [cu.x, cu.y, cu.z], [cr.x, cr.y, cr.z]);
+        // Le tangage du portage BAISSE le regard quand il croit.
+        pitch = borneTangage(pitch - ecartY * Math.PI / 180
+          * Math.min(1, verrouCamera.followRate * dt), cfgRegard);
       } else verrouFOV = null;
     }
 
@@ -5847,13 +5859,28 @@ async function boot() {
          - (cmds.held("Zoom Out", etatCmd) ? 1 : 0)) : 0;
     // Carte ouverte, c'est `MapCamera` qui fixe champ et plan proche.
     const fovLunette = telescope.update(dt, zoomAxe);
-    if (!vueCarte.open && !enVueAtterrissage()) camera.fov = fovLunette;
-    // Le zoom du verrouillage, quand la lunette ne sert pas : `Lerp` vers le
-    // champ vise a `_zoomSpeed * deltaTime` par image — le meme glissement par
-    // image que l'assise, et la meme dependance a la cadence.
-    if (verrouFOV !== null && !telescope.active && !vueCarte.open && !enVueAtterrissage()) {
-      const vise = verrouFOV * Math.PI / 180;
-      camera.fov += (vise - camera.fov) * Math.min(1, LOCK_ON.zoomSpeed * dt);
+    // `FirstPersonCameraController.UpdateFieldOfView` : UN champ, qui glisse
+    // vers sa cible, `Lerp(fov, _targetFOV, _zoomRate x deltaTime)`. Le
+    // verrouillage pose la cible — `max(500 / d, 20)` — a SA vitesse (8 a
+    // l'ordinateur de bord), et le relacher la ramene au champ initial a 2
+    // (`ResetTargetFieldOfView(2)`). Le portage repartait chaque image du
+    // champ de la lunette et n'en faisait qu'un pas vers la cible, a une
+    // vitesse commune : a soixante images par seconde, le zoom de l'ordinateur
+    // ne depassait pas un degre et demi, la ou l'alpha remplit le champ de
+    // l'ecran.
+    if (!vueCarte.open && !enVueAtterrissage()) {
+      if (telescope.active) {
+        camera.fov = fovLunette;
+        fovCourant = null;
+      } else {
+        const initFov = (reglagesCam.fov || 70);
+        if (verrouFOV !== null) { cibleFov = verrouFOV; tauxFov = verrouCamera.zoomSpeed || LOCK_ON.zoomSpeed; }
+        else if (cibleFov !== null) { cibleFov = null; tauxFov = 2; }
+        if (fovCourant === null) fovCourant = fovLunette;
+        const vise = (cibleFov ?? initFov) * Math.PI / 180;
+        fovCourant += (vise - fovCourant) * Math.min(1, tauxFov * dt);
+        camera.fov = fovCourant;
+      }
     }
     // `EnterTelescope` / `ExitTelescope` deplacent le plan proche de 0,05 a
     // 0,5 : a dix degres de champ, un plan proche a cinq centimetres ruine la

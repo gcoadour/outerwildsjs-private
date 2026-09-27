@@ -26,13 +26,23 @@ export const SECTORS = ["Unnamed", "Nomad", "HourglassTwins", "TimberHearth",
                         "BrittleHollow", "GiantsDeep", "DarkBramble",
                         "QuantumMoon", "Sun"];
 
+/** Les six cases de `PlayerSave.exploredPlanets`. */
+const EXPLORABLES = new Set(["HourglassTwins", "TimberHearth", "BrittleHollow",
+                             "GiantsDeep", "DarkBramble", "Nomad"]);
+/**
+ * `PlayerSave..ctor` : `exploredPlanets[1] = true`. Timber Hearth est
+ * explore des la sauvegarde neuve — on y est ne. Le portage partait de rien,
+ * et l'ordinateur de bord annoncait « database updated » au reveil, la ou
+ * l'alpha montre son logo.
+ */
+export const EXPLORE_AU_DEPART = ["TimberHearth"];
 const FLAGS = ["knowsTargeting", "knowsLaunchCodes", "knowsHowProbesWork",
                "knowsHowShipProbesWork", "knowsHowTelescopeWorks",
                "hasCompletedTraining"];
 
 export class PlayerData {
   constructor() {
-    this.explored = new Set();
+    this.explored = new Set(EXPLORE_AU_DEPART);
     this.loopCount = 0;
     for (const f of FLAGS) this[f] = false;
     // L'invulnerabilite ne se sauvegarde PAS : elle est statique dans le build
@@ -70,6 +80,7 @@ export class PlayerData {
    */
   nouvelleSauvegarde(skipIntro = false, flags = []) {
     this.explored.clear();
+    for (const s of EXPLORE_AU_DEPART) this.explored.add(s);
     this.loopCount = 0;
     for (const f of FLAGS) this[f] = false;
     if (!skipIntro) return;
@@ -79,11 +90,21 @@ export class PlayerData {
 
   // --- exploration ---
 
-  hasExplored(sector) { return this.explored.has(sector); }
+  /**
+   * `HasExploredPlanet` : un tableau de SIX booleens — Hourglass Twins,
+   * Timber Hearth, Brittle Hollow, Giant's Deep, Dark Bramble, The Nomad — et
+   * `true` pour tout le reste. Le Soleil, la Lune quantique et le « sans nom »
+   * sont donc explores d'office : l'ordinateur de bord ouvre la fiche du
+   * Soleil des le premier tour, la ou le portage affichait « UNEXPLORED ».
+   */
+  hasExplored(sector) {
+    if (!EXPLORABLES.has(sector)) return true;
+    return this.explored.has(sector);
+  }
 
   /** Appele quand le joueur entre dans un secteur. Retourne true si nouveau. */
   saveExploredPlanet(sector) {
-    if (!sector || sector === "Unnamed" || this.explored.has(sector)) return false;
+    if (!sector || !EXPLORABLES.has(sector) || this.explored.has(sector)) return false;
     this.explored.add(sector);
     this.save();
     return true;

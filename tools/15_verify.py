@@ -940,6 +940,12 @@ def _run(url, heavy, profil=None, zip_path=None):
           if (!s) return null;
           return { r: Math.round(Math.hypot(s.pos.x, s.pos.y, s.pos.z)),
                    pads: s.onPad, immobile: Math.hypot(s.vel.x, s.vel.y, s.vel.z) < 0.01 }; }""")
+        # `PlayerSave..ctor` : Timber Hearth est explore des la sauvegarde
+        # neuve. L'ecran de l'ordinateur ne s'annonce donc pas au reveil : il
+        # montre son logo, comme l'alpha (docs/132).
+        maj_reveil = page.evaluate("() => window.__consoles && window.__consoles.computer ? window.__consoles.computer.misAJour : null")
+        if maj_reveil is not None:
+            rep.eq("au reveil, l'ordinateur n'annonce pas de mise a jour", maj_reveil, False)
         if depart_vaisseau:
             rep.eq("le vaisseau attend au sommet de la tour, sur ses pads, immobile",
                    [depart_vaisseau["r"], depart_vaisseau["pads"], depart_vaisseau["immobile"]],

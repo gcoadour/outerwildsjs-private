@@ -8810,6 +8810,28 @@ check("au bord de la portee, rien", attenuationUnity(10, 10), 0);
         siege.frame(pose).position.map((v) => +v.toFixed(3) + 0).join(), "20,0,1");
 }
 
+// --- `PlayerSave` : ce qu'une sauvegarde neuve sait deja ---------------------
+{
+  const neuve = new PlayerData();
+  neuve.nouvelleSauvegarde(false);
+  check("une sauvegarde neuve connait Timber Hearth (`exploredPlanets[1]`)",
+        neuve.hasExplored("TimberHearth"), true);
+  check("le Soleil, hors des six cases, est explore d'office", neuve.hasExplored("Sun"), true);
+  check("Brittle Hollow, non", neuve.hasExplored("BrittleHollow"), false);
+  check("et Timber Hearth ne s'annonce donc pas au reveil", neuve.saveExploredPlanet("TimberHearth"), false);
+}
+
+// --- le verrou du regard tourne aussi le tangage ----------------------------
+{
+  const { lockPitchError } = await import("../web/src/gear.js");
+  // Avant +Z, haut +Y, droite +X ; une cible 45 degres plus haut, et decalee
+  // sur le cote : seule la part verticale compte.
+  check("une cible au-dessus : ecart positif, sans la part laterale",
+        Math.round(lockPitchError([3, 1, 1], [0, 0, 1], [0, 1, 0], [1, 0, 0])), 45);
+  check("en dessous : negatif", Math.round(lockPitchError([0, -1, 1], [0, 0, 1], [0, 1, 0], [1, 0, 0])), -45);
+  check("droit devant : rien", lockPitchError([0, 0, 5], [0, 0, 1], [0, 1, 0], [1, 0, 0]), 0);
+}
+
 // --- les touches de mise au point du build (`DebugKeyCode`) ------------------
 {
   const { toucheDebug, pointDeSaut, transfertSable, LIEU_DU_SAUT, SECONDES_FIN } =
