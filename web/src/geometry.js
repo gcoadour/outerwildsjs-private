@@ -40,6 +40,14 @@ export const BODY_TO_FILE = {
   GravityWell_Quantum: "quantummoon_body.gltf",
   GravityWell_Comet: "comet_pivot.gltf",
   GravityWell_DarkBramble: "darkbramble_pivot.gltf",
+  // Noms d'objets dans les effets de camera / impostures
+  HomePlanet_graybox: "timberhearth_pivot.gltf",
+  HomePlanet: "timberhearth_pivot.gltf",
+  TimberHearth_Body: "timberhearth_pivot.gltf",
+  BrittleHollow_Body: "brittlehollow_pivot.gltf",
+  DarkBramble_Body: "darkbramble_pivot.gltf",
+  GiantsDeep_Body: "giantsdeep_pivot.gltf",
+  Hourglass_Body: "hourglasstwins_pivot.gltf",
 };
 
 /** Lot de geometrie correspondant a un corps, ou null. */

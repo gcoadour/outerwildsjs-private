@@ -143,7 +143,8 @@ import { Autopilot, AUTOPILOT, relativeDelta, alongAxis, matchVelocityStep,
          autopilotMessageKey } from "../web/src/autopilot.js";
 import { coucheApresEchange, poseImposteur, repereRegard, imposteursDuBuild, EchangeSoleil, CALQUE_IMPOSTEUR } from "../web/src/imposteur.js";
 import { gltfEnGamma } from "../web/src/shaders/index.js";
-import { paginate, dispositionDialogue, GEOMETRIE } from "../web/src/dialogueui.js";
+import { paginate, dispositionDialogue, GEOMETRIE, DialogueUI } from "../web/src/dialogueui.js";
+import { entryForBody, BODY_TO_FILE } from "../web/src/geometry.js";
 import { colliderLODs, ColliderLODs } from "../web/src/lod.js";
 import { oxygenDetector } from "../web/src/resources.js";
 import { underAsleep, noCollide, rendererOff, hideDisabledRenderers, ombresDuRenderer, propagerExtras } from "../web/src/physics.js";
@@ -650,6 +651,16 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   check("au doigt, le fond s'arrete avant le losange",
         doigt.echelle * (doigt.fond.x + doigt.fond.w) <= 900 - 150, true);
   check("et une option fait un doigt", doigt.ligne * doigt.echelle >= 44, true);
+
+  // Redimensionnement du dialogue au tactile : resize() doit etre expose
+  // sur DialogueUI et recalculer le rendu quand une vue est active.
+  check("DialogueUI possede une methode resize", typeof DialogueUI.prototype.resize, "function");
+  const fakeDlg = { view: null, rendered: null, render(v) { this.rendered = v; } };
+  DialogueUI.prototype.resize.call(fakeDlg);
+  check("resize sans vue n'appelle pas render", fakeDlg.rendered, null);
+  fakeDlg.view = { character: "Slate", lines: ["Hello"] };
+  DialogueUI.prototype.resize.call(fakeDlg);
+  check("resize avec vue rappelle render", fakeDlg.rendered, fakeDlg.view);
 }
 
 // `Conversation` : une replique enchaine (`goto`), une option se choisit par
@@ -5726,6 +5737,23 @@ const round = (v, n = 3) => Math.round(v * 10 ** n) / 10 ** n;
   // Le plan ne se montre que si la vraie geometrie n'est PAS la.
   check("sans la vraie planete, l'imposture se voit", imposteur.visible(false), true);
   check("avec elle, elle s'efface", imposteur.visible(true), false);
+
+  // Les noms d'objets passes aux cameras d'impostures (HomePlanet_graybox,
+  // BrittleHollow_Body...) doivent correspondre aux fichiers glTF charges,
+  // sinon entryForBody ne les trouve pas et l'imposture reste visible a tort.
+  const entreesMock = [
+    { file: "timberhearth_pivot.gltf", meshes: [] },
+    { file: "brittlehollow_pivot.gltf", meshes: [] },
+  ];
+  check("HomePlanet_graybox est associe a timberhearth_pivot",
+        BODY_TO_FILE.HomePlanet_graybox, "timberhearth_pivot.gltf");
+  check("entryForBody trouve timberhearth depuis HomePlanet_graybox",
+        entryForBody(entreesMock, "HomePlanet_graybox")?.file, "timberhearth_pivot.gltf");
+  check("entryForBody trouve brittlehollow depuis BrittleHollow_Body",
+        entryForBody(entreesMock, "BrittleHollow_Body")?.file, "brittlehollow_pivot.gltf");
+  const reelTH = !!entryForBody(entreesMock, "HomePlanet_graybox");
+  check("avec la vraie geometrie, le plan d'imposture de Timber Hearth s'eteint",
+        imposteur.visible(reelTH), false);
 
   // La camera se met DERRIERE le plan, a la distance de la planete.
   check("la camera d'imposture est derriere le plan",

@@ -1306,8 +1306,17 @@ async function boot() {
           plan.material = m;
         }
       }
+      plan.setEnabled(false);
       impostersVifs.push({ imposture: imp, plan, texture, cam });
       console.log(`imposture : ${imp.data.plane} <- ${imp.data.planet}`);
+    }
+    // Les plans d'imposture sans camera dediee dans le build (Hourglass,
+    // GasGiant) : ils sont colles sur la planete et s'eteignent avec la vraie
+    // geometrie (docs/56-impostures.md).
+    for (const m of entry.meshes) {
+      if (/LODPlane/i.test(m.name) && !impostures.some((imp) => imp.data.plane === m.name)) {
+        m.setEnabled(false);
+      }
     }
 
     // Les nuages : dix visages sur vingt-quatre maillages homonymes.
@@ -3766,7 +3775,7 @@ async function boot() {
   // La couche existe enfin : la boite de dialogue peut mesurer la place que le
   // losange d'action lui prend. Sans ce rappel, elle garde l'echelle calculee
   // dans son constructeur, ou `#touchui` etait encore vide.
-  if (touch.enabled) dlgUI.resize();
+  if (touch.enabled && typeof dlgUI.resize === "function") dlgUI.resize();
   window.__touch = touch;   // sonde de verification
   // La carte capte glisser, pincer, taper et la molette quand elle est
   // ouverte. Les trois premiers sont des evenements de POINTEUR : le meme code

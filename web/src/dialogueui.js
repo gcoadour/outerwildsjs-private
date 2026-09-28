@@ -260,12 +260,18 @@ export class DialogueUI {
     return Math.ceil(this.ctx.measureText(texte || "").width);
   }
 
-  hide() { this.root.hidden = true; }
+  hide() { this.view = null; this.root.hidden = true; }
+
+  /** Recalcule la disposition si le dialogue est affiche. */
+  resize() {
+    if (this.view) this.render(this.view);
+  }
 
   /**
    * @param view etat courant du dialogue
    */
   render(view) {
+    this.view = view || null;
     if (!view) { this.hide(); return; }
     this.root.hidden = false;
     const W = this.root.clientWidth || innerWidth, H = this.root.clientHeight || innerHeight;
